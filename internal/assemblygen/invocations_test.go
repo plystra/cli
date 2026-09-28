@@ -582,6 +582,7 @@ import (
 	configuration "example.com/runtime-dependency/generated/go/configuration"
 	messagecontract "example.com/runtime-dependency/generated/go/contracts/message/send/v1"
 	policycontract "example.com/runtime-dependency/generated/go/contracts/policy/check/v1"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 type Config = configuration.RemoteServiceConfig
@@ -603,7 +604,7 @@ func (*Plugin) Send(_ context.Context, request messagecontract.Request) (message
 	addEvent("message:" + request.Recipient)
 	switch request.Recipient {
 	case "semantic":
-		return messagecontract.Response{Receipt: "must-not-escape"}, providerSemanticError{}
+		return messagecontract.Response{Receipt: "must-not-escape"}, kernelinvocation.NewSemanticError("invalid_recipient", fmt.Errorf("runtime-private-provider-semantic-payload"))
 	case "panic":
 		panic("runtime-private-provider-panic")
 	}
@@ -641,10 +642,6 @@ func addEvent(value string) {
 	events.values = append(events.values, value)
 }
 
-type providerSemanticError struct{}
-
-func (providerSemanticError) Error() string { return "runtime-private-provider-semantic-payload" }
-func (providerSemanticError) SemanticErrorCode() string { return "invalid_recipient" }
 `
 
 const runtimeAssemblyTestSource = `package assembly
@@ -757,7 +754,7 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 	remoteservice.ResetEvents()
 	response, err = invocations.MessageSendV1().Invoke(context.Background(), messagecontract.Request{Recipient: "semantic", Mode: messagecontract.RequestMode("safe"), Enabled: true, Labels: []string{}, Metadata: map[string]any{}})
 	var semantic *kernelinvocation.SemanticError
-	if !errors.As(err, &semantic) || semantic.SemanticErrorCode() != "invalid_recipient" || response != (messagecontract.Response{}) || strings.Contains(fmt.Sprint(err), "runtime-private") {
+	if !errors.As(err, &semantic) || semantic.Code() != "invalid_recipient" || response != (messagecontract.Response{}) || strings.Contains(fmt.Sprint(err), "runtime-private") {
 		t.Fatalf("semantic boundary = response %#v, error %v", response, err)
 	}
 	if got := strings.Join(remoteservice.Events(), ","); got != "policy:semantic,message:semantic" {

@@ -45,8 +45,9 @@ func TestRenderProducesDeterministicTypedProxyPackages(t *testing.T) {
 		[]byte(`kernelinvocation.Handle[contract.Request, contract.Response]`),
 		[]byte(`func (proxy Proxy) Create(ctx context.Context, request contract.Request) (contract.Response, error)`),
 		[]byte(`snapshot, err := CopyRequest(request)`),
-		[]byte(`response, err := proxy.handle.Invoke(ctx, snapshot)`),
-		[]byte(`return CopyResponse(response)`),
+		[]byte(`response, err := proxy.handle.InvokeWithResponse(ctx, snapshot,`),
+		[]byte(`copied, err := CopyResponse(value)`),
+		[]byte(`err == failure.boundary`),
 	} {
 		if !bytes.Contains(orderSource, required) {
 			t.Fatalf("order proxy omits %q:\n%s", required, orderSource)
@@ -175,6 +176,24 @@ replace github.com/plystra/kernel => %s
 	if err != nil {
 		t.Fatalf("test generated proxy module: %v\n%s", err, output)
 	}
+
+	// Hold the exact generated processor at its read and return boundaries; no
+	// production test hook or replacement Kernel is needed to control scheduling.
+	instrumented := strings.Replace(string(files[0].Data()), "copied, err := CopyResponse(value)", "TestResponseBarrier(\"copy\")\n\t\tcopied, err := CopyResponse(value)", 1)
+	instrumented = strings.Replace(instrumented, "return copied, err", "TestResponseBarrier(\"return\")\n\t\treturn copied, err", 1)
+	instrumented += "\nvar TestResponseBarrier = func(string) {}\n"
+	writeProxyFile(t, root, files[0].Path(), instrumented)
+	lifetimeTests := generatedResponseLifetimeTests
+	if shared {
+		lifetimeTests = strings.ReplaceAll(lifetimeTests, "contract.Response", "contract.Request")
+	}
+	writeProxyFile(t, root, "generated/go/proxies/order/create/v1/response_lifetime_test.go", lifetimeTests)
+	command = exec.CommandContext(t.Context(), "go", "test", "-race", "-count=1", "./...")
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("generated response lifetime: %v\n%s", err, output)
+	}
 }
 
 func proxyInput(t testing.TB, identifier, packagePath, method string) interfaceproxygen.Input {
@@ -266,5 +285,99 @@ func TestRequestAndResponseConstraintsAreIndependent(t *testing.T) {
 	if _, err := proxy.CopyResponse(contract.Response{Value: "request"}); err == nil { t.Fatal("response constraint was not applied") }
 	var zero *proxy.ValueError
 	if zero.Error() == "" || zero.Side() != "" || zero.Path() != "" || zero.Rule() != "" || zero.Unwrap() != nil { t.Fatal("nil validation error is unsafe") }
+}
+`
+
+const generatedResponseLifetimeTests = `package proxy_test
+
+import (
+	"context"
+	"crypto/sha256"
+	"errors"
+	"sync"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	contract "example.com/proxyfixture/interfaces/order/create/v1"
+	proxy "example.com/proxyfixture/generated/go/proxies/order/create/v1"
+	"github.com/plystra/kernel/capability"
+	"github.com/plystra/kernel/invocation"
+)
+
+func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
+	for _, stage := range []string{"copy", "return"} {
+		for _, mode := range []string{"normal", "cancel", "deadline", "shutdown"} {
+			for _, value := range []string{"valid-response", "invalid"} {
+				t.Run(stage+"/"+mode+"/"+value, func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+					entered, release := make(chan struct{}), make(chan struct{})
+					var released sync.Once
+					unblock := func() { released.Do(func() { close(release) }) }
+					proxy.TestResponseBarrier = func(at string) { if at == stage { close(entered); <-release } }
+					token := capability.MustParseContract[contract.Request, contract.Response]("order.create/v1")
+					endpoint, err := invocation.NewEndpoint(token, func(context.Context, contract.Request) (contract.Response, error) {
+						return contract.Response{Value: value}, nil
+					})
+					if err != nil { t.Fatal(err) }
+					build, err := invocation.NewModuleBuild("example.com/proxyfixture", "v1.0.0", "")
+					if err != nil { t.Fatal(err) }
+					binding, err := invocation.NewBinding(invocation.BindingOptions{
+						Kind: invocation.BindingKindImplementation, Constructor: "example.com/proxyfixture/implementation.New",
+						ModuleBuild: build, SelectionReason: invocation.SelectionReasonUniqueCompatible,
+						ContractDigest: sha256.Sum256([]byte("order.create/v1")),
+					}, endpoint)
+					if err != nil { t.Fatal(err) }
+					catalog, err := invocation.NewCatalog([]invocation.Binding{binding})
+					if err != nil { t.Fatal(err) }
+					dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{DefaultTimeout: 5*time.Second})
+					if err != nil { t.Fatal(err) }
+					defer func() {
+						unblock()
+						ctx, cancel := context.WithTimeout(context.Background(), time.Second); defer cancel()
+						if err := dispatcher.Drain(ctx); err != nil { t.Error(err) }
+						proxy.TestResponseBarrier = func(string) {}
+					}()
+					if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
+					handle, err := invocation.NewHandle(dispatcher, token, true)
+					if err != nil { t.Fatal(err) }
+					ctx, cancel := context.WithCancel(context.Background()); defer cancel()
+					if mode == "deadline" {
+						var stop context.CancelFunc
+						ctx, stop = context.WithTimeout(ctx, 200*time.Millisecond); defer stop()
+					}
+					type result struct { response contract.Response; err error }
+					done := make(chan result, 1)
+					go func() { response, err := proxy.New(handle).Create(ctx, contract.Request{Value: "request"}); done <- result{response, err} }()
+					select { case <-entered: case <-time.After(time.Second): t.Fatal("processor was not entered") }
+					if dispatcher.ActiveAttempts() != 1 { t.Fatal("response processing lost attempt ownership") }
+					if mode == "normal" {
+						unblock()
+					} else {
+						if mode == "cancel" { cancel() }
+						if mode == "deadline" { <-ctx.Done() }
+						bounded, stop := context.WithTimeout(context.Background(), 5*time.Millisecond)
+						err := dispatcher.Drain(bounded); stop()
+						if err == nil || dispatcher.ActiveAttempts() != 1 || !dispatcher.AdmissionClosed() { t.Fatal("drain ignored active response processing") }
+					}
+					var got result
+					select { case got = <-done: case <-time.After(time.Second): t.Fatal("caller did not complete") }
+					var validation *proxy.ValueError
+					if mode == "normal" {
+						if value == "invalid" {
+							if !errors.As(got.err, &validation) || validation.Side() != "response" || invocation.CompletionOf(got.err) != invocation.CompletionResultKnown { t.Fatalf("validation not restored: %v", got.err) }
+						} else if got.err != nil || got.response.Value != value { t.Fatalf("successful response = %#v", got) }
+					} else {
+						want := context.Canceled
+						if mode == "deadline" { want = context.DeadlineExceeded }
+						if !errors.Is(got.err, want) || errors.As(got.err, &validation) || invocation.CompletionOf(got.err) != invocation.CompletionResultUnknown { t.Fatalf("cancellation replaced by validation: %v", got.err) }
+						if dispatcher.ActiveAttempts() != 1 { t.Fatal("caller completion released the processor") }
+					}
+					if got.err != nil && got.response != (contract.Response{}) { t.Fatal("failed caller received a response") }
+					})
+				})
+			}
+		}
+	}
 }
 `

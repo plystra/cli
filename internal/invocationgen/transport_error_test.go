@@ -82,8 +82,8 @@ func TestCanonicalInvocationProjectsTransportFailures(t *testing.T) {
 		detail string
 	}{
 		{name: "Kernel semantic", err: kernelinvocation.NewTestSemanticError("invalid_recipient"), semantic: "invalid_recipient"},
-		{name: "generated semantic", err: contract.ErrTemporarilyUnavailable, semantic: "temporarily_unavailable"},
-		{name: "wrapped semantic", err: fmt.Errorf("outer Provider secret: %w", contract.ErrAuthenticationFailed), semantic: "authentication_failed"},
+		{name: "generated semantic", err: kernelinvocation.NewSemanticError(string(contract.ErrTemporarilyUnavailable), nil), semantic: "temporarily_unavailable"},
+		{name: "wrapped semantic", err: fmt.Errorf("outer Provider secret: %w", kernelinvocation.NewSemanticError(string(contract.ErrAuthenticationFailed), nil)), semantic: "authentication_failed"},
 		{name: "undeclared semantic", err: kernelinvocation.NewTestSemanticError("provider_secret"), class: "internal"},
 		{name: "panicking semantic", err: kernelinvocation.NewTestPanickingSemanticError(), class: "internal"},
 		{name: "classified", err: kernelinvocation.NewTestError(kernelinvocation.ErrorDenied, "authorization.denied"), class: "denied", detail: "authorization.denied"},

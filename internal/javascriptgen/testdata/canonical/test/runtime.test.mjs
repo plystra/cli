@@ -63,6 +63,7 @@ function safeErrorDetail({
   semanticErrorCode = "",
   kernelErrorClass = "",
   traceID = "",
+  completion = "result_known",
 } = {}) {
   const message = fromJson(
     errorDetailDescriptor,
@@ -72,6 +73,7 @@ function safeErrorDetail({
       semanticErrorCode,
       kernelErrorClass,
       traceId: traceID,
+      completion,
     },
     { ignoreUnknownFields: false },
   );
@@ -793,6 +795,7 @@ test("response and Connect errors expose only Plystra-owned stable fields", asyn
         canonicalCapabilityID: "email.send/v1",
         semanticErrorCode: "temporarily_unavailable",
         traceID: "trace-123",
+        completion: "result_known",
       });
       assert.equal(Object.isFrozen(error.detail), true);
       assert.equal(error.message, "capability_error");
@@ -862,7 +865,6 @@ test("closed Kernel error classes retain typed safe details", async () => {
     ["unavailable", "unavailable", 503, "unavailable"],
     ["deadline_exceeded", "timeout", 504, "timeout"],
     ["canceled", "cancelled", 0, "cancelled"],
-    ["unavailable", "result_unknown", 503, "result_unknown"],
     ["internal", "internal", 500, "internal"],
     ["unimplemented", "version_incompatible", 501, "version_incompatible"],
   ];
@@ -890,6 +892,7 @@ test("closed Kernel error classes retain typed safe details", async () => {
           requestedCapabilityID: "email.send/v1",
           canonicalCapabilityID: "email.send/v1",
           kernelErrorClass,
+          completion: "result_known",
         });
         assert.equal(error.message.includes("provider secret"), false);
         return true;
@@ -907,11 +910,14 @@ test("missing, malformed, duplicate, and mismatched details fail closed", async 
     ...validSemantic,
     value: Buffer.concat([
       Buffer.from(validSemantic.value, "base64"),
-      Buffer.from([0x32, 0x01, 0x78]),
+      Buffer.from([0x3a, 0x01, 0x78]),
     ]).toString("base64"),
   };
   const invalid = [
     { code: "failed_precondition", details: [] },
+    { code: "failed_precondition", details: [safeErrorDetail({ semanticErrorCode: "temporarily_unavailable", completion: "" })] },
+    { code: "failed_precondition", details: [safeErrorDetail({ semanticErrorCode: "temporarily_unavailable", completion: "unsafe" })] },
+    { code: "unavailable", details: [safeErrorDetail({ kernelErrorClass: "result_unknown" })] },
     {
       code: "failed_precondition",
       details: [validSemantic, validSemantic],
@@ -1002,9 +1008,38 @@ test("missing, malformed, duplicate, and mismatched details fail closed", async 
         error.status === 500 &&
         error.code === "internal" &&
         error.detail === undefined &&
+        error.completion === "result_unknown" &&
         error.message === "internal" &&
         !error.message.includes("provider secret"),
     );
+  }
+});
+
+test("completion is preserved independently of the semantic or Kernel code", async () => {
+  for (const completion of ["not_started", "result_known", "result_unknown"]) {
+    for (const semantic of [false, true]) {
+      let calls = 0;
+      const send = createEmailSendV1({
+        baseUrl: "https://api.example.test",
+        credentialPolicy: anonymousCredentialPolicy,
+        fetch: async () => {
+          calls++;
+          return connectErrorResponse(semantic ? "failed_precondition" : "unavailable", "private", 400, [
+            safeErrorDetail({
+              semanticErrorCode: semantic ? "temporarily_unavailable" : "",
+              kernelErrorClass: semantic ? "" : "unavailable",
+              completion,
+            }),
+          ]);
+        },
+      });
+      await assert.rejects(
+        () => send({ to: "person@example.com", tags: [], priority: "normal" }),
+        (error) => error instanceof PlystraError && error.completion === completion &&
+          error.detail?.completion === completion && error.code === (semantic ? "capability_error" : "unavailable"),
+      );
+      assert.equal(calls, 1);
+    }
   }
 });
 
@@ -1151,6 +1186,7 @@ test("bearer results are bounded, validated, and normalized without dispatch", a
         error instanceof PlystraError &&
         error.status === 0 &&
         error.code === "credential_error" &&
+        error.completion === "not_started" &&
         error.message === "credential_error" &&
         error.detail === undefined &&
         !("cause" in error),
@@ -1188,6 +1224,7 @@ test("bearer callback failures do not expose credential details", async () => {
       (error) =>
         error instanceof PlystraError &&
         error.code === "credential_error" &&
+        error.completion === "not_started" &&
         error.message === "credential_error" &&
         !String(error).includes(secret) &&
         !JSON.stringify(error).includes(secret) &&
@@ -1227,6 +1264,7 @@ test("AbortSignal cancels before and during bearer token acquisition", async () 
     (error) =>
       error instanceof PlystraError &&
       error.code === "cancelled" &&
+      error.completion === "not_started" &&
       error.message === "cancelled",
   );
   assert.equal(tokenCalls, 0);
@@ -1278,6 +1316,7 @@ test("AbortSignal cancels before and during bearer token acquisition", async () 
     (error) =>
       error instanceof PlystraError &&
       error.code === "cancelled" &&
+      error.completion === "not_started" &&
       error.message === "cancelled",
   );
   resolveToken("late-browser-token");
@@ -1308,6 +1347,7 @@ test("malformed request options and network failures remain safe", async () => {
     (error) =>
       error instanceof PlystraError &&
       error.code === "network_error" &&
+      error.completion === "result_unknown" &&
       error.message === "network_error" &&
       !error.message.includes("network detail"),
   );
@@ -1369,6 +1409,7 @@ test("in-flight AbortSignal cancellation reaches the canonical Interface transpo
     (error) =>
       error instanceof PlystraError &&
       error.code === "cancelled" &&
+      error.completion === "result_unknown" &&
       error.message === "cancelled",
   );
   assert.equal(calls, 1);

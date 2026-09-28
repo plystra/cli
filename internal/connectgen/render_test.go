@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/transportprovenance"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -639,6 +640,7 @@ func assertGeneratedHandlersRunWithSource(t testing.TB, contract contractgen.Fil
 		writeGeneratedFile(t, root, file.Path(), file.Data())
 	}
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
+	testkernel.WriteErrorBoundary(t, root)
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(testKernelInvocationSource))
 	writeGeneratedFile(t, root, "generated/go/adapters/connect/customer/profile/sync/v1/handler_gen_test.go", []byte(testSource))
 	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire (\n\tconnectrpc.com/connect "+connectgen.ConnectModuleVersion+"\n\tgithub.com/plystra/kernel v0.0.0\n\tgoogle.golang.org/protobuf "+connectgen.ProtobufModuleVersion+"\n)\n\nreplace github.com/plystra/kernel => ./kernel\n"))
@@ -816,7 +818,6 @@ const testKernelInvocationSource = `package invocation
 
 import (
 	"context"
-	"strings"
 )
 
 type Handle[Request, Response any] struct {
@@ -838,50 +839,6 @@ func (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) 
 	return response, nil
 }
 
-type ErrorCode string
-
-const (
-	ErrorInvalidArgument ErrorCode = "invalid_argument"
-	ErrorNotFound ErrorCode = "not_found"
-	ErrorConflict ErrorCode = "conflict"
-	ErrorDenied ErrorCode = "denied"
-	ErrorUnauthenticated ErrorCode = "unauthenticated"
-	ErrorUnavailable ErrorCode = "unavailable"
-	ErrorTimeout ErrorCode = "timeout"
-	ErrorCancelled ErrorCode = "cancelled"
-	ErrorResultUnknown ErrorCode = "result_unknown"
-	ErrorInternal ErrorCode = "internal"
-	ErrorVersionIncompatible ErrorCode = "version_incompatible"
-)
-
-func (c ErrorCode) String() string { return string(c) }
-func (c ErrorCode) Valid() bool {
-	switch c {
-	case ErrorInvalidArgument, ErrorNotFound, ErrorConflict, ErrorDenied, ErrorUnauthenticated, ErrorUnavailable, ErrorTimeout, ErrorCancelled, ErrorResultUnknown, ErrorInternal, ErrorVersionIncompatible:
-		return true
-	default:
-		return false
-	}
-}
-
-func ValidDetailCode(value string) bool {
-	return value == "" || len(value) <= 128 && !strings.ContainsAny(value, " \r\n\x00")
-}
-
-type Error struct {
-	code ErrorCode
-	detail string
-}
-
-func NewError(code ErrorCode, detail string) (*Error, error) {
-	if !code.Valid() || !ValidDetailCode(detail) {
-		return nil, &Error{}
-	}
-	return &Error{code: code, detail: detail}, nil
-}
-func (e *Error) Error() string { return "invocation error" }
-func (e *Error) Code() ErrorCode { if e == nil { return "" }; return e.code }
-func (e *Error) DetailCode() string { if e == nil { return "" }; return e.detail }
 `
 
 const generatedConnectRuntimeTest = `package customerprofilesyncv1_test
@@ -997,7 +954,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			case "provider-error":
 				return contract.Response{}, errors.New("provider secret must not cross the Connect boundary")
 			case "semantic-error":
-				return contract.Response{}, contract.ErrTemporarilyUnavailable
+				return contract.Response{}, kernelinvocation.NewSemanticError(string(contract.ErrTemporarilyUnavailable), nil)
 			case "kernel-invalid-argument":
 				return contract.Response{}, mustKernelError(kernelinvocation.ErrorInvalidArgument, "contract.invalid_request")
 			case "kernel-not-found":
@@ -1015,7 +972,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 			case "kernel-cancelled":
 				return contract.Response{}, mustKernelError(kernelinvocation.ErrorCancelled, "runtime.cancelled")
 			case "kernel-result-unknown":
-				return contract.Response{}, mustKernelError(kernelinvocation.ErrorResultUnknown, "runtime.result_unknown")
+				return contract.Response{}, kernelinvocation.NewResultUnknown(mustKernelError(kernelinvocation.ErrorUnavailable, "runtime.result_unknown"))
 			case "kernel-internal":
 				return contract.Response{}, mustKernelError(kernelinvocation.ErrorInternal, "runtime.internal")
 			case "kernel-version-incompatible":
@@ -1602,7 +1559,7 @@ func TestCanonicalAndAliasConnectInvocation(t *testing.T) {
 		{name: "unavailable", note: "kernel-unavailable", code: connect.CodeUnavailable, kernel: "unavailable"},
 		{name: "timeout", note: "kernel-timeout", code: connect.CodeDeadlineExceeded, kernel: "timeout"},
 		{name: "cancelled", note: "kernel-cancelled", code: connect.CodeCanceled, kernel: "cancelled"},
-		{name: "result unknown", note: "kernel-result-unknown", code: connect.CodeUnavailable, kernel: "result_unknown"},
+		{name: "result unknown", note: "kernel-result-unknown", code: connect.CodeUnavailable, kernel: "unavailable"},
 		{name: "internal", note: "kernel-internal", code: connect.CodeInternal, kernel: "internal"},
 		{name: "version incompatible", note: "kernel-version-incompatible", code: connect.CodeUnimplemented, kernel: "version_incompatible"},
 	}

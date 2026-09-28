@@ -46,6 +46,9 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 		`kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)`,
 		`func (runtime InterfaceRuntime) Start(ctx context.Context) error`,
 		`func (runtime InterfaceRuntime) Stop(ctx context.Context) error`,
+		`func (runtime InterfaceRuntime) Drain(ctx context.Context) error`,
+		`runtime.dispatcher.Drain(bounded)`,
+		`context.WithTimeout(ctx, runtime.cleanupTimeout)`,
 		`runtime.lifecycle.State().Valid()`,
 		`func (runtime InterfaceRuntime) AppRunV1()`,
 	} {
@@ -54,6 +57,9 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 		}
 	}
 	auditConstructor := bytes.Index(source, []byte(`.New()`))
+	if bytes.Index(source, []byte(`runtime.Drain(bounded)`)) >= bytes.Index(source, []byte(`runtime.lifecycle.Stop(bounded)`)) {
+		t.Fatal("invocation drain must precede lifecycle cleanup")
+	}
 	appConstructor := bytes.Index(source, []byte(`.New(interface2, plystra.Optional[`))
 	if auditConstructor < 0 || appConstructor < 0 || auditConstructor >= appConstructor {
 		t.Fatalf("constructors are not dependency-first:\n%s", source)

@@ -3,6 +3,7 @@ package invocationgen_test
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"go/parser"
 	"go/token"
 	"os"
@@ -15,6 +16,17 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/invocationgen"
 )
+
+var updateInvocationGolden = flag.Bool("update", false, "update generated invocation golden files")
+
+func invocationGolden(path string, data []byte) ([]byte, error) {
+	if *updateInvocationGolden {
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return nil, err
+		}
+	}
+	return os.ReadFile(path)
+}
 
 const (
 	testModulePath  = "example.com/acme/project"
@@ -49,7 +61,7 @@ func TestRenderGoldenCanonicalApplicationInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	want, err := os.ReadFile("testdata/email.send.v1.go")
+	want, err := invocationGolden("testdata/email.send.v1.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(golden): %v", err)
 	}

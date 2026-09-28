@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"go/parser"
 	"go/token"
 	"os"
@@ -18,8 +19,11 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/transportprovenance"
 )
+
+var updateGolden = flag.Bool("update", false, "update generated HTTP golden files")
 
 const (
 	testModulePath  = "example.com/acme/project"
@@ -73,7 +77,7 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 		`http.MaxBytesReader(writer, request.Body, MaximumRequestBytes)`,
 		`applicationinvocation.ValidateRequest(decoded)`,
 		`input := applicationinvocation.SafeTransportError(err)`,
-		`plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic)`,
+		`plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic, string(input.Completion()))`,
 	} {
 		if !strings.Contains(generated, required) {
 			t.Fatalf("generated adapter omits %q:\n%s", required, file.Data())
@@ -81,6 +85,11 @@ func TestRenderCanonicalHTTPAdapter(t *testing.T) {
 	}
 	if bytes.Contains(file.Data(), []byte("Dispatcher")) || bytes.Contains(file.Data(), []byte("kernelinvocation")) || bytes.Contains(file.Data(), []byte("github.com/plystra/kernel")) {
 		t.Fatalf("generated adapter bypasses canonical application invocation:\n%s", file.Data())
+	}
+	if *updateGolden {
+		if err := os.WriteFile("testdata/email.send.v1.go", file.Data(), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	want, err := os.ReadFile("testdata/email.send.v1.go")
 	if err != nil {
@@ -318,7 +327,8 @@ func assertGeneratedHTTPAdapterRuns(t testing.TB, contract contractgen.File, inv
 	writeGeneratedFile(t, root, invocation.Path(), invocation.Data())
 	writeGeneratedFile(t, root, adapter.Path(), adapter.Data())
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
-	writeGeneratedFile(t, root, "kernel/invocation/code.go", []byte(testKernelInvocationCodeSource))
+	testkernel.WriteErrorBoundary(t, root)
+	writeGeneratedFile(t, root, "kernel/invocation/test_helpers.go", []byte(testKernelInvocationCodeSource))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(testKernelInvocationSource))
 	writeGeneratedFile(t, root, "generated/go/adapters/http/email/send/v1/handler_gen_test.go", []byte(generatedHTTPRuntimeTest))
 	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))
@@ -343,37 +353,16 @@ func writeGeneratedFile(t testing.TB, root, relative string, data []byte) {
 }
 
 const testKernelInvocationCodeSource = `package invocation
-
-import "strings"
-
-type ErrorCode string
-
-const (
-	ErrorInvalidArgument ErrorCode = "invalid_argument"
-	ErrorNotFound ErrorCode = "not_found"
-	ErrorConflict ErrorCode = "conflict"
-	ErrorDenied ErrorCode = "denied"
-	ErrorUnauthenticated ErrorCode = "unauthenticated"
-	ErrorUnavailable ErrorCode = "unavailable"
-	ErrorTimeout ErrorCode = "timeout"
-	ErrorCancelled ErrorCode = "cancelled"
-	ErrorResultUnknown ErrorCode = "result_unknown"
-	ErrorInternal ErrorCode = "internal"
-	ErrorVersionIncompatible ErrorCode = "version_incompatible"
-)
-
-func (c ErrorCode) String() string { return string(c) }
-func (c ErrorCode) Valid() bool {
-	switch c {
-	case ErrorInvalidArgument, ErrorNotFound, ErrorConflict, ErrorDenied, ErrorUnauthenticated, ErrorUnavailable, ErrorTimeout, ErrorCancelled, ErrorResultUnknown, ErrorInternal, ErrorVersionIncompatible:
-		return true
-	default:
-		return false
-	}
+func NewTestError(code ErrorCode, detail string) *Error {
+    value, err := NewError(code, detail)
+    if err != nil { return &Error{} }
+    return value
 }
-func ValidDetailCode(value string) bool {
-	return value == "" || len(value) <= 128 && !strings.ContainsAny(value, " \r\n\x00")
-}
+func NewTestSemanticError(code string) *SemanticError { return NewSemanticError(code, nil) }
+type PanickingSemanticError struct{}
+func NewTestPanickingSemanticError() *PanickingSemanticError { return &PanickingSemanticError{} }
+func (*PanickingSemanticError) Error() string { return "private semantic failure" }
+func (*PanickingSemanticError) Unwrap() error { panic("private semantic failure") }
 `
 
 const testKernelInvocationSource = `package invocation
@@ -397,30 +386,6 @@ func (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) 
 	return response, nil
 }
 
-type Error struct {
-	code ErrorCode
-	detail string
-}
-func NewError(code ErrorCode, detail string) (*Error, error) {
-	if !code.Valid() || !ValidDetailCode(detail) {
-		return nil, &Error{}
-	}
-	return &Error{code: code, detail: detail}, nil
-}
-func NewTestError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
-func (e *Error) Error() string { return "classified secret must not cross transport" }
-func (e *Error) Code() ErrorCode { return e.code }
-func (e *Error) DetailCode() string { return e.detail }
-
-type SemanticError struct { code string }
-func NewTestSemanticError(code string) *SemanticError { return &SemanticError{code: code} }
-func (e *SemanticError) Error() string { return "semantic provider secret must not cross transport" }
-func (e *SemanticError) SemanticErrorCode() string { return e.code }
-
-type PanickingSemanticError struct{}
-func NewTestPanickingSemanticError() *PanickingSemanticError { return &PanickingSemanticError{} }
-func (*PanickingSemanticError) Error() string { return "semantic panic secret must not cross transport" }
-func (*PanickingSemanticError) SemanticErrorCode() string { panic("semantic code panic secret") }
 `
 
 const generatedHTTPRuntimeTest = `package emailsendv1_test
@@ -448,7 +413,11 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 		case "semantic":
 			return contract.Response{}, kernelinvocation.NewTestSemanticError("invalid_recipient")
 		case "generated-semantic":
-			return contract.Response{}, contract.ErrTemporarilyUnavailable
+			return contract.Response{}, kernelinvocation.NewSemanticError(string(contract.ErrTemporarilyUnavailable), nil)
+		case "uncertain-semantic":
+			return contract.Response{}, kernelinvocation.NewSemanticError("invalid_recipient", kernelinvocation.NewResultUnknown(errors.New("private cause")))
+		case "uncertain-timeout":
+			return contract.Response{}, kernelinvocation.NewResultUnknown(kernelinvocation.NewTestError(kernelinvocation.ErrorTimeout, ""))
 		case "undeclared-semantic":
 			return contract.Response{}, kernelinvocation.NewTestSemanticError("provider_secret")
 		case "panicking-semantic":
@@ -537,23 +506,26 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			assertError(t, response, test.status, test.code)
+			assertCompletion(t, response, "not_started")
 			if calls != beforeCalls || rootCalls != beforeRoots {
 				t.Fatalf("invalid request reached root/invocation: %d/%d -> %d/%d", beforeCalls, beforeRoots, calls, rootCalls)
 			}
 		})
 	}
 
-	for _, test := range []struct{name string; subject string; status int; code string; detail string}{
-		{name:"Kernel semantic", subject:"semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"invalid_recipient"},
-		{name:"generated semantic", subject:"generated-semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"temporarily_unavailable"},
-		{name:"undeclared semantic", subject:"undeclared-semantic", status:http.StatusInternalServerError, code:"internal"},
+	for _, test := range []struct{name string; subject string; status int; code string; detail string; completion string}{
+		{name:"Kernel semantic", subject:"semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"invalid_recipient", completion:"result_known"},
+		{name:"generated semantic", subject:"generated-semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"temporarily_unavailable", completion:"result_known"},
+		{name:"uncertain semantic", subject:"uncertain-semantic", status:http.StatusUnprocessableEntity, code:"capability_error", detail:"invalid_recipient"},
+		{name:"uncertain timeout", subject:"uncertain-timeout", status:http.StatusServiceUnavailable, code:"timeout"},
+		{name:"undeclared semantic", subject:"undeclared-semantic", status:http.StatusInternalServerError, code:"internal", completion:"result_known"},
 		{name:"panicking semantic", subject:"panicking-semantic", status:http.StatusInternalServerError, code:"internal"},
-		{name:"classified", subject:"denied", status:http.StatusForbidden, code:"denied", detail:"authorization.denied"},
+		{name:"classified", subject:"denied", status:http.StatusForbidden, code:"denied", detail:"authorization.denied", completion:"result_known"},
 		{name:"cancelled", subject:"cancelled", status:499, code:"cancelled"},
 		{name:"unknown", subject:"unknown-secret", status:http.StatusInternalServerError, code:"internal"},
 		{name:"panic", subject:"panic", status:http.StatusInternalServerError, code:"internal"},
 		{name:"invalid response", subject:"bad-response", status:http.StatusInternalServerError, code:"internal"},
-		{name:"oversized response", subject:"oversized-response", status:http.StatusInternalServerError, code:"internal"},
+		{name:"oversized response", subject:"oversized-response", status:http.StatusInternalServerError, code:"internal", completion:"result_known"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, adapter.RoutePath, strings.NewReader("{\"to\":[\"person@example.com\"],\"subject\":\""+test.subject+"\"}"))
@@ -561,6 +533,9 @@ func TestGeneratedHTTPHandlerValidatesAndInvokesCanonicalPath(t *testing.T) {
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			assertError(t, response, test.status, test.code)
+			completion := test.completion
+			if completion == "" { completion = "result_unknown" }
+			assertCompletion(t, response, completion)
 			if test.detail != "" && !strings.Contains(response.Body.String(), "\"detail_code\":\""+test.detail+"\"") {
 				t.Fatalf("detail = %s", response.Body.String())
 			}
@@ -610,6 +585,13 @@ func assertError(t *testing.T, response *httptest.ResponseRecorder, status int, 
 	}
 	if response.Header().Get("Content-Type") != "application/json" || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("headers = %#v", response.Header())
+	}
+}
+
+func assertCompletion(t *testing.T, response *httptest.ResponseRecorder, completion string) {
+	t.Helper()
+	if !strings.Contains(response.Body.String(), "\"completion\":\""+completion+"\"") {
+		t.Fatalf("completion = %s, want %s", response.Body.String(), completion)
 	}
 }
 `

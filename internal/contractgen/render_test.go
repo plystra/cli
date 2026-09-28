@@ -3,6 +3,7 @@ package contractgen_test
 import (
 	"bytes"
 	"errors"
+	"flag"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -15,6 +16,8 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	kernelcatalog "github.com/plystra/kernel/capability/catalog"
 )
+
+var updateContractGolden = flag.Bool("update", false, "update generated contract golden files")
 
 const emailSendSchema = `id: email.send/v1
 description: Sends an email message.
@@ -46,6 +49,11 @@ func TestRenderGoldenContract(t *testing.T) {
 	file, err := contractgen.Render([]byte(emailSendSchema))
 	if err != nil {
 		t.Fatalf("Render: %v", err)
+	}
+	if *updateContractGolden {
+		if err := os.WriteFile("testdata/email.send.v1.go", file.Data(), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	want, err := os.ReadFile("testdata/email.send.v1.go")
 	if err != nil {
@@ -255,12 +263,7 @@ func assertGeneratedCompiles(t testing.TB, file contractgen.File) {
 	if errorCode == nil {
 		t.Fatal("generated ErrorCode type is absent")
 	}
-	method := types.NewMethodSet(errorCode.Type()).Lookup(nil, "SemanticErrorCode")
-	if method == nil {
-		t.Fatal("generated ErrorCode does not expose SemanticErrorCode")
-	}
-	signature, ok := method.Obj().Type().(*types.Signature)
-	if !ok || signature.Params().Len() != 0 || signature.Results().Len() != 1 || signature.Results().At(0).Type().String() != "string" {
-		t.Fatalf("SemanticErrorCode signature = %v", method.Obj().Type())
+	if method := types.NewMethodSet(errorCode.Type()).Lookup(nil, "SemanticErrorCode"); method != nil {
+		t.Fatal("generated codes must not implement the removed structural semantic-error API")
 	}
 }

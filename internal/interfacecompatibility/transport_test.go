@@ -29,7 +29,7 @@ func TestBuildTransportProjectsDescriptorProcedureAndWireMap(t *testing.T) {
 	if err != nil || !baseline.Valid() {
 		t.Fatalf("BuildTransport = %#v, %v", baseline, err)
 	}
-	const wantDigest = "sha256:12f7ab01646418e779323839aa40cd3074cb0ecd3ce1c7923f1c27c0cd2942be"
+	const wantDigest = "sha256:57e036065bd8972a1be9181c7f3e4b954e70c7e5bc03eeed3e16891d4f543185"
 	if baseline.Schema() != TransportSchema || baseline.Digest() != wantDigest {
 		t.Fatalf("transport baseline schema = %q, digest = %q, canonical = %s", baseline.Schema(), baseline.Digest(), baseline.CanonicalJSON())
 	}

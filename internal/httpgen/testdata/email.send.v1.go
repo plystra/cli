@@ -55,46 +55,46 @@ func (h Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 // ServeRoute serves one CLI-validated canonical or Alias route through this canonical target.
 func (h Handler) ServeRoute(writer http.ResponseWriter, request *http.Request, routePath string) {
 	if request == nil || request.URL == nil {
-		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
+		plystraWriteError(writer, http.StatusInternalServerError, "internal", "", "not_started")
 		return
 	}
 	if request.URL.Path != routePath || request.URL.RawPath != "" {
-		plystraWriteError(writer, http.StatusNotFound, "not_found", "")
+		plystraWriteError(writer, http.StatusNotFound, "not_found", "", "not_started")
 		return
 	}
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
-		plystraWriteError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "")
+		plystraWriteError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "", "not_started")
 		return
 	}
 	if request.URL.RawQuery != "" {
-		plystraWriteError(writer, http.StatusBadRequest, "invalid_request", "")
+		plystraWriteError(writer, http.StatusBadRequest, "invalid_request", "", "not_started")
 		return
 	}
 	contentEncodings := request.Header.Values("Content-Encoding")
 	if len(contentEncodings) > 1 {
-		plystraWriteError(writer, http.StatusUnsupportedMediaType, "unsupported_media_type", "")
+		plystraWriteError(writer, http.StatusUnsupportedMediaType, "unsupported_media_type", "", "not_started")
 		return
 	}
 	if len(contentEncodings) == 1 {
 		contentEncoding := strings.TrimSpace(contentEncodings[0])
 		if contentEncoding != "" && !strings.EqualFold(contentEncoding, "identity") {
-			plystraWriteError(writer, http.StatusUnsupportedMediaType, "unsupported_media_type", "")
+			plystraWriteError(writer, http.StatusUnsupportedMediaType, "unsupported_media_type", "", "not_started")
 			return
 		}
 	}
 	contentTypes := request.Header.Values("Content-Type")
 	if len(contentTypes) != 1 || !plystraJSONContentType(contentTypes[0]) {
-		plystraWriteError(writer, http.StatusUnsupportedMediaType, "unsupported_media_type", "")
+		plystraWriteError(writer, http.StatusUnsupportedMediaType, "unsupported_media_type", "", "not_started")
 		return
 	}
 	decoded, status, code := plystraDecodeRequest(writer, request)
 	if code != "" {
-		plystraWriteError(writer, status, code, "")
+		plystraWriteError(writer, status, code, "", "not_started")
 		return
 	}
 	if h.root == nil || !applicationinvocation.Available(h.target) {
-		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
+		plystraWriteError(writer, http.StatusInternalServerError, "internal", "", "not_started")
 		return
 	}
 	if err := applicationinvocation.ValidateRequest(decoded); err != nil {
@@ -112,12 +112,12 @@ func (h Handler) ServeRoute(writer http.ResponseWriter, request *http.Request, r
 		return
 	}
 	if !plystraValidResponse(response) {
-		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
+		plystraWriteError(writer, http.StatusInternalServerError, "internal", "", "result_known")
 		return
 	}
 	payload, err := json.Marshal(response)
 	if err != nil || len(payload) > MaximumResponseBytes {
-		plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
+		plystraWriteError(writer, http.StatusInternalServerError, "internal", "", "result_known")
 		return
 	}
 	plystraWriteJSON(writer, http.StatusOK, payload)
@@ -262,19 +262,19 @@ func plystraInvoke(ctx context.Context, target applicationinvocation.Handle, req
 func plystraWriteInvocationError(writer http.ResponseWriter, err error) {
 	defer func() {
 		if recover() != nil {
-			plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
+			plystraWriteError(writer, http.StatusInternalServerError, "internal", "", "result_unknown")
 		}
 	}()
 	input := applicationinvocation.SafeTransportError(err)
 	if semantic := input.SemanticErrorCode(); semantic != "" {
-		plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic)
+		plystraWriteError(writer, http.StatusUnprocessableEntity, "capability_error", semantic, string(input.Completion()))
 		return
 	}
 	if class := input.KernelErrorClass(); class != "" {
-		plystraWriteError(writer, plystraStatus(class), class, input.KernelDetailCode())
+		plystraWriteError(writer, plystraStatus(class), class, input.KernelDetailCode(), string(input.Completion()))
 		return
 	}
-	plystraWriteError(writer, http.StatusInternalServerError, "internal", "")
+	plystraWriteError(writer, http.StatusInternalServerError, "internal", "", string(input.Completion()))
 }
 
 func plystraStatus(code string) int {
@@ -289,7 +289,7 @@ func plystraStatus(code string) int {
 		return http.StatusNotFound
 	case "conflict", "version_incompatible":
 		return http.StatusConflict
-	case "timeout", "unavailable", "result_unknown":
+	case "timeout", "unavailable":
 		return http.StatusServiceUnavailable
 	case "cancelled":
 		return 499
@@ -305,12 +305,13 @@ type plystraErrorEnvelope struct {
 type plystraErrorBody struct {
 	Code       string `json:"code"`
 	DetailCode string `json:"detail_code,omitempty"`
+	Completion string `json:"completion"`
 }
 
-func plystraWriteError(writer http.ResponseWriter, status int, code, detailCode string) {
-	payload, err := json.Marshal(plystraErrorEnvelope{Error: plystraErrorBody{Code: code, DetailCode: detailCode}})
+func plystraWriteError(writer http.ResponseWriter, status int, code, detailCode, completion string) {
+	payload, err := json.Marshal(plystraErrorEnvelope{Error: plystraErrorBody{Code: code, DetailCode: detailCode, Completion: completion}})
 	if err != nil {
-		payload = []byte(`{"error":{"code":"internal"}}`)
+		payload = []byte(`{"error":{"code":"internal","completion":"result_unknown"}}`)
 		status = http.StatusInternalServerError
 	}
 	plystraWriteJSON(writer, status, payload)

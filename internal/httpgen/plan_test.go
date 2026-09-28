@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 const (
@@ -309,7 +310,8 @@ func assertGeneratedHTTPPlanRuns(t testing.TB, adapter, alias httpgen.File, invo
 		writeGeneratedFile(t, root, file.path, file.data)
 	}
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
-	writeGeneratedFile(t, root, "kernel/invocation/code.go", []byte(testKernelInvocationCodeSource))
+	testkernel.WriteErrorBoundary(t, root)
+	writeGeneratedFile(t, root, "kernel/invocation/test_helpers.go", []byte(testKernelInvocationCodeSource))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(testKernelInvocationSource))
 	writeGeneratedFile(t, root, "generated/go/adapters/http/email/send/v1/handler_plan_gen_test.go", []byte(generatedHTTPPlanRuntimeTest))
 	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\n\nreplace github.com/plystra/kernel => ./kernel\n"))

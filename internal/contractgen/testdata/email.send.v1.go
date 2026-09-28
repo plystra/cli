@@ -34,7 +34,3 @@ const (
 func (c ErrorCode) Error() string {
 	return string(c)
 }
-
-func (c ErrorCode) SemanticErrorCode() string {
-	return string(c)
-}

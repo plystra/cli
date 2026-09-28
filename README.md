@@ -54,7 +54,16 @@ map key; map entries use indices in canonical-key lexical order. Invalid request
 never enter the target, and invalid responses return an internal contract error
 without a result. Ordinary required values may still be zero. Pointer-bearing
 Connect exposure remains unsupported until transport projections preserve those
-states. Caller/target lifetime separation and shutdown drain remain unfinished.
+states. Caller cancellation returns independently with result_unknown after
+target entry; late results are discarded. Response validation and copying
+remain inside the tracked attempt. Generated InterfaceRuntime.Drain closes
+admission and waits for actual termination; Stop drains before any lifecycle
+cleanup. Drain and cleanup share the construction/startup cleanup timeout and
+any earlier caller deadline. Failed drain keeps dependencies live for a fresh
+bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
+does not yet drain the transitional legacy Capability dispatcher. Readiness,
+lifecycle-hook dependency access, permits, retries, and separate telemetry
+remain unfinished.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned
 replaceable shape working record for every visible authored Interface, whether
@@ -448,6 +457,23 @@ Transitional explicitly JavaScript-exposed canonical Capabilities continue to lo
 The generated browser transport resolves each unary method from the same self-contained Protobuf descriptor graph used by the generated Connect handlers, translates Plystra request and response values at the wrapper boundary, and sends binary Connect requests through `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web`. Those packages are pinned direct npm dependencies of the generated package; callers never construct Protobuf messages, import descriptors, create raw Connect clients, or receive `ConnectError` as the public error model. The package export map exposes only the root Plystra API, and declaration generation strips transport, descriptor, codec, and binder internals. The transport preserves an application base-path prefix, bounds encoded requests to 1 MiB and canonical Interface traversal to 64 levels and 65,536 nodes, requires exactly one `credentialPolicy`, accepts an `AbortSignal`, and exposes only stable Plystra error fields. Anonymous mode uses Fetch credentials `omit` and sends no authorization header. Cookie mode sends no bearer header and uses exactly the declared `same-origin` or `include` Fetch policy. Bearer mode also uses `omit`, calls `getAccessToken` for one bounded raw token, adds exactly one `Authorization: Bearer ...` header, and fails closed with `PlystraError` code `credential_error` for rejected, nullish, empty, malformed, prefixed, control-containing, non-string, or oversized results without exposing credential data. No mode silently falls back to another. Aborting before dispatch, while bearer acquisition is pending, or while `fetch` is in flight rejects with `PlystraError` code `cancelled`; once server invocation has begun, the same cancellation reaches the generated Connect handler, canonical invocation, and Implementation context. Cancellation remains best-effort and does not promise Implementation rollback. Exact fields, enums, finite floating-point numbers, full-width `bigint` values, byte sequences, plain objects, and decoded responses remain validated. Network, cancellation, malformed-response, and schema failures are normalized without copying Connect or Implementation text.
 
 When Connect surfaces exist, descriptor generation also emits the shared `plystra/generated/transport/v1/error.proto` schema. Every generated application failure attaches exactly one `PlystraErrorDetail`; `requested_interface_id` records the requested canonical Interface or temporary pre-removal Alias, `canonical_interface_id` records the canonical Interface target, and exactly one of `semantic_error_code` or `kernel_error_class` is present. Trace identity remains absent until a safe source exists. Alias handlers enter the same canonical invocation while retaining the Alias as the requested identity. Implementation text, causes, payloads, panic data, configuration, credentials, Secrets, and internal Kernel detail codes are excluded. The JavaScript wrapper validates the outer Connect code, exact operation identities, declared semantic-code set, closed Kernel class, detail count, fields, and unknown wire data before exposing an immutable Plystra-owned `error.detail`. A missing, malformed, duplicate, unknown, mismatched, or undeclared detail fails closed to the generic `internal` error without leaking the raw Connect error.
+
+Construct semantic errors with invocation.NewSemanticError(code, cause) from
+github.com/plystra/kernel/invocation. Use errors.As with
+*invocation.SemanticError and Code() locally; structural SemanticErrorCode
+methods are not recognized. Wrap uncertain effects with
+invocation.NewResultUnknown(cause) before semantic translation. Generated
+error projection follows ordinary wrapping and joins up to 64 unwrap levels
+and 1,024 nodes, rejects conflicting or undeclared codes, and exposes no
+private cause. Completion remains independent of the primary code through
+Connect, transitional HTTP, and PlystraError.completion in the SDK.
+
+Completion is independent of the primary error code: not_started,
+result_known, or result_unknown. The wire completion field is required, and
+the SDK exposes PlystraError.completion as well as detail.completion.
+Predispatch cancellation is not_started; in-flight interruption or an
+untrusted failure is result_unknown. An uncertain semantic error does not
+prove rollback or permit automatic resubmission.
 
 Every final Alias whose normalized exposure includes JavaScript generates a nested method and tree-shakable factory under its Alias ID. The Alias module imports the canonical target's exact request, response, semantic errors, validators, codecs, and contract digest, then resolves the Alias service descriptor while reusing the canonical request and response messages. Several aliases may reuse one target without copying its schema or provider details. Alias exposure cannot broaden the target, and deprecated aliases emit native TypeScript `@deprecated` declarations without deprecating the target.
 

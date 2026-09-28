@@ -272,8 +272,10 @@ func requireValueError(t *testing.T, err error, side, path, rule string) {
 	var boundary *invocation.Error
 	if !errors.As(err, &value) || !errors.As(err, &boundary) || value.Interface() != "values.run/v1" || value.Side() != side || value.Path() != path || value.Rule() != rule { t.Fatalf("unexpected validation error: %T %v", err, err) }
 	want := invocation.ErrorInvalidArgument
-	if side == "response" { want = invocation.ErrorInternal }
+	completion := invocation.CompletionNotStarted
+	if side == "response" { want = invocation.ErrorInternal; completion = invocation.CompletionResultKnown }
 	if boundary.Code() != want || boundary.DetailCode() != "contract."+side+"_invalid" { t.Fatalf("boundary: %v", boundary) }
+	if invocation.CompletionOf(err) != completion { t.Fatalf("validation completion: %s", invocation.CompletionOf(err)) }
 	var log bytes.Buffer
 	slog.New(slog.NewTextHandler(&log, nil)).Error("failure", "error", err)
 	for _, text := range []string{fmt.Sprintf("%v %+v %#v", err, err, err), fmt.Sprint(errors.Unwrap(value)), log.String()} {

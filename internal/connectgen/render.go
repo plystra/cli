@@ -259,7 +259,7 @@ func exactErrorDetail(registry *protoregistry.Files) (protoreflect.MessageDescri
 		return nil, fmt.Errorf("%w: safe error detail %s is absent", ErrDescriptor, protobufdescriptor.ErrorDetailFullName)
 	}
 	message, ok := descriptor.(protoreflect.MessageDescriptor)
-	if !ok || message == nil || message.Fields().Len() != 5 {
+	if !ok || message == nil || message.Fields().Len() != 6 {
 		return nil, fmt.Errorf("%w: safe error detail %s is inconsistent", ErrDescriptor, protobufdescriptor.ErrorDetailFullName)
 	}
 	want := []struct {
@@ -271,6 +271,7 @@ func exactErrorDetail(registry *protoregistry.Files) (protoreflect.MessageDescri
 		{name: "semantic_error_code", number: 3},
 		{name: "kernel_error_class", number: 4},
 		{name: "trace_id", number: 5},
+		{name: "completion", number: 6},
 	}
 	for _, field := range want {
 		descriptor := message.Fields().ByNumber(field.number)

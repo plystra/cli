@@ -282,7 +282,7 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	if err := renderResponseValidation(&source, responseValidation, !requestValidation.hasObjects); err != nil {
 		return File{}, fmt.Errorf("%w: render response validation: %w", ErrRender, err)
 	}
-	renderTransportErrorInput(&source, contract.Errors)
+	RenderTransportErrorInput(&source, contract.Errors)
 	if prepared.hasAdapterCredentials {
 		fmt.Fprintln(&source)
 		fmt.Fprintln(&source, "func plystraAdapterCredential(source AdapterCredentialSource, name string) (credential *string) {")
@@ -357,11 +357,16 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 		fmt.Fprintln(&source, "type plystraConditionalError struct {")
 		fmt.Fprintln(&source, "\tcode    contract.ErrorCode")
 		fmt.Fprintln(&source, "\tmessage string")
+		fmt.Fprintln(&source, "\tcompletion kernelinvocation.Completion")
 		fmt.Fprintln(&source, "}")
 		fmt.Fprintln(&source)
 		fmt.Fprintln(&source, "func (e plystraConditionalError) Error() string { return e.message }")
 		fmt.Fprintln(&source)
-		fmt.Fprintln(&source, "func (e plystraConditionalError) Unwrap() error { return e.code }")
+		fmt.Fprintln(&source, "func (e plystraConditionalError) Unwrap() error {")
+		fmt.Fprintln(&source, "\tvar cause error")
+		fmt.Fprintln(&source, "\tif e.completion == kernelinvocation.CompletionResultUnknown { cause = kernelinvocation.NewResultUnknown(nil) }")
+		fmt.Fprintln(&source, "\treturn kernelinvocation.NewSemanticError(string(e.code), cause)")
+		fmt.Fprintln(&source, "}")
 	}
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {
@@ -379,17 +384,21 @@ func render(modulePath string, schema []byte, plan *generationlowering.Plan) (Fi
 	}, nil
 }
 
-func renderTransportErrorInput(source *strings.Builder, semanticErrors []string) {
+// RenderTransportErrorInput emits the shared bounded, data-free error projection.
+// The generated package must import context and kernelinvocation.
+func RenderTransportErrorInput(source *strings.Builder, semanticErrors []string) {
 	fmt.Fprintln(source)
 	fmt.Fprintln(source, "// TransportErrorInput is the immutable data-free failure projection consumed by generated external adapters.")
 	fmt.Fprintln(source, "type TransportErrorInput struct {")
 	fmt.Fprintln(source, "\tsemanticErrorCode string")
 	fmt.Fprintln(source, "\tkernelErrorClass kernelinvocation.ErrorCode")
 	fmt.Fprintln(source, "\tkernelDetailCode string")
+	fmt.Fprintln(source, "\tcompletion kernelinvocation.Completion")
 	fmt.Fprintln(source, "}")
 	fmt.Fprintln(source)
 	fmt.Fprintln(source, "// Valid reports whether the projection contains exactly one closed semantic or Kernel failure classification.")
 	fmt.Fprintln(source, "func (i TransportErrorInput) Valid() bool {")
+	fmt.Fprintln(source, "\tif !i.completion.Valid() { return false }")
 	fmt.Fprintln(source, "\tif i.semanticErrorCode != \"\" {")
 	fmt.Fprintln(source, "\t\treturn i.kernelErrorClass == \"\" && i.kernelDetailCode == \"\" && plystraDeclaredSemanticError(i.semanticErrorCode)")
 	fmt.Fprintln(source, "\t}")
@@ -423,6 +432,12 @@ func renderTransportErrorInput(source *strings.Builder, semanticErrors []string)
 	fmt.Fprintln(source, "\treturn i.kernelDetailCode")
 	fmt.Fprintln(source, "}")
 	fmt.Fprintln(source)
+	fmt.Fprintln(source, "// Completion returns the result certainty independently of the primary error code.")
+	fmt.Fprintln(source, "func (i TransportErrorInput) Completion() kernelinvocation.Completion {")
+	fmt.Fprintln(source, "\tif !i.Valid() { return kernelinvocation.CompletionResultUnknown }")
+	fmt.Fprintln(source, "\treturn i.completion")
+	fmt.Fprintln(source, "}")
+	fmt.Fprintln(source)
 	fmt.Fprintln(source, "// SafeTransportError projects one canonical invocation failure without retaining its text, cause, payload, or Provider data.")
 	fmt.Fprintln(source, "func SafeTransportError(err error) (input TransportErrorInput) {")
 	fmt.Fprintln(source, "\tinput = plystraInternalTransportError()")
@@ -434,32 +449,57 @@ func renderTransportErrorInput(source *strings.Builder, semanticErrors []string)
 	fmt.Fprintln(source, "\tif err == nil {")
 	fmt.Fprintln(source, "\t\treturn input")
 	fmt.Fprintln(source, "\t}")
-	fmt.Fprintln(source, "\tvar semantic plystraSemanticErrorCoder")
-	fmt.Fprintln(source, "\tif errors.As(err, &semantic) {")
-	fmt.Fprintln(source, "\t\tcode := semantic.SemanticErrorCode()")
-	fmt.Fprintln(source, "\t\tif plystraDeclaredSemanticError(code) {")
-	fmt.Fprintln(source, "\t\t\treturn TransportErrorInput{semanticErrorCode: code}")
-	fmt.Fprintln(source, "\t\t}")
-	fmt.Fprintln(source, "\t\treturn input")
-	fmt.Fprintln(source, "\t}")
-	fmt.Fprintln(source, "\tvar classified *kernelinvocation.Error")
-	fmt.Fprintln(source, "\tif errors.As(err, &classified) {")
-	fmt.Fprintln(source, "\t\treturn TransportErrorInput{kernelErrorClass: classified.Code(), kernelDetailCode: classified.DetailCode()}")
-	fmt.Fprintln(source, "\t}")
-	fmt.Fprintln(source, "\tswitch {")
-	fmt.Fprintln(source, "\tcase errors.Is(err, context.DeadlineExceeded):")
-	fmt.Fprintln(source, "\t\treturn TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorTimeout}")
-	fmt.Fprintln(source, "\tcase errors.Is(err, context.Canceled):")
-	fmt.Fprintln(source, "\t\treturn TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorCancelled}")
-	fmt.Fprintln(source, "\tdefault:")
-	fmt.Fprintln(source, "\t\treturn input")
-	fmt.Fprintln(source, "\t}")
-	fmt.Fprintln(source, "}")
-	fmt.Fprintln(source)
-	fmt.Fprintln(source, "type plystraSemanticErrorCoder interface {")
-	fmt.Fprintln(source, "\terror")
-	fmt.Fprintln(source, "\tSemanticErrorCode() string")
-	fmt.Fprintln(source, "}")
+	source.WriteString(`
+	completion := kernelinvocation.CompletionOf(err)
+	var semantic string
+	var primary kernelinvocation.ErrorCode
+	var detail string
+	invalid, visited := false, 0
+	addPrimary := func(code kernelinvocation.ErrorCode, value string) {
+		if !code.Valid() || !kernelinvocation.ValidDetailCode(value) || (code == kernelinvocation.ErrorDenied && value == "") ||
+			(primary != "" && (primary != code || detail != value)) { invalid = true }
+		primary, detail = code, value
+	}
+	// Only ordinary unwrap edges are followed. Depth and node limits also stop cycles.
+	var walk func(error, int) bool
+	walk = func(node error, depth int) bool {
+		if node == nil { return true }
+		if depth > 64 || visited == 1024 { return false }
+		visited++
+		switch value := node.(type) {
+		case *kernelinvocation.SemanticError:
+			code := value.Code()
+			if !plystraDeclaredSemanticError(code) || (semantic != "" && semantic != code) { invalid = true }
+			semantic = code
+		case *kernelinvocation.Error:
+			addPrimary(value.Code(), value.DetailCode())
+		default:
+			switch node {
+			case context.Canceled: addPrimary(kernelinvocation.ErrorCancelled, "")
+			case context.DeadlineExceeded: addPrimary(kernelinvocation.ErrorTimeout, "")
+			}
+		}
+		switch value := node.(type) {
+		case interface { Unwrap() error }:
+			return walk(value.Unwrap(), depth+1)
+		case interface { Unwrap() []error }:
+			children := value.Unwrap()
+			if len(children) > 1024-visited { return false }
+			for _, child := range children { if !walk(child, depth+1) { return false } }
+		}
+		return true
+	}
+	if !walk(err, 0) { return input }
+	if invalid || (semantic != "" && primary != "") {
+		input.completion = completion
+		return input
+	}
+	if semantic != "" { return TransportErrorInput{semanticErrorCode: semantic, completion: completion} }
+	if primary != "" { return TransportErrorInput{kernelErrorClass: primary, kernelDetailCode: detail, completion: completion} }
+	input.completion = completion
+	return input
+}
+`)
 	fmt.Fprintln(source)
 	fmt.Fprintln(source, "func plystraDeclaredSemanticError(code string) bool {")
 	if len(semanticErrors) == 0 {
@@ -482,7 +522,7 @@ func renderTransportErrorInput(source *strings.Builder, semanticErrors []string)
 	fmt.Fprintln(source, "}")
 	fmt.Fprintln(source)
 	fmt.Fprintln(source, "func plystraInternalTransportError() TransportErrorInput {")
-	fmt.Fprintln(source, "\treturn TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorInternal}")
+	fmt.Fprintln(source, "\treturn TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorInternal, completion: kernelinvocation.CompletionResultUnknown}")
 	fmt.Fprintln(source, "}")
 }
 
@@ -552,7 +592,7 @@ func renderRequestValidation(source *strings.Builder, plan responseValidationPla
 	if len(plan.fields) != 0 {
 		fmt.Fprintln(source)
 		fmt.Fprintln(source, "func plystraInvalidRequestError() error {")
-		fmt.Fprintln(source, "\tfailure, _ := kernelinvocation.NewError(kernelinvocation.ErrorInvalidArgument, \"contract.invalid_request\")")
+		fmt.Fprintln(source, "\tfailure, _ := kernelinvocation.NewNotStartedError(kernelinvocation.ErrorInvalidArgument, \"contract.invalid_request\")")
 		fmt.Fprintln(source, "\treturn failure")
 		fmt.Fprintln(source, "}")
 	}
@@ -1671,11 +1711,16 @@ func renderConditionalFailure(
 		return fmt.Errorf("%w: contribution %q node %q cannot render condition operator %q", ErrContribution, contribution.ID(), node.ID(), operation.Condition.Operator)
 	}
 	fmt.Fprintf(source, "\tif %s {\n", condition)
+	completion := "kernelinvocation.CompletionResultKnown"
+	if operation.Condition.Operator == generation.GeneratedConditionError {
+		completion = "kernelinvocation.CompletionOf(" + expression + ")"
+	}
 	fmt.Fprintf(
 		source,
-		"\t\treturn contract.Response{}, plystraConditionalError{code: contract.Err%s, message: %s}\n",
+		"\t\treturn contract.Response{}, plystraConditionalError{code: contract.Err%s, message: %s, completion: %s}\n",
 		goname.Field(operation.ErrorCode),
 		strconv.Quote(operation.Message),
+		completion,
 	)
 	fmt.Fprintln(source, "\t}")
 	return nil

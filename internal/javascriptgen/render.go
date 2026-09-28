@@ -520,7 +520,7 @@ func renderIndex(operations []renderedOperation, interfaces []renderedInterface)
 	}
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "export { PlystraError } from \"./runtime.js\";")
-	fmt.Fprintln(&source, "export type { ClientOptions, CredentialPolicy, JSONValue, KernelErrorClass, PlystraErrorDetail, RequestOptions } from \"./runtime.js\";")
+	fmt.Fprintln(&source, "export type { ClientOptions, Completion, CredentialPolicy, JSONValue, KernelErrorClass, PlystraErrorDetail, RequestOptions } from \"./runtime.js\";")
 	for _, operation := range operations {
 		importPath := indexImportPath(operation)
 		if operation.isAlias() {
@@ -694,7 +694,7 @@ func renderREADME(packageName string, operations []renderedOperation, interfaces
 	fmt.Fprintln(&readme)
 	fmt.Fprintln(&readme, "The Plystra wrapper resolves generated Protobuf descriptors and sends binary Connect requests through its pinned `@bufbuild/protobuf`, `@connectrpc/connect`, and `@connectrpc/connect-web` dependencies. Application code does not construct raw Protobuf messages or Connect clients, and raw Connect errors are normalized before they cross the wrapper boundary. Import only the package root; the export map blocks internal subpaths and generated declarations omit transport, descriptor, codec, and binder internals.")
 	fmt.Fprintln(&readme)
-	fmt.Fprintln(&readme, "Generated application failures expose only an immutable Plystra-owned safe detail. On the wire, `requested_interface_id` records the requested canonical Interface or temporary pre-removal Alias, `canonical_interface_id` records the canonical Interface target, and exactly one declared semantic code or closed Kernel class is present. Implementation text, causes, payloads, panic data, configuration, credentials, Secrets, internal Kernel detail codes, and raw Connect details are excluded. Missing, duplicate, malformed, unknown, mismatched, or undeclared details fail closed to `internal`; inspect `PlystraError.detail` rather than parsing an error message.")
+	fmt.Fprintln(&readme, "Generated application failures expose only an immutable Plystra-owned safe detail. Completion is independent of the primary error code: not_started, result_known, or result_unknown. The wire completion field is required, and the SDK exposes PlystraError.completion as well as detail.completion. Predispatch cancellation is not_started; in-flight interruption or an untrusted failure is result_unknown. An uncertain semantic error does not prove rollback or permit automatic resubmission. On the wire, `requested_interface_id` records the requested canonical Interface or temporary pre-removal Alias, `canonical_interface_id` records the canonical Interface target, and exactly one declared semantic code or closed Kernel class is present. Implementation text, causes, payloads, panic data, configuration, credentials, Secrets, internal Kernel detail codes, and raw Connect details are excluded. Missing, duplicate, malformed, unknown, mismatched, or undeclared details fail closed to `internal`; inspect `PlystraError.detail` rather than parsing an error message.")
 	fmt.Fprintln(&readme)
 	if len(operations) != 0 {
 		fmt.Fprintln(&readme, "Transitional legacy `integer` fields and integer array items are signed 64-bit values exposed as JavaScript `bigint`, including enum literals such as `0n`. Pass `bigint`, not `number`, so request and response values remain exact across the full range.")

@@ -119,6 +119,7 @@ func TestBuildRendersDeterministicSchemasAndSelfContainedDescriptors(t *testing.
 		{name: "semantic_error_code", number: 3},
 		{name: "kernel_error_class", number: 4},
 		{name: "trace_id", number: 5},
+		{name: "completion", number: 6},
 	}
 	if string(errorDetail.FullName()) != protobufdescriptor.ErrorDetailFullName || errorDetail.Fields().Len() != len(wantErrorFields) {
 		t.Fatalf("safe error detail = %#v", errorDetail)

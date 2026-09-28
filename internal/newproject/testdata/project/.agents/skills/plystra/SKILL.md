@@ -7,7 +7,7 @@ description: Develop this Plystra Project through installed CLI commands, author
 
 Project module: `example.com/acme/my-app`
 
-Installed support: CLI `0.1.0`, Kernel `v0.0.0-20260928055126-4402d1062034`, specification revision `b959f277b7661c0725660f394b84f7175c8df54b`.
+Installed support: CLI `0.1.0`, Kernel `v0.0.0-20260928111401-7ec80c2a00e3`, specification revision `b959f277b7661c0725660f394b84f7175c8df54b`.
 
 Start with `plystra help` and the exact subcommand help. Read only the task references needed for the current change.
 

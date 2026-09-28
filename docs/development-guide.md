@@ -498,7 +498,16 @@ Interface, side, field path, and failed rule; it exposes no submitted value or
 map key. An invalid request never enters the target, and an invalid response
 returns an internal contract error without a result. Pointer-bearing Connect
 exposure still fails closed until transport projections preserve those states.
-Caller/target lifetime separation and shutdown drain remain unfinished.
+Caller cancellation returns independently with result_unknown after target
+entry; late results are discarded. Response validation and copying remain
+inside the tracked attempt. Generated InterfaceRuntime.Drain closes admission
+and waits for actual termination; Stop drains before any lifecycle cleanup.
+Drain and cleanup share the construction/startup cleanup timeout and any
+earlier caller deadline. Failed drain keeps dependencies live for a fresh
+bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
+does not yet drain the transitional legacy Capability dispatcher. Readiness,
+lifecycle-hook dependency access, permits, retries, and separate telemetry
+remain unfinished.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned,
 replaceable shape working record for every visible authored Interface,
@@ -1782,7 +1791,9 @@ guarantee.
 Generated Connect application failures carry one closed
 `plystra.generated.transport.v1.PlystraErrorDetail`. The detail identifies the
 requested canonical or Alias Capability, its canonical target, and exactly one
-declared semantic error code or closed Kernel error class. It never contains a
+declared semantic error code or closed Kernel error class. The required wire
+field `completion` is independently `not_started`, `result_known`, or
+`result_unknown`; uncertainty is not a primary error class. It never contains a
 Provider ID or message, cause, payload, panic value, stack, internal Kernel
 detail code, configuration, credential, or Secret. Alias calls therefore keep
 the Alias in `requestedCapabilityID` while `canonicalCapabilityID` remains the
@@ -1803,6 +1814,20 @@ try {
   }
 }
 ```
+
+Inspect `PlystraError.completion` as well as the primary code. Cancellation
+before dispatch is `not_started`; an interrupted in-flight request or missing
+trustworthy detail is `result_unknown`. A semantic code can carry uncertainty.
+Neither cancellation nor a semantic failure proves rollback or permits automatic
+resubmission. The transitional HTTP JSON error body also carries `completion`.
+
+Construct semantic errors with `invocation.NewSemanticError(code, cause)` from
+`github.com/plystra/kernel/invocation`; use `errors.As` with
+`*invocation.SemanticError` and its `Code()` accessor locally. Wrap uncertain
+effects with `invocation.NewResultUnknown(cause)` before semantic translation.
+Generated adapters recognize ordinary wrapped and joined errors, bounded to 64
+unwrap levels and 1,024 nodes. Conflicting or undeclared codes fail closed without
+exposing private causes. A structural `SemanticErrorCode` method is not a carrier.
 
 Do not parse `error.message` or depend on Connect internals. A missing,
 duplicate, malformed, unknown, identity-mismatched, outer-code-mismatched, or

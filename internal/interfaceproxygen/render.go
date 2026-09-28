@@ -141,6 +141,7 @@ func render(input Input) ([]byte, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "import (")
 	fmt.Fprintln(&source, "\t\"context\"")
+	fmt.Fprintln(&source, "\t\"sync/atomic\"")
 	for _, name := range imports {
 		fmt.Fprintf(&source, "\t%q\n", name)
 	}
@@ -167,9 +168,16 @@ func render(input Input) ([]byte, error) {
 	fmt.Fprintf(&source, "func (proxy Proxy) %s(ctx context.Context, request contract.%s) (contract.%s, error) {\n", input.MethodName, input.RequestName, input.ResponseName)
 	fmt.Fprintln(&source, "\tsnapshot, err := CopyRequest(request)")
 	fmt.Fprintf(&source, "\tif err != nil { return contract.%s{}, err }\n", input.ResponseName)
-	fmt.Fprintln(&source, "\tresponse, err := proxy.handle.Invoke(ctx, snapshot)")
+	fmt.Fprintln(&source, "\t// Cancellation can finish this caller while its response processor is still running.")
+	fmt.Fprintln(&source, "\tvar validation atomic.Pointer[ValueError]")
+	fmt.Fprintf(&source, "\tresponse, err := proxy.handle.InvokeWithResponse(ctx, snapshot, func(value contract.%s) (contract.%s, error) {\n", input.ResponseName, input.ResponseName)
+	fmt.Fprintln(&source, "\t\tcopied, err := CopyResponse(value)")
+	fmt.Fprintln(&source, "\t\tif failure, ok := err.(*ValueError); ok { validation.Store(failure) }")
+	fmt.Fprintln(&source, "\t\treturn copied, err")
+	fmt.Fprintln(&source, "\t})")
+	fmt.Fprintln(&source, "\tif failure := validation.Load(); failure != nil && err == failure.boundary { err = failure }")
 	fmt.Fprintf(&source, "\tif err != nil { return contract.%s{}, err }\n", input.ResponseName)
-	fmt.Fprintln(&source, "\treturn CopyResponse(response)")
+	fmt.Fprintln(&source, "\treturn response, nil")
 	fmt.Fprintln(&source, "}")
 	source.WriteString(values)
 

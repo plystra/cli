@@ -90,6 +90,7 @@ constraints:
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -114,14 +115,6 @@ func LastRequest() echov1.Request {
 	return lastRequest
 }
 
-type semanticFailure string
-
-func (failure semanticFailure) Error() string {
-	return "private semantic failure: " + string(failure)
-}
-
-func (failure semanticFailure) SemanticErrorCode() string { return string(failure) }
-
 //plystra:implements records.echo/v1
 func New() (*Service, error) { return &Service{}, nil }
 
@@ -135,9 +128,11 @@ func (*Service) Echo(ctx context.Context, request echov1.Request) (echov1.Respon
 	lastRequestMu.Unlock()
 	switch request.Value.Detail.Code {
 	case "semantic":
-		return echov1.Response{}, semanticFailure("record_rejected")
+		return echov1.Response{}, kernelinvocation.NewSemanticError("record_rejected", errors.New("private semantic failure"))
+	case "uncertain-semantic":
+		return echov1.Response{}, fmt.Errorf("private wrapper: %w", kernelinvocation.NewSemanticError("record_rejected", kernelinvocation.NewResultUnknown(errors.New("private semantic failure"))))
 	case "undeclared-semantic":
-		return echov1.Response{}, semanticFailure("private_undeclared")
+		return echov1.Response{}, kernelinvocation.NewSemanticError("private_undeclared", nil)
 	case "unknown":
 		return echov1.Response{}, errors.New("private unknown implementation failure")
 	case "panic":
@@ -165,7 +160,7 @@ func (*Service) Echo(ctx context.Context, request echov1.Request) (echov1.Respon
 	case "kernel-cancelled":
 		return echov1.Response{}, kernelError(kernelinvocation.ErrorCancelled)
 	case "kernel-result-unknown":
-		return echov1.Response{}, kernelError(kernelinvocation.ErrorResultUnknown)
+		return echov1.Response{}, kernelinvocation.NewResultUnknown(kernelError(kernelinvocation.ErrorUnavailable))
 	case "kernel-internal":
 		return echov1.Response{}, kernelError(kernelinvocation.ErrorInternal)
 	case "kernel-version-incompatible":
@@ -306,8 +301,8 @@ http:
 		"return target.Echo(ctx, request)",
 		"connect.NewUnaryHandler(",
 		`kernelinvocation "github.com/plystra/kernel/invocation"`,
-		"errors.As(err, &semantic)",
-		"errors.As(err, &kernel)",
+		"input := SafeTransportError(err)",
+		"input.KernelErrorClass()",
 		`case "record_rejected":`,
 		`"requested_interface_id"`,
 		`"canonical_interface_id"`,
@@ -322,7 +317,7 @@ http:
 		modulePath + "/generated/go/invocations/",
 		modulePath + "/records\"",
 		"NewHandle(",
-		"DetailCode()",
+		"errors.As(err,",
 		"err.Error()",
 	} {
 		if bytes.Contains(handlerSource, []byte(forbidden)) {
@@ -662,8 +657,10 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 		code     connect.Code
 		semantic string
 		kernel   string
+		completion string
 	}{
 		{name: "semantic", behavior: "semantic", code: connect.CodeFailedPrecondition, semantic: "record_rejected"},
+		{name: "uncertain semantic", behavior: "uncertain-semantic", code: connect.CodeFailedPrecondition, semantic: "record_rejected", completion: "result_unknown"},
 		{name: "undeclared semantic", behavior: "undeclared-semantic", code: connect.CodeInternal, kernel: "internal"},
 		{name: "unknown", behavior: "unknown", code: connect.CodeInternal, kernel: "internal"},
 		{name: "panic", behavior: "panic", code: connect.CodeInternal, kernel: "internal"},
@@ -677,7 +674,7 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 		{name: "unavailable", behavior: "kernel-unavailable", code: connect.CodeUnavailable, kernel: "unavailable"},
 		{name: "timeout", behavior: "kernel-timeout", code: connect.CodeDeadlineExceeded, kernel: "timeout"},
 		{name: "cancelled", behavior: "kernel-cancelled", code: connect.CodeCanceled, kernel: "cancelled"},
-		{name: "result unknown", behavior: "kernel-result-unknown", code: connect.CodeUnavailable, kernel: "result_unknown"},
+		{name: "result unknown", behavior: "kernel-result-unknown", code: connect.CodeUnavailable, kernel: "unavailable", completion: "result_unknown"},
 		{name: "internal", behavior: "kernel-internal", code: connect.CodeInternal, kernel: "internal"},
 		{name: "version incompatible", behavior: "kernel-version-incompatible", code: connect.CodeUnimplemented, kernel: "version_incompatible"},
 	}
@@ -687,7 +684,9 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 			if response != nil {
 				t.Fatalf("error response = %#v", response)
 			}
-			assertSafeConnectError(t, err, test.code, test.semantic, test.kernel)
+			completion := test.completion
+			if completion == "" { completion = "result_known" }
+			assertSafeConnectError(t, err, test.code, test.semantic, test.kernel, completion)
 			status, body := callConnect(t, server.Client(), t.Context(), server.URL+connectadapter.Procedure, test.behavior)
 			if status == http.StatusOK {
 				t.Fatalf("HTTP error status = %d, body %s", status, body)
@@ -709,14 +708,14 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 	if response != nil {
 		t.Fatalf("canceled response = %#v", response)
 	}
-	assertSafeConnectError(t, err, connect.CodeCanceled, "", "cancelled")
+	assertSafeConnectError(t, err, connect.CodeCanceled, "", "cancelled", "not_started")
 	expired, expire := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer expire()
 	response, err = handler.Invoke(expired, directRequest(t, "root"))
 	if response != nil {
 		t.Fatalf("expired response = %#v", response)
 	}
-	assertSafeConnectError(t, err, connect.CodeDeadlineExceeded, "", "timeout")
+	assertSafeConnectError(t, err, connect.CodeDeadlineExceeded, "", "timeout", "not_started")
 
 	errorDescriptor, err := connectschema.Message("plystra.generated.transport.v1.PlystraErrorDetail")
 	if err != nil {
@@ -726,13 +725,13 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 	if response != nil {
 		t.Fatalf("invalid request response = %#v", response)
 	}
-	assertSafeConnectError(t, err, connect.CodeInvalidArgument, "", "invalid_argument")
+	assertSafeConnectError(t, err, connect.CodeInvalidArgument, "", "invalid_argument", "not_started")
 
 	response, err = handler.InvokeRequested(t.Context(), "../private/interface", directRequest(t, "root"))
 	if response != nil {
 		t.Fatalf("invalid requested Interface response = %#v", response)
 	}
-	assertSafeConnectError(t, err, connect.CodeInternal, "", "internal")
+	assertSafeConnectError(t, err, connect.CodeInternal, "", "internal", "not_started")
 
 	rootCases := []struct {
 		name   string
@@ -766,7 +765,7 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 			if response != nil {
 				t.Fatalf("root error response = %#v", response)
 			}
-			assertSafeConnectError(t, err, test.code, "", test.kernel)
+			assertSafeConnectError(t, err, test.code, "", test.kernel, "result_unknown")
 		})
 	}
 }
@@ -818,7 +817,7 @@ func dynamicRequestJSON(t *testing.T, body string) *dynamicpb.Message {
 	return message
 }
 
-func assertSafeConnectError(t *testing.T, err error, code connect.Code, semanticErrorCode, kernelErrorClass string) {
+func assertSafeConnectError(t *testing.T, err error, code connect.Code, semanticErrorCode, kernelErrorClass, completion string) {
 	t.Helper()
 	var connectError *connect.Error
 	if !errors.As(err, &connectError) || connectError == nil || connectError.Code() != code {
@@ -841,6 +840,7 @@ func assertSafeConnectError(t *testing.T, err error, code connect.Code, semantic
 		{number: 3, name: "semantic_error_code"},
 		{number: 4, name: "kernel_error_class"},
 		{number: 5, name: "trace_id"},
+		{number: 6, name: "completion"},
 	}
 	for _, expected := range wantFields {
 		if field := descriptor.Fields().ByNumber(expected.number); field == nil || field.Name() != expected.name {
@@ -863,8 +863,9 @@ func assertSafeConnectError(t *testing.T, err error, code connect.Code, semantic
 		field(3) != semanticErrorCode ||
 		field(4) != kernelErrorClass ||
 		field(5) != "" ||
+		field(6) != completion ||
 		(semanticErrorCode == "") == (kernelErrorClass == "") {
-		t.Fatalf("safe error detail = requested %q canonical %q semantic %q kernel %q trace %q", field(1), field(2), field(3), field(4), field(5))
+		t.Fatalf("safe error detail = requested %q canonical %q semantic %q kernel %q trace %q completion %q", field(1), field(2), field(3), field(4), field(5), field(6))
 	}
 	assertNoPrivateText(t, []byte(err.Error()))
 	assertNoPrivateText(t, details[0].Bytes())
@@ -902,7 +903,7 @@ func TestGeneratedConnectInterfaceRuntimeTestIsSelfContained(t *testing.T) {
 		"connectadapter.New(",
 		"callConnect(",
 		"assertSafeConnectError(",
-		`kernel: "result_unknown"`,
+		`completion: "result_unknown"`,
 		`name: "undeclared semantic"`,
 		`name: "invalid response"`,
 		`name: "panic"`,

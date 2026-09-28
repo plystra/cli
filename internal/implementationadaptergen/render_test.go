@@ -189,8 +189,10 @@ type Response struct { Value string }
 
 import (
 	"context"
+	"errors"
 
 	contract "example.com/adapterfixture/interfaces/order/create/v1"
+	"github.com/plystra/kernel/invocation"
 )
 
 type service struct{}
@@ -199,15 +201,11 @@ func New() (*service, error) { return &service{}, nil }
 
 func (*service) Create(_ context.Context, request contract.Request) (contract.Response, error) {
 	if request.Value == "semantic" {
-		return contract.Response{Value: "must not escape"}, semanticFailure("order_invalid")
+		return contract.Response{Value: "must not escape"}, invocation.NewSemanticError("order_invalid", errors.New("implementation secret"))
 	}
 	return contract.Response{Value: "handled:" + request.Value}, nil
 }
 
-type semanticFailure string
-
-func (failure semanticFailure) Error() string { return "implementation secret: " + string(failure) }
-func (failure semanticFailure) SemanticErrorCode() string { return string(failure) }
 `)
 	writeAdapterBytes(t, root, files[0].Path(), files[0].Data())
 	proxies, err := interfaceproxygen.Render([]interfaceproxygen.Input{{
@@ -329,7 +327,7 @@ func TestAdapterUsesSelectedUnexportedConcretePointer(t *testing.T) {
 
 	response, err = handle.Invoke(context.Background(), contract.Request{Value: "semantic"})
 	var semantic *invocation.SemanticError
-	if response != (contract.Response{}) || !errors.As(err, &semantic) || semantic.SemanticErrorCode() != "order_invalid" || strings.Contains(err.Error(), "secret") {
+	if response != (contract.Response{}) || !errors.As(err, &semantic) || semantic.Code() != "order_invalid" || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("semantic Invoke = %#v, %T %v", response, err, err)
 	}
 

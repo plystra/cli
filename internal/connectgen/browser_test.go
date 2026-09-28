@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/sdkmodel"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 func TestGeneratedBrowserInvokesCanonicalCapabilityAndAlias(t *testing.T) {
@@ -61,6 +62,7 @@ func TestGeneratedBrowserInvokesCanonicalCapabilityAndAlias(t *testing.T) {
 	}
 	writeGeneratedFile(t, root, "browser/index.html", []byte(browserCanonicalPage))
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
+	testkernel.WriteErrorBoundary(t, root)
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(testKernelInvocationSource))
 	writeGeneratedFile(t, root, "generated/go/adapters/connect/customer/profile/sync/v1/browser_test.go", []byte(generatedBrowserCanonicalRuntimeTest))
 	writeGeneratedFile(t, root, "go.mod", []byte("module "+testModulePath+"\n\ngo 1.26\n\nrequire (\n\tconnectrpc.com/connect "+connectgen.ConnectModuleVersion+"\n\tgithub.com/plystra/kernel v0.0.0\n\tgoogle.golang.org/protobuf "+connectgen.ProtobufModuleVersion+"\n)\n\nreplace github.com/plystra/kernel => ./kernel\n"))
@@ -146,7 +148,7 @@ const browserCanonicalPage = `<!doctype html>
 </head>
 <body data-result="pending">pending</body>
 <script type="module">
-  import { createPlystraClient } from "/sdk/index.js";
+  import { createPlystraClient, PlystraError } from "/sdk/index.js";
 
   try {
     const client = createPlystraClient({
@@ -183,6 +185,28 @@ const browserCanonicalPage = `<!doctype html>
         alias.note !== "accepted" || alias.ratio !== 1.5 || alias.records[0].id !== "record-1" ||
         alias.state !== "blocked" || alias.tags.join(",") !== "one,two") {
       throw new Error("unexpected canonical or Alias response");
+    }
+    for (const [invoke, requested] of [
+      [client.customer.profile.sync.v1, "customer.profile.sync/v1"],
+      [client.account.profile.v1, "account.profile/v1"]
+    ]) {
+      try {
+        await invoke({
+          active: true, count: 42n, metadata: {source: "browser"},
+          note: "uncertain", ratio: 1.5, records: [{id: "record-1"}],
+          state: "ready", tags: ["one", "two"]
+        });
+        throw new Error("uncertain invocation succeeded");
+      } catch (error) {
+        if (!(error instanceof PlystraError) || error.code !== "capability_error" ||
+            error.completion !== "result_unknown" || error.detail?.completion !== "result_unknown" ||
+            error.detail?.semanticErrorCode !== "temporarily_unavailable" ||
+            error.detail?.requestedCapabilityID !== requested ||
+            error.detail?.canonicalCapabilityID !== "customer.profile.sync/v1" ||
+            JSON.stringify(error).includes("private")) {
+          throw new Error("uncertain semantic result was not preserved");
+        }
+      }
     }
     document.body.dataset.result = "pass";
     document.body.textContent = "canonical:42:blocked;alias:84:blocked";
@@ -227,6 +251,9 @@ func TestRealBrowserCanonicalAndAliasInvocation(t *testing.T) {
 	var rootCalls atomic.Int32
 	target := kernelinvocation.NewTestHandle(func(_ context.Context, request contract.Request) (contract.Response, error) {
 		providerCalls.Add(1)
+		if request.Note != nil && *request.Note == "uncertain" {
+			return contract.Response{}, fmt.Errorf("private wrapper: %w", kernelinvocation.NewSemanticError("temporarily_unavailable", kernelinvocation.NewResultUnknown(fmt.Errorf("private commit state"))))
+		}
 		expectedCount := int64(42)
 		expectedSource := "browser"
 		if request.Note != nil && *request.Note == "alias-browser" {
@@ -345,17 +372,17 @@ func TestRealBrowserCanonicalAndAliasInvocation(t *testing.T) {
 	if !passed {
 		t.Fatalf("real browser canonical result was not successful:\n%s", document)
 	}
-	if calls := providerCalls.Load(); calls != 2 {
-		t.Fatalf("canonical Provider calls = %d, want 2", calls)
+	if calls := providerCalls.Load(); calls != 4 {
+		t.Fatalf("canonical Provider calls = %d, want 4", calls)
 	}
-	if calls := rootCalls.Load(); calls != 2 {
-		t.Fatalf("trusted-root calls = %d, want 2", calls)
+	if calls := rootCalls.Load(); calls != 4 {
+		t.Fatalf("trusted-root calls = %d, want 4", calls)
 	}
-	if calls := canonicalRequests.Load(); calls != 1 {
-		t.Fatalf("canonical Connect requests = %d, want 1", calls)
+	if calls := canonicalRequests.Load(); calls != 2 {
+		t.Fatalf("canonical Connect requests = %d, want 2", calls)
 	}
-	if calls := aliasRequests.Load(); calls != 1 {
-		t.Fatalf("Alias Connect requests = %d, want 1", calls)
+	if calls := aliasRequests.Load(); calls != 2 {
+		t.Fatalf("Alias Connect requests = %d, want 2", calls)
 	}
 }
 

@@ -117,10 +117,14 @@ type TransportErrorInput struct {
 	semanticErrorCode string
 	kernelErrorClass  kernelinvocation.ErrorCode
 	kernelDetailCode  string
+	completion        kernelinvocation.Completion
 }
 
 // Valid reports whether the projection contains exactly one closed semantic or Kernel failure classification.
 func (i TransportErrorInput) Valid() bool {
+	if !i.completion.Valid() {
+		return false
+	}
 	if i.semanticErrorCode != "" {
 		return i.kernelErrorClass == "" && i.kernelDetailCode == "" && plystraDeclaredSemanticError(i.semanticErrorCode)
 	}
@@ -154,6 +158,14 @@ func (i TransportErrorInput) KernelDetailCode() string {
 	return i.kernelDetailCode
 }
 
+// Completion returns the result certainty independently of the primary error code.
+func (i TransportErrorInput) Completion() kernelinvocation.Completion {
+	if !i.Valid() {
+		return kernelinvocation.CompletionResultUnknown
+	}
+	return i.completion
+}
+
 // SafeTransportError projects one canonical invocation failure without retaining its text, cause, payload, or Provider data.
 func SafeTransportError(err error) (input TransportErrorInput) {
 	input = plystraInternalTransportError()
@@ -165,31 +177,77 @@ func SafeTransportError(err error) (input TransportErrorInput) {
 	if err == nil {
 		return input
 	}
-	var semantic plystraSemanticErrorCoder
-	if errors.As(err, &semantic) {
-		code := semantic.SemanticErrorCode()
-		if plystraDeclaredSemanticError(code) {
-			return TransportErrorInput{semanticErrorCode: code}
-		}
-		return input
-	}
-	var classified *kernelinvocation.Error
-	if errors.As(err, &classified) {
-		return TransportErrorInput{kernelErrorClass: classified.Code(), kernelDetailCode: classified.DetailCode()}
-	}
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		return TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorTimeout}
-	case errors.Is(err, context.Canceled):
-		return TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorCancelled}
-	default:
-		return input
-	}
-}
 
-type plystraSemanticErrorCoder interface {
-	error
-	SemanticErrorCode() string
+	completion := kernelinvocation.CompletionOf(err)
+	var semantic string
+	var primary kernelinvocation.ErrorCode
+	var detail string
+	invalid, visited := false, 0
+	addPrimary := func(code kernelinvocation.ErrorCode, value string) {
+		if !code.Valid() || !kernelinvocation.ValidDetailCode(value) || (code == kernelinvocation.ErrorDenied && value == "") ||
+			(primary != "" && (primary != code || detail != value)) {
+			invalid = true
+		}
+		primary, detail = code, value
+	}
+	// Only ordinary unwrap edges are followed. Depth and node limits also stop cycles.
+	var walk func(error, int) bool
+	walk = func(node error, depth int) bool {
+		if node == nil {
+			return true
+		}
+		if depth > 64 || visited == 1024 {
+			return false
+		}
+		visited++
+		switch value := node.(type) {
+		case *kernelinvocation.SemanticError:
+			code := value.Code()
+			if !plystraDeclaredSemanticError(code) || (semantic != "" && semantic != code) {
+				invalid = true
+			}
+			semantic = code
+		case *kernelinvocation.Error:
+			addPrimary(value.Code(), value.DetailCode())
+		default:
+			switch node {
+			case context.Canceled:
+				addPrimary(kernelinvocation.ErrorCancelled, "")
+			case context.DeadlineExceeded:
+				addPrimary(kernelinvocation.ErrorTimeout, "")
+			}
+		}
+		switch value := node.(type) {
+		case interface{ Unwrap() error }:
+			return walk(value.Unwrap(), depth+1)
+		case interface{ Unwrap() []error }:
+			children := value.Unwrap()
+			if len(children) > 1024-visited {
+				return false
+			}
+			for _, child := range children {
+				if !walk(child, depth+1) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if !walk(err, 0) {
+		return input
+	}
+	if invalid || (semantic != "" && primary != "") {
+		input.completion = completion
+		return input
+	}
+	if semantic != "" {
+		return TransportErrorInput{semanticErrorCode: semantic, completion: completion}
+	}
+	if primary != "" {
+		return TransportErrorInput{kernelErrorClass: primary, kernelDetailCode: detail, completion: completion}
+	}
+	input.completion = completion
+	return input
 }
 
 func plystraDeclaredSemanticError(code string) bool {
@@ -202,7 +260,7 @@ func plystraDeclaredSemanticError(code string) bool {
 }
 
 func plystraInternalTransportError() TransportErrorInput {
-	return TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorInternal}
+	return TransportErrorInput{kernelErrorClass: kernelinvocation.ErrorInternal, completion: kernelinvocation.CompletionResultUnknown}
 }
 
 var plystraErrInvalidContext = errors.New("nil generated invocation context")

@@ -89,7 +89,8 @@ token: {type: secret}
 		"a.interfaces.Valid()",
 		"a.interfaces.Start(startupContext)",
 		"a.interfaces.Stop(cleanupContext)",
-		"a.interfaces.Stop(ctx)",
+		"a.interfaces.Drain(bounded)",
+		"a.interfaces.Stop(bounded)",
 		"context.WithoutCancel(ctx)",
 		"staticState := a.interfaces.State()",
 		"legacyState := a.lifecycle.State()",
@@ -114,6 +115,9 @@ token: {type: secret}
 		if bytes.Contains(generated, []byte(forbidden)) {
 			t.Fatalf("generated source contains runtime input %q:\n%s", forbidden, generated)
 		}
+	}
+	if bytes.Index(generated, []byte("a.interfaces.Drain(bounded)")) >= bytes.Index(generated, []byte("a.lifecycle.Stop(bounded)")) {
+		t.Fatal("static invocation drain must precede legacy dependency cleanup")
 	}
 	repeatedOptions := options
 	repeatedOptions.ConfigurationSchemas = []bootstrapgen.ConfigurationSchema{

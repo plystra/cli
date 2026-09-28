@@ -90,9 +90,11 @@ type service struct{}
 
 var failStart atomic.Bool
 var failConstruction atomic.Bool
+var entered, release chan struct{}
 
 func SetStartFailure(value bool) { failStart.Store(value) }
 func SetConstructorFailure(value bool) { failConstruction.Store(value) }
+func BlockCalls(started, finish chan struct{}) { entered, release = started, finish }
 
 //plystra:implements audit.write/v1
 func New() (*service, error) {
@@ -115,6 +117,15 @@ func (*service) Stop(context.Context) error {
 func (*service) Write(ctx context.Context, request writev1.Request) (writev1.Response, error) {
 	if _, governed := kernelinvocation.Current(ctx); !governed {
 		panic("audit call bypassed Kernel governance")
+	}
+	if entered != nil {
+		close(entered)
+		<-release
+		probe.Lifecycle("late:audit")
+		switch request.Value {
+		case "error": return writev1.Response{}, errors.New("private-late-secret")
+		case "panic": panic("private-late-secret")
+		}
 	}
 	return writev1.Response{Value: "audit:" + request.Value}, nil
 }
@@ -465,6 +476,71 @@ func TestNeverStartedCleanup(t *testing.T) {
 			want = append(want, "stop:app", "stop:audit")
 			if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("events = %v, want %v", probe.Events(), want) }
 		})
+	}
+}
+
+func TestShutdownRetainsDependenciesUntilLateTargetsTerminate(t *testing.T) {
+	for _, surface := range []string{"runtime", "bootstrap"} {
+		for _, outcome := range []string{"success", "error", "panic"} {
+			for _, finish := range []string{"cancel", "deadline", "shutdown"} {
+				t.Run(surface+"/"+outcome+"/"+finish, func(t *testing.T) {
+					synctest.Test(t, func(t *testing.T) {
+						probe.Reset()
+						var runtime assembly.InterfaceRuntime
+						var stop func(context.Context) error
+						if surface == "bootstrap" {
+							application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+							if err != nil { t.Fatal(err) }
+							if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
+							runtime, stop = application.Interfaces(), application.Stop
+						} else {
+							var err error
+							runtime, err = assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{}, 20*time.Millisecond)
+							if err != nil { t.Fatal(err) }
+							if err := runtime.Start(context.Background()); err != nil { t.Fatal(err) }
+							stop = runtime.Stop
+						}
+						if err := stop(nil); err == nil { t.Fatal("nil shutdown accepted") }
+						entered, release := make(chan struct{}), make(chan struct{})
+						auditimplementation.BlockCalls(entered, release)
+						defer auditimplementation.BlockCalls(nil, nil)
+						defer func() { if release != nil { close(release); synctest.Wait() } }()
+						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+						defer cancel()
+						if finish != "deadline" { cancel(); ctx, cancel = context.WithCancel(context.Background()); defer cancel() }
+						type result struct { response runv1.Response; err error }
+						done := make(chan result, 1)
+						go func() { response, err := runtime.AppRunV1().Run(ctx, runv1.Request{Value: outcome}); done <- result{response, err} }()
+						<-entered
+						if finish == "cancel" { cancel() }
+						if finish == "deadline" { time.Sleep(10*time.Millisecond) }
+						before := probe.Events()
+						shutdown := context.Background()
+						if surface == "bootstrap" { var end context.CancelFunc; shutdown, end = context.WithTimeout(shutdown, 20*time.Millisecond); defer end() }
+						start := time.Now()
+						err := stop(shutdown)
+						if !errors.Is(err, kernelinvocation.ErrDrain) || !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 20*time.Millisecond {
+							t.Fatalf("bounded drain = %v after %s", err, time.Since(start))
+						}
+						if !reflect.DeepEqual(probe.Events(), before) { t.Fatalf("cleanup raced target: %v", probe.Events()) }
+						got := <-done
+						want := context.Canceled
+						if finish == "deadline" { want = context.DeadlineExceeded }
+						if !errors.Is(got.err, want) || kernelinvocation.CompletionOf(got.err) != kernelinvocation.CompletionResultUnknown || got.response != (runv1.Response{}) {
+							t.Fatalf("caller result = %#v, %v, %s", got.response, got.err, kernelinvocation.CompletionOf(got.err))
+						}
+						_, rejected := runtime.AppRunV1().Run(context.Background(), runv1.Request{})
+						if kernelinvocation.CompletionOf(rejected) != kernelinvocation.CompletionNotStarted { t.Fatalf("closed admission = %v", rejected) }
+						close(release); release = nil
+						synctest.Wait()
+						if err := stop(context.Background()); err != nil { t.Fatal(err) }
+						wantEvents := append(before, "late:audit", "stop:app", "stop:audit")
+						if !reflect.DeepEqual(probe.Events(), wantEvents) { t.Fatalf("retry cleanup = %v, want %v", probe.Events(), wantEvents) }
+						if err := stop(context.Background()); err != nil || !reflect.DeepEqual(probe.Events(), wantEvents) { t.Fatalf("repeated stop = %v, %v", err, probe.Events()) }
+					})
+				})
+			}
+		}
 	}
 }
 

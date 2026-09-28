@@ -280,6 +280,11 @@ var sharedRuntimeAPI = []publicRuntimeAPI{
 		},
 	},
 	{
+		Kind:       "type",
+		Name:       "Completion",
+		Definition: []string{`"not_started"`, `"result_known"`, `"result_unknown"`},
+	},
+	{
 		Kind: "type",
 		Name: "KernelErrorClass",
 		Definition: []string{
@@ -291,7 +296,6 @@ var sharedRuntimeAPI = []publicRuntimeAPI{
 			`"unavailable"`,
 			`"timeout"`,
 			`"cancelled"`,
-			`"result_unknown"`,
 			`"internal"`,
 			`"version_incompatible"`,
 		},
@@ -304,7 +308,8 @@ var sharedRuntimeAPI = []publicRuntimeAPI{
 			"readonly status: number",
 			"readonly code: string",
 			"readonly detail: PlystraErrorDetail | undefined",
-			"constructor(status: number, code: string, detail?: PlystraErrorDetail)",
+			"readonly completion: Completion",
+			"constructor(status: number, code: string, detail?: PlystraErrorDetail, completion?: Completion)",
 		},
 	},
 	{
@@ -314,6 +319,7 @@ var sharedRuntimeAPI = []publicRuntimeAPI{
 			"readonly requestedCapabilityID: string",
 			"readonly canonicalCapabilityID: string",
 			"readonly traceID?: string",
+			"readonly completion: Completion",
 			"exactly one of semanticErrorCode: string or kernelErrorClass: KernelErrorClass",
 		},
 	},
@@ -348,6 +354,7 @@ func buildPublicPackage(packageName string, enabled bool) (publicAPIPackage, err
 		record.ValueExports = []string{"PlystraError", "createPlystraClient"}
 		record.TypeExports = []string{
 			"ClientOptions",
+			"Completion",
 			"CredentialPolicy",
 			"JSONValue",
 			"KernelErrorClass",

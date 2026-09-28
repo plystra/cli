@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/testkernel"
 )
 
 const (
@@ -147,7 +148,7 @@ func TestRenderPlanGoldenAndRuntimeOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan: %v", err)
 	}
-	want, err := os.ReadFile("testdata/order.create.prepare.go")
+	want, err := invocationGolden("testdata/order.create.prepare.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(golden): %v", err)
 	}
@@ -349,7 +350,7 @@ func TestRenderPlanDerivesAndReusesBoundedContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan: %v", err)
 	}
-	want, err := os.ReadFile("testdata/order.context-create.context.go")
+	want, err := invocationGolden("testdata/order.context-create.context.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(context golden): %v\n%s", err, file.Data())
 	}
@@ -433,7 +434,7 @@ func TestRenderPlanGoldenAndRuntimeMetadataAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan: %v", err)
 	}
-	want, err := os.ReadFile("testdata/order.create.metadata.go")
+	want, err := invocationGolden("testdata/order.create.metadata.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(metadata golden): %v\n%s", err, file.Data())
 	}
@@ -512,7 +513,7 @@ func TestRenderPlanGoldenAndRuntimeAuditEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan: %v", err)
 	}
-	want, err := os.ReadFile("testdata/order.create.audit.go")
+	want, err := invocationGolden("testdata/order.create.audit.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(audit golden): %v\n%s", err, file.Data())
 	}
@@ -607,7 +608,7 @@ func TestRenderPlanGoldenAndRuntimeCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan: %v", err)
 	}
-	want, err := os.ReadFile("testdata/order.create.completion.go")
+	want, err := invocationGolden("testdata/order.create.completion.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(completion golden): %v\n%s", err, file.Data())
 	}
@@ -690,7 +691,7 @@ func TestRenderPlanGoldenAndRuntimeConditionalFailures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan: %v", err)
 	}
-	want, err := os.ReadFile("testdata/order.create.conditions.go")
+	want, err := invocationGolden("testdata/order.create.conditions.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(conditions golden): %v\n%s", err, file.Data())
 	}
@@ -788,7 +789,7 @@ func TestRenderPlanGoldenAndRuntimeNodeValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderPlan: %v", err)
 	}
-	want, err := os.ReadFile("testdata/order.create.node-values.go")
+	want, err := invocationGolden("testdata/order.create.node-values.go", file.Data())
 	if err != nil {
 		t.Fatalf("ReadFile(node-values golden): %v\n%s", err, file.Data())
 	}
@@ -1651,7 +1652,8 @@ func TestCompletionRunsAfterCanonicalDispatchAndHandlesItsOutcome(t *testing.T) 
 	failOrder = true
 	sequence = nil
 	response, err = handle.Invoke(context.Background(), request)
-	if !errors.Is(err, ordercontract.ErrPolicyFailed) || err.Error() != "Canonical dispatch failed." || response.Accepted || response.OrderID != "" || dispatches != 3 || audits != 2 || !slices.Equal(sequence, []string{"order:order-1"}) {
+	var semantic *kernelinvocation.SemanticError
+	if !errors.As(err, &semantic) || semantic.Code() != string(ordercontract.ErrPolicyFailed) || kernelinvocation.CompletionOf(err) != kernelinvocation.CompletionResultUnknown || err.Error() != "Canonical dispatch failed." || response.Accepted || response.OrderID != "" || dispatches != 3 || audits != 2 || !slices.Equal(sequence, []string{"order:order-1"}) {
 		t.Fatalf("Invoke(dispatch failure) = %#v, %v, dispatches %d, audits %d, sequence %v", response, err, dispatches, audits, sequence)
 	}
 	failOrder = false
@@ -1771,7 +1773,8 @@ func TestConditionalFailuresPreventCanonicalDispatch(t *testing.T) {
 			beforePolicyCalls := policyCalls
 			beforeDispatches := dispatches
 			response, err := handle.Invoke(test.ctx, test.request)
-			if !errors.Is(err, ordercontract.ErrPolicyFailed) || err.Error() != test.wantMessage || response.Accepted {
+			var semantic *kernelinvocation.SemanticError
+			if !errors.As(err, &semantic) || semantic.Code() != string(ordercontract.ErrPolicyFailed) || err.Error() != test.wantMessage || response.Accepted {
 				t.Fatalf("Invoke = %#v, %v", response, err)
 			}
 			if policyCalls-beforePolicyCalls != test.wantPolicyCalls || dispatches != beforeDispatches {
@@ -1946,68 +1949,18 @@ func TestEarlierNodeValuesFlowIntoContextAndCalls(t *testing.T) {
 func writeInvocationTestKernel(t testing.TB, root string) {
 	t.Helper()
 	writeGeneratedFile(t, root, "kernel/go.mod", []byte("module github.com/plystra/kernel\n\ngo 1.26\n"))
-	writeGeneratedFile(t, root, "kernel/invocation/error.go", []byte(`package invocation
-
-import (
-	"errors"
-	"strings"
-)
-
-type ErrorCode string
-
-const (
-	ErrorInvalidArgument ErrorCode = "invalid_argument"
-	ErrorNotFound ErrorCode = "not_found"
-	ErrorConflict ErrorCode = "conflict"
-	ErrorDenied ErrorCode = "denied"
-	ErrorUnauthenticated ErrorCode = "unauthenticated"
-	ErrorUnavailable ErrorCode = "unavailable"
-	ErrorTimeout ErrorCode = "timeout"
-	ErrorCancelled ErrorCode = "cancelled"
-	ErrorResultUnknown ErrorCode = "result_unknown"
-	ErrorInternal ErrorCode = "internal"
-	ErrorVersionIncompatible ErrorCode = "version_incompatible"
-)
-
-func (c ErrorCode) String() string { return string(c) }
-func (c ErrorCode) Valid() bool {
-	switch c {
-	case ErrorInvalidArgument, ErrorNotFound, ErrorConflict, ErrorDenied, ErrorUnauthenticated, ErrorUnavailable, ErrorTimeout, ErrorCancelled, ErrorResultUnknown, ErrorInternal, ErrorVersionIncompatible:
-		return true
-	default:
-		return false
-	}
+	testkernel.WriteErrorBoundary(t, root)
+	writeGeneratedFile(t, root, "kernel/invocation/test_helpers.go", []byte(`package invocation
+func NewTestError(code ErrorCode, detail string) *Error {
+    value, err := NewError(code, detail)
+    if err != nil { return &Error{} }
+    return value
 }
-
-func ValidDetailCode(value string) bool {
-	return value == "" || len(value) <= 128 && !strings.ContainsAny(value, " \r\n\x00")
-}
-
-type Error struct {
-	code ErrorCode
-	detail string
-}
-
-func NewError(code ErrorCode, detail string) (*Error, error) {
-	if !code.Valid() || !ValidDetailCode(detail) {
-		return nil, errors.New("invalid invocation error")
-	}
-	return &Error{code: code, detail: detail}, nil
-}
-func NewTestError(code ErrorCode, detail string) *Error { return &Error{code: code, detail: detail} }
-func (e *Error) Error() string { return "classified Provider secret" }
-func (e *Error) Code() ErrorCode { return e.code }
-func (e *Error) DetailCode() string { return e.detail }
-
-type SemanticError struct { code string }
-func NewTestSemanticError(code string) *SemanticError { return &SemanticError{code: code} }
-func (e *SemanticError) Error() string { return "semantic Provider secret" }
-func (e *SemanticError) SemanticErrorCode() string { return e.code }
-
+func NewTestSemanticError(code string) *SemanticError { return NewSemanticError(code, nil) }
 type PanickingSemanticError struct{}
 func NewTestPanickingSemanticError() *PanickingSemanticError { return &PanickingSemanticError{} }
-func (*PanickingSemanticError) Error() string { return "panicking semantic Provider secret" }
-func (*PanickingSemanticError) SemanticErrorCode() string { panic("semantic Provider secret") }
+func (*PanickingSemanticError) Error() string { return "private semantic failure" }
+func (*PanickingSemanticError) Unwrap() error { panic("private semantic failure") }
 `))
 	writeGeneratedFile(t, root, "kernel/invocation/handle.go", []byte(`package invocation
 

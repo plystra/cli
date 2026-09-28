@@ -47,9 +47,12 @@ type valueTraversal struct {
 }
 
 func (b *valueTraversal) failure(path, rule string) error {
-	code, detail := kernelinvocation.ErrorInvalidArgument, "contract.request_invalid"
-	if b.side == "response" { code, detail = kernelinvocation.ErrorInternal, "contract.response_invalid" }
-	boundary, _ := kernelinvocation.NewError(code, detail)
+	var boundary *kernelinvocation.Error
+	if b.side == "response" {
+		boundary, _ = kernelinvocation.NewError(kernelinvocation.ErrorInternal, "contract.response_invalid")
+	} else {
+		boundary, _ = kernelinvocation.NewNotStartedError(kernelinvocation.ErrorInvalidArgument, "contract.request_invalid")
+	}
 	return &ValueError{side: b.side, path: path, rule: rule, boundary: boundary}
 }
 

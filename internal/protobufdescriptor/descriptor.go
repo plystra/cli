@@ -194,6 +194,7 @@ func errorDetailDescriptor() *descriptorpb.FileDescriptorProto {
 		{name: "semantic_error_code", jsonName: "semanticErrorCode", number: 3},
 		{name: "kernel_error_class", jsonName: "kernelErrorClass", number: 4},
 		{name: "trace_id", jsonName: "traceId", number: 5},
+		{name: "completion", jsonName: "completion", number: 6},
 	}
 	message := &descriptorpb.DescriptorProto{Name: proto.String("PlystraErrorDetail")}
 	for _, field := range fields {

@@ -33,10 +33,11 @@ type ConstructorConfiguration struct {
 
 // InterfaceRuntime owns one frozen catalog and the typed proxies backed by it.
 type InterfaceRuntime struct {
-	catalog     kernelinvocation.Catalog
-	dispatcher  *kernelinvocation.Dispatcher
-	lifecycle   *kernellifecycle.Manager
-	initialized bool
+	catalog        kernelinvocation.Catalog
+	dispatcher     *kernelinvocation.Dispatcher
+	lifecycle      *kernellifecycle.Manager
+	cleanupTimeout time.Duration
+	initialized    bool
 }
 
 // Valid reports whether the complete immutable catalog is live.
@@ -63,12 +64,38 @@ func (runtime InterfaceRuntime) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop cleans constructed lifecycle-aware Implementations in reverse dependency order, including before Start.
+// Drain closes admission and waits for actual target and response-processing termination.
+// Failure leaves lifecycle dependencies live for a later bounded shutdown attempt.
+func (runtime InterfaceRuntime) Drain(ctx context.Context) error {
+	if !runtime.Valid() {
+		return fmt.Errorf("%w: %w", ErrInterfaceStop, ErrInvalidInterfaceRuntime)
+	}
+	if ctx == nil {
+		return fmt.Errorf("%w: %w", ErrInterfaceStop, kernellifecycle.ErrInvalidContext)
+	}
+	bounded, cancel := context.WithTimeout(ctx, runtime.cleanupTimeout)
+	defer cancel()
+	if err := runtime.dispatcher.Drain(bounded); err != nil {
+		return fmt.Errorf("%w: %w", ErrInterfaceStop, err)
+	}
+	return nil
+}
+
+// Stop drains invocations, then cleans constructed values in reverse dependency order.
+// Drain and cleanup share the construction cleanup timeout and any earlier caller deadline.
 func (runtime InterfaceRuntime) Stop(ctx context.Context) error {
 	if !runtime.Valid() {
 		return fmt.Errorf("%w: %w", ErrInterfaceStop, ErrInvalidInterfaceRuntime)
 	}
-	if err := runtime.lifecycle.Stop(ctx); err != nil {
+	if ctx == nil {
+		return fmt.Errorf("%w: %w", ErrInterfaceStop, kernellifecycle.ErrInvalidContext)
+	}
+	bounded, cancel := context.WithTimeout(ctx, runtime.cleanupTimeout)
+	defer cancel()
+	if err := runtime.Drain(bounded); err != nil {
+		return err
+	}
+	if err := runtime.lifecycle.Stop(bounded); err != nil {
 		return fmt.Errorf("%w: %w", ErrInterfaceStop, err)
 	}
 	return nil
@@ -185,7 +212,7 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 		return InterfaceRuntime{}, fmt.Errorf("%w: implementation lifecycle: %w", ErrInterfaceAssembly, err)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260928055126-4402d1062034",
+		ModuleVersion: "v0.0.0-20260928111401-7ec80c2a00e3",
 		BuildIdentity: "",
 	})
 	if err != nil {
@@ -199,9 +226,10 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 		return InterfaceRuntime{}, fmt.Errorf("%w: publish immutable catalog", ErrInterfaceAssembly)
 	}
 	return InterfaceRuntime{
-		catalog:     catalog,
-		dispatcher:  dispatcher,
-		lifecycle:   lifecycle,
-		initialized: true,
+		catalog:        catalog,
+		dispatcher:     dispatcher,
+		lifecycle:      lifecycle,
+		cleanupTimeout: rollbackTimeout,
+		initialized:    true,
 	}, nil
 }

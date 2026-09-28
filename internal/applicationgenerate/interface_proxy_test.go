@@ -138,8 +138,8 @@ replace example.com/platform/unused => %s
 		[]byte(`contract "example.com/acme/interface-proxy-app/interfaces/app/run/v1"`),
 		[]byte(`var _ contract.Interface = Proxy{}`),
 		[]byte(`snapshot, err := CopyRequest(request)`),
-		[]byte(`response, err := proxy.handle.Invoke(ctx, snapshot)`),
-		[]byte(`return CopyResponse(response)`),
+		[]byte(`response, err := proxy.handle.InvokeWithResponse(ctx, snapshot,`),
+		[]byte(`copied, err := CopyResponse(value)`),
 	} {
 		if !bytes.Contains(appSource, required) {
 			t.Fatalf("generated app proxy omits %q:\n%s", required, appSource)

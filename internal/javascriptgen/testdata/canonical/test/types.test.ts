@@ -6,6 +6,7 @@ import {
   createPlystraClient,
   createRecordsEchoV1,
   type ClientOptions,
+  type Completion,
   type CompatSendV1Request,
   type CompatSendV1Response,
   type CredentialPolicy,
@@ -86,9 +87,15 @@ const safeDetail: PlystraErrorDetail = {
   requestedCapabilityID: "email.send/v1",
   canonicalCapabilityID: "email.send/v1",
   semanticErrorCode: errorCode,
+  completion: "result_unknown",
 };
 const kernelClass: KernelErrorClass = "unavailable";
 const classified = new PlystraError(422, "capability_error", safeDetail);
+const completion: Completion = classified.completion;
+// @ts-expect-error certainty is not a primary runtime error class.
+const uncertainClass: KernelErrorClass = "result_unknown";
+// @ts-expect-error only the closed completion vocabulary is supported.
+const invalidCompletion: Completion = "cancelled";
 const interfaceDetail: RecordsEchoV1Detail = {
   code: "nested",
   amount: -9_223_372_036_854_775_808n,

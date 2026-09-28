@@ -34,9 +34,9 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:f388718d044c9fbd3465cf96de29120e1dbe247b091ef447d957e3ab9c03f1b5\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":3}"
-	compiledApplicationModelCompatibilityDigest = "sha256:2c809d3c25ce1e747783dd5057af6dd71748eab781479c67292a14ec036fc827"
-	compiledApplicationModelDigest              = "sha256:f388718d044c9fbd3465cf96de29120e1dbe247b091ef447d957e3ab9c03f1b5"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:214da0b27863a65336a0175fa99c038d79a85e7e70f6e0d0fcfb35d61d7ec269\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":3}"
+	compiledApplicationModelCompatibilityDigest = "sha256:da94b59cf6b763ede42b51d7c283fb5a1bb71674759ff7531e93f535248bcbd8"
+	compiledApplicationModelDigest              = "sha256:214da0b27863a65336a0175fa99c038d79a85e7e70f6e0d0fcfb35d61d7ec269"
 )
 
 var (
@@ -185,7 +185,9 @@ func (a *Application) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop shuts down active lifecycles in reverse startup order.
+// Stop drains static Interface calls before lifecycle cleanup, then stops in reverse startup order.
+// The transitional legacy invocation dispatcher is not included in this drain.
+// The startup cleanup timeout bounds the complete attempt, including an earlier caller deadline.
 func (a *Application) Stop(ctx context.Context) error {
 	if !a.Valid() {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, ErrInvalidApplication)
@@ -193,8 +195,13 @@ func (a *Application) Stop(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, ErrInvalidContext)
 	}
-	legacyError := a.lifecycle.Stop(ctx)
-	interfaceError := a.interfaces.Stop(ctx)
+	bounded, cancel := context.WithTimeout(ctx, a.startupTimeout)
+	defer cancel()
+	if err := a.interfaces.Drain(bounded); err != nil {
+		return fmt.Errorf("%w: %w", ErrApplicationStop, err)
+	}
+	legacyError := a.lifecycle.Stop(bounded)
+	interfaceError := a.interfaces.Stop(bounded)
 	if err := errors.Join(legacyError, interfaceError); err != nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, err)
 	}

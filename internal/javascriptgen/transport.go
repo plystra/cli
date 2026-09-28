@@ -235,7 +235,7 @@ func validateDescriptorSet(data []byte, identities []protobufidentity.Identity) 
 }
 
 func validErrorDetailDescriptor(message protoreflect.MessageDescriptor) bool {
-	if message == nil || string(message.FullName()) != protobufdescriptor.ErrorDetailFullName || message.Fields().Len() != 5 {
+	if message == nil || string(message.FullName()) != protobufdescriptor.ErrorDetailFullName || message.Fields().Len() != 6 {
 		return false
 	}
 	want := []struct {
@@ -247,6 +247,7 @@ func validErrorDetailDescriptor(message protoreflect.MessageDescriptor) bool {
 		{name: "semantic_error_code", number: 3},
 		{name: "kernel_error_class", number: 4},
 		{name: "trace_id", number: 5},
+		{name: "completion", number: 6},
 	}
 	for _, expected := range want {
 		field := message.Fields().ByNumber(expected.number)

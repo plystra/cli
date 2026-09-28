@@ -336,6 +336,7 @@ import (
 
 	lookupcontract "example.com/wiring-dependency/generated/go/contracts/catalog/lookup/v1"
 	configuration "example.com/wiring-dependency/generated/go/configuration"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 type Config = configuration.CatalogConfig
@@ -355,7 +356,7 @@ func (*Plugin) Lookup(_ context.Context, request lookupcontract.Request) (lookup
 	state.lastHint = request.Hint
 	state.Unlock()
 	if request.Key == "missing" {
-		return lookupcontract.Response{}, lookupcontract.ErrNotFound
+		return lookupcontract.Response{}, kernelinvocation.NewSemanticError(string(lookupcontract.ErrNotFound), nil)
 	}
 	status := lookupcontract.ResponseStatusFound
 	if request.Mode == lookupcontract.RequestModeFuzzy {
@@ -508,8 +509,8 @@ func newWiringResolver(t *testing.T) *kernelconfiguration.Resolver {
 
 func assertWiringSemanticError(t *testing.T, err error, code string) {
 	t.Helper()
-	var semantic interface{ SemanticErrorCode() string }
-	if !errors.As(err, &semantic) || semantic.SemanticErrorCode() != code {
+	var semantic interface{ Code() string }
+	if !errors.As(err, &semantic) || semantic.Code() != code {
 		t.Fatalf("semantic error = %v", err)
 	}
 }

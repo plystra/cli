@@ -65,13 +65,15 @@ export type KernelErrorClass =
   | "unavailable"
   | "timeout"
   | "cancelled"
-  | "result_unknown"
   | "internal"
   | "version_incompatible";
+
+export type Completion = "not_started" | "result_known" | "result_unknown";
 
 interface PlystraErrorDetailBase {
   readonly requestedCapabilityID: string;
   readonly canonicalCapabilityID: string;
+  readonly completion: Completion;
   readonly traceID?: string;
 }
 
@@ -93,12 +95,14 @@ export class PlystraError extends Error {
   readonly status: number;
   readonly code: string;
   readonly detail: PlystraErrorDetail | undefined;
+  readonly completion: Completion;
 
-  constructor(status: number, code: string, detail?: PlystraErrorDetail) {
+  constructor(status: number, code: string, detail?: PlystraErrorDetail, completion: Completion = "result_unknown") {
     super(code);
     this.name = "PlystraError";
     this.status = status;
     this.code = code;
+    this.completion = detail?.completion ?? completion;
     this.detail =
       detail === undefined
         ? undefined
@@ -351,7 +355,7 @@ async function resolveBearerToken(
   signal: AbortSignal | undefined,
 ): Promise<string> {
   if (signalAborted(signal)) {
-    throw new PlystraError(0, "cancelled");
+    throw new PlystraError(0, "cancelled", undefined, "not_started");
   }
 
   let pending: Awaitable<string>;
@@ -359,9 +363,9 @@ async function resolveBearerToken(
     pending = getAccessToken();
   } catch {
     if (signalAborted(signal)) {
-      throw new PlystraError(0, "cancelled");
+      throw new PlystraError(0, "cancelled", undefined, "not_started");
     }
-    throw new PlystraError(0, "credential_error");
+    throw new PlystraError(0, "credential_error", undefined, "not_started");
   }
 
   let token: unknown;
@@ -369,12 +373,12 @@ async function resolveBearerToken(
     token = await awaitWithSignal(pending, signal);
   } catch {
     if (signalAborted(signal)) {
-      throw new PlystraError(0, "cancelled");
+      throw new PlystraError(0, "cancelled", undefined, "not_started");
     }
-    throw new PlystraError(0, "credential_error");
+    throw new PlystraError(0, "credential_error", undefined, "not_started");
   }
   if (signalAborted(signal)) {
-    throw new PlystraError(0, "cancelled");
+    throw new PlystraError(0, "cancelled", undefined, "not_started");
   }
   if (
     typeof token !== "string" ||
@@ -383,7 +387,7 @@ async function resolveBearerToken(
     !/^[A-Za-z0-9._~+\/-]+=*$/.test(token) ||
     new TextEncoder().encode(token).byteLength > maximumCredentialBytes
   ) {
-    throw new PlystraError(0, "credential_error");
+    throw new PlystraError(0, "credential_error", undefined, "not_started");
   }
   return token;
 }
@@ -407,7 +411,7 @@ function awaitWithSignal<T>(
       action();
     };
     const onAbort = (): void => {
-      settle(() => reject(new PlystraError(0, "cancelled")));
+      settle(() => reject(new PlystraError(0, "cancelled", undefined, "not_started")));
     };
     signal.addEventListener("abort", onAbort, { once: true });
     pending.then(
@@ -432,7 +436,7 @@ export async function invoke(
 ): Promise<unknown> {
   const signal = normalizeRequestSignal(options);
   if (signalAborted(signal)) {
-    throw new PlystraError(0, "cancelled");
+    throw new PlystraError(0, "cancelled", undefined, "not_started");
   }
 
   let requestMessage: MessageShape<typeof method.input>;
@@ -469,7 +473,7 @@ export async function invokeInterface(
 ): Promise<unknown> {
   const signal = normalizeRequestSignal(options);
   if (signalAborted(signal)) {
-    throw new PlystraError(0, "cancelled");
+    throw new PlystraError(0, "cancelled", undefined, "not_started");
   }
 
   let requestMessage: MessageShape<typeof method.input>;
@@ -504,7 +508,7 @@ async function invokePrepared(
   decodeResponse: (message: MessageShape<typeof method.output>) => unknown,
 ): Promise<unknown> {
   if (signalAborted(signal)) {
-    throw new PlystraError(0, "cancelled");
+    throw new PlystraError(0, "cancelled", undefined, "not_started");
   }
 
   const headers = new Headers();
@@ -516,7 +520,7 @@ async function invokePrepared(
     headers.set("Authorization", "Bearer " + token);
   }
   if (signalAborted(signal)) {
-    throw new PlystraError(0, "cancelled");
+    throw new PlystraError(0, "cancelled", undefined, "not_started");
   }
 
   let responseMessage: MessageShape<typeof method.output>;
@@ -1497,12 +1501,13 @@ function decodeSafeErrorDetail(
   });
   if (
     !isPlainObject(json) ||
-    Object.keys(json).length !== 5 ||
+    Object.keys(json).length !== 6 ||
     !hasOwn(json, "requested_interface_id") ||
     !hasOwn(json, "canonical_interface_id") ||
     !hasOwn(json, "semantic_error_code") ||
     !hasOwn(json, "kernel_error_class") ||
-    !hasOwn(json, "trace_id")
+    !hasOwn(json, "trace_id") ||
+    !hasOwn(json, "completion")
   ) {
     return undefined;
   }
@@ -1511,12 +1516,14 @@ function decodeSafeErrorDetail(
   const semanticErrorCode = json["semantic_error_code"];
   const kernelErrorClass = json["kernel_error_class"];
   const traceID = json["trace_id"];
+  const completion = json["completion"];
   if (
     typeof requestedCapabilityID !== "string" ||
     typeof canonicalCapabilityID !== "string" ||
     typeof semanticErrorCode !== "string" ||
     typeof kernelErrorClass !== "string" ||
     typeof traceID !== "string" ||
+    (completion !== "not_started" && completion !== "result_known" && completion !== "result_unknown") ||
     requestedCapabilityID !== contract.requestedCapabilityID ||
     canonicalCapabilityID !== contract.canonicalCapabilityID ||
     !validTraceID(traceID) ||
@@ -1536,6 +1543,7 @@ function decodeSafeErrorDetail(
       requestedCapabilityID,
       canonicalCapabilityID,
       semanticErrorCode,
+      completion,
       ...trace,
     });
   }
@@ -1549,6 +1557,7 @@ function decodeSafeErrorDetail(
     requestedCapabilityID,
     canonicalCapabilityID,
     kernelErrorClass,
+    completion,
     ...trace,
   });
 }
@@ -1563,7 +1572,6 @@ function isKernelErrorClass(value: string): value is KernelErrorClass {
     case "unavailable":
     case "timeout":
     case "cancelled":
-    case "result_unknown":
     case "internal":
     case "version_incompatible":
       return true;
@@ -1585,7 +1593,6 @@ function connectCodeForKernelError(value: KernelErrorClass): Code {
     case "unauthenticated":
       return Code.Unauthenticated;
     case "unavailable":
-    case "result_unknown":
       return Code.Unavailable;
     case "timeout":
       return Code.DeadlineExceeded;
@@ -1614,7 +1621,6 @@ function kernelPlystraError(
     case "unauthenticated":
       return new PlystraError(401, code, detail);
     case "unavailable":
-    case "result_unknown":
       return new PlystraError(503, code, detail);
     case "timeout":
       return new PlystraError(504, code, detail);

@@ -7,7 +7,7 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "compatibility:interface-documentation",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
@@ -34,7 +34,7 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "compatibility:interface-javascript:sha256:ac1559747ce3d5003afe65d941bd111c7fc5c7aac552210707af224f6f9cff57",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
@@ -61,7 +61,7 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "compatibility:interface-metadata:sha256:bb4211882f90e5a9da55f240c4376f912bdb238ba6611bb36587afa4461ee873",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
@@ -88,7 +88,7 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "compatibility:interface-transport:sha256:a04f0f29744f2523288b8367997e05cde4756c4d50ce70ffd49e2329e87e6a8c",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
@@ -115,7 +115,7 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "compatibility:interface-shape:sha256:fb3f135d4d0f3d717cc46c840fcdd0381b2f2d4cc87c0b9614e2ec20b17625a4",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
@@ -142,7 +142,7 @@
       "generator": "plystra.application-entrypoint/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -168,7 +168,7 @@
       "generator": "plystra.kernel-assembly-compatibility/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -190,11 +190,11 @@
     },
     {
       "path": "generated/go/assembly/interfaces_gen.go",
-      "sha256": "sha256:9b31ca3778d86721912010b4c36c44006db34920581fedc064d46139fd714363",
+      "sha256": "sha256:26755bfa45e65b3153b59fe5475dcfe89723f7c188bd81f3fd7572afb91b4307",
       "generator": "plystra.implementation-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -220,7 +220,7 @@
       "generator": "plystra.invocation-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -246,7 +246,7 @@
       "generator": "plystra.provider-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -268,11 +268,11 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:435478e063970228e395ba83214638415325a26fe93c955ac1bfecfdfec44e80",
+      "sha256": "sha256:fba42ce2d916027507c3998a847f51862fa0c29a035c8dfe16ebf48ee828e2d2",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -298,7 +298,7 @@
       "generator": "plystra.configuration/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
@@ -309,11 +309,11 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:c820af2dc60f70b96c9302438f1fe32438cd494e3822b20cbcc920974d3e19e0",
+      "sha256": "sha256:65ec52c002725c87fe92c193347c2d5bc3a0c39809407ab02e61784c2442ab85",
       "generator": "plystra.application-manifest/v1",
       "output_kind": "application-manifest",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "configuration-selection:default:plystra.yaml:sha256:d13c9b06a753179095308ba82e914b17c49dd2f04196d1efbeb9cde8d3dc5359",
         "dependency-composition:sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
@@ -341,7 +341,7 @@
       "generator": "plystra.protobuf-descriptor/v1",
       "output_kind": "protobuf-descriptor",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -367,7 +367,7 @@
       "generator": "plystra.proto-wire-map/v5",
       "output_kind": "wire-map",
       "input_record_ids": [
-        "application-model:sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302",
+        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
@@ -430,7 +430,7 @@
       "dormant_constructor_configurations": [],
       "dormant_constructor_configurations_digest": "sha256:2c55f3bad8a359bcfc8f72af010d653ec12eba9785a3e73b7b92b988cb80ca41",
       "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
-      "application_model_digest": "sha256:fa6d2a0ea58cf9cff9477c871705948908ef56e59e533b21559d204ee19e4302"
+      "application_model_digest": "sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2"
     },
     "interface_provenance": {
       "schema": "plystra.interface-provenance/v1",
