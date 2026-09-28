@@ -13,9 +13,11 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/testinterface"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -853,6 +855,8 @@ func TestApplicationModelDigestIncludesTypedInterfaceProxiesDeterministically(t 
 		RequestName:  "Request",
 		ResponseName: "Response",
 	}
+	order.Contract = testinterface.Simple(t, order.InterfaceID.String(), order.PackagePath, order.MethodName)
+	audit.Contract = testinterface.Simple(t, audit.InterfaceID.String(), audit.PackagePath, audit.MethodName)
 	options := applicationgen.ApplicationModelOptions{
 		ModulePath:          applicationModulePath,
 		JavaScriptPackage:   applicationSDKPackage,
@@ -883,6 +887,7 @@ func TestApplicationModelDigestIncludesTypedInterfaceProxiesDeterministically(t 
 	}
 	changed := order
 	changed.PackagePath = "example.com/acme/application/interfaces/order/create/v1beta"
+	changed.Contract = testinterface.Simple(t, changed.InterfaceID.String(), changed.PackagePath, changed.MethodName)
 	options.InterfaceProxies = []interfaceproxygen.Input{audit, changed}
 	changedDigest, err := applicationModelDigest(t, options)
 	if err != nil {
@@ -890,6 +895,16 @@ func TestApplicationModelDigestIncludesTypedInterfaceProxiesDeterministically(t 
 	}
 	if changedDigest == withProxies {
 		t.Fatal("changed proxy contract package did not alter the application-model digest")
+	}
+	changed = order
+	changed.Metadata, err = interfacemeta.ParseFile("interface.yaml", []byte("constraints:\n  request.Value: {min_length: 2}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.InterfaceProxies = []interfaceproxygen.Input{audit, changed}
+	constrained, err := applicationModelDigest(t, options)
+	if err != nil || constrained == withProxies {
+		t.Fatalf("constraint projection did not change the digest: %s, %v", constrained, err)
 	}
 }
 
@@ -912,23 +927,25 @@ func TestApplicationModelDigestIncludesImplementationAdaptersDeterministically(t
 	}
 	constructor := parseConstructor("example.com/acme/application/orders.New")
 	order := implementationadaptergen.Input{
-		InterfaceID:    parseID("order.create/v1"),
-		PackagePath:    "example.com/acme/application/interfaces/order/create/v1",
-		MethodName:     "Create",
-		RequestName:    "Request",
-		ResponseName:   "Response",
-		Constructor:    constructor,
-		ConcreteType:   "*example.com/acme/application/orders.service",
-		SemanticErrors: []string{"order_invalid", "order_already_exists"},
+		InterfaceID:      parseID("order.create/v1"),
+		PackagePath:      "example.com/acme/application/interfaces/order/create/v1",
+		ProxyPackagePath: "example.com/acme/application/generated/go/proxies/order/create/v1",
+		MethodName:       "Create",
+		RequestName:      "Request",
+		ResponseName:     "Response",
+		Constructor:      constructor,
+		ConcreteType:     "*example.com/acme/application/orders.service",
+		SemanticErrors:   []string{"order_invalid", "order_already_exists"},
 	}
 	audit := implementationadaptergen.Input{
-		InterfaceID:  parseID("audit.write/v1"),
-		PackagePath:  "example.com/acme/application/interfaces/audit/write/v1",
-		MethodName:   "Write",
-		RequestName:  "Request",
-		ResponseName: "Response",
-		Constructor:  parseConstructor("example.com/acme/application/audit.New"),
-		ConcreteType: "*example.com/acme/application/audit.Service",
+		InterfaceID:      parseID("audit.write/v1"),
+		PackagePath:      "example.com/acme/application/interfaces/audit/write/v1",
+		ProxyPackagePath: "example.com/acme/application/generated/go/proxies/audit/write/v1",
+		MethodName:       "Write",
+		RequestName:      "Request",
+		ResponseName:     "Response",
+		Constructor:      parseConstructor("example.com/acme/application/audit.New"),
+		ConcreteType:     "*example.com/acme/application/audit.Service",
 	}
 	options := applicationgen.ApplicationModelOptions{
 		ModulePath:          applicationModulePath,

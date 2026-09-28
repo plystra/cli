@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -13,6 +14,8 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceproxygen"
+	"github.com/plystra/cli/internal/testinterface"
 	"github.com/plystra/cli/internal/testkernel"
 )
 
@@ -45,7 +48,8 @@ func TestRenderProducesDeterministicTypedImplementationAdapters(t *testing.T) {
 		[]byte(`"order_invalid"`),
 		[]byte(`func Contract() kernelcapability.Contract[contract.Request, contract.Response]`),
 		[]byte(`func NewEndpoint(implementation contract.Interface) (kernelinvocation.Endpoint, error)`),
-		[]byte(`return implementation.Create(ctx, request)`),
+		[]byte(`attempt, err := proxy.CopyRequest(request)`),
+		[]byte(`return implementation.Create(ctx, attempt)`),
 	} {
 		if !bytes.Contains(orderSource, required) {
 			t.Fatalf("order adapter omits %q:\n%s", required, orderSource)
@@ -83,6 +87,9 @@ func TestRenderRejectsInvalidAndDuplicateImplementationAdapterInputs(t *testing.
 		name  string
 		input implementationadaptergen.Input
 	}{
+		{name: "missing proxy package", input: withAdapterField(valid, func(input *implementationadaptergen.Input) { input.ProxyPackagePath = "" })},
+		{name: "invalid proxy package", input: withAdapterField(valid, func(input *implementationadaptergen.Input) { input.ProxyPackagePath = "../proxy" })},
+		{name: "same proxy and contract", input: withAdapterField(valid, func(input *implementationadaptergen.Input) { input.ProxyPackagePath = input.PackagePath })},
 		{name: "missing Interface ID", input: withAdapterField(valid, func(input *implementationadaptergen.Input) { input.InterfaceID = interfaceid.Identifier{} })},
 		{name: "invalid package", input: withAdapterField(valid, func(input *implementationadaptergen.Input) { input.PackagePath = "../contract" })},
 		{name: "Kernel capability package", input: withAdapterField(valid, func(input *implementationadaptergen.Input) {
@@ -203,6 +210,15 @@ func (failure semanticFailure) Error() string { return "implementation secret: "
 func (failure semanticFailure) SemanticErrorCode() string { return string(failure) }
 `)
 	writeAdapterBytes(t, root, files[0].Path(), files[0].Data())
+	proxies, err := interfaceproxygen.Render([]interfaceproxygen.Input{{
+		InterfaceID: input.InterfaceID, PackagePath: input.PackagePath, MethodName: input.MethodName,
+		RequestName: input.RequestName, ResponseName: input.ResponseName,
+		Contract: testinterface.Simple(t, input.InterfaceID.String(), input.PackagePath, input.MethodName),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeAdapterBytes(t, root, proxies[0].Path(), proxies[0].Data())
 	writeAdapterFile(t, root, "generated/go/adapters/implementations/order/create/v1/adapter_gen_test.go", generatedAdapterRuntimeTest)
 
 	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
@@ -225,14 +241,15 @@ func adapterInput(t testing.TB, identifier, packagePath, method, constructor, co
 		t.Fatalf("constructorsymbol.Parse(%q): %v", constructor, err)
 	}
 	return implementationadaptergen.Input{
-		InterfaceID:    parsedID,
-		PackagePath:    packagePath,
-		MethodName:     method,
-		RequestName:    "Request",
-		ResponseName:   "Response",
-		Constructor:    parsedConstructor,
-		ConcreteType:   concrete,
-		SemanticErrors: append([]string(nil), semanticErrors...),
+		InterfaceID:      parsedID,
+		PackagePath:      packagePath,
+		ProxyPackagePath: "example.com/adapterfixture/" + path.Dir(interfaceproxygen.OutputPath(parsedID)),
+		MethodName:       method,
+		RequestName:      "Request",
+		ResponseName:     "Response",
+		Constructor:      parsedConstructor,
+		ConcreteType:     concrete,
+		SemanticErrors:   append([]string(nil), semanticErrors...),
 	}
 }
 

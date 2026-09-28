@@ -580,7 +580,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior Interface documentation compatibility baseline: %w", err))
 	}
-	interfaceProxies, err := interfaceProxyInputs(resolved, interfaceProtobufModel)
+	interfaceProxies, err := interfaceProxyInputs(resolved, interfaceProtobufModel, intrinsicInterfaces)
 	if err != nil {
 		return preparedGeneration{}, err
 	}
@@ -1029,7 +1029,7 @@ func kernelBuildProvenance(resolved applicationresolve.Result) (string, string, 
 	return dependency.SelectedVersion(), identity, nil
 }
 
-func interfaceProxyInputs(resolved applicationresolve.Result, interfaceModel protobufmodel.InterfaceModel) ([]interfaceproxygen.Input, error) {
+func interfaceProxyInputs(resolved applicationresolve.Result, interfaceModel protobufmodel.InterfaceModel, intrinsics []interfaceinventory.Interface) ([]interfaceproxygen.Input, error) {
 	visible := resolved.Interfaces().Interfaces()
 	definitions := make(map[string]interfaceproxygen.Input, len(visible))
 	for _, definition := range visible {
@@ -1038,12 +1038,15 @@ func interfaceProxyInputs(resolved applicationresolve.Result, interfaceModel pro
 		if _, duplicate := definitions[identifier]; duplicate {
 			return nil, fmt.Errorf("canonical Interface %s has more than one visible definition while generating typed proxies", identifier)
 		}
+		metadata, _ := definition.Metadata()
 		definitions[identifier] = interfaceproxygen.Input{
 			InterfaceID:  contract.ID(),
 			PackagePath:  contract.PackagePath(),
 			MethodName:   contract.MethodName(),
 			RequestName:  contract.RequestName(),
 			ResponseName: contract.ResponseName(),
+			Contract:     contract,
+			Metadata:     metadata,
 		}
 	}
 
@@ -1063,12 +1066,25 @@ func interfaceProxyInputs(resolved applicationresolve.Result, interfaceModel pro
 		if _, duplicate := definitions[operation.ID().String()]; duplicate {
 			return nil, fmt.Errorf("intrinsic Interface %s duplicates an authored Interface while generating typed proxies", operation.ID())
 		}
+		var definition interfaceinventory.Interface
+		for _, intrinsic := range intrinsics {
+			if intrinsic.Contract().ID() == operation.ID() {
+				definition = intrinsic
+				break
+			}
+		}
+		if definition.Contract().ID() != operation.ID() {
+			return nil, fmt.Errorf("intrinsic Interface %s has no canonical contract for typed proxy generation", operation.ID())
+		}
+		metadata, _ := definition.Metadata()
 		inputs = append(inputs, interfaceproxygen.Input{
 			InterfaceID:  operation.ID(),
 			PackagePath:  operation.PackagePath(),
 			MethodName:   operation.MethodName(),
 			RequestName:  operation.RequestGoName(),
 			ResponseName: operation.ResponseGoName(),
+			Contract:     definition.Contract(),
+			Metadata:     metadata,
 		})
 	}
 	return inputs, nil
@@ -1089,12 +1105,13 @@ func implementationAdapterInputs(resolved applicationresolve.Result) ([]implemen
 			errorCodes[index] = semanticError.Code()
 		}
 		definitions[identifier] = implementationadaptergen.Input{
-			InterfaceID:    contract.ID(),
-			PackagePath:    contract.PackagePath(),
-			MethodName:     contract.MethodName(),
-			RequestName:    contract.RequestName(),
-			ResponseName:   contract.ResponseName(),
-			SemanticErrors: errorCodes,
+			InterfaceID:      contract.ID(),
+			PackagePath:      contract.PackagePath(),
+			ProxyPackagePath: resolved.Module().ModulePath() + "/" + path.Dir(interfaceproxygen.OutputPath(contract.ID())),
+			MethodName:       contract.MethodName(),
+			RequestName:      contract.RequestName(),
+			ResponseName:     contract.ResponseName(),
+			SemanticErrors:   errorCodes,
 		}
 	}
 

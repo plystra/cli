@@ -137,7 +137,9 @@ replace example.com/platform/unused => %s
 	for _, required := range [][]byte{
 		[]byte(`contract "example.com/acme/interface-proxy-app/interfaces/app/run/v1"`),
 		[]byte(`var _ contract.Interface = Proxy{}`),
-		[]byte(`return proxy.handle.Invoke(ctx, request)`),
+		[]byte(`snapshot, err := CopyRequest(request)`),
+		[]byte(`response, err := proxy.handle.Invoke(ctx, snapshot)`),
+		[]byte(`return CopyResponse(response)`),
 	} {
 		if !bytes.Contains(appSource, required) {
 			t.Fatalf("generated app proxy omits %q:\n%s", required, appSource)

@@ -1487,8 +1487,10 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`required` ordinary field is meaningful only at a representation that retains occurrence"),
 		[]byte("required `**T` also rejects absence but still permits explicit null"),
 		[]byte("contract model applies constraints through pointer layers"),
-		[]byte("Generated proxies and Implementation adapters do not yet apply pointer-aware requiredness"),
-		[]byte("Pointer-bearing Connect exposure therefore fails closed"),
+		[]byte("Generated proxies check pointer requiredness before constraints"),
+		[]byte("Adapters give each target execution a fresh copy"),
+		[]byte("Traversal is bounded to 64 levels and 65,536 nodes"),
+		[]byte("Pointer-bearing Connect exposure still fails closed"),
 	} {
 		if !bytes.Contains(readme, pointerGuidance) {
 			t.Fatalf("generated README omits pointer guidance %q:\n%s", pointerGuidance, readme)
@@ -2281,7 +2283,7 @@ func createKernelProxy(t *testing.T) string {
 		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nconst MaximumSecretValueBytes = 1 << 20\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype ResolverOptions struct { MaximumValueBytes int }\ntype Resolver struct{}\ntype Secret struct{}\ntype Values struct{}\ntype ObjectMap struct{}\ntype StringMap struct{}\n\nfunc NewResolver(ResolverOptions) (*Resolver, error) { return &Resolver{}, nil }\nfunc LoadDocument(path string) ([]byte, error) { return os.ReadFile(path) }\nfunc (ObjectMap) Names() []string { return nil }\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\nfunc (StringMap) Names() []string { return nil }\nfunc (StringMap) Value(string) (string, bool) { return \"\", false }\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\nfunc ExtractStringMap([]byte, string) (StringMap, error) { return StringMap{}, nil }\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
 		{name: "go.mod", data: moduleFile},
 		{name: "invocation/dependencies.go", data: []byte("package invocation\n\nimport _ \"golang.org/x/mod/module\"\n")},
-		{name: "invocation/error.go", data: []byte("package invocation\n\nconst ErrorInternal ErrorCode = \"internal\"\n")},
+		{name: "invocation/error.go", data: []byte("package invocation\n\nconst ErrorInternal ErrorCode = \"internal\"\nfunc NewError(code ErrorCode, detail string) (*Error, error) { return &Error{code: code, detailCode: detail}, nil }\n")},
 		{name: "interfaces/kernel/health/v1/interface.go", data: readPinnedKernelFile(t, "interfaces/kernel/health/v1/interface.go")},
 		{name: "interfaces/kernel/health/v1/interface.yaml", data: readPinnedKernelFile(t, "interfaces/kernel/health/v1/interface.yaml")},
 		{name: "interfaces/kernel/info/v1/interface.go", data: readPinnedKernelFile(t, "interfaces/kernel/info/v1/interface.go")},

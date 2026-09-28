@@ -81,6 +81,9 @@ type OptionalDetail struct {
 `)
 	writeFile(t, filepath.Join(root, "interfaces", "records", "echo", "v1", "interface.yaml"), `errors:
   - code: record_rejected
+constraints:
+  request.value.name: {max_length: 16}
+  response.value.name: {max_length: 16}
 `)
 	writeFile(t, filepath.Join(root, "records", "service.go"), `package records
 
@@ -141,6 +144,9 @@ func (*Service) Echo(ctx context.Context, request echov1.Request) (echov1.Respon
 		panic("private implementation panic")
 	case "invalid-response":
 		request.Value.Name = string([]byte{0xff})
+		return echov1.Response{Value: request.Value}, nil
+	case "invalid-response-constraint":
+		request.Value.Name = "private-response-invalid"
 		return echov1.Response{Value: request.Value}, nil
 	case "kernel-invalid-argument":
 		return echov1.Response{}, kernelError(kernelinvocation.ErrorInvalidArgument)
@@ -662,6 +668,7 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 		{name: "unknown", behavior: "unknown", code: connect.CodeInternal, kernel: "internal"},
 		{name: "panic", behavior: "panic", code: connect.CodeInternal, kernel: "internal"},
 		{name: "invalid response", behavior: "invalid-response", code: connect.CodeInternal, kernel: "internal"},
+		{name: "invalid response constraint", behavior: "invalid-response-constraint", code: connect.CodeInternal, kernel: "internal"},
 		{name: "invalid argument", behavior: "kernel-invalid-argument", code: connect.CodeInvalidArgument, kernel: "invalid_argument"},
 		{name: "not found", behavior: "kernel-not-found", code: connect.CodeNotFound, kernel: "not_found"},
 		{name: "conflict", behavior: "kernel-conflict", code: connect.CodeAborted, kernel: "conflict"},
@@ -688,6 +695,13 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 			assertNoPrivateText(t, body)
 		})
 	}
+	beforeInvalid := records.Calls()
+	invalid := strings.Replace(requestJSON, "governed", "private-request-invalid", 1)
+	status, body := callConnectJSON(t, server.Client(), t.Context(), server.URL+connectadapter.Procedure, invalid)
+	if status == http.StatusOK || records.Calls() != beforeInvalid { t.Fatalf("invalid constrained request entered target: %d, %s", status, body) }
+	assertNoPrivateText(t, body)
+	_, internalError := application.Interfaces().RecordsEchoV1().Echo(t.Context(), echov1.Request{Value: echov1.Envelope{Name: "private-request-invalid"}})
+	if internalError == nil || records.Calls() != beforeInvalid { t.Fatal("internal call bypassed request constraint") }
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()

@@ -42,10 +42,19 @@ null, or present state.
 
 Current support implements that model for Interface declaration parsing,
 `interface.yaml` constraint and example validation, and compatibility
-classification. Generated proxies and Implementation adapters do not yet apply
-pointer-aware requiredness, constraint checks, or empty-collection normalization
-to internal calls. Pointer-bearing Connect exposure therefore fails closed until
-the governed runtime and transport projections preserve those states.
+classification. Generated governed proxies check represented pointer requiredness
+before field constraints, normalize empty collections, and deep-copy requests
+into isolated call snapshots. Each Implementation adapter gives its target a
+fresh independent copy; successful responses are validated and copied into
+caller-owned storage. The generated proxy package exports `CopyRequest` and
+`CopyResponse` for applying the same checks in direct Implementation tests.
+Traversal fails closed beyond 64 levels or 65,536 nodes. A generated `ValueError`
+reports the Interface, side, field path, and rule, never the submitted value or
+map key; map entries use indices in canonical-key lexical order. Invalid requests
+never enter the target, and invalid responses return an internal contract error
+without a result. Ordinary required values may still be zero. Pointer-bearing
+Connect exposure remains unsupported until transport projections preserve those
+states. Caller/target lifetime separation and shutdown drain remain unfinished.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned
 replaceable shape working record for every visible authored Interface, whether

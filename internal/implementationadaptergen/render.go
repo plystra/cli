@@ -39,14 +39,15 @@ var (
 // Input is the complete selected binding and authored contract shape needed
 // by one typed Implementation adapter.
 type Input struct {
-	InterfaceID    interfaceid.Identifier
-	PackagePath    string
-	MethodName     string
-	RequestName    string
-	ResponseName   string
-	Constructor    constructorsymbol.Symbol
-	ConcreteType   string
-	SemanticErrors []string
+	InterfaceID      interfaceid.Identifier
+	PackagePath      string
+	ProxyPackagePath string
+	MethodName       string
+	RequestName      string
+	ResponseName     string
+	Constructor      constructorsymbol.Symbol
+	ConcreteType     string
+	SemanticErrors   []string
 }
 
 // File is one immutable generated Implementation adapter source file.
@@ -131,6 +132,9 @@ func validateInput(input Input) error {
 	if module.CheckImportPath(input.PackagePath) != nil || input.PackagePath == kernelCapabilityPackage || input.PackagePath == kernelInvocationPackage {
 		return fmt.Errorf("%w: Interface package %q is invalid", ErrInvalidInput, input.PackagePath)
 	}
+	if module.CheckImportPath(input.ProxyPackagePath) != nil || input.ProxyPackagePath == input.PackagePath || input.ProxyPackagePath == kernelCapabilityPackage || input.ProxyPackagePath == kernelInvocationPackage {
+		return fmt.Errorf("%w: generated proxy package %q is invalid", ErrInvalidInput, input.ProxyPackagePath)
+	}
 	for _, candidate := range []struct {
 		name  string
 		value string
@@ -194,6 +198,7 @@ func render(input Input) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\"context\"")
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "\tcontract %s\n", strconv.Quote(input.PackagePath))
+	fmt.Fprintf(&source, "\tproxy %s\n", strconv.Quote(input.ProxyPackagePath))
 	fmt.Fprintf(&source, "\tkernelcapability %s\n", strconv.Quote(kernelCapabilityPackage))
 	fmt.Fprintf(&source, "\tkernelinvocation %s\n", strconv.Quote(kernelInvocationPackage))
 	fmt.Fprintln(&source, ")")
@@ -217,7 +222,9 @@ func render(input Input) ([]byte, error) {
 	fmt.Fprintln(&source, "// NewEndpoint adapts the selected concrete Implementation through its authored Interface.")
 	fmt.Fprintln(&source, "func NewEndpoint(implementation contract.Interface) (kernelinvocation.Endpoint, error) {")
 	fmt.Fprintf(&source, "\treturn kernelinvocation.NewEndpoint(contractToken, func(ctx context.Context, request contract.%s) (contract.%s, error) {\n", input.RequestName, input.ResponseName)
-	fmt.Fprintf(&source, "\t\treturn implementation.%s(ctx, request)\n", input.MethodName)
+	fmt.Fprintln(&source, "\t\tattempt, err := proxy.CopyRequest(request)")
+	fmt.Fprintf(&source, "\t\tif err != nil { return contract.%s{}, err }\n", input.ResponseName)
+	fmt.Fprintf(&source, "\t\treturn implementation.%s(ctx, attempt)\n", input.MethodName)
 	fmt.Fprintln(&source, "\t})")
 	fmt.Fprintln(&source, "}")
 

@@ -8,10 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceproxygen"
+	"github.com/plystra/cli/internal/testinterface"
 	"github.com/plystra/cli/internal/testkernel"
 )
 
@@ -40,7 +44,9 @@ func TestRenderProducesDeterministicTypedProxyPackages(t *testing.T) {
 		[]byte(`var _ contract.Interface = Proxy{}`),
 		[]byte(`kernelinvocation.Handle[contract.Request, contract.Response]`),
 		[]byte(`func (proxy Proxy) Create(ctx context.Context, request contract.Request) (contract.Response, error)`),
-		[]byte(`return proxy.handle.Invoke(ctx, request)`),
+		[]byte(`snapshot, err := CopyRequest(request)`),
+		[]byte(`response, err := proxy.handle.Invoke(ctx, snapshot)`),
+		[]byte(`return CopyResponse(response)`),
 	} {
 		if !bytes.Contains(orderSource, required) {
 			t.Fatalf("order proxy omits %q:\n%s", required, orderSource)
@@ -67,10 +73,16 @@ func TestRenderRejectsInvalidAndDuplicateInterfaceInputs(t *testing.T) {
 	t.Parallel()
 
 	valid := proxyInput(t, "order.create/v1", "example.com/contracts/order/create/v1", "Create")
+	missing := valid
+	missing.Contract = interfacecontract.Contract{}
+	mismatched := valid
+	mismatched.Contract = testinterface.Simple(t, "order.create/v1", "example.com/another/contract", "Create")
 	tests := []struct {
 		name  string
 		input interfaceproxygen.Input
 	}{
+		{name: "missing canonical contract", input: missing},
+		{name: "mismatched canonical contract", input: mismatched},
 		{name: "missing Interface ID", input: interfaceproxygen.Input{PackagePath: valid.PackagePath, MethodName: "Create", RequestName: "Request", ResponseName: "Response"}},
 		{name: "invalid package", input: interfaceproxygen.Input{InterfaceID: valid.InterfaceID, PackagePath: "../contract", MethodName: "Create", RequestName: "Request", ResponseName: "Response"}},
 		{name: "Kernel invocation package", input: interfaceproxygen.Input{InterfaceID: valid.InterfaceID, PackagePath: "github.com/plystra/kernel/invocation", MethodName: "Create", RequestName: "Request", ResponseName: "Response"}},
@@ -104,7 +116,27 @@ func TestRenderRejectsInvalidAndDuplicateInterfaceInputs(t *testing.T) {
 }
 
 func TestGeneratedProxyImplementsAndInvokesAuthoredInterface(t *testing.T) {
+	for _, shared := range []bool{false, true} {
+		t.Run(fmt.Sprintf("shared_response_%t", shared), func(t *testing.T) { testGeneratedProxy(t, shared) })
+	}
+}
+
+func testGeneratedProxy(t *testing.T, shared bool) {
+	t.Helper()
 	input := proxyInput(t, "order.create/v1", "example.com/proxyfixture/interfaces/order/create/v1", "Create")
+	source := "package createv1\nimport \"context\"\n//plystra:interface order.create/v1\ntype Interface interface { Create(context.Context, Request) (Response, error) }\ntype Request struct { Value string `plystra:\"1\"` }\ntype Response struct { Value string `plystra:\"1\"` }\n"
+	tests := generatedProxyRuntimeTest
+	if shared {
+		source = strings.Replace(source, "(Response, error)", "(Request, error)", 1)
+		input.ResponseName = "Request"
+		tests = strings.ReplaceAll(tests, "contract.Response", "contract.Request")
+	}
+	input.Contract = testinterface.Parse(t, input.PackagePath, source)
+	metadata, err := interfacemeta.ParseFile("interface.yaml", []byte("constraints:\n  request.Value: {min_length: 7}\n  response.Value: {min_length: 8}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Metadata = metadata
 	files, err := interfaceproxygen.Render([]interfaceproxygen.Input{input})
 	if err != nil || len(files) != 1 {
 		t.Fatalf("Render = %#v, %v", files, err)
@@ -132,19 +164,9 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("read CLI go.sum: %v", err)
 	}
 	writeProxyBytes(t, root, "go.sum", goSum)
-	writeProxyFile(t, root, "interfaces/order/create/v1/interface.go", `package createv1
-
-import "context"
-
-type Interface interface {
-	Create(context.Context, Request) (Response, error)
-}
-
-type Request struct { Value string }
-type Response struct { Value string }
-`)
+	writeProxyFile(t, root, "interfaces/order/create/v1/interface.go", source)
 	writeProxyBytes(t, root, files[0].Path(), files[0].Data())
-	writeProxyFile(t, root, "generated/go/proxies/order/create/v1/proxy_gen_test.go", generatedProxyRuntimeTest)
+	writeProxyFile(t, root, "generated/go/proxies/order/create/v1/proxy_gen_test.go", tests)
 
 	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
 	command.Dir = root
@@ -167,6 +189,7 @@ func proxyInput(t testing.TB, identifier, packagePath, method string) interfacep
 		MethodName:   method,
 		RequestName:  "Request",
 		ResponseName: "Response",
+		Contract:     testinterface.Simple(t, identifier, packagePath, method),
 	}
 }
 
@@ -236,5 +259,12 @@ func TestProxyUsesGovernedHandle(t *testing.T) {
 	if err != nil || response.Value != "handled:request" {
 		t.Fatalf("Create = %#v, %v", response, err)
 	}
+}
+
+func TestRequestAndResponseConstraintsAreIndependent(t *testing.T) {
+	if _, err := proxy.CopyRequest(contract.Request{Value: "request"}); err != nil { t.Fatal(err) }
+	if _, err := proxy.CopyResponse(contract.Response{Value: "request"}); err == nil { t.Fatal("response constraint was not applied") }
+	var zero *proxy.ValueError
+	if zero.Error() == "" || zero.Side() != "" || zero.Path() != "" || zero.Rule() != "" || zero.Unwrap() != nil { t.Fatal("nil validation error is unsafe") }
 }
 `
