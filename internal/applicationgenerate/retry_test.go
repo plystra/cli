@@ -112,6 +112,7 @@ import (
 func TestSelectedRetry(t *testing.T) {
 	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: %#v})
 	if err != nil { t.Fatal(err) }
+	if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 	defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
 	_, err = app.Interfaces().WorkRunV1().Run(context.Background(), runv1.Request{Mode: "unavailable", Data: []byte{7}, Labels: map[string]string{"value": "original"}})
 	var boundary *invocation.Error
@@ -249,6 +250,7 @@ func TestEligibilityAndFreshAttempts(t *testing.T) {
 			work.Calls.Store(0)
 			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 			if err != nil { t.Fatal(err) }
+			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
 			input := request(test.mode)
 			start := time.Now()
@@ -272,6 +274,7 @@ func TestNestedOwnership(t *testing.T) {
 			work.Calls.Store(0); work.OuterCalls.Store(0)
 			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 			if err != nil { t.Fatal(err) }
+			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
 			want := 1
 			if outerOwns {
@@ -295,6 +298,7 @@ func TestConnectUsesOnlyBindingRetries(t *testing.T) {
 			work.Calls.Store(0)
 			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 			if err != nil { t.Fatal(err) }
+			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
 			handler, err := adapter.New(func(ctx context.Context, _ http.Header) (context.Context, error) { return ctx, nil }, app.Interfaces().WorkRunV1())
 			if err != nil { t.Fatal(err) }
@@ -312,6 +316,7 @@ func TestRequestValidationPrecedesAttempts(t *testing.T) {
 	work.Calls.Store(0)
 	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 	if err != nil { t.Fatal(err) }
+	if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 	defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
 	_, err = app.Interfaces().WorkRunV1().Run(context.Background(), request(strings.Repeat("x", 65)))
 	if err == nil || invocation.CompletionOf(err) != invocation.CompletionNotStarted || work.Calls.Load() != 0 { t.Fatal("invalid request reached retry target", err) }
@@ -369,6 +374,7 @@ func TestTotalBudgetAndInterruptibleBackoff(t *testing.T) {
 			work.Calls.Store(0)
 			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 			if err != nil { t.Fatal(err) }
+			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
 			ctx, cancel := context.WithCancel(context.Background()); defer cancel()
 			if mode == "caller-deadline" { cancel(); ctx, cancel = context.WithTimeout(context.Background(), time.Second); defer cancel() }

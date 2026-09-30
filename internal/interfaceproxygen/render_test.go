@@ -291,6 +291,7 @@ func TestProxyUsesGovernedHandle(t *testing.T) {
 	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: invocation.PolicySchemaVersion})
 	if err != nil { t.Fatal(err) }
 	if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
+	if err := dispatcher.OpenAdmission(); err != nil { t.Fatal(err) }
 	handle, err := invocation.NewHandle(dispatcher, contractToken, true)
 	if err != nil { t.Fatal(err) }
 	var implementation contract.Interface = proxy.New(handle)
@@ -368,6 +369,7 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 						proxy.TestResponseOutcome = func(err error) error { return err }
 					}()
 					if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
+					if err := dispatcher.OpenAdmission(); err != nil { t.Fatal(err) }
 					handle, err := invocation.NewHandle(dispatcher, token, true)
 					if err != nil { t.Fatal(err) }
 					ctx, cancel := context.WithCancel(context.Background()); defer cancel()

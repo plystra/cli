@@ -36,6 +36,7 @@ func TestGeneratedPreparationSharesOneBudget(t *testing.T) {
 			dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: 1})
 			if err != nil { t.Fatal(err) }
 			if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
+			if err := dispatcher.OpenAdmission(); err != nil { t.Fatal(err) }
 			handle, err := invocation.NewHandle(dispatcher, token, true)
 			if err != nil { t.Fatal(err) }
 			ctx := context.Background()

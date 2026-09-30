@@ -32,6 +32,24 @@ func (i Invocations) Valid() bool {
 	return true
 }
 
+// OpenAdmission accepts public calls only after all lifecycle members are ready.
+// Bootstrap calls it after both application managers have started.
+func (i Invocations) OpenAdmission() error {
+	if !i.Valid() {
+		return ErrInvocationAssembly
+	}
+	return i.dispatcher.OpenAdmission()
+}
+
+// Drain permanently closes admission and waits for actual target termination.
+// The application supplies one deadline-bound context for both dispatchers.
+func (i Invocations) Drain(ctx context.Context) error {
+	if !i.Valid() {
+		return ErrInvocationAssembly
+	}
+	return i.dispatcher.Drain(ctx)
+}
+
 // Catalog returns the immutable canonical registry snapshot.
 func (i Invocations) Catalog() kernelinvocation.Catalog {
 	if !i.Valid() {
@@ -106,7 +124,7 @@ func publishInvocations(pending pendingInvocations, providers Providers) (Invoca
 		return Invocations{}, fmt.Errorf("%w: selected providers are invalid", ErrInvocationAssembly)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260930101550-2e6c78e3ad6d",
+		ModuleVersion: "v0.0.0-20260930115756-0e0c0f957ef4",
 		BuildIdentity: "",
 	})
 	if err != nil {

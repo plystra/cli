@@ -325,6 +325,7 @@ func TestAdapterUsesSelectedUnexportedConcretePointer(t *testing.T) {
 	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: invocation.PolicySchemaVersion})
 	if err != nil { t.Fatal(err) }
 	if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
+	if err := dispatcher.OpenAdmission(); err != nil { t.Fatal(err) }
 	handle, err := invocation.NewHandle(dispatcher, adapter.Contract(), true)
 	if err != nil { t.Fatal(err) }
 	response, err := handle.Invoke(context.Background(), contract.Request{Value: "request"})

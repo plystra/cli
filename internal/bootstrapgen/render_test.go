@@ -83,14 +83,18 @@ token: {type: secret}
 		"kernelconfiguration.ExtractStringMap(document, \"timeouts\")",
 		"kernelconfiguration.NewResolver",
 		"applicationassembly.NewRuntime",
-		"applicationassembly.NewProviderLifecycle",
+		"applicationassembly.NewRuntime(ctx, resolver, document, startupTimeout)",
 		"applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)",
 		"func (a *Application) Interfaces() applicationassembly.InterfaceRuntime",
 		"a.interfaces.Valid()",
 		"a.interfaces.Start(startupContext)",
-		"a.interfaces.Stop(cleanupContext)",
-		"a.interfaces.Drain(bounded)",
-		"a.interfaces.Stop(bounded)",
+		"a.interfaces.OpenAdmission()",
+		"a.invocations.OpenAdmission()",
+		"a.interfaces.Drain(ctx)",
+		"a.invocations.Drain(ctx)",
+		"a.interfaces.Stop(ctx)",
+		"a.cleanup(bounded, true, true)",
+		"ApplicationAssemblyError",
 		"context.WithoutCancel(ctx)",
 		"staticState := a.interfaces.State()",
 		"legacyState := a.lifecycle.State()",
@@ -119,8 +123,8 @@ token: {type: secret}
 			t.Fatalf("generated source contains runtime input %q:\n%s", forbidden, generated)
 		}
 	}
-	if bytes.Index(generated, []byte("a.interfaces.Drain(bounded)")) >= bytes.Index(generated, []byte("a.lifecycle.Stop(bounded)")) {
-		t.Fatal("static invocation drain must precede legacy dependency cleanup")
+	if bytes.Index(generated, []byte("<-staticDrained, legacyError")) >= bytes.Index(generated, []byte("a.lifecycle.Stop(ctx)")) {
+		t.Fatal("both invocation drains must precede legacy dependency cleanup")
 	}
 	if bytes.Count(generated, []byte("!a.transition.TryLock()")) != 2 || bytes.Count(generated, []byte("defer a.transition.Unlock()")) != 2 {
 		t.Fatal("both application lifecycle operations must hold the shared transition guard")

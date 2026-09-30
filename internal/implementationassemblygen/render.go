@@ -475,16 +475,29 @@ func render(planned plan) ([]byte, error) {
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// Start starts lifecycle-aware Implementations in constructor dependency order.")
+	fmt.Fprintln(&source, "// It does not open public admission; bootstrap opens it only after complete application readiness.")
 	fmt.Fprintln(&source, "func (runtime InterfaceRuntime) Start(ctx context.Context) error {")
 	fmt.Fprintln(&source, "\tif !runtime.Valid() {")
 	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: %w\", ErrInterfaceStart, ErrInvalidInterfaceRuntime)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tif err := runtime.lifecycle.Start(ctx); err != nil {")
+	fmt.Fprintln(&source, "\tif ctx == nil { return fmt.Errorf(\"%w: %w\", ErrInterfaceStart, kernellifecycle.ErrInvalidContext) }")
+	fmt.Fprintln(&source, "\tbounded, cancel := context.WithTimeout(ctx, runtime.cleanupTimeout)")
+	fmt.Fprintln(&source, "\tdefer cancel()")
+	fmt.Fprintln(&source, "\tif err := runtime.lifecycle.Start(bounded); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: %w\", ErrInterfaceStart, err)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\treturn nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
+	source.WriteString(`// OpenAdmission accepts public calls after the complete application is ready.
+// Standalone assembly owners must call Start successfully before opening it.
+func (runtime InterfaceRuntime) OpenAdmission() error {
+	if !runtime.Valid() { return ErrInvalidInterfaceRuntime }
+	if runtime.lifecycle.State() != kernellifecycle.StateRunning { return kernellifecycle.ErrState }
+	return runtime.dispatcher.OpenAdmission()
+}
+
+`)
 	fmt.Fprintln(&source, "// Drain closes admission and waits for actual target and response-processing termination.")
 	fmt.Fprintln(&source, "// Failure leaves lifecycle dependencies live for a later bounded shutdown attempt.")
 	fmt.Fprintln(&source, "func (runtime InterfaceRuntime) Drain(ctx context.Context) error {")
@@ -606,6 +619,9 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: invalid cleanup timeout\", ErrInterfaceAssembly)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintf(&source, "\tlifecycleBindings := make([]kernellifecycle.Binding, 0, %d)\n", len(planned.constructors))
+	fmt.Fprintln(&source, "\tvar lifecycle *kernellifecycle.Manager")
+	fmt.Fprintln(&source, "\tvar dispatcher *kernelinvocation.Dispatcher")
+	fmt.Fprintln(&source, "\tvar err error")
 	fmt.Fprintln(&source, "\tcurrentConstructor := \"\"")
 	source.WriteString(`	defer func() {
 		if recover() != nil {
@@ -618,22 +634,24 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 		if len(lifecycleBindings) == 0 {
 			return
 		}
-		cleanup, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)
-		if err != nil {
-			failure = errors.Join(failure, err)
-			return
+		if lifecycle == nil {
+			lifecycle, err = kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout, Dispatcher: dispatcher}, lifecycleBindings)
+			if err != nil {
+				failure = errors.Join(failure, err)
+				return
+			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
 		defer cancel()
-		if err := cleanup.Stop(ctx); err != nil {
-			failure = &InterfaceAssemblyError{failure: errors.Join(failure, err), cleanup: cleanup, timeout: rollbackTimeout}
+		if err := lifecycle.Stop(ctx); err != nil {
+			failure = &InterfaceAssemblyError{failure: errors.Join(failure, err), cleanup: lifecycle, timeout: rollbackTimeout}
 		}
 	}()
 `)
 	fmt.Fprintln(&source, "\tif err := RequireKernelCompatibility(); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: Kernel compatibility: %w\", ErrInterfaceAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintf(&source, "\tdispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: %d})\n", kernelinvocation.PolicySchemaVersion)
+	fmt.Fprintf(&source, "\tdispatcher, err = kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: %d})\n", kernelinvocation.PolicySchemaVersion)
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: governed dispatcher\", ErrInterfaceAssembly)")
 	fmt.Fprintln(&source, "\t}")
@@ -696,7 +714,7 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 		fmt.Fprintf(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: constructor %s returned nil\", ErrInterfaceAssembly)\n", constructor.Symbol)
 		fmt.Fprintln(&source, "\t}")
 	}
-	fmt.Fprintln(&source, "\tlifecycle, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)")
+	fmt.Fprintln(&source, "\tlifecycle, err = kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout, Dispatcher: dispatcher}, lifecycleBindings)")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: implementation lifecycle: %w\", ErrInterfaceAssembly, err)")
 	fmt.Fprintln(&source, "\t}")

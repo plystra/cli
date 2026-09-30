@@ -182,6 +182,7 @@ replace github.com/plystra/kernel => %s
 	writeFile(t, filepath.Join(applicationRoot, "orders", "plugin.go"), wiringLocalOrdersSource)
 	writeFile(t, filepath.Join(dependencyRoot, "catalog", "plugin.go"), wiringRemoteCatalogSource)
 	writeFile(t, filepath.Join(dependencyRoot, "workflow", "plugin.go"), wiringRemoteWorkflowSource)
+	writeFile(t, filepath.Join(dependencyRoot, "lifecycleevents", "events.go"), lifecycleEventsSource)
 
 	providers := []assemblygen.ProviderInput{
 		{
@@ -210,7 +211,12 @@ replace github.com/plystra/kernel => %s
 			}},
 		},
 	}
-	providerSource, err := assemblygen.RenderProviders(wiringApplicationModule, providers)
+	invocationInputs := []assemblygen.InvocationInput{
+		{ContractJSON: []byte(wiringLookupSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "remote.catalog", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+		{ContractJSON: []byte(wiringOrderSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "acme.local-orders", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+		{ContractJSON: []byte(wiringWorkflowSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "remote.workflow", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+	}
+	providerSource, err := assemblygen.RenderProviders(wiringApplicationModule, providers, invocationInputs)
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
 	}
@@ -220,11 +226,7 @@ replace github.com/plystra/kernel => %s
 		KernelModuleVersion:      "v0.0.0",
 		KernelBuildIdentity:      "wiring-test-build",
 		Providers:                providers,
-		Invocations: []assemblygen.InvocationInput{
-			{ContractJSON: []byte(wiringLookupSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "remote.catalog", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
-			{ContractJSON: []byte(wiringOrderSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "acme.local-orders", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
-			{ContractJSON: []byte(wiringWorkflowSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "remote.workflow", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
-		},
+		Invocations:              invocationInputs,
 	})
 	if err != nil {
 		t.Fatalf("RenderInvocations: %v", err)
@@ -241,7 +243,7 @@ replace github.com/plystra/kernel => %s
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	tidyGeneratedModule(t, ctx, applicationRoot)
-	command := exec.CommandContext(ctx, "go", "test", "-mod=readonly", "-count=1", "./...")
+	command := exec.CommandContext(ctx, "go", "test", "-race", "-mod=readonly", "-count=1", "./...")
 	command.Dir = applicationRoot
 	command.Env = isolatedGoEnvironment(os.Environ())
 	output, err := command.CombinedOutput()
@@ -261,6 +263,7 @@ import (
 	ordercontract "example.com/wiring-application/generated/go/contracts/order/place/v1"
 	configuration "example.com/wiring-application/generated/go/configuration"
 	dependencies "example.com/wiring-application/generated/go/dependencies/orders"
+	"example.com/wiring-dependency/lifecycleevents"
 )
 
 type Config = configuration.OrdersConfig
@@ -274,6 +277,7 @@ var state struct {
 }
 
 func New(config Config, clients dependencies.Dependencies) *Plugin {
+	lifecycleevents.Add("orders.construct")
 	_, probeError := clients.CatalogLookupV1().Lookup(context.Background(), lookupcontract.Request{
 		Key: "constructor-probe",
 		Mode: lookupcontract.RequestModeExact,
@@ -286,6 +290,18 @@ func New(config Config, clients dependencies.Dependencies) *Plugin {
 		return nil
 	}
 	return &Plugin{lookup: clients.CatalogLookupV1()}
+}
+
+func (p *Plugin) Start(ctx context.Context) error {
+	lifecycleevents.Add("orders.start")
+	_, err := p.lookup.Lookup(ctx, lookupcontract.Request{Key: "startup", Mode: lookupcontract.RequestModeExact})
+	return err
+}
+
+func (p *Plugin) Stop(ctx context.Context) error {
+	lifecycleevents.Add("orders.stop")
+	_, err := p.lookup.Lookup(ctx, lookupcontract.Request{Key: "shutdown", Mode: lookupcontract.RequestModeExact})
+	return err
 }
 
 func (p *Plugin) Place(ctx context.Context, request ordercontract.Request) (ordercontract.Response, error) {
@@ -333,24 +349,40 @@ const wiringRemoteCatalogSource = `package catalog
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"fmt"
 
 	lookupcontract "example.com/wiring-dependency/generated/go/contracts/catalog/lookup/v1"
 	configuration "example.com/wiring-dependency/generated/go/configuration"
+	"example.com/wiring-dependency/lifecycleevents"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
 
 type Config = configuration.CatalogConfig
-type Plugin struct{}
+type Plugin struct{ ready atomic.Bool }
 
 var state struct {
 	sync.Mutex
 	lastMode lookupcontract.RequestMode
 	lastHint *lookupcontract.RequestHint
+	stopFailures int
 }
 
-func New(Config) *Plugin { return &Plugin{} }
+func New(Config) *Plugin { lifecycleevents.Add("catalog.construct"); return &Plugin{} }
 
-func (*Plugin) Lookup(_ context.Context, request lookupcontract.Request) (lookupcontract.Response, error) {
+func (p *Plugin) Start(context.Context) error { lifecycleevents.Add("catalog.start"); p.ready.Store(true); return nil }
+func (p *Plugin) Stop(ctx context.Context) error {
+	lifecycleevents.Add("catalog.stop")
+	if _, bounded := ctx.Deadline(); !bounded { return fmt.Errorf("unbounded cleanup") }
+	state.Lock(); defer state.Unlock()
+	if state.stopFailures > 0 { state.stopFailures--; return fmt.Errorf("private-stop-secret") }
+	p.ready.Store(false)
+	return nil
+}
+func FailStops(count int) { state.Lock(); defer state.Unlock(); state.stopFailures = count }
+
+func (p *Plugin) Lookup(_ context.Context, request lookupcontract.Request) (lookupcontract.Response, error) {
+	if !p.ready.Load() { return lookupcontract.Response{}, fmt.Errorf("catalog is not ready") }
 	state.Lock()
 	state.lastMode = request.Mode
 	state.lastHint = request.Hint
@@ -382,13 +414,27 @@ import (
 	workflowcontract "example.com/wiring-dependency/generated/go/contracts/workflow/run/v1"
 	configuration "example.com/wiring-dependency/generated/go/configuration"
 	dependencies "example.com/wiring-dependency/generated/go/dependencies/workflow"
+	"example.com/wiring-dependency/lifecycleevents"
 )
 
 type Config = configuration.WorkflowConfig
 type Plugin struct{ orders dependencies.Dependencies }
 
 func New(_ Config, clients dependencies.Dependencies) *Plugin {
+	lifecycleevents.Add("workflow.construct")
 	return &Plugin{orders: clients}
+}
+
+func (p *Plugin) Start(ctx context.Context) error {
+	lifecycleevents.Add("workflow.start")
+	_, err := p.Run(ctx, workflowcontract.Request{Key: "startup", Mode: workflowcontract.RequestModeExact})
+	return err
+}
+
+func (p *Plugin) Stop(ctx context.Context) error {
+	lifecycleevents.Add("workflow.stop")
+	_, err := p.Run(ctx, workflowcontract.Request{Key: "shutdown", Mode: workflowcontract.RequestModeExact})
+	return err
 }
 
 func (p *Plugin) Run(ctx context.Context, request workflowcontract.Request) (workflowcontract.Response, error) {
@@ -425,18 +471,21 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	orders "example.com/wiring-application/orders"
 	lookupcontract "example.com/wiring-application/generated/go/contracts/catalog/lookup/v1"
 	ordercontract "example.com/wiring-application/generated/go/contracts/order/place/v1"
 	workflowcontract "example.com/wiring-application/generated/go/contracts/workflow/run/v1"
 	remotecatalog "example.com/wiring-dependency/catalog"
+	"example.com/wiring-dependency/lifecycleevents"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 )
 
 func TestInjectedDependencyChain(t *testing.T) {
 	orders.Reset()
-	providers, invocations, err := NewRuntime(context.Background(), newWiringResolver(t), []byte("config: {}\n"))
+	lifecycleevents.Reset()
+	providers, invocations, manager, err := NewRuntime(context.Background(), newWiringResolver(t), []byte("config: {}\n"), time.Second)
 	if err != nil || !providers.Valid() || !invocations.Valid() {
 		t.Fatalf("NewRuntime = %v, %v, %v", providers, invocations, err)
 	}
@@ -444,6 +493,13 @@ func TestInjectedDependencyChain(t *testing.T) {
 	if constructorCalls != 1 || !constructorDispatchFailed {
 		t.Fatalf("constructor state = calls %d, dispatch failed %t", constructorCalls, constructorDispatchFailed)
 	}
+	if got := strings.Join(lifecycleevents.Snapshot(), ","); got != "catalog.construct,orders.construct,workflow.construct" { t.Fatalf("construction order = %s", got) }
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := invocations.OpenAdmission(); err == nil { t.Fatal("admission before readiness") }
+	if err := manager.Start(ctx); err != nil { t.Fatal(err) }
+	if _, err := invocations.IntrinsicHealth(ctx); err == nil { t.Fatal("Start opened admission") }
+	if err := invocations.OpenAdmission(); err != nil { t.Fatal(err) }
 	lookupHint := lookupcontract.RequestHintFast
 	lookupResponse, err := invocations.CatalogLookupV1().Invoke(context.Background(), lookupcontract.Request{
 		Key: "direct",
@@ -481,11 +537,18 @@ func TestInjectedDependencyChain(t *testing.T) {
 	assertWiringSemanticError(t, err, "not_found")
 	_, err = invocations.CatalogLookupV1().Invoke(context.Background(), lookupcontract.Request{Key: "missing", Mode: lookupcontract.RequestModeExact})
 	assertWiringSemanticError(t, err, "not_found")
+	if err := invocations.Drain(ctx); err != nil { t.Fatal(err) }
+	if err := manager.Stop(ctx); err != nil { t.Fatal(err) }
+	if err := manager.Stop(ctx); err != nil { t.Fatal(err) }
+	want := "catalog.construct,orders.construct,workflow.construct,catalog.start,orders.start,workflow.start,workflow.stop,orders.stop,catalog.stop"
+	if got := strings.Join(lifecycleevents.Snapshot(), ","); got != want { t.Fatalf("lifecycle order = %s, want %s", got, want) }
+	if err := invocations.OpenAdmission(); err == nil { t.Fatal("reopened stopped runtime") }
 }
 
 func TestConstructorFailureDoesNotPublishDispatch(t *testing.T) {
 	orders.Reset()
-	providers, invocations, err := NewRuntime(context.Background(), newWiringResolver(t), []byte("config:\n  acme.local-orders:\n    mode: \"nil\"\n"))
+	lifecycleevents.Reset()
+	providers, invocations, _, err := NewRuntime(context.Background(), newWiringResolver(t), []byte("config:\n  acme.local-orders:\n    mode: \"nil\"\n"), time.Second)
 	if providers.Valid() || invocations.Valid() || !errors.Is(err, ErrRuntimeAssembly) || !errors.Is(err, ErrPluginConstructor) {
 		t.Fatalf("NewRuntime(nil constructor) = %v, %v, %v", providers, invocations, err)
 	}
@@ -496,6 +559,25 @@ func TestConstructorFailureDoesNotPublishDispatch(t *testing.T) {
 	if strings.Contains(err.Error(), "constructor-probe") {
 		t.Fatalf("constructor failure exposed request data: %v", err)
 	}
+	if got := strings.Join(lifecycleevents.Snapshot(), ","); got != "catalog.construct,orders.construct,catalog.stop" { t.Fatalf("construction cleanup = %s", got) }
+}
+
+func TestConstructorFailureRetainsLegacyCleanup(t *testing.T) {
+	orders.Reset()
+	lifecycleevents.Reset()
+	remotecatalog.FailStops(1)
+	defer remotecatalog.FailStops(0)
+	_, _, _, err := NewRuntime(context.Background(), newWiringResolver(t), []byte("config:\n  acme.local-orders:\n    mode: \"nil\"\n"), time.Second)
+	var cleanup *ProviderAssemblyError
+	if !errors.As(err, &cleanup) || strings.Contains(err.Error(), "private") { t.Fatalf("cleanup error = %v", err) }
+	before := strings.Join(lifecycleevents.Snapshot(), ",")
+	if before != "catalog.construct,orders.construct,catalog.stop" { t.Fatalf("initial cleanup = %s", before) }
+	if err := cleanup.RetryCleanup(nil); err == nil { t.Fatal("nil cleanup context accepted") }
+	ctx, cancel := context.WithCancel(context.Background()); cancel()
+	if err := cleanup.RetryCleanup(ctx); !errors.Is(err, context.Canceled) || strings.Join(lifecycleevents.Snapshot(), ",") != before { t.Fatalf("cancelled cleanup = %v", err) }
+	if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatal(err) }
+	if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatal(err) }
+	if got := strings.Join(lifecycleevents.Snapshot(), ","); got != before+",catalog.stop" { t.Fatalf("retry cleanup = %s", got) }
 }
 
 func newWiringResolver(t *testing.T) *kernelconfiguration.Resolver {

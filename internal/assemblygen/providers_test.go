@@ -33,7 +33,7 @@ func TestRenderProvidersIsDeterministicSchemaOnlySource(t *testing.T) {
 		{PluginID: "zeta.remote-store", ModulePath: "example.com/dependency", ImportPath: "example.com/dependency/remote-store"},
 		{PluginID: "acme.local-service", ModulePath: "example.com/application", ImportPath: "example.com/application/local-service"},
 	}
-	generated, err := assemblygen.RenderProviders("example.com/application", inputs)
+	generated, err := assemblygen.RenderProviders("example.com/application", inputs, nil)
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
 	}
@@ -49,7 +49,8 @@ func TestRenderProvidersIsDeterministicSchemaOnlySource(t *testing.T) {
 		"provider1.New(configuration)",
 		"clear(pluginConfigurationData0)",
 		"ErrUnselectedPluginConfiguration",
-		"NewProviderLifecycle",
+		"newProviderLifecycle",
+		"Dispatcher: dispatcher",
 		"kernellifecycle.NewBinding",
 		"kernellifecycle.NewManager",
 		"recover()",
@@ -73,7 +74,7 @@ func TestRenderProvidersIsDeterministicSchemaOnlySource(t *testing.T) {
 	}
 
 	reversed := []assemblygen.ProviderInput{inputs[1], inputs[0]}
-	repeated, err := assemblygen.RenderProviders("example.com/application", reversed)
+	repeated, err := assemblygen.RenderProviders("example.com/application", reversed, nil)
 	if err != nil || !bytes.Equal(generated, repeated) {
 		t.Fatalf("reordered RenderProviders is not deterministic: %v", err)
 	}
@@ -81,7 +82,7 @@ func TestRenderProvidersIsDeterministicSchemaOnlySource(t *testing.T) {
 	sameModule, err := assemblygen.RenderProviders("example.com/application", []assemblygen.ProviderInput{
 		{PluginID: "acme.alpha", ModulePath: "example.com/application", ImportPath: "example.com/application/alpha"},
 		{PluginID: "acme.beta", ModulePath: "example.com/application", ImportPath: "example.com/application/beta"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("RenderProviders same module: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestRenderProvidersRejectsInvalidOrDuplicateProvenance(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			generated, err := assemblygen.RenderProviders("example.com/application", test.inputs)
+			generated, err := assemblygen.RenderProviders("example.com/application", test.inputs, nil)
 			if generated != nil || !errors.Is(err, assemblygen.ErrRenderProviders) || !errors.Is(err, test.reason) {
 				t.Fatalf("RenderProviders = %q, %v", generated, err)
 			}
@@ -186,7 +187,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 		{PluginID: "zeta.remote-store", ModulePath: "example.com/assemblydependency", ImportPath: "example.com/assemblydependency/remote-store", ConfigurationSchema: remoteSchema},
 		{PluginID: "acme.local-service", ModulePath: "example.com/assemblyapp", ImportPath: "example.com/assemblyapp/local-service", ConfigurationSchema: localSchema},
 	}
-	providers, err := assemblygen.RenderProviders("example.com/assemblyapp", providerInputs)
+	providers, err := assemblygen.RenderProviders("example.com/assemblyapp", providerInputs, nil)
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
 	}
@@ -267,7 +268,7 @@ replace github.com/plystra/kernel => %s
 	}
 	writeBytes(t, filepath.Join(applicationRoot, "go.sum"), goSum)
 
-	providers, err := assemblygen.RenderProviders("example.com/emptyapp", nil)
+	providers, err := assemblygen.RenderProviders("example.com/emptyapp", nil, nil)
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
 	}
@@ -614,7 +615,7 @@ func TestConstructProviders(t *testing.T) {
 	localservice.Reset()
 	remotestore.Reset()
 
-	providers, invocations, err := NewRuntime(context.Background(), newResolver(t), []byte("config:\n"+remoteConfiguration))
+	providers, invocations, _, err := NewRuntime(context.Background(), newResolver(t), []byte("config:\n"+remoteConfiguration), time.Second)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -652,22 +653,19 @@ func TestConstructProviders(t *testing.T) {
 
 func TestLifecycleUsesDeterministicSelectedPluginOrder(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
-	providers, _, err := NewRuntime(context.Background(), newResolver(t), []byte("config:\n"+remoteConfiguration))
+	_, invocations, manager, err := NewRuntime(context.Background(), newResolver(t), []byte("config:\n"+remoteConfiguration), time.Second)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if manager, err := NewProviderLifecycle(Providers{}, time.Second); manager != nil || !errors.Is(err, ErrProviderLifecycle) {
-		t.Fatalf("invalid NewProviderLifecycle = %#v, %v", manager, err)
-	}
-	manager, err := NewProviderLifecycle(providers, time.Second)
-	if err != nil {
-		t.Fatalf("NewProviderLifecycle: %v", err)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := invocations.OpenAdmission(); err == nil { t.Fatal("opened before readiness") }
 	lifecycleevents.Reset()
-	if err := manager.Start(context.Background()); err != nil {
+	if err := manager.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if err := manager.Stop(context.Background()); err != nil {
+	if err := invocations.OpenAdmission(); err != nil { t.Fatal(err) }
+	if err := manager.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 	want := "acme.local-service.start,zeta.remote-store.start,zeta.remote-store.stop,acme.local-service.stop"
@@ -681,7 +679,7 @@ func TestRejectsUnselectedConfigurationBeforeConstructors(t *testing.T) {
 	localservice.Reset()
 	remotestore.Reset()
 	document := []byte("config:\n  unknown.private:\n    token: runtime-private-unknown\n" + remoteConfiguration)
-	providers, invocations, err := NewRuntime(context.Background(), newResolver(t), document)
+	providers, invocations, _, err := NewRuntime(context.Background(), newResolver(t), document, time.Second)
 	if providers.Valid() || invocations.Valid() || !errors.Is(err, ErrProviderAssembly) || !errors.Is(err, ErrUnselectedPluginConfiguration) {
 		t.Fatalf("NewRuntime = %v, %v, %v", providers, invocations, err)
 	}
@@ -696,7 +694,7 @@ func TestConstructorPanicAndNilAreSafe(t *testing.T) {
 			localservice.Reset()
 			remotestore.Reset()
 			document := []byte("config:\n  acme.local-service:\n    mode: " + mode + "\n" + remoteConfiguration)
-			providers, invocations, err := NewRuntime(context.Background(), newResolver(t), document)
+			providers, invocations, _, err := NewRuntime(context.Background(), newResolver(t), document, time.Second)
 			if providers.Valid() || invocations.Valid() || !errors.Is(err, ErrProviderAssembly) || !errors.Is(err, ErrPluginConstructor) {
 				t.Fatalf("NewRuntime(%s) = %v, %v, %v", mode, providers, invocations, err)
 			}
@@ -715,7 +713,7 @@ func TestConfigurationFailurePrecedesEveryConstructor(t *testing.T) {
 	localservice.Reset()
 	remotestore.Reset()
 	document := []byte("config:\n  acme.local-service:\n    mode: runtime-private-invalid-enum\n" + remoteConfiguration)
-	providers, invocations, err := NewRuntime(context.Background(), newResolver(t), document)
+	providers, invocations, _, err := NewRuntime(context.Background(), newResolver(t), document, time.Second)
 	if providers.Valid() || invocations.Valid() || !errors.Is(err, ErrProviderAssembly) {
 		t.Fatalf("NewRuntime = %v, %v, %v", providers, invocations, err)
 	}

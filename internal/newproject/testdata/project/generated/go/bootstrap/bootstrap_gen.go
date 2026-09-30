@@ -35,9 +35,9 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":4}"
-	compiledApplicationModelCompatibilityDigest = "sha256:406d918b69b55a46fc2c541de77f8c0f330b5aad90bda2c7ed53eae276a6dd75"
-	compiledApplicationModelDigest              = "sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":4}"
+	compiledApplicationModelCompatibilityDigest = "sha256:ab2a8c37b78b463f6ba97e7d5a3febcbd3b464797236f24799d384a431ea9172"
+	compiledApplicationModelDigest              = "sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4"
 )
 
 var (
@@ -104,17 +104,22 @@ func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: initialize Secret resolver: %w", ErrBootstrap, err)
 	}
-	providers, invocations, err := applicationassembly.NewRuntime(ctx, resolver, document)
+	providers, invocations, manager, err := applicationassembly.NewRuntime(ctx, resolver, document, startupTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct application runtime: %w", ErrBootstrap, err)
 	}
-	manager, err := applicationassembly.NewProviderLifecycle(providers, startupTimeout)
-	if err != nil {
-		return nil, fmt.Errorf("%w: bind provider lifecycle: %w", ErrBootstrap, err)
-	}
 	interfaces, err := applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("%w: construct static Interface runtime: %w", ErrBootstrap, err)
+		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), startupTimeout)
+		defer cancel()
+		cleanupError := manager.Stop(bounded)
+		failure := errors.Join(fmt.Errorf("%w: construct static Interface runtime: %w", ErrBootstrap, err), cleanupError)
+		var staticCleanup interface{ RetryCleanup(context.Context) error }
+		errors.As(err, &staticCleanup)
+		if cleanupError != nil || staticCleanup != nil {
+			failure = &ApplicationAssemblyError{failure: failure, staticCleanup: staticCleanup, legacyCleanup: manager, timeout: startupTimeout}
+		}
+		return nil, failure
 	}
 	return &Application{interfaces: interfaces, providers: providers, invocations: invocations, lifecycle: manager, transition: new(sync.Mutex), startupTimeout: startupTimeout}, nil
 }
@@ -178,22 +183,33 @@ func (a *Application) Start(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", ErrApplicationStart, kernellifecycle.ErrState)
 	}
 	defer a.transition.Unlock()
+	if a.interfaces.State() != kernellifecycle.StateNew || a.lifecycle.State() != kernellifecycle.StateNew {
+		return fmt.Errorf("%w: %w", ErrApplicationStart, kernellifecycle.ErrState)
+	}
 	startupContext, cancel := context.WithTimeout(ctx, a.startupTimeout)
 	defer cancel()
 	if err := a.interfaces.Start(startupContext); err != nil {
-		return fmt.Errorf("%w: %w", ErrApplicationStart, err)
+		return a.rollback(ctx, err, false, true)
 	}
 	if err := a.lifecycle.Start(startupContext); err != nil {
-		cleanupContext, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), a.startupTimeout)
-		defer cleanupCancel()
-		cleanupError := a.interfaces.Stop(cleanupContext)
-		return errors.Join(fmt.Errorf("%w: legacy lifecycle: %w", ErrApplicationStart, err), cleanupError)
+		return a.rollback(ctx, err, true, false)
+	}
+	if err := startupContext.Err(); err != nil {
+		return a.rollback(ctx, err, true, true)
+	}
+	if err := a.interfaces.OpenAdmission(); err != nil {
+		return a.rollback(ctx, err, true, true)
+	}
+	if err := a.invocations.OpenAdmission(); err != nil {
+		return a.rollback(ctx, err, true, true)
+	}
+	if err := startupContext.Err(); err != nil {
+		return a.rollback(ctx, err, true, true)
 	}
 	return nil
 }
 
-// Stop drains static Interface calls before lifecycle cleanup, then stops in reverse startup order.
-// The transitional legacy invocation dispatcher is not included in this drain.
+// Stop drains both dispatchers before lifecycle cleanup, then stops in reverse startup order.
 // The startup cleanup timeout bounds the complete attempt, including an earlier caller deadline.
 // Concurrent or reentrant application transitions fail without entering drain or cleanup.
 func (a *Application) Stop(ctx context.Context) error {
@@ -209,15 +225,82 @@ func (a *Application) Stop(ctx context.Context) error {
 	defer a.transition.Unlock()
 	bounded, cancel := context.WithTimeout(ctx, a.startupTimeout)
 	defer cancel()
-	if err := a.interfaces.Drain(bounded); err != nil {
-		return fmt.Errorf("%w: %w", ErrApplicationStop, err)
-	}
-	legacyError := a.lifecycle.Stop(bounded)
-	interfaceError := a.interfaces.Stop(bounded)
-	if err := errors.Join(legacyError, interfaceError); err != nil {
+	if err := a.cleanup(bounded, true, true); err != nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, err)
 	}
 	return nil
+}
+
+// cleanup initiates both drains before waiting for either. A failed drain
+// retains both managers, including values whose Start has never run.
+func (a *Application) cleanup(ctx context.Context, static, legacy bool) error {
+	staticDrained := make(chan error, 1)
+	go func() { staticDrained <- a.interfaces.Drain(ctx) }()
+	legacyError := a.invocations.Drain(ctx)
+	if err := errors.Join(<-staticDrained, legacyError); err != nil {
+		return err
+	}
+	var staticError error
+	if legacy {
+		legacyError = a.lifecycle.Stop(ctx)
+	}
+	if static {
+		staticError = a.interfaces.Stop(ctx)
+	}
+	return errors.Join(legacyError, staticError)
+}
+
+func (a *Application) rollback(ctx context.Context, failure error, static, legacy bool) error {
+	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), a.startupTimeout)
+	defer cancel()
+	return errors.Join(ErrApplicationStart, failure, a.cleanup(bounded, static, legacy))
+}
+
+// ApplicationAssemblyError retains cleanup from both construction phases.
+type ApplicationAssemblyError struct {
+	failure       error
+	staticCleanup interface{ RetryCleanup(context.Context) error }
+	legacyCleanup *kernellifecycle.Manager
+	timeout       time.Duration
+}
+
+func (failure *ApplicationAssemblyError) Error() string {
+	if failure == nil || failure.failure == nil {
+		return ErrBootstrap.Error()
+	}
+	return failure.failure.Error()
+}
+
+func (failure *ApplicationAssemblyError) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.failure
+}
+
+// RetryCleanup resumes only pending cleanup within the original timeout.
+func (failure *ApplicationAssemblyError) RetryCleanup(ctx context.Context) error {
+	if failure == nil || failure.legacyCleanup == nil {
+		return ErrInvalidApplication
+	}
+	if ctx == nil {
+		return ErrInvalidContext
+	}
+	bounded, cancel := context.WithTimeout(ctx, failure.timeout)
+	defer cancel()
+	var staticError error
+	if failure.staticCleanup != nil {
+		staticError = failure.staticCleanup.RetryCleanup(bounded)
+	}
+	return errors.Join(staticError, failure.legacyCleanup.Stop(bounded))
+}
+
+func (failure *ApplicationAssemblyError) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte(failure.Error()))
+}
+
+func (failure *ApplicationAssemblyError) LogValue() slog.Value {
+	return slog.StringValue(failure.Error())
 }
 
 // String redacts instances and runtime configuration.

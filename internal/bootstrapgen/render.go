@@ -181,17 +181,23 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: initialize Secret resolver: %w\", ErrBootstrap, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tproviders, invocations, err := applicationassembly.NewRuntime(ctx, resolver, document)")
+	fmt.Fprintln(&source, "\tproviders, invocations, manager, err := applicationassembly.NewRuntime(ctx, resolver, document, startupTimeout)")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: construct application runtime: %w\", ErrBootstrap, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tmanager, err := applicationassembly.NewProviderLifecycle(providers, startupTimeout)")
-	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: bind provider lifecycle: %w\", ErrBootstrap, err)")
-	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tinterfaces, err := applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)")
 	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: construct static Interface runtime: %w\", ErrBootstrap, err)")
+	source.WriteString(`		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), startupTimeout)
+		defer cancel()
+		cleanupError := manager.Stop(bounded)
+		failure := errors.Join(fmt.Errorf("%w: construct static Interface runtime: %w", ErrBootstrap, err), cleanupError)
+		var staticCleanup interface { RetryCleanup(context.Context) error }
+		errors.As(err, &staticCleanup)
+		if cleanupError != nil || staticCleanup != nil {
+			failure = &ApplicationAssemblyError{failure: failure, staticCleanup: staticCleanup, legacyCleanup: manager, timeout: startupTimeout}
+		}
+		return nil, failure
+`)
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\treturn &Application{interfaces: interfaces, providers: providers, invocations: invocations, lifecycle: manager, transition: new(sync.Mutex), startupTimeout: startupTimeout}, nil")
 	fmt.Fprintln(&source, "}")
@@ -255,22 +261,23 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: %w\", ErrApplicationStart, kernellifecycle.ErrState)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tdefer a.transition.Unlock()")
+	fmt.Fprintln(&source, "\tif a.interfaces.State() != kernellifecycle.StateNew || a.lifecycle.State() != kernellifecycle.StateNew { return fmt.Errorf(\"%w: %w\", ErrApplicationStart, kernellifecycle.ErrState) }")
 	fmt.Fprintln(&source, "\tstartupContext, cancel := context.WithTimeout(ctx, a.startupTimeout)")
 	fmt.Fprintln(&source, "\tdefer cancel()")
 	fmt.Fprintln(&source, "\tif err := a.interfaces.Start(startupContext); err != nil {")
-	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: %w\", ErrApplicationStart, err)")
+	fmt.Fprintln(&source, "\t\treturn a.rollback(ctx, err, false, true)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\tif err := a.lifecycle.Start(startupContext); err != nil {")
-	fmt.Fprintln(&source, "\t\tcleanupContext, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), a.startupTimeout)")
-	fmt.Fprintln(&source, "\t\tdefer cleanupCancel()")
-	fmt.Fprintln(&source, "\t\tcleanupError := a.interfaces.Stop(cleanupContext)")
-	fmt.Fprintln(&source, "\t\treturn errors.Join(fmt.Errorf(\"%w: legacy lifecycle: %w\", ErrApplicationStart, err), cleanupError)")
+	fmt.Fprintln(&source, "\t\treturn a.rollback(ctx, err, true, false)")
 	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "\tif err := startupContext.Err(); err != nil { return a.rollback(ctx, err, true, true) }")
+	fmt.Fprintln(&source, "\tif err := a.interfaces.OpenAdmission(); err != nil { return a.rollback(ctx, err, true, true) }")
+	fmt.Fprintln(&source, "\tif err := a.invocations.OpenAdmission(); err != nil { return a.rollback(ctx, err, true, true) }")
+	fmt.Fprintln(&source, "\tif err := startupContext.Err(); err != nil { return a.rollback(ctx, err, true, true) }")
 	fmt.Fprintln(&source, "\treturn nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// Stop drains static Interface calls before lifecycle cleanup, then stops in reverse startup order.")
-	fmt.Fprintln(&source, "// The transitional legacy invocation dispatcher is not included in this drain.")
+	fmt.Fprintln(&source, "// Stop drains both dispatchers before lifecycle cleanup, then stops in reverse startup order.")
 	fmt.Fprintln(&source, "// The startup cleanup timeout bounds the complete attempt, including an earlier caller deadline.")
 	fmt.Fprintln(&source, "// Concurrent or reentrant application transitions fail without entering drain or cleanup.")
 	fmt.Fprintln(&source, "func (a *Application) Stop(ctx context.Context) error {")
@@ -286,15 +293,69 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tdefer a.transition.Unlock()")
 	fmt.Fprintln(&source, "\tbounded, cancel := context.WithTimeout(ctx, a.startupTimeout)")
 	fmt.Fprintln(&source, "\tdefer cancel()")
-	fmt.Fprintln(&source, "\tif err := a.interfaces.Drain(bounded); err != nil { return fmt.Errorf(\"%w: %w\", ErrApplicationStop, err) }")
-	fmt.Fprintln(&source, "\tlegacyError := a.lifecycle.Stop(bounded)")
-	fmt.Fprintln(&source, "\tinterfaceError := a.interfaces.Stop(bounded)")
-	fmt.Fprintln(&source, "\tif err := errors.Join(legacyError, interfaceError); err != nil {")
+	fmt.Fprintln(&source, "\tif err := a.cleanup(bounded, true, true); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn fmt.Errorf(\"%w: %w\", ErrApplicationStop, err)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\treturn nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
+	source.WriteString(`// cleanup initiates both drains before waiting for either. A failed drain
+// retains both managers, including values whose Start has never run.
+func (a *Application) cleanup(ctx context.Context, static, legacy bool) error {
+	staticDrained := make(chan error, 1)
+	go func() { staticDrained <- a.interfaces.Drain(ctx) }()
+	legacyError := a.invocations.Drain(ctx)
+	if err := errors.Join(<-staticDrained, legacyError); err != nil { return err }
+	var staticError error
+	if legacy { legacyError = a.lifecycle.Stop(ctx) }
+	if static { staticError = a.interfaces.Stop(ctx) }
+	return errors.Join(legacyError, staticError)
+}
+
+func (a *Application) rollback(ctx context.Context, failure error, static, legacy bool) error {
+	bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), a.startupTimeout)
+	defer cancel()
+	return errors.Join(ErrApplicationStart, failure, a.cleanup(bounded, static, legacy))
+}
+
+// ApplicationAssemblyError retains cleanup from both construction phases.
+type ApplicationAssemblyError struct {
+	failure error
+	staticCleanup interface { RetryCleanup(context.Context) error }
+	legacyCleanup *kernellifecycle.Manager
+	timeout time.Duration
+}
+
+func (failure *ApplicationAssemblyError) Error() string {
+	if failure == nil || failure.failure == nil { return ErrBootstrap.Error() }
+	return failure.failure.Error()
+}
+
+func (failure *ApplicationAssemblyError) Unwrap() error {
+	if failure == nil { return nil }
+	return failure.failure
+}
+
+// RetryCleanup resumes only pending cleanup within the original timeout.
+func (failure *ApplicationAssemblyError) RetryCleanup(ctx context.Context) error {
+	if failure == nil || failure.legacyCleanup == nil { return ErrInvalidApplication }
+	if ctx == nil { return ErrInvalidContext }
+	bounded, cancel := context.WithTimeout(ctx, failure.timeout)
+	defer cancel()
+	var staticError error
+	if failure.staticCleanup != nil { staticError = failure.staticCleanup.RetryCleanup(bounded) }
+	return errors.Join(staticError, failure.legacyCleanup.Stop(bounded))
+}
+
+func (failure *ApplicationAssemblyError) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte(failure.Error()))
+}
+
+func (failure *ApplicationAssemblyError) LogValue() slog.Value {
+	return slog.StringValue(failure.Error())
+}
+
+`)
 	fmt.Fprintln(&source, "// String redacts instances and runtime configuration.")
 	fmt.Fprintln(&source, "func (Application) String() string { return \"<redacted-generated-application>\" }")
 	fmt.Fprintln(&source)

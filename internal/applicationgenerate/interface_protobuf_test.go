@@ -684,6 +684,8 @@ func TestIntrinsicConnectHandlersUseGovernedInterfaceAccessors(t *testing.T) {
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
+	if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
+	defer func() { if err := application.Stop(context.Background()); err != nil { t.Error(err) } }()
 	health, err := application.Interfaces().KernelHealthV1().Health(context.Background(), healthv1.Request{})
 	if err != nil || health.Status != healthv1.StatusHealthy {
 		t.Fatalf("internal health = %#v, %v", health, err)

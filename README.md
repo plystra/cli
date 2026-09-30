@@ -63,9 +63,16 @@ remain inside the tracked attempt. Generated InterfaceRuntime.Drain closes
 admission and waits for actual termination; Stop drains before any lifecycle
 cleanup. Drain and cleanup share the construction/startup cleanup timeout and
 any earlier caller deadline. Failed drain keeps dependencies live for a fresh
-bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
-does not yet drain the transitional legacy Capability dispatcher. Readiness,
-lifecycle-hook dependency access, and whole-runtime drain remain unfinished.
+bounded Stop retry. Application Stop initiates both static Interface and
+transitional legacy Capability drains before waiting, and cleans neither
+lifecycle set unless both drains succeed.
+
+Construction publishes catalogs without accepting public work. Application
+Start opens both dispatchers only after all dependency-ordered hooks succeed.
+Hooks use their bounded context for governed calls to already-ready injected
+dependencies, including during Stop after public admission closes. Never retain
+a hook context for later work. Standalone InterfaceRuntime owners must call
+Start and then OpenAdmission explicitly; Application owners use Start alone.
 
 Generated application `Start` and `Stop` share one transition guard across
 both lifecycle managers, including rollback and bounded drain. Overlapping or
@@ -298,8 +305,10 @@ lifecycle `Start`. Assembly rejects nil success values, redacts constructor
 errors and panics, and cleans earlier lifecycle values plus any non-nil partial
 result in reverse dependency order before returning failure. No failed runtime
 is published. `Stop` must tolerate never-started and partially started values.
-If construction cleanup fails, `errors.As` can recover the generated
-`assembly.InterfaceAssemblyError`, including through bootstrap errors. Its
+If construction cleanup fails, use `errors.As` with
+`interface { RetryCleanup(context.Context) error }` to recover the outermost
+cleanup owner. Bootstrap retains both static and legacy cleanup when needed;
+standalone failures use `InterfaceAssemblyError` or `ProviderAssemblyError`.
 `RetryCleanup(ctx)` retries only pending stops under the original timeout and
 any earlier caller deadline, without repeating successful cleanup or restarting
 construction. Versioned Kernel dependencies older than the installed supported

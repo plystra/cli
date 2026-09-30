@@ -157,8 +157,10 @@ type service struct {
 var failStart atomic.Bool
 var constructorMode string
 var lastAudit writev1.Interface
+var startHook, stopHook func(context.Context, writev1.Interface) error
 
 func SetStartFailure(value bool) { failStart.Store(value) }
+func SetHooks(start, stop func(context.Context, writev1.Interface) error) { startHook, stopHook = start, stop }
 func SetConstructorMode(value string) { constructorMode = value; lastAudit = nil }
 func CallCapturedDependency(ctx context.Context) error {
 	_, err := lastAudit.Write(ctx, writev1.Request{})
@@ -188,8 +190,9 @@ func New(audit writev1.Interface, notify plystra.Optional[sendv1.Interface]) (*s
 	return value, nil
 }
 
-func (*service) Start(context.Context) error {
+func (value *service) Start(ctx context.Context) error {
 	probe.Lifecycle("start:app")
+	if startHook != nil { return startHook(ctx, value.audit) }
 	if failStart.Load() {
 		return errors.New("private-startup-secret")
 	}
@@ -198,6 +201,7 @@ func (*service) Start(context.Context) error {
 
 func (value *service) Stop(ctx context.Context) error {
 	probe.Lifecycle("stop:app")
+	if stopHook != nil { return stopHook(ctx, value.audit) }
 	if value.mode == "partial-retry" || value.mode == "partial-panic-stop" || value.mode == "partial-timeout" {
 		if _, ok := ctx.Deadline(); !ok { panic("cleanup deadline missing") }
 	}
@@ -271,6 +275,7 @@ import (
 	bootstrap "example.com/acme/static-interface-runtime/generated/go/bootstrap"
 	checkv1 "example.com/acme/static-interface-runtime/interfaces/app/check/v1"
 	runv1 "example.com/acme/static-interface-runtime/interfaces/app/run/v1"
+	writev1 "example.com/acme/static-interface-runtime/interfaces/audit/write/v1"
 	"example.com/acme/static-interface-runtime/probe"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
@@ -347,6 +352,92 @@ func TestRuntime(t *testing.T) {
 	if err := failed.Stop(context.Background()); err != nil || failed.State() != kernellifecycle.StateStopped || !reflect.DeepEqual(probe.Events(), wantRollback) {
 		t.Fatalf("post-rollback Stop = %v, State %s, events %v", err, failed.State(), probe.Events())
 	}
+}
+
+func TestStaticHookDependenciesRemainGovernedBehindClosedAdmission(t *testing.T) {
+	probe.Reset()
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	if err != nil { t.Fatal(err) }
+	var captured context.Context
+	hooks := 0
+	hook := func(ctx context.Context, audit writev1.Interface) error {
+		hooks++
+		if _, bounded := ctx.Deadline(); !bounded { return errors.New("missing hook deadline") }
+		if _, err := application.Interfaces().AppCheckV1().Check(context.Background(), checkv1.Request{}); err == nil { return errors.New("public admission is open") }
+		if _, err := application.Interfaces().AppCheckV1().Check(ctx, checkv1.Request{}); err == nil { return errors.New("hook invoked its own unready constructor") }
+		captured = ctx
+		response, err := audit.Write(ctx, writev1.Request{Value: "hook"})
+		if err != nil { return err }
+		if response.Value != "audit:hook" { return errors.New("incorrect dependency result") }
+		return nil
+	}
+	appimplementation.SetHooks(hook, hook)
+	defer appimplementation.SetHooks(nil, nil)
+	if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
+	if err := appimplementation.CallCapturedDependency(captured); err == nil || kernelinvocation.CompletionOf(err) != kernelinvocation.CompletionNotStarted { t.Fatalf("expired hook context entered target: %v", err) }
+	if err := application.Stop(context.Background()); err != nil { t.Fatal(err) }
+	if hooks != 2 { t.Fatalf("hook count = %d", hooks) }
+}
+
+func TestStaticStartupHookRetainsLateDependencyUntilRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		probe.Reset()
+		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+		if err != nil { t.Fatal(err) }
+		entered, release := make(chan struct{}), make(chan struct{})
+		auditimplementation.BlockCalls(entered, release)
+		defer auditimplementation.BlockCalls(nil, nil)
+		defer func() { if release != nil { close(release); synctest.Wait() } }()
+		appimplementation.SetHooks(func(ctx context.Context, audit writev1.Interface) error {
+			_, err := audit.Write(ctx, writev1.Request{})
+			return err
+		}, nil)
+		defer appimplementation.SetHooks(nil, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond); defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- application.Start(ctx) }()
+		<-entered
+		err = <-done
+		if !errors.Is(err, kernelinvocation.ErrDrain) || !errors.Is(err, bootstrap.ErrApplicationStart) { t.Fatalf("startup drain = %v", err) }
+		before := probe.Events()
+		for _, event := range before { if strings.HasPrefix(event, "stop:") { t.Fatalf("early cleanup: %v", before) } }
+		close(release); release = nil; synctest.Wait()
+		if err := application.Stop(context.Background()); err != nil { t.Fatal(err) }
+		want := append(before, "late:audit", "stop:app", "stop:audit")
+		if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("retry cleanup = %v", probe.Events()) }
+	})
+}
+
+func TestStaticShutdownHookRetainsLateDependencyUntilRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		probe.Reset()
+		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+		if err != nil { t.Fatal(err) }
+		if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
+		entered, release := make(chan struct{}), make(chan struct{})
+		auditimplementation.BlockCalls(entered, release)
+		defer auditimplementation.BlockCalls(nil, nil)
+		defer func() { if release != nil { close(release); synctest.Wait() } }()
+		appimplementation.SetHooks(nil, func(ctx context.Context, audit writev1.Interface) error {
+			_, err := audit.Write(ctx, writev1.Request{})
+			return err
+		})
+		defer appimplementation.SetHooks(nil, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond); defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- application.Stop(ctx) }()
+		<-entered
+		err = <-done
+		if !errors.Is(err, kernelinvocation.ErrDrain) || !errors.Is(err, bootstrap.ErrApplicationStop) { t.Fatalf("shutdown hook drain = %v", err) }
+		before := probe.Events()
+		for _, event := range before { if event == "stop:audit" { t.Fatalf("early dependency cleanup: %v", before) } }
+		close(release); release = nil; synctest.Wait()
+		auditimplementation.BlockCalls(nil, nil)
+		if err := application.Stop(context.Background()); err != nil { t.Fatal(err) }
+		want := append(before, "late:audit", "stop:app", "stop:audit")
+		if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("retry cleanup = %v", probe.Events()) }
+		if err := application.Stop(context.Background()); err != nil || !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("duplicate cleanup = %v", err) }
+	})
 }
 
 func TestConstructorResults(t *testing.T) {
@@ -498,6 +589,7 @@ func TestShutdownRetainsDependenciesUntilLateTargetsTerminate(t *testing.T) {
 							runtime, err = assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{}, 20*time.Millisecond)
 							if err != nil { t.Fatal(err) }
 							if err := runtime.Start(context.Background()); err != nil { t.Fatal(err) }
+							if err := runtime.OpenAdmission(); err != nil { t.Fatal(err) }
 							stop = runtime.Stop
 						}
 						if err := stop(nil); err == nil { t.Fatal("nil shutdown accepted") }

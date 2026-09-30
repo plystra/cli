@@ -171,10 +171,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err := validateJavaScriptTransport(options, context, aliases); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
-	providers, err := assemblygen.RenderProviders(options.ModulePath, options.Providers)
-	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
-	}
 	if err := validateAssemblyClosure(options, context); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: %w: %v", ErrRender, ErrResolution, err)
 	}
@@ -342,9 +338,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	if err := add(assemblyCompatibilityPath, compatibility); err != nil {
 		return generatedfiles.Output{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
 	}
-	if err := add(assemblygen.ProvidersPath, providers); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
-	}
 	runtimeConfigurationSchemas := make([]bootstrapgen.ConfigurationSchema, len(providerInputs))
 	for index, provider := range providerInputs {
 		runtimeConfigurationSchemas[index] = bootstrapgen.ConfigurationSchema{
@@ -501,6 +494,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 				return generatedfiles.Output{}, fmt.Errorf("%w: HTTP adapter %s: %w", ErrRender, id, err)
 			}
 		}
+	}
+	providers, err := assemblygen.RenderProviders(options.ModulePath, options.Providers, invocationInputs)
+	if err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
+	}
+	if err := add(assemblygen.ProvidersPath, providers); err != nil {
+		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               options.ModulePath,

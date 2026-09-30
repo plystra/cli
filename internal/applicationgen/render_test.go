@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationactivation"
+	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecompatibility"
@@ -497,7 +498,7 @@ func TestRenderRejectsInvalidResolutionModuleAndPackage(t *testing.T) {
 	invalidModule.ModulePath = "not a module path"
 	invalidModule.ImplementationAssembly.ModulePath = applicationModulePath
 	invalidModule = withManifestProvenance(t, invalidModule, resolution)
-	if _, err := applicationgen.Render(invalidModule, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, assemblygen.ErrRenderProviders) {
+	if _, err := applicationgen.Render(invalidModule, resolution); !errors.Is(err, applicationgen.ErrRender) || !errors.Is(err, generationlowering.ErrLower) || !strings.Contains(err.Error(), "invalid application Go Module path") {
 		t.Fatalf("Render invalid module error = %v", err)
 	}
 	missingPackage := resolvedOptions()

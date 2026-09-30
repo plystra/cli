@@ -122,6 +122,7 @@ func TestCompiledBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		app, err := bootstrap.New(context.Background(), options)
 		if err != nil { t.Fatal(err) }
+		if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 		defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
 		for _, binding := range app.Interfaces().Catalog().Bindings() {
 			p := binding.Policy()

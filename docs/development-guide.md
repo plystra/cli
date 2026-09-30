@@ -507,9 +507,16 @@ inside the tracked attempt. Generated InterfaceRuntime.Drain closes admission
 and waits for actual termination; Stop drains before any lifecycle cleanup.
 Drain and cleanup share the construction/startup cleanup timeout and any
 earlier caller deadline. Failed drain keeps dependencies live for a fresh
-bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
-does not yet drain the transitional legacy Capability dispatcher. Readiness,
-lifecycle-hook dependency access, and whole-runtime drain remain unfinished.
+bounded Stop retry. Application Stop initiates both static and legacy drains
+before waiting for either; neither lifecycle set stops unless both succeed.
+
+Catalog publication is not readiness. Application Start opens both dispatchers
+only after all dependency-ordered hooks succeed. Hooks pass their bounded
+context to governed calls on already-ready injected dependencies, including
+during shutdown after public admission closes. Do not retain that context for
+later work. Standalone InterfaceRuntime owners call Start and then OpenAdmission;
+Application owners use Start alone. NewRuntime returns the pre-publication-bound
+legacy manager with its providers and invocations; it requires a cleanup timeout.
 
 Use the generated application's `Start` and `Stop` to own lifecycle changes.
 They share one non-blocking transition guard across both managers, rollback,
@@ -933,9 +940,11 @@ in reverse dependency order after failure, including a non-nil partial result.
 `Stop` must also tolerate never-started values. Startup failure cleans the full
 constructed lifecycle set, not just values whose `Start` ran.
 
-Construction cleanup failures preserve a generated
-`assembly.InterfaceAssemblyError` through ordinary `errors.As`, including when
-wrapped by bootstrap. Its `RetryCleanup(ctx)` method retries only pending stops
+Construction cleanup failures preserve a generated cleanup owner through
+`errors.As` with `interface { RetryCleanup(context.Context) error }`. The
+outermost owner retains both construction phases when bootstrap needs them;
+standalone failures use `InterfaceAssemblyError` or `ProviderAssemblyError`.
+Its `RetryCleanup(ctx)` method retries only pending stops
 under the original cleanup timeout and any earlier caller deadline. It does not
 restart construction or expose a usable runtime. Fix the authored constructor
 or lifecycle hook, regenerate, test startup and failure cleanup, and check

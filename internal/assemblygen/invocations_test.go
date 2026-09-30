@@ -361,7 +361,7 @@ replace github.com/plystra/kernel => %s
 		ModuleVersion: "v1.2.3",
 		ImportPath:    "example.com/runtime-dependency/remote-service",
 	}
-	providers, err := assemblygen.RenderProviders("example.com/runtime-application", []assemblygen.ProviderInput{provider})
+	providers, err := assemblygen.RenderProviders("example.com/runtime-application", []assemblygen.ProviderInput{provider}, nil)
 	if err != nil {
 		t.Fatalf("RenderProviders: %v", err)
 	}
@@ -447,6 +447,20 @@ func FuzzRenderInvocations(f *testing.F) {
 				Policy:          timeoutPolicy(30 * time.Second),
 				SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
 			}},
+		}
+		providerSource, providerErr := assemblygen.RenderProviders(options.ModulePath, options.Providers, options.Invocations)
+		if providerErr != nil {
+			if providerSource != nil || !errors.Is(providerErr, assemblygen.ErrRenderProviders) {
+				t.Fatalf("RenderProviders = %q, %v", providerSource, providerErr)
+			}
+		} else {
+			if _, err := parser.ParseFile(token.NewFileSet(), assemblygen.ProvidersPath, providerSource, parser.AllErrors); err != nil {
+				t.Fatalf("parse generated providers: %v", err)
+			}
+			repeated, err := assemblygen.RenderProviders(options.ModulePath, options.Providers, options.Invocations)
+			if err != nil || !bytes.Equal(providerSource, repeated) {
+				t.Fatalf("unstable provider rendering: %v", err)
+			}
 		}
 		generated, err := assemblygen.RenderInvocations(options)
 		if err != nil {
@@ -660,6 +674,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	healthcontract "example.com/runtime-application/generated/go/contracts/kernel/health/v1"
 	messagecontract "example.com/runtime-application/generated/go/contracts/message/send/v1"
@@ -677,13 +692,19 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 	if invocations, err := publishInvocations(pendingInvocations{}, Providers{}); invocations.Valid() || !errors.Is(err, ErrInvocationAssembly) {
 		t.Fatalf("publishInvocations(invalid) = %v, %v", invocations, err)
 	}
-	providers, invocations, err := NewRuntime(context.Background(), resolver, []byte("config: {}\n"))
+	providers, invocations, manager, err := NewRuntime(context.Background(), resolver, []byte("config: {}\n"), time.Second)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	if !providers.Valid() || !invocations.Valid() {
 		t.Fatalf("generated runtime is invalid")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := invocations.IntrinsicHealth(ctx); err == nil { t.Fatal("public work accepted before Start") }
+	if err := manager.Start(ctx); err != nil { t.Fatal(err) }
+	if err := invocations.OpenAdmission(); err != nil { t.Fatal(err) }
+	defer func() { if err := manager.Stop(ctx); err != nil { t.Error(err) } }()
 
 	bindings := invocations.Catalog().Bindings()
 	if len(bindings) != 4 {

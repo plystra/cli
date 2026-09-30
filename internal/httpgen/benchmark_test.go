@@ -171,6 +171,9 @@ func benchmarkHTTPHandle(b testing.TB) kernelinvocation.Handle[benchmarkHTTPRequ
 	if err := dispatcher.Publish(catalog); err != nil {
 		b.Fatalf("Publish: %v", err)
 	}
+	if err := dispatcher.OpenAdmission(); err != nil {
+		b.Fatalf("OpenAdmission: %v", err)
+	}
 	handle, err := kernelinvocation.NewHandle(dispatcher, contract, true)
 	if err != nil {
 		b.Fatalf("NewHandle: %v", err)

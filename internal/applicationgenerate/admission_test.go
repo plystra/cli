@@ -136,6 +136,7 @@ func TestAdmission(t *testing.T) {
 					if _, err := app.Interfaces().WorkCheckV1().Check(context.Background(), checkv1.Request{}); err != nil { t.Fatalf("independent binding: %v", err) }
 					other, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
 					if err != nil { t.Fatal(err) }
+					if err := other.Start(context.Background()); err != nil { t.Fatal(err) }
 					if _, err := other.Interfaces().WorkRunV1().Run(context.Background(), runv1.Request{}); err != nil { t.Fatalf("independent dispatcher: %v", err) }
 					if err := other.Stop(context.Background()); err != nil { t.Fatal(err) }
 					work.Stops.Store(0)

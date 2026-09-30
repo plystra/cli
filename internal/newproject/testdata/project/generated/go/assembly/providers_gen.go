@@ -10,6 +10,7 @@ import (
 	"time"
 
 	kernelconfiguration "github.com/plystra/kernel/configuration"
+	kernelinvocation "github.com/plystra/kernel/invocation"
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
 )
 
@@ -82,20 +83,33 @@ func (Providers) MarshalYAML() (any, error) {
 // NewRuntime prepares typed application clients before constructors, decodes
 // exactly one private configuration object per selected Plugin ID, constructs
 // every provider, and only then publishes the complete canonical runtime.
-func NewRuntime(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte) (Providers, Invocations, error) {
+func NewRuntime(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte, rollbackTimeout time.Duration) (Providers, Invocations, *kernellifecycle.Manager, error) {
+	if ctx == nil || rollbackTimeout <= 0 {
+		return Providers{}, Invocations{}, nil, ErrRuntimeAssembly
+	}
 	pending, err := newPendingInvocations()
 	if err != nil {
-		return Providers{}, Invocations{}, fmt.Errorf("%w: prepare invocation clients: %w", ErrRuntimeAssembly, err)
+		return Providers{}, Invocations{}, nil, fmt.Errorf("%w: prepare invocation clients: %w", ErrRuntimeAssembly, err)
 	}
-	providers, err := newProviders(ctx, resolver, document, pending)
+	providers, constructionError := newProviders(ctx, resolver, document, pending)
+	manager, err := newProviderLifecycle(providers, pending.dispatcher, rollbackTimeout)
 	if err != nil {
-		return Providers{}, Invocations{}, fmt.Errorf("%w: %w", ErrRuntimeAssembly, err)
+		return Providers{}, Invocations{}, nil, errors.Join(ErrRuntimeAssembly, constructionError, err)
 	}
-	invocations, err := publishInvocations(pending, providers)
-	if err != nil {
-		return Providers{}, Invocations{}, fmt.Errorf("%w: %w", ErrRuntimeAssembly, err)
+	var invocations Invocations
+	if constructionError == nil {
+		invocations, constructionError = publishInvocations(pending, providers)
 	}
-	return providers, invocations, nil
+	if constructionError != nil {
+		failure := errors.Join(ErrRuntimeAssembly, constructionError)
+		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		defer cancel()
+		if err := manager.Stop(bounded); err != nil {
+			failure = &ProviderAssemblyError{failure: errors.Join(failure, err), cleanup: manager, timeout: rollbackTimeout}
+		}
+		return Providers{}, Invocations{}, nil, failure
+	}
+	return providers, invocations, manager, nil
 }
 
 // newProviders validates the generated Kernel boundary, decodes exactly one
@@ -115,21 +129,63 @@ func newProviders(ctx context.Context, resolver *kernelconfiguration.Resolver, d
 	for _, pluginID := range configurations.Names() {
 		return Providers{}, fmt.Errorf("%w: %w %q", ErrProviderAssembly, ErrUnselectedPluginConfiguration, pluginID)
 	}
-	return Providers{
-		initialized: true,
-	}, nil
+	var providers Providers
+	if err := ctx.Err(); err != nil {
+		return providers, errors.Join(ErrProviderAssembly, err)
+	}
+	providers.initialized = true
+	return providers, nil
 }
 
-// NewProviderLifecycle binds optional lifecycle providers in deterministic
-// selected Plugin ID order. The Kernel starts this order and stops it in reverse.
-func NewProviderLifecycle(providers Providers, rollbackTimeout time.Duration) (*kernellifecycle.Manager, error) {
-	if !providers.Valid() {
-		return nil, fmt.Errorf("%w: providers are invalid", ErrProviderLifecycle)
-	}
+// newProviderLifecycle binds every returned lifecycle provider before catalog publication in deterministic
+// constructor dependency order. The Kernel starts this order and stops it in reverse.
+func newProviderLifecycle(providers Providers, dispatcher *kernelinvocation.Dispatcher, rollbackTimeout time.Duration) (*kernellifecycle.Manager, error) {
 	bindings := make([]kernellifecycle.Binding, 0, 0)
-	manager, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, bindings)
+	manager, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout, Dispatcher: dispatcher}, bindings)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrProviderLifecycle, err)
 	}
 	return manager, nil
+}
+
+// ProviderAssemblyError retains pending cleanup after failed provider construction.
+type ProviderAssemblyError struct {
+	failure error
+	cleanup *kernellifecycle.Manager
+	timeout time.Duration
+}
+
+func (failure *ProviderAssemblyError) Error() string {
+	if failure == nil || failure.failure == nil {
+		return ErrRuntimeAssembly.Error()
+	}
+	return failure.failure.Error()
+}
+
+func (failure *ProviderAssemblyError) Unwrap() error {
+	if failure == nil {
+		return nil
+	}
+	return failure.failure
+}
+
+// RetryCleanup retries only pending stops with the original timeout and any earlier caller deadline.
+func (failure *ProviderAssemblyError) RetryCleanup(ctx context.Context) error {
+	if failure == nil || failure.cleanup == nil {
+		return ErrProviderLifecycle
+	}
+	if ctx == nil {
+		return kernellifecycle.ErrInvalidContext
+	}
+	bounded, cancel := context.WithTimeout(ctx, failure.timeout)
+	defer cancel()
+	return failure.cleanup.Stop(bounded)
+}
+
+func (failure *ProviderAssemblyError) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte(failure.Error()))
+}
+
+func (failure *ProviderAssemblyError) LogValue() slog.Value {
+	return slog.StringValue(failure.Error())
 }

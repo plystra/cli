@@ -195,6 +195,8 @@ func runtime(t *testing.T) assembly.InterfaceRuntime {
 	t.Helper()
 	runtime, err := assembly.NewInterfaceRuntime(assembly.ConstructorConfiguration{}, time.Second)
 	if err != nil { t.Fatal(err) }
+	if err := runtime.Start(context.Background()); err != nil { t.Fatal(err) }
+	if err := runtime.OpenAdmission(); err != nil { t.Fatal(err) }
 	t.Cleanup(func() { if err := runtime.Stop(context.Background()); err != nil { t.Error(err) } })
 	return runtime
 }
@@ -221,6 +223,7 @@ func TestIndependentAttemptsAndConcurrentCallerMutation(t *testing.T) {
 	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: invocation.PolicySchemaVersion})
 	if err != nil { t.Fatal(err) }
 	if err := dispatcher.Publish(runtime.Catalog()); err != nil { t.Fatal(err) }
+	if err := dispatcher.OpenAdmission(); err != nil { t.Fatal(err) }
 	handle, err := invocation.NewHandle(dispatcher, adapter.Contract(), true)
 	if err != nil { t.Fatal(err) }
 	snapshot, err := proxy.CopyRequest(values.Request{Value: valid()})

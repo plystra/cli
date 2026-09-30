@@ -195,6 +195,21 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	}
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
+	source.WriteString(`// OpenAdmission accepts public calls only after all lifecycle members are ready.
+// Bootstrap calls it after both application managers have started.
+func (i Invocations) OpenAdmission() error {
+	if !i.Valid() { return ErrInvocationAssembly }
+	return i.dispatcher.OpenAdmission()
+}
+
+// Drain permanently closes admission and waits for actual target termination.
+// The application supplies one deadline-bound context for both dispatchers.
+func (i Invocations) Drain(ctx context.Context) error {
+	if !i.Valid() { return ErrInvocationAssembly }
+	return i.dispatcher.Drain(ctx)
+}
+
+`)
 	fmt.Fprintln(&source, "// Catalog returns the immutable canonical registry snapshot.")
 	fmt.Fprintln(&source, "func (i Invocations) Catalog() kernelinvocation.Catalog {")
 	fmt.Fprintln(&source, "\tif !i.Valid() {")

@@ -82,11 +82,15 @@ type importSpec struct {
 // selected plugin. The generated source extracts private values only at
 // startup, rejects stale configuration before invoking constructors, and
 // never embeds application runtime values or Secret reference targets.
-func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]byte, error) {
+func RenderProviders(applicationModulePath string, inputs []ProviderInput, invocations []InvocationInput) ([]byte, error) {
 	if err := modulepath.CheckProject(applicationModulePath); err != nil {
 		return nil, fmt.Errorf("%w: %w: invalid application Go Module path %q: %v", ErrRenderProviders, ErrInvalidProvider, applicationModulePath, err)
 	}
 	providers, imports, err := planProviders(inputs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRenderProviders, err)
+	}
+	order, err := providerConstructionOrder(providers, invocations)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRenderProviders, err)
 	}
@@ -108,6 +112,7 @@ func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]by
 	fmt.Fprintln(&source, "\t\"time\"")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "\tkernelconfiguration \"github.com/plystra/kernel/configuration\"")
+	fmt.Fprintln(&source, "\tkernelinvocation \"github.com/plystra/kernel/invocation\"")
 	fmt.Fprintln(&source, "\tkernellifecycle \"github.com/plystra/kernel/lifecycle\"")
 	for _, imported := range imports {
 		fmt.Fprintf(&source, "\t%s %s\n", imported.alias, strconv.Quote(imported.path))
@@ -197,20 +202,32 @@ func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]by
 	fmt.Fprintln(&source, "// NewRuntime prepares typed application clients before constructors, decodes")
 	fmt.Fprintln(&source, "// exactly one private configuration object per selected Plugin ID, constructs")
 	fmt.Fprintln(&source, "// every provider, and only then publishes the complete canonical runtime.")
-	fmt.Fprintln(&source, "func NewRuntime(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte) (Providers, Invocations, error) {")
+	fmt.Fprintln(&source, "func NewRuntime(ctx context.Context, resolver *kernelconfiguration.Resolver, document []byte, rollbackTimeout time.Duration) (Providers, Invocations, *kernellifecycle.Manager, error) {")
+	fmt.Fprintln(&source, "\tif ctx == nil || rollbackTimeout <= 0 { return Providers{}, Invocations{}, nil, ErrRuntimeAssembly }")
 	fmt.Fprintln(&source, "\tpending, err := newPendingInvocations()")
 	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn Providers{}, Invocations{}, fmt.Errorf(\"%w: prepare invocation clients: %w\", ErrRuntimeAssembly, err)")
+	fmt.Fprintln(&source, "\t\treturn Providers{}, Invocations{}, nil, fmt.Errorf(\"%w: prepare invocation clients: %w\", ErrRuntimeAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tproviders, err := newProviders(ctx, resolver, document, pending)")
-	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn Providers{}, Invocations{}, fmt.Errorf(\"%w: %w\", ErrRuntimeAssembly, err)")
-	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tinvocations, err := publishInvocations(pending, providers)")
-	fmt.Fprintln(&source, "\tif err != nil {")
-	fmt.Fprintln(&source, "\t\treturn Providers{}, Invocations{}, fmt.Errorf(\"%w: %w\", ErrRuntimeAssembly, err)")
-	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\treturn providers, invocations, nil")
+	source.WriteString(`	providers, constructionError := newProviders(ctx, resolver, document, pending)
+	manager, err := newProviderLifecycle(providers, pending.dispatcher, rollbackTimeout)
+	if err != nil {
+		return Providers{}, Invocations{}, nil, errors.Join(ErrRuntimeAssembly, constructionError, err)
+	}
+	var invocations Invocations
+	if constructionError == nil {
+		invocations, constructionError = publishInvocations(pending, providers)
+	}
+	if constructionError != nil {
+		failure := errors.Join(ErrRuntimeAssembly, constructionError)
+		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		defer cancel()
+		if err := manager.Stop(bounded); err != nil {
+			failure = &ProviderAssemblyError{failure: errors.Join(failure, err), cleanup: manager, timeout: rollbackTimeout}
+		}
+		return Providers{}, Invocations{}, nil, failure
+	}
+	return providers, invocations, manager, nil
+`)
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// newProviders validates the generated Kernel boundary, decodes exactly one")
@@ -256,29 +273,26 @@ func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]by
 		fmt.Fprintf(&source, "\t\treturn Providers{}, fmt.Errorf(\"%%w: decode plugin %%q configuration: %%w\", ErrProviderAssembly, %s, err)\n", strconv.Quote(provider.PluginID))
 		fmt.Fprintln(&source, "\t}")
 	}
-	for index := range providers {
-		fmt.Fprintf(&source, "\tplugin%d, err := constructPlugin%d(pluginConfiguration%d, pending)\n", index, index, index)
+	fmt.Fprintln(&source, "\tvar providers Providers")
+	for _, index := range order {
+		fmt.Fprintln(&source, "\tif err := ctx.Err(); err != nil { return providers, errors.Join(ErrProviderAssembly, err) }")
+		fmt.Fprintf(&source, "\tproviders.plugin%d, err = constructPlugin%d(pluginConfiguration%d, pending)\n", index, index, index)
 		fmt.Fprintln(&source, "\tif err != nil {")
-		fmt.Fprintln(&source, "\t\treturn Providers{}, fmt.Errorf(\"%w: %w\", ErrProviderAssembly, err)")
+		fmt.Fprintln(&source, "\t\treturn providers, fmt.Errorf(\"%w: %w\", ErrProviderAssembly, err)")
 		fmt.Fprintln(&source, "\t}")
 	}
-	fmt.Fprintln(&source, "\treturn Providers{")
-	for index := range providers {
-		fmt.Fprintf(&source, "\t\tplugin%d: plugin%d,\n", index, index)
-	}
-	fmt.Fprintln(&source, "\t\tinitialized: true,")
-	fmt.Fprintln(&source, "\t}, nil")
+	fmt.Fprintln(&source, "\tif err := ctx.Err(); err != nil { return providers, errors.Join(ErrProviderAssembly, err) }")
+	fmt.Fprintln(&source, "\tproviders.initialized = true")
+	fmt.Fprintln(&source, "\treturn providers, nil")
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// NewProviderLifecycle binds optional lifecycle providers in deterministic")
-	fmt.Fprintln(&source, "// selected Plugin ID order. The Kernel starts this order and stops it in reverse.")
-	fmt.Fprintln(&source, "func NewProviderLifecycle(providers Providers, rollbackTimeout time.Duration) (*kernellifecycle.Manager, error) {")
-	fmt.Fprintln(&source, "\tif !providers.Valid() {")
-	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: providers are invalid\", ErrProviderLifecycle)")
-	fmt.Fprintln(&source, "\t}")
+	fmt.Fprintln(&source, "// newProviderLifecycle binds every returned lifecycle provider before catalog publication in deterministic")
+	fmt.Fprintln(&source, "// constructor dependency order. The Kernel starts this order and stops it in reverse.")
+	fmt.Fprintln(&source, "func newProviderLifecycle(providers Providers, dispatcher *kernelinvocation.Dispatcher, rollbackTimeout time.Duration) (*kernellifecycle.Manager, error) {")
 	fmt.Fprintf(&source, "\tbindings := make([]kernellifecycle.Binding, 0, %d)\n", len(providers))
-	for index, provider := range providers {
-		fmt.Fprintf(&source, "\tif lifecycleInstance, ok := any(providers.plugin%d).(kernellifecycle.Instance); ok {\n", index)
+	for _, index := range order {
+		provider := providers[index]
+		fmt.Fprintf(&source, "\tif lifecycleInstance, ok := any(providers.plugin%d).(kernellifecycle.Instance); providers.plugin%d != nil && ok {\n", index, index)
 		fmt.Fprintf(&source, "\t\tbinding, err := kernellifecycle.NewBinding(%s, lifecycleInstance)\n", strconv.Quote(provider.ImportPath+".New"))
 		fmt.Fprintln(&source, "\t\tif err != nil {")
 		fmt.Fprintf(&source, "\t\t\treturn nil, fmt.Errorf(\"%%w: plugin %%q: %%w\", ErrProviderLifecycle, %s, err)\n", strconv.Quote(provider.PluginID))
@@ -286,12 +300,47 @@ func RenderProviders(applicationModulePath string, inputs []ProviderInput) ([]by
 		fmt.Fprintln(&source, "\t\tbindings = append(bindings, binding)")
 		fmt.Fprintln(&source, "\t}")
 	}
-	fmt.Fprintln(&source, "\tmanager, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, bindings)")
+	fmt.Fprintln(&source, "\tmanager, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout, Dispatcher: dispatcher}, bindings)")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: %w\", ErrProviderLifecycle, err)")
 	fmt.Fprintln(&source, "\t}")
 	fmt.Fprintln(&source, "\treturn manager, nil")
 	fmt.Fprintln(&source, "}")
+	source.WriteString(`
+// ProviderAssemblyError retains pending cleanup after failed provider construction.
+type ProviderAssemblyError struct {
+	failure error
+	cleanup *kernellifecycle.Manager
+	timeout time.Duration
+}
+
+func (failure *ProviderAssemblyError) Error() string {
+	if failure == nil || failure.failure == nil { return ErrRuntimeAssembly.Error() }
+	return failure.failure.Error()
+}
+
+func (failure *ProviderAssemblyError) Unwrap() error {
+	if failure == nil { return nil }
+	return failure.failure
+}
+
+// RetryCleanup retries only pending stops with the original timeout and any earlier caller deadline.
+func (failure *ProviderAssemblyError) RetryCleanup(ctx context.Context) error {
+	if failure == nil || failure.cleanup == nil { return ErrProviderLifecycle }
+	if ctx == nil { return kernellifecycle.ErrInvalidContext }
+	bounded, cancel := context.WithTimeout(ctx, failure.timeout)
+	defer cancel()
+	return failure.cleanup.Stop(bounded)
+}
+
+func (failure *ProviderAssemblyError) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte(failure.Error()))
+}
+
+func (failure *ProviderAssemblyError) LogValue() slog.Value {
+	return slog.StringValue(failure.Error())
+}
+`)
 
 	for index, provider := range providers {
 		fmt.Fprintln(&source)

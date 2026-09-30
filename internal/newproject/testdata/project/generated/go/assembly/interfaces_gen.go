@@ -52,14 +52,32 @@ func (runtime InterfaceRuntime) State() kernellifecycle.State {
 }
 
 // Start starts lifecycle-aware Implementations in constructor dependency order.
+// It does not open public admission; bootstrap opens it only after complete application readiness.
 func (runtime InterfaceRuntime) Start(ctx context.Context) error {
 	if !runtime.Valid() {
 		return fmt.Errorf("%w: %w", ErrInterfaceStart, ErrInvalidInterfaceRuntime)
 	}
-	if err := runtime.lifecycle.Start(ctx); err != nil {
+	if ctx == nil {
+		return fmt.Errorf("%w: %w", ErrInterfaceStart, kernellifecycle.ErrInvalidContext)
+	}
+	bounded, cancel := context.WithTimeout(ctx, runtime.cleanupTimeout)
+	defer cancel()
+	if err := runtime.lifecycle.Start(bounded); err != nil {
 		return fmt.Errorf("%w: %w", ErrInterfaceStart, err)
 	}
 	return nil
+}
+
+// OpenAdmission accepts public calls after the complete application is ready.
+// Standalone assembly owners must call Start successfully before opening it.
+func (runtime InterfaceRuntime) OpenAdmission() error {
+	if !runtime.Valid() {
+		return ErrInvalidInterfaceRuntime
+	}
+	if runtime.lifecycle.State() != kernellifecycle.StateRunning {
+		return kernellifecycle.ErrState
+	}
+	return runtime.dispatcher.OpenAdmission()
 }
 
 // Drain closes admission and waits for actual target and response-processing termination.
@@ -175,6 +193,9 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 		return InterfaceRuntime{}, fmt.Errorf("%w: invalid cleanup timeout", ErrInterfaceAssembly)
 	}
 	lifecycleBindings := make([]kernellifecycle.Binding, 0, 0)
+	var lifecycle *kernellifecycle.Manager
+	var dispatcher *kernelinvocation.Dispatcher
+	var err error
 	currentConstructor := ""
 	defer func() {
 		if recover() != nil {
@@ -187,30 +208,32 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 		if len(lifecycleBindings) == 0 {
 			return
 		}
-		cleanup, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)
-		if err != nil {
-			failure = errors.Join(failure, err)
-			return
+		if lifecycle == nil {
+			lifecycle, err = kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout, Dispatcher: dispatcher}, lifecycleBindings)
+			if err != nil {
+				failure = errors.Join(failure, err)
+				return
+			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
 		defer cancel()
-		if err := cleanup.Stop(ctx); err != nil {
-			failure = &InterfaceAssemblyError{failure: errors.Join(failure, err), cleanup: cleanup, timeout: rollbackTimeout}
+		if err := lifecycle.Stop(ctx); err != nil {
+			failure = &InterfaceAssemblyError{failure: errors.Join(failure, err), cleanup: lifecycle, timeout: rollbackTimeout}
 		}
 	}()
 	if err := RequireKernelCompatibility(); err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrInterfaceAssembly, err)
 	}
-	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: 1})
+	dispatcher, err = kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: 1})
 	if err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: governed dispatcher", ErrInterfaceAssembly)
 	}
-	lifecycle, err := kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout}, lifecycleBindings)
+	lifecycle, err = kernellifecycle.NewManager(kernellifecycle.ManagerOptions{RollbackTimeout: rollbackTimeout, Dispatcher: dispatcher}, lifecycleBindings)
 	if err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: implementation lifecycle: %w", ErrInterfaceAssembly, err)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260930101550-2e6c78e3ad6d",
+		ModuleVersion: "v0.0.0-20260930115756-0e0c0f957ef4",
 		BuildIdentity: "",
 	})
 	if err != nil {
