@@ -277,7 +277,10 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 		return err
 	}
 	policy := capabilities.InvocationPolicy()
-	if _, err := fmt.Fprintf(writer, "Invocation policy: schema %d, compiler %d, defaults %d; timeout 1ns through %s (%d bytes); default attempts %d, circuit disabled\nSupport stages:\n", policy.SchemaVersion, policy.CompilerVersion, policy.DefaultsVersion, policy.MaximumTimeout, policy.DurationBytes, policy.DefaultAttempts); err != nil {
+	if _, err := fmt.Fprintf(writer, "Invocation policy: schema %d, compiler %d, defaults %d; timeout 1ns through %s (%d bytes); default attempts %d, circuit disabled\n", policy.SchemaVersion, policy.CompilerVersion, policy.DefaultsVersion, policy.MaximumTimeout, policy.DurationBytes, policy.DefaultAttempts); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(writer, "Retry: %s, attempts 2 through %d (default %d), backoff 0s through %s (default %s)\nSupport stages:\n", policy.RetryEligibility, policy.MaximumRetryAttempts, policy.RetryDefaultAttempts, policy.MaximumRetryBackoff, policy.RetryDefaultBackoff); err != nil {
 		return err
 	}
 	for _, support := range capabilities.Support() {

@@ -1173,7 +1173,7 @@ func implementationAssemblyInput(resolved applicationresolve.Result, interfaceMo
 		policy := invocationpolicy.Default()
 		for _, authored := range resolved.Manifest().InterfacePolicies() {
 			if authored.InterfaceID() == binding.InterfaceID() {
-				policy.Timeout = authored.Timeout()
+				policy = invocationpolicy.Compile(authored)
 				break
 			}
 		}
@@ -1307,8 +1307,8 @@ func buildInterfaceProvenance(
 			compiled.ConcurrencyLimit = kernelintrinsic.ConcurrencyLimit
 		}
 		if policy, exists := policies[identifier]; exists {
-			field := fmt.Sprintf("interfaces.policies[%q].timeout", identifier)
-			compiled.Timeout = policy.Timeout()
+			field := fmt.Sprintf("interfaces.policies[%q]", identifier)
+			compiled = invocationpolicy.Compile(policy)
 			return interfaceprovenance.PolicyInput{
 				Compiled: compiled,
 				Sources:  provenanceSources(resolved, field, policy.Source()),

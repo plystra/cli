@@ -14,6 +14,17 @@ func TimeoutSupport() commandschema.CapabilitySupportInput {
 	}
 }
 
+// RetrySupport reports each field of the generated replay-safe retry form.
+func RetrySupport() []commandschema.CapabilitySupportInput {
+	var support []commandschema.CapabilitySupportInput
+	for _, field := range []string{"eligibility", "max_attempts", "backoff"} {
+		fact := TimeoutSupport()
+		fact.ID = "interfaces.policies.*.retry." + field
+		support = append(support, fact)
+	}
+	return support
+}
+
 // LegacyTimeoutSupport keeps transitional contribution wrappers fail-closed:
 // their preparation and completion still execute outside Kernel governance.
 func LegacyTimeoutSupport() commandschema.CapabilitySupportInput {

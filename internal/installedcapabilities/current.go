@@ -28,12 +28,16 @@ func Current() (commandschema.Capabilities, error) {
 	}
 	capabilities, err := commandschema.NewCapabilities(commandschema.CapabilitiesInput{
 		InvocationPolicy: commandschema.CapabilityInvocationPolicy{
-			SchemaVersion:   kernelinvocation.PolicySchemaVersion,
-			CompilerVersion: kernelinvocation.PolicyCompilerVersion,
-			DefaultsVersion: kernelinvocation.PolicyDefaultsVersion,
-			DurationBytes:   64,
-			MaximumTimeout:  kernelinvocation.MaximumPolicyDuration,
-			DefaultAttempts: invocationpolicy.Default().Retry.MaxAttempts,
+			SchemaVersion:        kernelinvocation.PolicySchemaVersion,
+			CompilerVersion:      kernelinvocation.PolicyCompilerVersion,
+			DefaultsVersion:      kernelinvocation.PolicyDefaultsVersion,
+			DurationBytes:        64,
+			MaximumTimeout:       kernelinvocation.MaximumPolicyDuration,
+			DefaultAttempts:      invocationpolicy.Default().Retry.MaxAttempts,
+			RetryEligibility:     kernelinvocation.RetryReplaySafe,
+			RetryDefaultAttempts: 2,
+			MaximumRetryAttempts: kernelinvocation.MaximumRetryAttempts,
+			MaximumRetryBackoff:  kernelinvocation.MaximumPolicyDuration,
 		},
 		CLIVersion:            version.Current,
 		KernelVersion:         version.KernelVersion,
@@ -80,7 +84,7 @@ func Current() (commandschema.Capabilities, error) {
 		InvocationTimeout:          applicationmeta.DefaultInvocationTimeout,
 		InvocationConcurrencyLimit: applicationmeta.DefaultInvocationConcurrencyLimit,
 		MaximumConcurrencyLimit:    kernelinvocation.MaximumConcurrencyLimit,
-		Support: []commandschema.CapabilitySupportInput{
+		Support: append([]commandschema.CapabilitySupportInput{
 			{
 				ID:        "invocation.default-concurrency",
 				Specified: commandschema.SupportYes,
@@ -131,7 +135,7 @@ func Current() (commandschema.Capabilities, error) {
 				Executed:  commandschema.SupportNo,
 				Accepted:  commandschema.SupportNo,
 			},
-		},
+		}, invocationpolicy.RetrySupport()...),
 	})
 	if err != nil {
 		return commandschema.Capabilities{}, fmt.Errorf("%w: %v", ErrCurrent, err)

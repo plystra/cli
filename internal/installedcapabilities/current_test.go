@@ -133,6 +133,9 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"data|yes|no|no|no|no",
 		"data.compiler|yes|no|no|no|no",
 		"inspect.capabilities|yes|yes|not_applicable|yes|yes",
+		"interfaces.policies.*.retry.backoff|yes|yes|yes|yes|yes",
+		"interfaces.policies.*.retry.eligibility|yes|yes|yes|yes|yes",
+		"interfaces.policies.*.retry.max_attempts|yes|yes|yes|yes|yes",
 		"interfaces.policies.*.timeout|yes|yes|yes|yes|yes",
 		"invocation.default-concurrency|yes|not_applicable|yes|yes|yes",
 		"legacy.capability-timeout|yes|yes|yes|no|no",
@@ -235,6 +238,9 @@ func TestCurrentIsDeterministicAndProjectIndependent(t *testing.T) {
 		t.Fatalf("Current is not deterministic:\nfirst  %s\nsecond %s", first.CanonicalJSON(), second.CanonicalJSON())
 	}
 	policy := first.InvocationPolicy()
+	if policy.RetryEligibility != "replay_safe" || policy.RetryDefaultAttempts != 2 || policy.MaximumRetryAttempts != 16 || policy.RetryDefaultBackoff != 0 || policy.MaximumRetryBackoff != 1<<63-1 {
+		t.Fatalf("retry support facts = %#v", policy)
+	}
 	if first.InvocationTimeout() != 0 || first.InvocationTimeoutText() != "0s" || policy.SchemaVersion != 1 || policy.CompilerVersion != 1 || policy.DefaultsVersion != 1 || policy.MaximumTimeout != 1<<63-1 || policy.DurationBytes != 64 || policy.DefaultAttempts != 1 || policy.CircuitEnabled {
 		t.Fatalf("compiled policy support facts = %#v", policy)
 	}

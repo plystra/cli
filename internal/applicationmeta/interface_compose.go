@@ -3,6 +3,7 @@ package applicationmeta
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/plystra/cli/internal/interfaceid"
@@ -319,7 +320,7 @@ func inheritedInterfacePolicyConflict(id interfaceid.Identifier, candidates map[
 	declarations := make(configurationDeclarationSources)
 	for _, digest := range digests {
 		candidate := candidates[digest]
-		declaration := candidate.policy.timeout.String()
+		declaration := interfacePolicyDescription(candidate.policy)
 		if candidate.removed {
 			declaration = "<removed>"
 		}
@@ -329,21 +330,25 @@ func inheritedInterfacePolicyConflict(id interfaceid.Identifier, candidates map[
 	field := interfacePolicyPath(id)
 	return newInheritedConflictError(
 		field,
-		fmt.Sprintf("%s has incompatible timeout declarations: %s; set or remove that exact Interface policy in the current Project configuration", field, strings.Join(parts, "; ")),
+		fmt.Sprintf("%s has incompatible policy declarations: %s; set or remove that exact Interface policy in the current Project configuration", field, strings.Join(parts, "; ")),
 		declarations,
 	)
 }
 
 func interfacePolicyPath(id interfaceid.Identifier) string {
-	return fmt.Sprintf("interfaces.policies[%q].timeout", id.String())
+	return fmt.Sprintf("interfaces.policies[%q]", id.String())
 }
 
 func interfacePolicyDigest(policy InterfacePolicy) string {
-	return digestStrings("interfaces.policies", policy.interfaceID.String(), "timeout", policy.timeout.String())
+	return digestStrings("interfaces.policies", policy.interfaceID.String(), "timeout", policy.timeout.String(), "retry", policy.retry.Eligibility, strconv.Itoa(policy.retry.MaxAttempts), policy.retry.Backoff.String())
 }
 
 func interfacePolicyRemovalDigest(id interfaceid.Identifier) string {
-	return digestStrings("interfaces.policies", id.String(), "timeout", "removed")
+	return digestStrings("interfaces.policies", id.String(), "removed")
+}
+
+func interfacePolicyDescription(policy InterfacePolicy) string {
+	return fmt.Sprintf("timeout %s, retry eligibility %q, attempts %d, backoff %s", policy.timeout, policy.retry.Eligibility, policy.retry.MaxAttempts, policy.retry.Backoff)
 }
 
 func interfaceDeclarationDigest(path string, id interfaceid.Identifier, removed bool) string {

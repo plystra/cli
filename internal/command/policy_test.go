@@ -15,17 +15,17 @@ import (
 	"github.com/plystra/cli/internal/testkernel"
 )
 
-func TestPublicGenerationRejectsLegacyTimeoutPolicies(t *testing.T) {
+func TestPublicGenerationRejectsLegacyTimeoutAndRetryPolicies(t *testing.T) {
 	root := writeCommandPolicyProject(t)
 	writeCommandFile(t, filepath.Join(root, "business", "plugin.yaml"), "id: acme.business\nprovides: [audit.write/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "business", "capabilities", "audit.write", "v1", "capability.yaml"), "id: audit.write/v1\nrequest: {}\nresponse: {}\n")
 	dependency := t.TempDir()
 	writeCommandFile(t, filepath.Join(dependency, "go.mod"), "module example.com/policy-export\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "composition:\n  exports:\n    defaults:\n      interfaces:\n        policies: {audit.write/v1: {timeout: 5s}}\n")
+	writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "composition:\n  exports:\n    defaults:\n      interfaces:\n        policies: {audit.write/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}\n")
 	mod := string(readCommandFile(t, root, "go.mod"))
 	writeCommandFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/policy-export v1.0.0\nreplace example.com/policy-export => "+filepath.ToSlash(dependency)+"\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "composition:\n  adopt: [{module: example.com/policy-export, export: defaults}]\ncapabilities: {require: [audit.write/v1]}\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {policies: {audit.write/v1: {timeout: 2s}}}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {policies: {audit.write/v1: {timeout: 2s, retry: {eligibility: replay_safe, max_attempts: 3}}}}\n")
 	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "untouched\n")
 	before, dependencyBefore := commandTree(t, root), commandTree(t, dependency)
 	for _, mode := range []struct {
@@ -107,6 +107,13 @@ func TestPublicGenerationEnforcesAdoptedPolicyAndCurrentReplacement(t *testing.T
 
 func assertCommandTimeoutPolicy(t *testing.T, root string, selector, environment []string, timeout time.Duration) {
 	t.Helper()
+	want := invocationpolicy.Default()
+	want.Timeout = timeout
+	assertCommandInvocationPolicy(t, root, selector, environment, want)
+}
+
+func assertCommandInvocationPolicy(t *testing.T, root string, selector, environment []string, want invocationpolicy.Policy) {
+	t.Helper()
 	args := append([]string{"generate"}, selector...)
 	if code, stdout, stderr := runCommand(t, args, filepath.Join(root, "smtp"), environment); code != 0 {
 		t.Fatalf("%v = %d, %q, %q", args, code, stdout, stderr)
@@ -116,10 +123,8 @@ func assertCommandTimeoutPolicy(t *testing.T, root string, selector, environment
 		t.Fatal(err)
 	}
 	bindings := manifest.InterfaceProvenance().Bindings()
-	want := invocationpolicy.Default()
-	want.Timeout = timeout
 	if len(bindings) != 1 || bindings[0].Policy().Compiled() != want {
-		t.Fatalf("compiled timeout policy = %#v", bindings)
+		t.Fatalf("compiled invocation policy = %#v; want %#v", bindings, want)
 	}
 	before := commandTree(t, root)
 	for _, invocation := range [][]string{{"generate", "--check"}, {"check"}, {"inspect", "interfaces", "--format", "json"}} {

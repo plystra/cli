@@ -199,13 +199,18 @@ type capabilitiesDocument struct {
 // CapabilityInvocationPolicy reports the installed compiled-policy protocol and
 // supported timeout bounds. Enabled authored stages are reported separately.
 type CapabilityInvocationPolicy struct {
-	SchemaVersion   int           `json:"schema_version"`
-	CompilerVersion int           `json:"compiler_version"`
-	DefaultsVersion int           `json:"defaults_version"`
-	DurationBytes   int           `json:"duration_bytes"`
-	MaximumTimeout  time.Duration `json:"maximum_timeout_ns"`
-	DefaultAttempts int           `json:"default_attempts"`
-	CircuitEnabled  bool          `json:"circuit_enabled"`
+	SchemaVersion        int           `json:"schema_version"`
+	CompilerVersion      int           `json:"compiler_version"`
+	DefaultsVersion      int           `json:"defaults_version"`
+	DurationBytes        int           `json:"duration_bytes"`
+	MaximumTimeout       time.Duration `json:"maximum_timeout_ns"`
+	DefaultAttempts      int           `json:"default_attempts"`
+	CircuitEnabled       bool          `json:"circuit_enabled"`
+	RetryEligibility     string        `json:"retry_eligibility"`
+	RetryDefaultAttempts int           `json:"retry_default_attempts"`
+	MaximumRetryAttempts int           `json:"maximum_retry_attempts"`
+	RetryDefaultBackoff  time.Duration `json:"retry_default_backoff_ns"`
+	MaximumRetryBackoff  time.Duration `json:"maximum_retry_backoff_ns"`
 }
 
 type capabilitiesInstalledDocument struct {
@@ -430,6 +435,9 @@ func (Capabilities) commandPayload() {}
 
 func validateCapabilitiesInput(input CapabilitiesInput) error {
 	p := input.InvocationPolicy
+	if p.RetryEligibility != "replay_safe" || p.RetryDefaultAttempts < 2 || p.MaximumRetryAttempts < p.RetryDefaultAttempts || p.RetryDefaultBackoff != 0 || p.MaximumRetryBackoff <= 0 {
+		return errors.New("invocation retry eligibility, defaults, or bounds are invalid")
+	}
 	if p.SchemaVersion < 1 || p.CompilerVersion < 1 || p.DefaultsVersion < 1 || p.DurationBytes < 1 || p.MaximumTimeout <= 0 || p.DefaultAttempts != 1 || p.CircuitEnabled || input.InvocationTimeout > p.MaximumTimeout {
 		return errors.New("invocation policy protocol, bounds, or absence defaults are invalid")
 	}
@@ -568,7 +576,7 @@ func validCapabilitySupportID(value string) bool {
 		if segment == "*" {
 			continue
 		}
-		if !validLowerKebab(segment, 64) {
+		if !validLowerKebab(strings.ReplaceAll(segment, "_", "-"), 64) {
 			return false
 		}
 	}

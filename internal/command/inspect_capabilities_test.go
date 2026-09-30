@@ -148,6 +148,8 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 		"Defaults: interaction non_interactive, output human, startup 2m, invocation 0s\n",
 		"Invocation concurrency: default_limit 64, queue 0, maximum 65536\n",
 		"Invocation policy: schema 1, compiler 1, defaults 1; timeout 1ns through 2562047h47m16.854775807s (64 bytes); default attempts 1, circuit disabled\n",
+		"Retry: replay_safe, attempts 2 through 16 (default 2), backoff 0s through 2562047h47m16.854775807s (default 0s)\n",
+		"interfaces.policies.*.retry.max_attempts: specified=yes parsed=yes generated=yes executed=yes accepted=yes\n",
 		"interfaces.policies.*.timeout: specified=yes parsed=yes generated=yes executed=yes accepted=yes\n",
 		"legacy.capability-timeout: specified=yes parsed=yes generated=yes executed=no accepted=no\n",
 		"invocation.default-concurrency: specified=yes parsed=not_applicable generated=yes executed=yes accepted=yes\n",

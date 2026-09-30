@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/kernel/invocation"
 )
 
@@ -45,6 +46,14 @@ func Default() Policy {
 		ConcurrencyLimit: invocation.DefaultConcurrencyLimit,
 		Retry:            Retry{MaxAttempts: 1},
 	}
+}
+
+// Compile resolves the authored policy into complete immutable assembly input.
+func Compile(authored applicationmeta.InterfacePolicy) Policy {
+	policy := Default()
+	policy.Timeout = authored.Timeout()
+	policy.Retry = Retry{Eligibility: authored.RetryEligibility(), MaxAttempts: authored.RetryMaxAttempts(), Backoff: authored.RetryBackoff()}
+	return policy
 }
 
 // Validate rejects incompatible input before rendering. Enabled stages remain

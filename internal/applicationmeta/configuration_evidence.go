@@ -93,7 +93,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 			case maintenanceImplementationChoice:
 				summary = ConfigurationSummaryImplementation
 			case maintenanceInterfacePolicy:
-				summary = ConfigurationSummaryDuration
+				summary = ConfigurationSummaryObject
 			case maintenanceAlias:
 				summary = ConfigurationSummaryAlias
 			case maintenanceConstructorConfig:

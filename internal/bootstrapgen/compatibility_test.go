@@ -70,13 +70,13 @@ http:
 	canonical := string(left.CanonicalJSON())
 	for _, required := range []string{
 		`"application_model_digest":"` + digest + `"`,
-		`"version":3`,
+		`"version":4`,
 		`"export_adoptions":[{"export":"runtime","module":"example.com/alpha"},{"export":"defaults","module":"example.com/zeta"}]`,
 		`"http_exposures":[{"interface":"records.read/v1","transport":"connect"}]`,
 		`"interface_requirements":["records.read/v1"]`,
 		`"interface":"records.read/v1"`,
 		`"constructor":"example.com/acme/records.New"`,
-		`"interface_policies":[{"interface":"records.read/v1","timeout":"5s"}]`,
+		`"interface_policies":[{"interface":"records.read/v1","retry":{"backoff_ns":0,"eligibility":"","max_attempts":1},"timeout":"5s"}]`,
 	} {
 		if !strings.Contains(canonical, required) {
 			t.Fatalf("canonical projection omits %q: %s", required, canonical)

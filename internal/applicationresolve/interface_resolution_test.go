@@ -52,7 +52,7 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	}) {
 		t.Fatalf("default selections = %v", got)
 	}
-	if policies := resolved.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "5s" || policies[0].Source() != `plystra.yaml interfaces.policies["audit.write/v1"].timeout` {
+	if policies := resolved.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "5s" || policies[0].Source() != `plystra.yaml interfaces.policies["audit.write/v1"]` {
 		t.Fatalf("default Interface policies = %#v", policies)
 	}
 	app := graph.ConstructionOrder()[1]
@@ -89,7 +89,7 @@ func TestResolveBuildsSelectedInterfaceConstructorGraphFromConfiguration(t *test
 	}) {
 		t.Fatalf("production selections = %v", got)
 	}
-	if policies := production.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "2s" || policies[0].Source() != `plystra.production.yaml interfaces.policies["audit.write/v1"].timeout` {
+	if policies := production.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "2s" || policies[0].Source() != `plystra.production.yaml interfaces.policies["audit.write/v1"]` {
 		t.Fatalf("production Interface policies = %#v", policies)
 	}
 	productionDependencies := productionGraph.ConstructionOrder()[2].Dependencies()
@@ -168,7 +168,7 @@ interfaces:
 	if maintenance := resolved.ConfigurationMaintenance(); maintenance.Changed() || resolved.ConfigurationMaintenancePath() != "deploy/customer.yaml" || !reflect.DeepEqual(maintenance.Data(), []byte(selectedConfiguration)) {
 		t.Fatalf("full-replacement dependency maintenance = changed %t path %q data %q", maintenance.Changed(), resolved.ConfigurationMaintenancePath(), maintenance.Data())
 	}
-	if policies := resolved.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "2s" || policies[0].Source() != `deploy/customer.yaml interfaces.policies["audit.write/v1"].timeout` {
+	if policies := resolved.Composition().Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout().String() != "2s" || policies[0].Source() != `deploy/customer.yaml interfaces.policies["audit.write/v1"]` {
 		t.Fatalf("full-replacement Interface policies = %#v", policies)
 	}
 	if got := resolvedSelectionSummaries(resolved.InterfaceResolution()); !reflect.DeepEqual(got, []string{
@@ -1505,7 +1505,7 @@ composition:
 		`interfaces.require["audit.write/v1"]`:                   "example.com/transitive@v1.4.0",
 		`interfaces.use["app.run/v1"]`:                           "example.com/direct@v1.2.0",
 		`interfaces.use["audit.write/v1"]`:                       "example.com/transitive@v1.4.0",
-		`interfaces.policies["app.run/v1"].timeout`:              "example.com/direct@v1.2.0",
+		`interfaces.policies["app.run/v1"]`:                      "example.com/direct@v1.2.0",
 		`config["example.com/direct/app.New"]["message"]`:        "example.com/direct@v1.2.0",
 		`config["example.com/transitive/audit.New"]["endpoint"]`: "example.com/transitive@v1.4.0",
 	} {

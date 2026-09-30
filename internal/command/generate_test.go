@@ -1902,11 +1902,11 @@ interfaces:
 	process.Dir = root
 	process.Env = environment
 	output, runErr = process.CombinedOutput()
-	if runErr == nil || !strings.Contains(string(output), `interfaces.policies["email.preview/v1"] contains unknown key "retry"`) {
+	if runErr == nil || !strings.Contains(string(output), `interfaces.policies["email.preview/v1"].retry must be a mapping`) {
 		t.Fatalf("generated application accepted invalid environment policy: %v\n%s", runErr, output)
 	}
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, `interfaces.policies["email.preview/v1"] contains unknown key "retry"`) {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, `interfaces.policies["email.preview/v1"].retry must be a mapping`) {
 		t.Fatalf("invalid environment policy = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeInvalid) {

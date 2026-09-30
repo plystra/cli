@@ -12,9 +12,10 @@ import (
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/invocationpolicy"
 )
 
-const applicationModelCompatibilityVersion = 3
+const applicationModelCompatibilityVersion = 4
 
 // ErrInvalidApplicationModelCompatibility reports a compatibility projection
 // that cannot be tied to one complete generated application model.
@@ -67,8 +68,9 @@ type applicationModelCompatibilityImplementation struct {
 }
 
 type applicationModelCompatibilityPolicy struct {
-	Interface string `json:"interface"`
-	Timeout   string `json:"timeout"`
+	Interface string                 `json:"interface"`
+	Timeout   string                 `json:"timeout"`
+	Retry     invocationpolicy.Retry `json:"retry"`
 }
 
 // NewApplicationModelCompatibility projects one final typed application
@@ -151,6 +153,7 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 		projection.InterfacePolicies = append(projection.InterfacePolicies, applicationModelCompatibilityPolicy{
 			Interface: policy.InterfaceID().String(),
 			Timeout:   policy.Timeout().String(),
+			Retry:     invocationpolicy.Compile(policy).Retry,
 		})
 	}
 	sort.Slice(projection.HTTPExposures, func(left, right int) bool {
@@ -259,6 +262,11 @@ func encodeApplicationModelCompatibility(document applicationModelCompatibilityD
 		policies[index] = map[string]any{
 			"interface": policy.Interface,
 			"timeout":   policy.Timeout,
+			"retry": map[string]any{
+				"eligibility":  policy.Retry.Eligibility,
+				"max_attempts": policy.Retry.MaxAttempts,
+				"backoff_ns":   policy.Retry.Backoff,
+			},
 		}
 	}
 	var cors any

@@ -628,7 +628,7 @@ func maintenanceDecisionDescription(decision maintenanceDecision) string {
 	case maintenanceImplementationChoice:
 		return "Implementation " + decision.constructor.String()
 	case maintenanceInterfacePolicy:
-		return "Interface timeout " + decision.policy.timeout.String()
+		return "Interface policy " + interfacePolicyDescription(decision.policy)
 	case maintenanceAlias:
 		return "Alias target " + decision.alias.target.String()
 	case maintenanceConstructorConfig:
@@ -782,6 +782,13 @@ func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error
 		if !decision.removed {
 			value = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 			setMappingValue(value, "timeout", stringYAMLNode(decision.policy.timeout.String()))
+			if retry := decision.policy.retry; retry.Eligibility != "" {
+				fields := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+				setMappingValue(fields, "eligibility", stringYAMLNode(retry.Eligibility))
+				setMappingValue(fields, "max_attempts", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: fmt.Sprint(retry.MaxAttempts)})
+				setMappingValue(fields, "backoff", stringYAMLNode(retry.Backoff.String()))
+				setMappingValue(value, "retry", fields)
+			}
 		}
 		return setKeyedMaintenanceDecision(root, []string{"interfaces", "policies"}, decision.interfaceID.String(), value)
 	case maintenanceAlias:

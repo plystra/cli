@@ -90,7 +90,7 @@ func TestInheritedConflictErrorCoversEveryComposableDeclarationFamily(t *testing
 			name:   "Interface policy",
 			first:  "interfaces: {policies: {email.send/v1: {timeout: 5s}}}\n",
 			second: "interfaces: {policies: {email.send/v1: {timeout: 10s}}}\n",
-			field:  `interfaces.policies["email.send/v1"].timeout`,
+			field:  `interfaces.policies["email.send/v1"]`,
 		},
 		{
 			name:         "constructor configuration",

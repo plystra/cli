@@ -3,11 +3,13 @@ package applicationmeta
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/kernel/invocation"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -49,6 +51,7 @@ func (c ImplementationChoice) Source() string { return c.source }
 type InterfacePolicy struct {
 	interfaceID interfaceid.Identifier
 	timeout     time.Duration
+	retry       interfaceRetry
 	source      string
 }
 
@@ -57,6 +60,21 @@ func (p InterfacePolicy) InterfaceID() interfaceid.Identifier { return p.interfa
 
 // Timeout returns the normalized positive invocation timeout.
 func (p InterfacePolicy) Timeout() time.Duration { return p.timeout }
+
+type interfaceRetry struct {
+	Eligibility string
+	MaxAttempts int
+	Backoff     time.Duration
+}
+
+// RetryEligibility returns the explicit replay assertion, empty when absent.
+func (p InterfacePolicy) RetryEligibility() string { return p.retry.Eligibility }
+
+// RetryMaxAttempts includes the first attempt; absence resolves to one.
+func (p InterfacePolicy) RetryMaxAttempts() int { return p.retry.MaxAttempts }
+
+// RetryBackoff returns the normalized nonnegative delay between attempts.
+func (p InterfacePolicy) RetryBackoff() time.Duration { return p.retry.Backoff }
 
 // Source returns stable configuration-field provenance for diagnostics.
 func (p InterfacePolicy) Source() string { return p.source }
@@ -255,7 +273,7 @@ func parseInterfacePolicies(node *yaml.Node) ([]InterfacePolicy, []interfaceRemo
 			return nil, nil, err
 		}
 		for _, field := range sortedNodeKeys(fields) {
-			if field != "timeout" {
+			if field != "timeout" && field != "retry" {
 				return nil, nil, invalid("%s contains unknown key %q", path, field)
 			}
 		}
@@ -271,11 +289,59 @@ func parseInterfacePolicies(node *yaml.Node) ([]InterfacePolicy, []interfaceRemo
 		if err != nil || timeout <= 0 {
 			return nil, nil, invalid("%s.timeout must be a positive Go duration", path)
 		}
+		retry, err := parseInterfaceRetry(fields["retry"], path+".retry")
+		if err != nil {
+			return nil, nil, err
+		}
 		policies = append(policies, InterfacePolicy{
 			interfaceID: identifier,
 			timeout:     timeout,
-			source:      "plystra.yaml " + path + ".timeout",
+			retry:       retry,
+			source:      "plystra.yaml " + path,
 		})
 	}
 	return policies, removals, nil
+}
+
+func parseInterfaceRetry(node *yaml.Node, path string) (interfaceRetry, error) {
+	if node == nil {
+		return interfaceRetry{MaxAttempts: 1}, nil
+	}
+	fields, err := mapping(node, path)
+	if err != nil {
+		return interfaceRetry{}, err
+	}
+	for _, field := range sortedNodeKeys(fields) {
+		if field != "eligibility" && field != "max_attempts" && field != "backoff" {
+			return interfaceRetry{}, invalid("%s contains unknown key %q", path, field)
+		}
+	}
+	eligibility, err := strictString(fields["eligibility"])
+	if err != nil || eligibility != invocation.RetryReplaySafe {
+		return interfaceRetry{}, invalid("%s.eligibility must be replay_safe", path)
+	}
+	retry := interfaceRetry{Eligibility: eligibility, MaxAttempts: 2}
+	if value, exists := fields["max_attempts"]; exists {
+		valid := value.Kind == yaml.ScalarNode && value.Tag == "!!int" && value.Value != ""
+		for _, char := range value.Value {
+			valid = valid && char >= '0' && char <= '9'
+		}
+		attempts, err := strconv.Atoi(value.Value)
+		if !valid || err != nil || attempts < 2 || attempts > invocation.MaximumRetryAttempts {
+			return interfaceRetry{}, invalid("%s.max_attempts must be a base-10 integer within 2 through %d", path, invocation.MaximumRetryAttempts)
+		}
+		retry.MaxAttempts = attempts
+	}
+	if value, exists := fields["backoff"]; exists {
+		text, err := strictString(value)
+		if err != nil || text == "" || len(text) > 64 || strings.TrimSpace(text) != text || strings.ContainsRune(text, '\x00') {
+			return interfaceRetry{}, invalid("%s.backoff must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL", path)
+		}
+		backoff, err := time.ParseDuration(text)
+		if err != nil || backoff < 0 {
+			return interfaceRetry{}, invalid("%s.backoff must be a nonnegative Go duration", path)
+		}
+		retry.Backoff = backoff
+	}
+	return retry, nil
 }

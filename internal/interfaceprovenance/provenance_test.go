@@ -23,7 +23,7 @@ func TestProvenanceCanonicalizesCompleteInterfaceAndConstructorGraph(t *testing.
 	if !first.Valid() || first.SchemaVersion() != interfaceprovenance.Schema {
 		t.Fatalf("constructed provenance is invalid: schema %q digest %q", first.SchemaVersion(), first.Digest())
 	}
-	const expectedDigest = "sha256:7b6b810d2119375461d533b9a27390226d5f794f72737c5568282b1260082f7e"
+	const expectedDigest = "sha256:594244bd1af64a29694888d482249d0d70e9229ca1deb4fbc8ef27b3b9b5d0b2"
 	if first.Digest() != expectedDigest {
 		t.Fatalf("digest = %q; want %q", first.Digest(), expectedDigest)
 	}
@@ -347,7 +347,7 @@ func completeInput() interfaceprovenance.Input {
 				ConfigurationOwner: orderConstructor.ConfigurationOwner,
 				Policy: interfaceprovenance.PolicyInput{
 					Compiled: timeoutPolicy(5 * time.Second),
-					Sources:  []string{`plystra.yaml interfaces.policies["order.create/v1"].timeout`},
+					Sources:  []string{`plystra.yaml interfaces.policies["order.create/v1"]`},
 				},
 				Mappings: orderMapping,
 			},

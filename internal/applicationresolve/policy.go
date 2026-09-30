@@ -88,43 +88,49 @@ func validateExecutablePolicies(manifest applicationmeta.Manifest, interfaces in
 	for _, requirement := range legacy.Requirements() {
 		legacyActive[requirement.String()] = true
 	}
-	timeoutSupport, err := commandschema.NewCapabilitySupport(invocationpolicy.TimeoutSupport())
-	if err != nil {
-		return err
-	}
 	legacySupport, err := commandschema.NewCapabilitySupport(invocationpolicy.LegacyTimeoutSupport())
 	if err != nil {
 		return err
 	}
 	for _, policy := range policies {
-		support := timeoutSupport
 		if !active[policy.InterfaceID().String()] && !legacyActive[policy.InterfaceID().String()] {
 			continue
 		}
-		if legacyActive[policy.InterfaceID().String()] {
-			support = legacySupport
+		inputs := []commandschema.CapabilitySupportInput{invocationpolicy.TimeoutSupport()}
+		if policy.RetryEligibility() != "" {
+			inputs = append(inputs, invocationpolicy.RetrySupport()...)
 		}
-		if support.Generated() == commandschema.SupportYes && support.Executed() == commandschema.SupportYes {
-			continue
+		for _, input := range inputs {
+			support, err := commandschema.NewCapabilitySupport(input)
+			if err != nil {
+				return err
+			}
+			fieldName := strings.TrimPrefix(input.ID, "interfaces.policies.*.")
+			if legacyActive[policy.InterfaceID().String()] {
+				support = legacySupport
+			}
+			if support.Generated() == commandschema.SupportYes && support.Executed() == commandschema.SupportYes {
+				continue
+			}
+			field := fmt.Sprintf("interfaces.policies[%q]", policy.InterfaceID())
+			locations, err := applicationinput.ConfigurationSources(sources, policy.Source(), field)
+			if err != nil {
+				return fmt.Errorf("policy %s provenance: %w", policy.InterfaceID(), err)
+			}
+			slices.SortFunc(locations, func(a, b applicationinput.ConfigurationSource) int {
+				if cmp := strings.Compare(a.ModulePath, b.ModulePath); cmp != 0 {
+					return cmp
+				}
+				if cmp := strings.Compare(a.Path, b.Path); cmp != 0 {
+					return cmp
+				}
+				if a.Line != b.Line {
+					return a.Line - b.Line
+				}
+				return a.Column - b.Column
+			})
+			return &PolicyNotEnforcedError{interfaceID: policy.InterfaceID(), field: fieldName, cliVersion: version.Current, kernelVersion: version.KernelVersion, support: support, sources: locations}
 		}
-		field := fmt.Sprintf("interfaces.policies[%q].timeout", policy.InterfaceID())
-		locations, err := applicationinput.ConfigurationSources(sources, policy.Source(), field)
-		if err != nil {
-			return fmt.Errorf("policy %s provenance: %w", policy.InterfaceID(), err)
-		}
-		slices.SortFunc(locations, func(a, b applicationinput.ConfigurationSource) int {
-			if cmp := strings.Compare(a.ModulePath, b.ModulePath); cmp != 0 {
-				return cmp
-			}
-			if cmp := strings.Compare(a.Path, b.Path); cmp != 0 {
-				return cmp
-			}
-			if a.Line != b.Line {
-				return a.Line - b.Line
-			}
-			return a.Column - b.Column
-		})
-		return &PolicyNotEnforcedError{interfaceID: policy.InterfaceID(), field: "timeout", cliVersion: version.Current, kernelVersion: version.KernelVersion, support: support, sources: locations}
 	}
 	return nil
 }

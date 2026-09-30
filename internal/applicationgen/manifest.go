@@ -871,9 +871,11 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		if index > 0 && policies[index-1].InterfaceID() == identifier {
 			return "", fmt.Errorf("%w: Interface policy %q is duplicated", ErrResolution, identifier.String())
 		}
-		if compiled, active := effectivePolicies[identifier.String()]; active {
-			compiled.Timeout = policy.Timeout()
-			effectivePolicies[identifier.String()] = compiled
+		if err := invocationpolicy.Compile(policy).Validate(); err != nil {
+			return "", fmt.Errorf("%w: invalid Interface policy: %w", ErrResolution, err)
+		}
+		if _, active := effectivePolicies[identifier.String()]; active {
+			effectivePolicies[identifier.String()] = invocationpolicy.Compile(policy)
 		}
 	}
 	for _, binding := range assemblyBindings {

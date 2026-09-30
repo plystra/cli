@@ -45,7 +45,7 @@ interfaces:
 	}
 	policies := manifest.InterfacePolicies()
 	if got := interfacePolicyStrings(policies); !reflect.DeepEqual(got, []string{
-		`email.send/v1=5s@deploy/production.yaml interfaces.policies["email.send/v1"].timeout`,
+		`email.send/v1=5s@deploy/production.yaml interfaces.policies["email.send/v1"]`,
 	}) {
 		t.Fatalf("InterfacePolicies = %v", got)
 	}
@@ -64,13 +64,13 @@ interfaces:
 		summary applicationmeta.ConfigurationDecisionSummary
 		removed bool
 	}{
-		`interfaces.require["audit.write/v1"]`:          {summary: applicationmeta.ConfigurationSummaryInterface},
-		`interfaces.require["email.send/v1"]`:           {summary: applicationmeta.ConfigurationSummaryInterface},
-		`interfaces.require["cache.read/v1"]`:           {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
-		`interfaces.use["email.send/v1"]`:               {summary: applicationmeta.ConfigurationSummaryImplementation},
-		`interfaces.use["cache.read/v1"]`:               {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
-		`interfaces.policies["email.send/v1"].timeout`:  {summary: applicationmeta.ConfigurationSummaryDuration},
-		`interfaces.policies["audit.write/v1"].timeout`: {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
+		`interfaces.require["audit.write/v1"]`:  {summary: applicationmeta.ConfigurationSummaryInterface},
+		`interfaces.require["email.send/v1"]`:   {summary: applicationmeta.ConfigurationSummaryInterface},
+		`interfaces.require["cache.read/v1"]`:   {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
+		`interfaces.use["email.send/v1"]`:       {summary: applicationmeta.ConfigurationSummaryImplementation},
+		`interfaces.use["cache.read/v1"]`:       {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
+		`interfaces.policies["email.send/v1"]`:  {summary: applicationmeta.ConfigurationSummaryObject},
+		`interfaces.policies["audit.write/v1"]`: {summary: applicationmeta.ConfigurationSummaryRemoval, removed: true},
 	}
 	if len(decisions) != len(want) {
 		t.Fatalf("ConfigurationDecisions = %#v", decisions)
@@ -140,7 +140,7 @@ func TestParseRejectsInvalidInterfaceConfiguration(t *testing.T) {
 		{name: "intrinsic policy", data: "interfaces: {policies: {kernel.health/v1: {timeout: 1s}}}\n", want: "intrinsic kernel.* Interface"},
 		{name: "policy nonmapping", data: "interfaces: {policies: {email.send/v1: 1s}}\n", want: `interfaces.policies["email.send/v1"] must be a mapping`},
 		{name: "empty policy", data: "interfaces: {policies: {email.send/v1: {}}}\n", want: `.timeout is required`},
-		{name: "unknown policy field", data: "interfaces: {policies: {email.send/v1: {retry: 2}}}\n", want: `contains unknown key "retry"`},
+		{name: "unknown policy field", data: "interfaces: {policies: {email.send/v1: {replay: 2}}}\n", want: `contains unknown key "replay"`},
 		{name: "nonstring policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: 5}}}\n", want: "must be a non-empty trimmed Go duration string"},
 		{name: "null policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: null}}}\n", want: "must be a non-empty trimmed Go duration string"},
 		{name: "zero policy timeout", data: "interfaces: {policies: {email.send/v1: {timeout: 0s}}}\n", want: "must be a positive Go duration"},
@@ -251,7 +251,7 @@ func TestComposePolicyResolutionSourcesTrackOnlyEffectiveValues(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			records := findProvenance(t, composed.ResolutionSources(), `interfaces.policies["email.send/v1"].timeout`)
+			records := findProvenance(t, composed.ResolutionSources(), `interfaces.policies["email.send/v1"]`)
 			if len(records) != test.count || test.count == 1 && len(records[0].Sources()) != 2 {
 				t.Fatalf("effective policy sources = %#v", records)
 			}
@@ -316,11 +316,11 @@ func TestComposeInterfacePoliciesDeterministicallyWithCurrentReplacement(t *test
 		t.Fatal(err)
 	}
 	if got := interfacePolicyStrings(first.Manifest().InterfacePolicies()); !reflect.DeepEqual(got, []string{
-		`email.send/v1=5s@example.com/platform-a@v1.0.0/plystra.yaml interfaces.policies["email.send/v1"].timeout`,
+		`email.send/v1=5s@example.com/platform-a@v1.0.0/plystra.yaml interfaces.policies["email.send/v1"]`,
 	}) {
 		t.Fatalf("composed policies = %v", got)
 	}
-	path := `interfaces.policies["email.send/v1"].timeout`
+	path := `interfaces.policies["email.send/v1"]`
 	provenance := findProvenance(t, first.Provenance(), path)
 	if len(provenance) != 1 || len(provenance[0].Sources()) != 2 || first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(first.Provenance(), second.Provenance()) {
 		t.Fatalf("policy provenance = %#v / %#v", first.Provenance(), second.Provenance())
@@ -338,7 +338,7 @@ func TestComposeInterfacePoliciesDeterministicallyWithCurrentReplacement(t *test
 		t.Fatal(err)
 	}
 	if got := interfacePolicyStrings(resolved.Manifest().InterfacePolicies()); !reflect.DeepEqual(got, []string{
-		`email.send/v1=2s@plystra.yaml interfaces.policies["email.send/v1"].timeout`,
+		`email.send/v1=2s@plystra.yaml interfaces.policies["email.send/v1"]`,
 	}) {
 		t.Fatalf("current policy replacement = %v", got)
 	}
@@ -389,7 +389,7 @@ interfaces:
 		t.Fatalf("overlay choices = %v", got)
 	}
 	if got := interfacePolicyStrings(effective.InterfacePolicies()); !reflect.DeepEqual(got, []string{
-		`audit.write/v1=2s@plystra.production.yaml interfaces.policies["audit.write/v1"].timeout`,
+		`audit.write/v1=2s@plystra.production.yaml interfaces.policies["audit.write/v1"]`,
 	}) {
 		t.Fatalf("overlay policies = %v", got)
 	}
@@ -408,7 +408,7 @@ interfaces:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := interfaceRequirementIDs(composed.Manifest().InterfaceRequirements()); !reflect.DeepEqual(got, []string{"cache.read/v1", "email.send/v1"}) || len(composed.Manifest().ImplementationChoices()) != 1 || composed.Manifest().ImplementationChoices()[0].Constructor().String() != "github.com/acme/auditprod.New" || !reflect.DeepEqual(interfacePolicyStrings(composed.Manifest().InterfacePolicies()), []string{`audit.write/v1=2s@plystra.production.yaml interfaces.policies["audit.write/v1"].timeout`}) {
+	if got := interfaceRequirementIDs(composed.Manifest().InterfaceRequirements()); !reflect.DeepEqual(got, []string{"cache.read/v1", "email.send/v1"}) || len(composed.Manifest().ImplementationChoices()) != 1 || composed.Manifest().ImplementationChoices()[0].Constructor().String() != "github.com/acme/auditprod.New" || !reflect.DeepEqual(interfacePolicyStrings(composed.Manifest().InterfacePolicies()), []string{`audit.write/v1=2s@plystra.production.yaml interfaces.policies["audit.write/v1"]`}) {
 		t.Fatalf("overlay dependency suppression = %v / %v / %v", got, implementationChoiceStrings(composed.Manifest().ImplementationChoices()), interfacePolicyStrings(composed.Manifest().InterfacePolicies()))
 	}
 }
@@ -582,7 +582,7 @@ config:
 	for _, path := range []string{
 		`interfaces.require["audit.write/v1"]`,
 		`interfaces.use["email.send/v1"]`,
-		`interfaces.policies["email.send/v1"].timeout`,
+		`interfaces.policies["email.send/v1"]`,
 		`config["example.com/platform/smtp.New"]["host"]`,
 	} {
 		if !slices.Contains(maintained.LocalPaths(), path) {
@@ -656,7 +656,7 @@ interfaces:
 	if bytes.Contains(maintained.Data(), []byte("10s")) {
 		t.Fatalf("dependency timeout overwrote local policy:\n%s", maintained.Data())
 	}
-	localPath := `interfaces.policies["email.send/v1"].timeout`
+	localPath := `interfaces.policies["email.send/v1"]`
 	if !slices.Contains(maintained.LocalPaths(), localPath) {
 		t.Fatalf("local paths %v omit %s", maintained.LocalPaths(), localPath)
 	}
@@ -665,8 +665,8 @@ interfaces:
 		t.Fatal(err)
 	}
 	if got := interfacePolicyStrings(composition.Manifest().InterfacePolicies()); !reflect.DeepEqual(got, []string{
-		`audit.write/v1=3s@plystra.yaml interfaces.policies["audit.write/v1"].timeout`,
-		`email.send/v1=2s@plystra.yaml interfaces.policies["email.send/v1"].timeout`,
+		`audit.write/v1=3s@plystra.yaml interfaces.policies["audit.write/v1"]`,
+		`email.send/v1=2s@plystra.yaml interfaces.policies["email.send/v1"]`,
 	}) {
 		t.Fatalf("maintained effective policies = %v", got)
 	}

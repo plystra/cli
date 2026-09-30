@@ -38,7 +38,7 @@ func TestCapabilitiesAreCanonicalClosedAndDefensive(t *testing.T) {
 		t.Fatalf("NewCapabilities = %#v, %v", payload, err)
 	}
 	want := fmt.Sprintf(
-		`{"invocation_policy":{"schema_version":1,"compiler_version":1,"defaults_version":1,"duration_bytes":64,"maximum_timeout_ns":9223372036854775807,"default_attempts":1,"circuit_enabled":false},"schema":"plystra.capabilities/v1","installed":{"cli_version":"1.2.3","kernel_version":"v1.4.0","specification_revision":"0123456789abcdef0123456789abcdef01234567","go_requirement":"1.26","platform":{"goos":"testos","goarch":"testarch"},"transport_toolchain":%s},"schemas":[{"role":"continuation","available":false,"name":null,"version":null},{"role":"diagnostic","available":false,"name":null,"version":null},{"role":"graph","available":true,"name":"plystra.graph","version":1},{"role":"inspection","available":true,"name":"plystra.inspect","version":1},{"role":"recovery","available":true,"name":"plystra.recovery","version":1},{"role":"result","available":true,"name":"plystra.result","version":1}],"commands":[{"id":"inspect","path":["inspect"],"arguments":[{"name":"--config","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--env"]},{"name":"--env","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--config"]},{"name":"--format","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":["human","json"],"requires":[],"conflicts":[]}],"selectors":["configuration"],"stable_defaults":[{"name":"verbosity","value":"concise"}],"interaction_modes":["non_interactive"],"output_formats":["human","json"]}],"selectors":[{"id":"configuration","arguments":["--config","--env"],"environment_variables":["PLYSTRA_CONFIG","PLYSTRA_ENV"],"modes":["default","environment","explicit-config"],"default_mode":"default"}],"effect_classes":["project_write","temporary_file","cache_materialization","download","trusted_code_execution","process_startup","backend_read","backend_write","publication"],"limits":{"project_document_bytes":1048576,"invocation_concurrency_limit":65536},"defaults":{"interaction_mode":"non_interactive","output_format":"human","startup_timeout":"2m","invocation_timeout":"30s","invocation_concurrency":{"default_limit":64,"queue":0}},"support":[{"id":"data","specified":"yes","parsed":"no","generated":"no","executed":"no","accepted":"no"},{"id":"inspect.capabilities","specified":"yes","parsed":"yes","generated":"not_applicable","executed":"yes","accepted":"yes"}]}`,
+		`{"invocation_policy":{"schema_version":1,"compiler_version":1,"defaults_version":1,"duration_bytes":64,"maximum_timeout_ns":9223372036854775807,"default_attempts":1,"circuit_enabled":false,"retry_eligibility":"replay_safe","retry_default_attempts":2,"maximum_retry_attempts":16,"retry_default_backoff_ns":0,"maximum_retry_backoff_ns":9223372036854775807},"schema":"plystra.capabilities/v1","installed":{"cli_version":"1.2.3","kernel_version":"v1.4.0","specification_revision":"0123456789abcdef0123456789abcdef01234567","go_requirement":"1.26","platform":{"goos":"testos","goarch":"testarch"},"transport_toolchain":%s},"schemas":[{"role":"continuation","available":false,"name":null,"version":null},{"role":"diagnostic","available":false,"name":null,"version":null},{"role":"graph","available":true,"name":"plystra.graph","version":1},{"role":"inspection","available":true,"name":"plystra.inspect","version":1},{"role":"recovery","available":true,"name":"plystra.recovery","version":1},{"role":"result","available":true,"name":"plystra.result","version":1}],"commands":[{"id":"inspect","path":["inspect"],"arguments":[{"name":"--config","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--env"]},{"name":"--env","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":[],"requires":[],"conflicts":["--config"]},{"name":"--format","kind":"option","position":null,"value":"string","required":false,"repeatable":false,"choices":["human","json"],"requires":[],"conflicts":[]}],"selectors":["configuration"],"stable_defaults":[{"name":"verbosity","value":"concise"}],"interaction_modes":["non_interactive"],"output_formats":["human","json"]}],"selectors":[{"id":"configuration","arguments":["--config","--env"],"environment_variables":["PLYSTRA_CONFIG","PLYSTRA_ENV"],"modes":["default","environment","explicit-config"],"default_mode":"default"}],"effect_classes":["project_write","temporary_file","cache_materialization","download","trusted_code_execution","process_startup","backend_read","backend_write","publication"],"limits":{"project_document_bytes":1048576,"invocation_concurrency_limit":65536},"defaults":{"interaction_mode":"non_interactive","output_format":"human","startup_timeout":"2m","invocation_timeout":"30s","invocation_concurrency":{"default_limit":64,"queue":0}},"support":[{"id":"data","specified":"yes","parsed":"no","generated":"no","executed":"no","accepted":"no"},{"id":"inspect.capabilities","specified":"yes","parsed":"yes","generated":"not_applicable","executed":"yes","accepted":"yes"}]}`,
 		input.TransportToolchain.RecordJSON(),
 	)
 	if string(payload.CanonicalJSON()) != want {
@@ -184,6 +184,11 @@ func TestCapabilitiesRejectInvalidInstalledFactsAndSupport(t *testing.T) {
 		{name: "timeout bound", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.MaximumTimeout = time.Second }},
 		{name: "default retry", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.DefaultAttempts = 2 }},
 		{name: "default circuit", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.CircuitEnabled = true }},
+		{name: "retry assertion", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.RetryEligibility = "automatic" }},
+		{name: "retry default", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.RetryDefaultAttempts = 1 }},
+		{name: "retry maximum", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.MaximumRetryAttempts = 1 }},
+		{name: "backoff default", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.RetryDefaultBackoff = 1 }},
+		{name: "backoff maximum", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationPolicy.MaximumRetryBackoff = 0 }},
 		{name: "zero concurrency", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationConcurrencyLimit = 0 }},
 		{name: "negative concurrency", mutate: func(input *commandschema.CapabilitiesInput) { input.InvocationConcurrencyLimit = -1 }},
 		{name: "excessive concurrency", mutate: func(input *commandschema.CapabilitiesInput) {
@@ -210,6 +215,20 @@ func TestCapabilitiesRejectInvalidInstalledFactsAndSupport(t *testing.T) {
 	}
 }
 
+func TestSupportIdentityPreservesAuthoredSnakeCaseFields(t *testing.T) {
+	input := validCapabilitiesInput(t).Support[0]
+	input.ID = "interfaces.policies.*.retry.max_attempts"
+	if support, err := commandschema.NewCapabilitySupport(input); err != nil || support.ID() != input.ID {
+		t.Fatalf("authored field identity = %#v, %v", support, err)
+	}
+	for _, invalid := range []string{"retry._field", "retry.field_", "retry.max__attempts", "retry.Max_attempts", "retry..field", "retry.field/other"} {
+		input.ID = invalid
+		if _, err := commandschema.NewCapabilitySupport(input); err == nil {
+			t.Fatalf("accepted support ID %q", invalid)
+		}
+	}
+}
+
 func validCapabilitiesInput(t testing.TB) commandschema.CapabilitiesInput {
 	t.Helper()
 	toolchain, err := transporttoolchain.Current()
@@ -217,7 +236,7 @@ func validCapabilitiesInput(t testing.TB) commandschema.CapabilitiesInput {
 		t.Fatalf("transporttoolchain.Current: %v", err)
 	}
 	return commandschema.CapabilitiesInput{
-		InvocationPolicy:      commandschema.CapabilityInvocationPolicy{SchemaVersion: 1, CompilerVersion: 1, DefaultsVersion: 1, DurationBytes: 64, MaximumTimeout: time.Duration(1<<63 - 1), DefaultAttempts: 1},
+		InvocationPolicy:      commandschema.CapabilityInvocationPolicy{SchemaVersion: 1, CompilerVersion: 1, DefaultsVersion: 1, DurationBytes: 64, MaximumTimeout: time.Duration(1<<63 - 1), DefaultAttempts: 1, RetryEligibility: "replay_safe", RetryDefaultAttempts: 2, MaximumRetryAttempts: 16, MaximumRetryBackoff: time.Duration(1<<63 - 1)},
 		CLIVersion:            "1.2.3",
 		KernelVersion:         "v1.4.0",
 		SpecificationRevision: "0123456789abcdef0123456789abcdef01234567",

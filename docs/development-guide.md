@@ -520,12 +520,17 @@ preserves both facts without automatic retries. Generated assembly, the frozen
 model, and Interface provenance v3 record the limit. Installed capability JSON
 reports `defaults.invocation_concurrency` (`default_limit: 64`, `queue: 0`) and
 `limits.invocation_concurrency_limit` (65,536). Authored concurrency, queue,
-retry, and circuit forms remain unsupported. Complete compiled defaults and
-timeout policies include literal schema, compiler, and defaults identities.
+and circuit forms remain unsupported. Complete compiled defaults and timeout
+and replay-safe retry policies include literal schema, compiler, and defaults
+identities.
 The default timeout is zero (no added deadline), retries are disabled with one
 attempt, and circuits are disabled. Installed capability facts include those
 identities and positive timeout bounds of 1ns through 2562047h47m16.854775807s,
-with at most 64 bytes per authored duration.
+with at most 64 bytes per authored duration. An authored retry requires
+`eligibility: replay_safe` and `timeout`; `max_attempts` counts the first attempt
+and permits 2 through 16 (default 2), while `backoff` defaults to 0s and permits
+0s through 2562047h47m16.854775807s. The outermost retry-enabled binding owns
+replay, with fresh request copies and no overlapping attempts.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned,
 replaceable shape working record for every visible authored Interface,
@@ -1133,9 +1138,9 @@ model without transferring current-Project ownership. Check mode reports
 generated drift for that model and does not write configuration, generated
 output, or module metadata.
 
-Authored static Interface timeout policies execute through the selected binding. One total budget starts before request validation and copying, is capped by an earlier caller deadline, and includes target and response processing. Absence adds no deadline. Complete compiled policy values and literal schema/compiler/defaults versions are frozen before runtime; mismatches fail closed. Dormant policies remain intent outside executable identity until activation. Inspect capabilities reports support stages, exact defaults, and duration bounds. Authored concurrency, queue, retry, and circuit forms remain unsupported. Transitional legacy Capability wrappers do not include preparation and completion in the Kernel budget; active authored timeouts on that path still fail with PLYSTRA_POLICY_NOT_ENFORCED. Capability discovery reports that exception as legacy.capability-timeout with executed=no and accepted=no.
+Authored static Interface timeout and replay-safe retry policies execute through the selected binding. Retry requires timeout and the explicit eligibility: replay_safe assertion about the binding and its downstream effects; safety is never inferred. max_attempts counts the first attempt, defaults to 2, and permits 2 through 16; backoff defaults to 0s and accepts nonnegative Go durations. One total budget starts before request validation and copying, is capped by an earlier caller deadline, and includes all attempts, backoff, and response processing. Each attempt receives a fresh copy of the original request snapshot and starts only after the previous target terminates. The outermost retry-enabled binding owns replay; nested bindings suppress their own retries. Only not_started resource exhaustion and result_known unavailable or resource exhaustion can retry. Semantic errors, cancellation, deadlines, internal or validation failures, and result_unknown never replay; exhaustion retains the final safe category, completion, and bounded attempt count. Without retry there is one attempt; without timeout there is no added deadline. Complete compiled policy values and literal schema/compiler/defaults versions are frozen before runtime; mismatches fail closed. Dormant policies remain intent outside executable identity until activation. Inspect capabilities reports support stages, exact defaults, and duration bounds. Authored concurrency, queue, and circuit forms remain unsupported. Transitional legacy Capability wrappers do not include preparation and completion in the Kernel budget; active authored policies on that path still fail with PLYSTRA_POLICY_NOT_ENFORCED. Capability discovery reports that exception as legacy.capability-timeout with executed=no and accepted=no.
 This applies to root, environment, adopted-export, and replacement policies.
-Regenerate and rebuild after changing an active timeout; startup rejects a
+Regenerate and rebuild after changing an active timeout or retry; startup rejects a
 changed active policy before any Implementation constructor runs.
 
 `generated/manifest.json` records a versioned canonical constraint projection
@@ -1193,7 +1198,7 @@ Interfaces and generated assembly. It records:
   documentation, and example identities;
 - every reachable ordinary binding, its root, exposure and requiring
   constructors, explicit or unique-compatible selection, configuration owner,
-  effective timeout-policy input, and selected constructor;
+  effective compiled-policy input, and selected constructor;
 - every reachable constructor exactly once in dependency-first order,
   including parameter-ordered required and optional Interface dependencies;
 - required intrinsic `kernel.*` Interfaces in a separate collection, without

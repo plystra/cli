@@ -585,7 +585,7 @@ func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
 		paths = append(paths, fmt.Sprintf("interfaces.use[%q]", choice.InterfaceID().String()))
 	}
 	for _, policy := range manifest.InterfacePolicies() {
-		paths = append(paths, fmt.Sprintf("interfaces.policies[%q].timeout", policy.InterfaceID().String()))
+		paths = append(paths, fmt.Sprintf("interfaces.policies[%q]", policy.InterfaceID().String()))
 	}
 	for _, configured := range manifest.Configurations() {
 		paths = append(paths, fmt.Sprintf("config[%q]", configured.Constructor().String()))

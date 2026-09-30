@@ -34,8 +34,8 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":3}"
-	compiledApplicationModelCompatibilityDigest = "sha256:e4a72630b4138367ba0c9db102dee9a6d54958fadeac25c2469e25f282c69e14"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":4}"
+	compiledApplicationModelCompatibilityDigest = "sha256:eee2dd814a626958090b400c9777ebd2a465c4ad9d6044d943ba07488d0e7d18"
 	compiledApplicationModelDigest              = "sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf"
 )
 
@@ -263,6 +263,8 @@ func parseStartupTimeout(document []byte) (time.Duration, error) {
 	return timeout, nil
 }
 
+const runtimeMaximumRetryAttempts = 16
+
 type runtimeConfigurationFieldKind uint8
 
 const (
@@ -343,7 +345,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 3,
+		"version": 4,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -487,20 +489,17 @@ func runtimeApplicationModelInterfacePolicies(node *yaml.Node) ([]map[string]any
 			return nil, runtimeConfigurationError("interfaces.policies key %q is not a selectable canonical Interface ID", interfaceID)
 		}
 		path := "interfaces.policies[" + strconv.Quote(interfaceID) + "]"
-		fields, mappingErr := runtimeMapping(values[interfaceID], path, runtimeKeySet("timeout"))
-		if mappingErr != nil {
-			return nil, mappingErr
-		}
-		timeout, timeoutErr := validateRuntimeInterfacePolicyTimeout(fields["timeout"], path+".timeout")
-		if timeoutErr != nil {
-			return nil, timeoutErr
+		fields, retry, err := normalizeRuntimeInterfacePolicy(values[interfaceID], path)
+		if err != nil {
+			return nil, err
 		}
 		if _, executable := runtimeExecutableInterfaceChoices[interfaceID]; !executable {
 			continue
 		}
 		policies = append(policies, map[string]any{
 			"interface": interfaceID,
-			"timeout":   timeout.Value,
+			"timeout":   fields["timeout"].Value,
+			"retry":     retry,
 		})
 	}
 	return policies, nil
@@ -1378,15 +1377,11 @@ func mergeRuntimeInterfacePolicies(lowerNode, upperNode *yaml.Node) (*yaml.Node,
 				continue
 			}
 			path := "interfaces.policies[" + strconv.Quote(interfaceID) + "]"
-			fields, mappingErr := runtimeMapping(value, path, runtimeKeySet("timeout"))
-			if mappingErr != nil {
-				return nil, false, mappingErr
+			fields, _, err := normalizeRuntimeInterfacePolicy(value, path)
+			if err != nil {
+				return nil, false, err
 			}
-			timeout, timeoutErr := validateRuntimeInterfacePolicyTimeout(fields["timeout"], path+".timeout")
-			if timeoutErr != nil {
-				return nil, false, timeoutErr
-			}
-			values[interfaceID] = runtimeMappingNode(map[string]*yaml.Node{"timeout": timeout})
+			values[interfaceID] = runtimeMappingNode(fields)
 		}
 	}
 	return runtimeMappingNode(values), true, nil
@@ -1749,6 +1744,59 @@ func validateRuntimeDuration(node *yaml.Node, path string) (*yaml.Node, error) {
 		return nil, runtimeConfigurationError("%s must be a positive Go duration string", path)
 	}
 	return runtimeClone(node), nil
+}
+
+func normalizeRuntimeInterfacePolicy(node *yaml.Node, path string) (map[string]*yaml.Node, map[string]any, error) {
+	fields, err := runtimeMapping(node, path, runtimeKeySet("timeout", "retry"))
+	if err != nil {
+		return nil, nil, err
+	}
+	timeout, err := validateRuntimeInterfacePolicyTimeout(fields["timeout"], path+".timeout")
+	if err != nil {
+		return nil, nil, err
+	}
+	fields["timeout"] = timeout
+	record := map[string]any{"eligibility": "", "max_attempts": 1, "backoff_ns": time.Duration(0)}
+	if node, exists := fields["retry"]; exists {
+		retryPath := path + ".retry"
+		retry, err := runtimeMapping(node, retryPath, runtimeKeySet("eligibility", "max_attempts", "backoff"))
+		if err != nil {
+			return nil, nil, err
+		}
+		eligibility, err := runtimeString(retry["eligibility"])
+		if err != nil || eligibility != "replay_safe" {
+			return nil, nil, runtimeConfigurationError("%s.eligibility must be replay_safe", retryPath)
+		}
+		attempts := 2
+		if value, exists := retry["max_attempts"]; exists {
+			valid := value.Kind == yaml.ScalarNode && value.Tag == "!!int" && value.Value != ""
+			for _, char := range value.Value {
+				valid = valid && char >= '0' && char <= '9'
+			}
+			attempts, err = strconv.Atoi(value.Value)
+			if !valid || err != nil || attempts < 2 || attempts > runtimeMaximumRetryAttempts {
+				return nil, nil, runtimeConfigurationError("%s.max_attempts must be a base-10 integer within 2 through %d", retryPath, runtimeMaximumRetryAttempts)
+			}
+		}
+		var backoff time.Duration
+		if value, exists := retry["backoff"]; exists {
+			text, err := runtimeString(value)
+			if err != nil || text == "" || len(text) > 64 || strings.TrimSpace(text) != text || strings.ContainsRune(text, '\x00') {
+				return nil, nil, runtimeConfigurationError("%s.backoff must be a non-empty trimmed Go duration string of at most 64 bytes with no NUL", retryPath)
+			}
+			backoff, err = time.ParseDuration(text)
+			if err != nil || backoff < 0 {
+				return nil, nil, runtimeConfigurationError("%s.backoff must be a nonnegative Go duration", retryPath)
+			}
+		}
+		record = map[string]any{"eligibility": eligibility, "max_attempts": attempts, "backoff_ns": backoff}
+		fields["retry"] = runtimeMappingNode(map[string]*yaml.Node{
+			"eligibility":  runtimeStringNode(eligibility),
+			"max_attempts": {Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(attempts)},
+			"backoff":      runtimeStringNode(backoff.String()),
+		})
+	}
+	return fields, record, nil
 }
 
 func validateRuntimeInterfacePolicyTimeout(node *yaml.Node, path string) (*yaml.Node, error) {

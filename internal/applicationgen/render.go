@@ -486,7 +486,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			invocationInput.Policy = invocationpolicy.Default()
 			for _, policy := range options.Composition.Manifest().InterfacePolicies() {
 				if policy.InterfaceID().String() == id.String() {
-					invocationInput.Policy.Timeout = policy.Timeout()
+					invocationInput.Policy = invocationpolicy.Compile(policy)
 					break
 				}
 			}

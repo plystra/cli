@@ -486,12 +486,9 @@ func validConfigurationFieldPath(value string) bool {
 		_, err := interfaceid.Parse(keys[0])
 		return err == nil
 	}
-	if strings.HasSuffix(value, ".timeout") {
-		keys, ok := configurationPathKeys(strings.TrimSuffix(value, ".timeout"), "interfaces.policies")
-		if ok && len(keys) == 1 {
-			identifier, err := interfaceid.Parse(keys[0])
-			return err == nil && !strings.HasPrefix(identifier.Name(), "kernel.")
-		}
+	if keys, ok := configurationPathKeys(value, "interfaces.policies"); ok && len(keys) == 1 {
+		identifier, err := interfaceid.Parse(keys[0])
+		return err == nil && !strings.HasPrefix(identifier.Name(), "kernel.")
 	}
 	keys, ok := configurationPathKeys(value, "config")
 	if !ok || len(keys) == 0 {
