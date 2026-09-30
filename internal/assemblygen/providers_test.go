@@ -230,11 +230,12 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "providers_gen_test.go"), generatedProvidersRuntimeTest)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "bootstrap_gen_test.go"), generatedBootstrapRuntimeTest)
+	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "transition_test.go"), generatedBootstrapTransitionTest)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	tidyGeneratedModule(t, ctx, applicationRoot)
-	command := exec.CommandContext(ctx, "go", "test", "-mod=readonly", "-count=1", "./...")
+	command := exec.CommandContext(ctx, "go", "test", "-race", "-mod=readonly", "-count=1", "./...")
 	command.Dir = applicationRoot
 	command.Env = isolatedGoEnvironment(os.Environ())
 	output, err := command.CombinedOutput()
@@ -504,6 +505,8 @@ var state struct {
 	sync.Mutex
 	calls  int
 	config Config
+	startHook func(context.Context) error
+	stopHook func(context.Context) error
 }
 
 func New(config Config) *Plugin {
@@ -516,6 +519,10 @@ func New(config Config) *Plugin {
 
 func (p *Plugin) Start(ctx context.Context) error {
 	lifecycleevents.Add("zeta.remote-store.start")
+	state.Lock()
+	hook := state.startHook
+	state.Unlock()
+	if hook != nil { return hook(ctx) }
 	if p.startup == "wait" {
 		<-ctx.Done()
 		return ctx.Err()
@@ -523,9 +530,19 @@ func (p *Plugin) Start(ctx context.Context) error {
 	return nil
 }
 
-func (*Plugin) Stop(context.Context) error {
+func (*Plugin) Stop(ctx context.Context) error {
 	lifecycleevents.Add("zeta.remote-store.stop")
+	state.Lock()
+	hook := state.stopHook
+	state.Unlock()
+	if hook != nil { return hook(ctx) }
 	return nil
+}
+
+func SetHooks(start, stop func(context.Context) error) {
+	state.Lock()
+	defer state.Unlock()
+	state.startHook, state.stopHook = start, stop
 }
 
 func Reset() {
@@ -533,6 +550,7 @@ func Reset() {
 	defer state.Unlock()
 	state.calls = 0
 	state.config = Config{}
+	state.startHook, state.stopHook = nil, nil
 }
 
 func Snapshot() (int, Config) {

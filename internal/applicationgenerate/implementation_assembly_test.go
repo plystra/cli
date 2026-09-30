@@ -555,6 +555,45 @@ func TestInvalidCleanupTimeoutDoesNotConstruct(t *testing.T) {
 		}
 	}
 }
+
+func TestApplicationTransitionOwnsFailedDrain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		probe.Reset()
+		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+		if err != nil { t.Fatal(err) }
+		if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
+		copied := *application
+		entered, release := make(chan struct{}), make(chan struct{})
+		auditimplementation.BlockCalls(entered, release)
+		defer auditimplementation.BlockCalls(nil, nil)
+		defer func() { if release != nil { close(release); synctest.Wait() } }()
+		call := make(chan error, 1)
+		go func() {
+			_, err := application.Interfaces().AppRunV1().Run(context.Background(), runv1.Request{})
+			call <- err
+		}()
+		<-entered
+		before := probe.Events()
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		stopped := make(chan error, 1)
+		go func() { stopped <- application.Stop(ctx) }()
+		synctest.Wait()
+		started := time.Now()
+		if err := copied.Stop(context.Background()); !errors.Is(err, bootstrap.ErrApplicationStop) || !errors.Is(err, kernellifecycle.ErrState) { t.Fatalf("competing Stop = %v", err) }
+		if err := copied.Start(context.Background()); !errors.Is(err, bootstrap.ErrApplicationStart) || !errors.Is(err, kernellifecycle.ErrState) { t.Fatalf("competing Start = %v", err) }
+		if !time.Now().Equal(started) || !reflect.DeepEqual(probe.Events(), before) { t.Fatalf("contention waited or cleaned dependencies: %v", probe.Events()) }
+		if err := <-stopped; !errors.Is(err, kernelinvocation.ErrDrain) || !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("failed drain = %v", err) }
+		if err := <-call; !errors.Is(err, context.Canceled) { t.Fatalf("cancelled target caller = %v", err) }
+		if !reflect.DeepEqual(probe.Events(), before) { t.Fatalf("failed drain cleaned dependencies: %v", probe.Events()) }
+		close(release); release = nil
+		synctest.Wait()
+		if err := copied.Stop(context.Background()); err != nil { t.Fatalf("retry after failed drain = %v", err) }
+		want := append(before, "late:audit", "stop:app", "stop:audit")
+		if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("retry cleanup = %v, want %v", probe.Events(), want) }
+		if err := application.Stop(context.Background()); err != nil || !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("duplicate cleanup = %v, %v", err, probe.Events()) }
+	})
+}
 `)
 
 	compiledTests := exec.CommandContext(t.Context(), "go", "test", "-race", "./...", "-count=1")

@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -73,6 +74,7 @@ type Application struct {
 	providers      applicationassembly.Providers
 	invocations    applicationassembly.Invocations
 	lifecycle      *kernellifecycle.Manager
+	transition     *sync.Mutex
 	startupTimeout time.Duration
 }
 
@@ -114,12 +116,12 @@ func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct static Interface runtime: %w", ErrBootstrap, err)
 	}
-	return &Application{interfaces: interfaces, providers: providers, invocations: invocations, lifecycle: manager, startupTimeout: startupTimeout}, nil
+	return &Application{interfaces: interfaces, providers: providers, invocations: invocations, lifecycle: manager, transition: new(sync.Mutex), startupTimeout: startupTimeout}, nil
 }
 
 // Valid reports whether static Interface construction and lifecycle binding completed.
 func (a *Application) Valid() bool {
-	return a != nil && a.interfaces.Valid() && a.providers.Valid() && a.invocations.Valid() && a.lifecycle != nil && a.startupTimeout > 0
+	return a != nil && a.interfaces.Valid() && a.providers.Valid() && a.invocations.Valid() && a.lifecycle != nil && a.transition != nil && a.startupTimeout > 0
 }
 
 // Interfaces returns the immutable governed typed Interface runtime.
@@ -164,6 +166,7 @@ func (a *Application) State() kernellifecycle.State {
 }
 
 // Start starts static lifecycle-aware Implementations in dependency order within timeouts.startup.
+// Concurrent or reentrant application transitions fail with lifecycle.ErrState, including during rollback.
 func (a *Application) Start(ctx context.Context) error {
 	if !a.Valid() {
 		return fmt.Errorf("%w: %w", ErrApplicationStart, ErrInvalidApplication)
@@ -171,6 +174,10 @@ func (a *Application) Start(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStart, ErrInvalidContext)
 	}
+	if !a.transition.TryLock() {
+		return fmt.Errorf("%w: %w", ErrApplicationStart, kernellifecycle.ErrState)
+	}
+	defer a.transition.Unlock()
 	startupContext, cancel := context.WithTimeout(ctx, a.startupTimeout)
 	defer cancel()
 	if err := a.interfaces.Start(startupContext); err != nil {
@@ -188,6 +195,7 @@ func (a *Application) Start(ctx context.Context) error {
 // Stop drains static Interface calls before lifecycle cleanup, then stops in reverse startup order.
 // The transitional legacy invocation dispatcher is not included in this drain.
 // The startup cleanup timeout bounds the complete attempt, including an earlier caller deadline.
+// Concurrent or reentrant application transitions fail without entering drain or cleanup.
 func (a *Application) Stop(ctx context.Context) error {
 	if !a.Valid() {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, ErrInvalidApplication)
@@ -195,6 +203,10 @@ func (a *Application) Stop(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("%w: %w", ErrApplicationStop, ErrInvalidContext)
 	}
+	if !a.transition.TryLock() {
+		return fmt.Errorf("%w: %w", ErrApplicationStop, kernellifecycle.ErrState)
+	}
+	defer a.transition.Unlock()
 	bounded, cancel := context.WithTimeout(ctx, a.startupTimeout)
 	defer cancel()
 	if err := a.interfaces.Drain(bounded); err != nil {

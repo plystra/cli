@@ -511,6 +511,14 @@ bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
 does not yet drain the transitional legacy Capability dispatcher. Readiness,
 lifecycle-hook dependency access, and whole-runtime drain remain unfinished.
 
+Use the generated application's `Start` and `Stop` to own lifecycle changes.
+They share one non-blocking transition guard across both managers, rollback,
+and bounded drain. A concurrent or reentrant call returns `lifecycle.ErrState`
+without mutating lifecycle state or admission; retry only after the active
+operation returns. Application value copies share the same guard, while
+independent applications remain independent. Lower-level lifecycle calls on
+`Interfaces()` are not coordinated with application transitions.
+
 Generated static calls emit separate Kernel OpenTelemetry histograms for caller
 completion and entered-target termination: `plystra.invocation.caller.duration`
 and `plystra.invocation.target.duration`, in seconds. Counts distinguish logical

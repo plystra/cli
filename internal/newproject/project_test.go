@@ -1417,6 +1417,9 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		t.Fatalf("generated README omits the JavaScript Connect requirement:\n%s", readme)
 	}
 	for _, activationGuidance := range [][]byte{
+		[]byte("Overlapping or reentrant application transitions return lifecycle.ErrState"),
+		[]byte("Application copies share this guard; independent applications do not"),
+		[]byte("Direct lifecycle calls on the lower-level InterfaceRuntime are outside this application guard"),
 		[]byte("`plystra implement` creates a validated compatible candidate"),
 		[]byte("`interfaces.require` set for an internal application root"),
 		[]byte("Discovery alone never creates a root"),

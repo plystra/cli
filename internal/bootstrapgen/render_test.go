@@ -96,6 +96,9 @@ token: {type: secret}
 		"legacyState := a.lifecycle.State()",
 		"staticState == kernellifecycle.StateFailed || legacyState == kernellifecycle.StateFailed",
 		"context.WithTimeout(ctx, a.startupTimeout)",
+		"transition: new(sync.Mutex)",
+		"!a.transition.TryLock()",
+		"defer a.transition.Unlock()",
 		"<redacted-generated-application>",
 		"kernelconfiguration.ErrSecretExposure",
 	} {
@@ -118,6 +121,9 @@ token: {type: secret}
 	}
 	if bytes.Index(generated, []byte("a.interfaces.Drain(bounded)")) >= bytes.Index(generated, []byte("a.lifecycle.Stop(bounded)")) {
 		t.Fatal("static invocation drain must precede legacy dependency cleanup")
+	}
+	if bytes.Count(generated, []byte("!a.transition.TryLock()")) != 2 || bytes.Count(generated, []byte("defer a.transition.Unlock()")) != 2 {
+		t.Fatal("both application lifecycle operations must hold the shared transition guard")
 	}
 	repeatedOptions := options
 	repeatedOptions.ConfigurationSchemas = []bootstrapgen.ConfigurationSchema{
