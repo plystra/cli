@@ -118,6 +118,8 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"cannot contain the reserved one-entry $remove mapping",
 		"nested configuration, collections, or an unadopted Resource fragment",
 		"adopted values still require compiled-type validation",
+		"Resource export syntax is checked even without adoption",
+		"Resource adoption remains unsupported",
 	} {
 		if !bytes.Contains(configuration, []byte(phrase)) {
 			t.Fatalf("configuration guidance omits %q:\n%s", phrase, configuration)

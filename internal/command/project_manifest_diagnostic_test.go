@@ -58,6 +58,23 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
 		},
 		{
+			name: "malformed-resource-in-current-export",
+			setup: func(t *testing.T, parent string) string {
+				applicationRoot := filepath.Join(parent, "application")
+				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), "module example.com/application\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: {exports: {defaults: {resources: {instances: {database: {config: {private-key: 1, private-key: 2}}}}}}}\n")
+				return applicationRoot
+			},
+			wantSource: "Source: example.com/application:plystra.yaml:1:1 (project-marker)",
+		},
+		{
+			name: "malformed-resource-in-unadopted-dependency-export",
+			setup: func(t *testing.T, parent string) string {
+				return writeManifestDiagnosticDependencyProject(t, parent, "composition: {exports: {defaults: {resources: {bind: {private-key: private-value}}}}}\n", false)
+			},
+			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
+		},
+		{
 			name: "unsafe-current-marker",
 			setup: func(t *testing.T, parent string) string {
 				applicationRoot := filepath.Join(parent, "application")
@@ -94,7 +111,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 					if !strings.HasSuffix(stderr, "Diagnostic: "+diagnosticcode.ProjectManifestInvalid+"\n") || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
 						t.Fatalf("%v diagnostic envelope = %q", command.arguments, stderr)
 					}
-					for _, privatePath := range []string{parent, filepath.ToSlash(parent), applicationRoot, filepath.ToSlash(applicationRoot), "private-key"} {
+					for _, privatePath := range []string{parent, filepath.ToSlash(parent), applicationRoot, filepath.ToSlash(applicationRoot), "private-key", "private-value"} {
 						if strings.Contains(stderr, privatePath) {
 							t.Fatalf("%v exposed private path %q: %q", command.arguments, privatePath, stderr)
 						}

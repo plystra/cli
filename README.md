@@ -396,9 +396,9 @@ dependency remains unscanned.
 
 Only exact `{module, export}` identities in the selected current Project's
 `composition.adopt` set activate reusable configuration. This installed CLI
-inventories a Resource-bearing export and its currently supported `interfaces`
-and `config` fragment without rejecting or activating it while it remains
-unadopted. Exact adoption of that export fails before any portion contributes,
+inventories a syntactically valid Resource-bearing export and its currently
+supported `interfaces` and `config` fragment without activating it while it
+remains unadopted. Exact adoption fails before any portion contributes,
 because Resource composition is not yet supported; the CLI never partially
 activates `interfaces` or `config` while dropping `resources`. Adopted supported
 exports form one unordered lower-precedence layer. Identical declarations
@@ -415,6 +415,16 @@ The reserved one-entry `$remove` mapping is rejected anywhere inside an export,
 including nested configuration values, collections, and unadopted Resource
 fragments. This does not reinterpret ordinary null, empty, or zero values as
 removal; their typed validation still applies when the export is adopted.
+
+Resource export syntax is validated even without adoption. The closed shape is
+`resources.instances.<name>.{use,config}` and
+`resources.bind.{implementations,instances}.<consumer>.<parameter>`. Instance
+names use dot-separated lower-kebab segments, at most 128 ASCII bytes. Authored
+`use` values and Implementation consumers are exact constructor symbols;
+binding parameters are nonblank Go identifiers and binding values are instance
+names. Configuration objects and structural containers require mappings with
+unique string keys. Provider types, required fields, and target existence still
+need composition and resolution; this syntax check does not enable adoption.
 
 Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `null` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
 

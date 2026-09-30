@@ -242,6 +242,106 @@ func TestResolveAdoptedExportsRejectsUnsupportedResourceFragmentOnlyAtActivation
 	}
 }
 
+func TestParseExportsRejectsMalformedResourceDeclarations(t *testing.T) {
+	t.Parallel()
+	for _, resource := range []string{
+		`null`,
+		`[]`,
+		`{private-key: private-value}`,
+		`{instances: {}, instances: {}}`,
+		`{instances: null}`,
+		`{instances: []}`,
+		`{instances: {1: {}}}`,
+		`{instances: {Database: {}}}`,
+		`{instances: {database.1: {}}}`,
+		`{instances: {database..primary: {}}}`,
+		`{instances: {database--primary: {}}}`,
+		`{instances: {database-: {}}}`,
+		`{instances: {` + strings.Repeat("a", 129) + `: {}}}`,
+		`{instances: {database: {}, database: {}}}`,
+		`{instances: {database: null}}`,
+		`{instances: {database: []}}`,
+		`{instances: {database: {private-key: private-value}}}`,
+		`{instances: {database: {use: private-value}}}`,
+		`{instances: {database: {use: null}}}`,
+		`{instances: {database: {use: example.com/db.new}}}`,
+		`{instances: {database: {config: null}}}`,
+		`{instances: {database: {config: []}}}`,
+		`{instances: {database: {config: {1: private-value}}}}`,
+		`{instances: {database: {config: {private-key: 1, private-key: 2}}}}`,
+		`{bind: null}`,
+		`{bind: []}`,
+		`{bind: {example.com/service.New: {database: primary}}}`,
+		`{bind: {implementations: null}}`,
+		`{bind: {instances: []}}`,
+		`{bind: {implementations: {private-key: {database: primary}}}}`,
+		`{bind: {instances: {Bad: {database: primary}}}}`,
+		`{bind: {instances: {primary: null}}}`,
+		`{bind: {instances: {primary: {_ : secondary}}}}`,
+		`{bind: {instances: {primary: {if: secondary}}}}`,
+		`{bind: {instances: {primary: {private-key: private-value}}}}`,
+		`{bind: {instances: {primary: {database: null}}}}`,
+		`{bind: {instances: {primary: {database: 1}}}}`,
+		`{bind: {instances: {primary: {database: Database}}}}`,
+		`{bind: {instances: {primary: {database: {instance: secondary}}}}}`,
+		`{bind: {instances: {primary: {database: secondary, database: third}}}}`,
+	} {
+		for _, parse := range []struct {
+			name string
+			run  func([]byte) (applicationmeta.Manifest, error)
+		}{
+			{name: "current", run: applicationmeta.Parse},
+			{name: "dependency", run: func(data []byte) (applicationmeta.Manifest, error) {
+				return applicationmeta.ParseExportInventorySource("dependency/plystra.yaml", data)
+			}},
+		} {
+			t.Run(parse.name+"/"+resource, func(t *testing.T) {
+				data := []byte("composition: {exports: {defaults: {resources: " + resource + "}}}\n")
+				manifest, err := parse.run(data)
+				if !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), `composition.exports["defaults"].resources`) {
+					t.Fatalf("Parse Resource export = %#v, %v", manifest, err)
+				}
+				if len(manifest.Exports()) != 0 || strings.Contains(err.Error(), "private-key") || strings.Contains(err.Error(), "private-value") {
+					t.Fatalf("invalid Resource export retained declarations or exposed private data: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestParseExportsPreservesInertResourceSyntaxWithoutResolvingIt(t *testing.T) {
+	t.Parallel()
+	for _, resource := range []string{
+		`{}`,
+		`{instances: {}}`,
+		`{instances: {database: {}}}`,
+		`{instances: {database: {config: {pool: 20}}}}`,
+		`{instances: {` + strings.Repeat("a", 128) + `: {use: example.com/db.New}}}`,
+		`{instances: {database-1.primary: {use: example.com/db.New, config: {url: {env: DATABASE_URL}, pool: 0, options: null, labels: {}, replicas: []}}}}`,
+		`{bind: {implementations: {}, instances: {}}}`,
+		`{bind: {implementations: {example.com/service.New: {database: database-1.primary, Database: database.secondary}}, instances: {cache: {upstream: database.primary}}}}`,
+		`{bind: {instances: {cache: {"\u03b4": database}}}}`,
+	} {
+		t.Run(resource, func(t *testing.T) {
+			data := []byte("composition: {exports: {defaults: {resources: " + resource + "}}}\n")
+			for _, parse := range []func([]byte) (applicationmeta.Manifest, error){
+				applicationmeta.Parse,
+				func(data []byte) (applicationmeta.Manifest, error) {
+					return applicationmeta.ParseExportInventorySource("dependency/plystra.yaml", data)
+				},
+			} {
+				manifest, err := parse(data)
+				if err != nil || len(manifest.Exports()) != 1 {
+					t.Fatalf("Parse inert Resource export = %#v, %v", manifest, err)
+				}
+				if len(manifest.InterfaceRequirements()) != 0 || len(manifest.Configurations()) != 0 || len(manifest.ExportAdoptions()) != 0 {
+					t.Fatalf("inert Resource export contributed active declarations: %#v", manifest)
+				}
+			}
+		})
+	}
+}
+
 func TestResolveAdoptedExportsKeepsDependencyRootsInert(t *testing.T) {
 	t.Parallel()
 

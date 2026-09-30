@@ -4,6 +4,8 @@ Use one selected current-Project configuration mode consistently.
 
 Reusable exports have no lower layer and cannot contain the reserved one-entry $remove mapping, even inside nested configuration, collections, or an unadopted Resource fragment. This does not turn ordinary null, empty, or zero values into removals; adopted values still require compiled-type validation. Correct the export in the owning Project marker reported by PLYSTRA_PROJECT_MANIFEST_INVALID, then rerun the same generation or check command.
 
+Resource export syntax is checked even without adoption: instances contain only use and config; bind contains only implementations and instances. Instance names use dot-separated lower-kebab segments within 128 ASCII bytes, constructors use exact symbols, and binding leaves map nonblank Go parameter identifiers to instance names. Structural and configuration mappings need unique string keys. Resource adoption remains unsupported; syntax validation does not resolve provider types, required fields, or binding targets.
+
 ## Select the document
 
 - No selector: root `plystra.yaml` only, including its explicit `composition.adopt` set.

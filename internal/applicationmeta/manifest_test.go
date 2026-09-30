@@ -496,6 +496,8 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"{}\n",
 		"composition: {exports: {defaults: {config: {example.com/acme/service.New: {settings: [{$remove: true}]}}}}}\n",
 		"composition: {exports: {defaults: {resources: {instances: {database: {$remove: true}}}}}}\n",
+		"composition: {exports: {defaults: {resources: {instances: {database: {use: example.com/db.New, config: {url: {env: DATABASE_URL}}}}, bind: {instances: {cache: {upstream: database}}}}}}}\n",
+		"composition: {exports: {defaults: {resources: {bind: {example.com/service.New: {database: primary}}}}}}\n",
 		"composition: {exports: {defaults: {config: {example.com/acme/service.New: {settings: null, label: '$remove'}}}}}\n",
 		"http: {address: \":8080\", expose: {kernel.health/v1: {transport: connect}, order.create/v1: {transport: connect}}}\n",
 		"http: {}\n",

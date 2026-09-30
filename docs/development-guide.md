@@ -905,10 +905,22 @@ For Project creation, the repeatable
 after validating that every named export exists in the resolved template.
 For an existing Project, edit the selected current-Project document and then
 run `plystra generate` with the same selector. This installed CLI inventories a
-Resource-bearing export and its currently supported `interfaces` and `config`
-fragment while the export remains unadopted. Exact adoption fails before any
+syntactically valid Resource-bearing export and its currently supported
+`interfaces` and `config` fragment while the export remains unadopted. Exact adoption fails before any
 portion activates because Resource composition is not yet supported; the CLI
 does not apply the supported fragment while silently dropping `resources`.
+
+Resource export syntax uses only `instances` and `bind`. Instance entries have
+only `use` and `config`; an authored `use` is an exact constructor symbol and
+`config` is a mapping. Instance names are at most 128 ASCII bytes in
+dot-separated lower-kebab segments. Bindings use exactly the `implementations`
+or `instances` namespace, followed by an exact constructor or instance name,
+then the case-sensitive nonblank Go parameter identifier, then an instance-name
+value. Structural mappings and configuration objects reject duplicate and
+non-string keys. Malformed syntax is rejected even in unadopted exports, with
+value-redacted Project-marker diagnostics. Missing fields and cross-fragment
+references are left for composition and typed resolution, not inferred during
+inert inventory parsing.
 
 Adopted exports compose as one unordered lower-precedence layer. Identical
 declarations deduplicate, incompatible declarations fail with every selected

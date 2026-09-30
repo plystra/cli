@@ -211,6 +211,9 @@ func parseConfigurationExports(node *yaml.Node, source string) ([]ConfigurationE
 			switch key {
 			case "interfaces", "config":
 			case "resources":
+				if err := validateExportResourceSyntax(fragmentValues[key], path+".resources"); err != nil {
+					return nil, err
+				}
 				unsupportedResources = true
 			default:
 				return nil, invalid("%s may contain only interfaces, config, and resources", path)
