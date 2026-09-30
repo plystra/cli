@@ -410,6 +410,12 @@ sorting never choose a winner. Expose an imported Interface in the selected
 current Project; dependency exposure creates no consumer root, transport, or
 SDK surface.
 
+An export has no lower-precedence layer and cannot contain removal markers.
+The reserved one-entry `$remove` mapping is rejected anywhere inside an export,
+including nested configuration values, collections, and unadopted Resource
+fragments. This does not reinterpret ordinary null, empty, or zero values as
+removal; their typed validation still applies when the export is adopted.
+
 Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `null` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
 
 `plystra generate --config deploy/customer-a.yaml` instead uses that one complete

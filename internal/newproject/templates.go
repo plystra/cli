@@ -89,6 +89,8 @@ A well-formed ` + "`capability expose`" + ` target absent from the selected visi
 
 A template's top-level requirements and Provider choices are consumer-inert. Only explicitly adopted exports enter the staged application model; ordinary resolution rejects any ambiguity introduced by those selected exports and leaves no target Project to repair.
 
+Reusable exports have no lower layer and cannot contain the reserved one-entry $remove mapping, even inside nested configuration, collections, or an unadopted Resource fragment. Ordinary null, empty, and zero values are not removals; adopted values still require compiled-type validation. Correct the export in the owning Project marker reported by PLYSTRA_PROJECT_MANIFEST_INVALID, then rerun the same generation or check command.
+
 The template's complete effective graph must contain only public Go Modules. Creation rejects every direct or transitive module matched by the effective ` + "`GOPRIVATE`" + ` setting, reports its selected ` + "`path@version`" + `, and leaves no target Project. Publish or replace a genuinely private dependency before publishing the template, or correct an overbroad Go privacy setting before retrying.
 
 Every dependency Plystra Project in the template graph must be portable without a relative Go Module ` + "`replace`" + `. Creation reports each remaining directive with stable ` + "`module@version/go.mod`" + ` provenance and leaves no target Project. Publish the referenced module versions and remove the relative replacements before publishing a corrected template.

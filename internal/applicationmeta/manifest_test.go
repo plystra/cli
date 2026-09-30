@@ -494,6 +494,9 @@ func TestParseRejectsOversizedManifest(t *testing.T) {
 func FuzzParseApplicationManifest(f *testing.F) {
 	for _, seed := range []string{
 		"{}\n",
+		"composition: {exports: {defaults: {config: {example.com/acme/service.New: {settings: [{$remove: true}]}}}}}\n",
+		"composition: {exports: {defaults: {resources: {instances: {database: {$remove: true}}}}}}\n",
+		"composition: {exports: {defaults: {config: {example.com/acme/service.New: {settings: null, label: '$remove'}}}}}\n",
 		"http: {address: \":8080\", expose: {kernel.health/v1: {transport: connect}, order.create/v1: {transport: connect}}}\n",
 		"http: {}\n",
 		"http: {}\n",

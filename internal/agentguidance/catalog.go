@@ -423,6 +423,8 @@ const configurationAndSecretsTask = `# Configuration and Secrets
 
 Use one selected current-Project configuration mode consistently.
 
+Reusable exports have no lower layer and cannot contain the reserved one-entry $remove mapping, even inside nested configuration, collections, or an unadopted Resource fragment. This does not turn ordinary null, empty, or zero values into removals; adopted values still require compiled-type validation. Correct the export in the owning Project marker reported by PLYSTRA_PROJECT_MANIFEST_INVALID, then rerun the same generation or check command.
+
 ## Select the document
 
 - No selector: root ` + "`" + `plystra.yaml` + "`" + ` only, including its explicit ` + "`" + `composition.adopt` + "`" + ` set.

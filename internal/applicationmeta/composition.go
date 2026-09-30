@@ -203,6 +203,9 @@ func parseConfigurationExports(node *yaml.Node, source string) ([]ConfigurationE
 		if err != nil {
 			return nil, err
 		}
+		if exportContainsRemovalMapping(values[name]) {
+			return nil, invalid("%s cannot contain reserved $remove mappings", path)
+		}
 		unsupportedResources := false
 		for _, key := range sortedNodeKeys(fragmentValues) {
 			switch key {
@@ -244,6 +247,23 @@ func parseConfigurationExports(node *yaml.Node, source string) ([]ConfigurationE
 		})
 	}
 	return result, nil
+}
+
+// Inspect raw values before opaque configuration and Resource nodes are lowered away.
+func exportContainsRemovalMapping(root *yaml.Node) bool {
+	stack := []*yaml.Node{root}
+	for len(stack) > 0 {
+		last := len(stack) - 1
+		node := stack[last]
+		stack = stack[:last]
+		if node.Kind == yaml.MappingNode && len(node.Content) == 2 {
+			if key, err := strictString(node.Content[0]); err == nil && key == "$remove" {
+				return true
+			}
+		}
+		stack = append(stack, node.Content...)
+	}
+	return false
 }
 
 func manifestContainsRemoval(manifest Manifest) bool {

@@ -883,6 +883,14 @@ composition:
           - email.send/v1
 ```
 
+Exports have no lower layer to remove from. A reserved one-entry `$remove`
+mapping anywhere in the fragment is invalid, including inside nested
+configuration values, collections, or an unadopted Resource fragment. Parsing
+does not reinterpret ordinary null, empty, or zero values as removal; adopted
+values still require validation against their compiled types. Public generation
+and check commands report the owning Project marker without exposing nested
+configuration keys or values, and leave the rejected Project unchanged.
+
 The selected current Project activates that exact module/export identity:
 
 ```yaml

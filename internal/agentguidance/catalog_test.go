@@ -113,6 +113,16 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 			t.Fatalf("Interface guidance omits %q:\n%s", phrase, interfaces)
 		}
 	}
+	configuration := byPath[Root+"/tasks/configuration-and-secrets.md"]
+	for _, phrase := range []string{
+		"cannot contain the reserved one-entry $remove mapping",
+		"nested configuration, collections, or an unadopted Resource fragment",
+		"adopted values still require compiled-type validation",
+	} {
+		if !bytes.Contains(configuration, []byte(phrase)) {
+			t.Fatalf("configuration guidance omits %q:\n%s", phrase, configuration)
+		}
+	}
 	diagnostics := byPath[Root+"/tasks/diagnostics-and-recovery.md"]
 	for _, phrase := range []string{
 		"plystra inspect capabilities --format json",
