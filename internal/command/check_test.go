@@ -22,7 +22,7 @@ go 1.26
 
 require (
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -262,7 +262,7 @@ go 1.26
 require (
 	example.com/platform v1.0.0
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -311,7 +311,7 @@ func TestRunCheckReportsGoTestFailureWithoutMutation(t *testing.T) {
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := testkernel.Root(t)
-	goMod := fmt.Sprintf("module example.com/acme/failing-check\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.4 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/kernel => %s\n", filepath.ToSlash(kernelRoot))
+	goMod := fmt.Sprintf("module example.com/acme/failing-check\n\ngo 1.26\n\nrequire (\n\tgithub.com/plystra/kernel v0.0.0\n\tgo.yaml.in/yaml/v3 v3.0.5 // indirect\n\tgolang.org/x/mod v0.38.0 // indirect\n)\n\nreplace github.com/plystra/kernel => %s\n", filepath.ToSlash(kernelRoot))
 	writeCommandFile(t, filepath.Join(root, "go.mod"), goMod)
 	goSum, err := os.ReadFile(filepath.Join(cliRoot, "go.sum"))
 	if err != nil {

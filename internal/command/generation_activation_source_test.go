@@ -714,7 +714,7 @@ func writeGenerationDependencyCycleProject(t *testing.T) string {
 	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+`
 require (
 	github.com/plystra/cli v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -779,7 +779,7 @@ func writeGenerationContributionCycleProject(t *testing.T) string {
 	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+`
 require (
 	github.com/plystra/cli v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -852,7 +852,7 @@ func writeGenerationRepeatedStateProject(t *testing.T) string {
 	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+`
 require (
 	github.com/plystra/cli v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -981,7 +981,7 @@ func writeGenerationCompileFailureProject(t *testing.T) string {
 	writeCommandFile(t, filepath.Join(root, "go.mod"), string(goMod)+`
 require (
 	github.com/plystra/cli v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 

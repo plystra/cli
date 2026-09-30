@@ -1141,7 +1141,7 @@ go 1.26
 require (
 	github.com/plystra/cli v0.0.0
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 

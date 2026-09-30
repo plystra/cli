@@ -235,7 +235,7 @@ func TestCreateRejectsUnexpectedGeneratedOutputWithoutMutation(t *testing.T) {
 func createBuildableAuthoringModule(t *testing.T, modulePath, catalogRoot string) string {
 	t.Helper()
 	testmodulecache.Ensure(t,
-		"go.yaml.in/yaml/v3@v3.0.4",
+		"go.yaml.in/yaml/v3@v3.0.5",
 		"golang.org/x/mod@v0.38.0",
 		"golang.org/x/tools@v0.47.0",
 		"gopkg.in/check.v1@v0.0.0-20161208181325-20d25e280405",

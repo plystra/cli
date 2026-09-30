@@ -271,7 +271,7 @@ replace github.com/plystra/kernel => %s
 	}
 	for _, requirement := range [][]byte{
 		[]byte("example.com/catalog v0.0.0"),
-		[]byte("go.yaml.in/yaml/v3 v3.0.4"),
+		[]byte("go.yaml.in/yaml/v3 v3.0.5"),
 	} {
 		if !bytes.Contains(normalizedMod, requirement) {
 			t.Fatalf("normalized go.mod omits %q:\n%s", requirement, normalizedMod)
@@ -452,7 +452,7 @@ func createModule(t *testing.T, modulePath string) string {
 		t.Fatalf("resolve CLI root: %v", err)
 	}
 	testmodulecache.Ensure(t,
-		"go.yaml.in/yaml/v3@v3.0.4",
+		"go.yaml.in/yaml/v3@v3.0.5",
 		"golang.org/x/mod@v0.38.0",
 		"golang.org/x/tools@v0.47.0",
 		"gopkg.in/check.v1@v0.0.0-20161208181325-20d25e280405",
@@ -464,7 +464,7 @@ go 1.26
 
 require (
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 

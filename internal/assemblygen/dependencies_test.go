@@ -98,7 +98,7 @@ go 1.26
 require (
 	%s v1.0.0
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -240,6 +240,7 @@ replace github.com/plystra/kernel => %s
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	tidyGeneratedModule(t, ctx, applicationRoot)
 	command := exec.CommandContext(ctx, "go", "test", "-mod=readonly", "-count=1", "./...")
 	command.Dir = applicationRoot
 	command.Env = isolatedGoEnvironment(os.Environ())

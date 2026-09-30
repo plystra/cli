@@ -3425,7 +3425,7 @@ go 1.26
 require (
 	github.com/plystra/cli v0.0.0
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -3868,7 +3868,14 @@ func writeApplicationModuleDefinition(t testing.TB, root, modulePath string) {
 	kernelRoot := testkernel.Root(t)
 	extra := fmt.Sprintf(`require (
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4
+	go.yaml.in/yaml/v3 v3.0.5
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/go-logr/logr v1.4.4 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/otel v1.46.0 // indirect
+	go.opentelemetry.io/otel/metric v1.46.0 // indirect
+	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 )
 

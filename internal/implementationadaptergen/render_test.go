@@ -219,7 +219,13 @@ func (*service) Create(_ context.Context, request contract.Request) (contract.Re
 	writeAdapterBytes(t, root, proxies[0].Path(), proxies[0].Data())
 	writeAdapterFile(t, root, "generated/go/adapters/implementations/order/create/v1/adapter_gen_test.go", generatedAdapterRuntimeTest)
 
-	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
+	command := exec.CommandContext(t.Context(), "go", "mod", "tidy")
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOFLAGS=", "GOWORK=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("prepare generated adapter module: %v\n%s", err, output)
+	}
+	command = exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
 	command.Dir = root
 	command.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
 	output, err := command.CombinedOutput()

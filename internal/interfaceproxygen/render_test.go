@@ -170,7 +170,13 @@ replace github.com/plystra/kernel => %s
 	writeProxyBytes(t, root, files[0].Path(), files[0].Data())
 	writeProxyFile(t, root, "generated/go/proxies/order/create/v1/proxy_gen_test.go", tests)
 
-	command := exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
+	command := exec.CommandContext(t.Context(), "go", "mod", "tidy")
+	command.Dir = root
+	command.Env = append(os.Environ(), "GOFLAGS=", "GOWORK=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("prepare generated proxy module: %v\n%s", err, output)
+	}
+	command = exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
 	command.Dir = root
 	command.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
 	output, err := command.CombinedOutput()

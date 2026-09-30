@@ -7,11 +7,11 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "compatibility:interface-documentation",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -20,10 +20,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -34,11 +34,11 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "compatibility:interface-javascript:sha256:ac1559747ce3d5003afe65d941bd111c7fc5c7aac552210707af224f6f9cff57",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -47,10 +47,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -61,11 +61,11 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "compatibility:interface-metadata:sha256:bb4211882f90e5a9da55f240c4376f912bdb238ba6611bb36587afa4461ee873",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -74,10 +74,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -88,11 +88,11 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "compatibility:interface-transport:sha256:a04f0f29744f2523288b8367997e05cde4756c4d50ce70ffd49e2329e87e6a8c",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -101,10 +101,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -115,11 +115,11 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "compatibility:interface-shape:sha256:fb3f135d4d0f3d717cc46c840fcdd0381b2f2d4cc87c0b9614e2ec20b17625a4",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -128,10 +128,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -142,10 +142,10 @@
       "generator": "plystra.application-entrypoint/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -154,10 +154,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -168,10 +168,10 @@
       "generator": "plystra.kernel-assembly-compatibility/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -180,24 +180,24 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
     },
     {
       "path": "generated/go/assembly/interfaces_gen.go",
-      "sha256": "sha256:058eca20e6a178f02cfb55191a658ec553a2b29bd582628e2216d20f3561bfa4",
+      "sha256": "sha256:ffdddeeb125c824037eb95f66b7673b72449f0de001a4e6343fc4ca1307ace6a",
       "generator": "plystra.implementation-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -206,24 +206,24 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
     },
     {
       "path": "generated/go/assembly/invocations_gen.go",
-      "sha256": "sha256:8bdf3d28cbdd1a3d58a34467164310bfb61ec54c245af04a20b465cbed6b01b3",
+      "sha256": "sha256:330cb539fd40c8d317105567f202b021b5047850ecd87921d7fe3524563a29ed",
       "generator": "plystra.invocation-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -232,10 +232,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -246,10 +246,10 @@
       "generator": "plystra.provider-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -258,24 +258,24 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:01889ed6ed2dd4c837a42ff86b124482715a2b584a44bf5262c6589e5e1ca804",
+      "sha256": "sha256:c0567d9dc984875c0871178a98f92cfb11fd2b094a7c68108aa042ba1aa27eee",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -284,26 +284,26 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:dd4367e99c654d6fc138fc7a9a7d9ab8b3159f705b50f5d54a731bc59b15e602",
+      "sha256": "sha256:b5505920e4e894d92a78ec3b2ad9b628b331a359cd4a427f574e65bbe4a9d05a",
       "generator": "plystra.application-manifest/v1",
       "output_kind": "application-manifest",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "configuration-selection:default:plystra.yaml:sha256:ca916098173c7977e88b038f1b39a79477ef1d451f3504d832ead88d1829375c",
         "dependency-composition:sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -312,10 +312,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -326,10 +326,10 @@
       "generator": "plystra.protobuf-descriptor/v1",
       "output_kind": "protobuf-descriptor",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
@@ -338,10 +338,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -352,10 +352,10 @@
       "generator": "plystra.proto-wire-map/v5",
       "output_kind": "wire-map",
       "input_record_ids": [
-        "application-model:sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf",
+        "application-model:sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737",
+        "interface-provenance:sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "protobuf-wire-map:sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
@@ -365,10 +365,10 @@
         "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-        "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"
@@ -415,7 +415,7 @@
       "dormant_constructor_configurations": [],
       "dormant_constructor_configurations_digest": "sha256:2c55f3bad8a359bcfc8f72af010d653ec12eba9785a3e73b7b92b988cb80ca41",
       "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
-      "application_model_digest": "sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf"
+      "application_model_digest": "sha256:7145a2959519349b57c45c1bbfa9aa9adf33eb9b87eeff85a8b71eccd9473ba1"
     },
     "interface_provenance": {
       "schema": "plystra.interface-provenance/v3",
@@ -428,9 +428,9 @@
             "id": "kernel.health/v1",
             "package_path": "github.com/plystra/kernel/interfaces/kernel/health/v1",
             "module_path": "github.com/plystra/kernel",
-            "module_version": "v0.0.0-20260928160103-31e44ff1a5b6",
-            "directive_source": "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.go:11:1",
-            "metadata_source": "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/health/v1/interface.yaml",
+            "module_version": "v0.0.0-20260930101550-2e6c78e3ad6d",
+            "directive_source": "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.go:11:1",
+            "metadata_source": "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/health/v1/interface.yaml",
             "shape_digest": "sha256:4b1d718eaa79860b44f83d7c9119057f16236c4919e535db8395b8ba6ea0dc81",
             "contract_digest": "sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
             "documentation_digest": "sha256:4a2825ae70f4f485be68e62ab7fdbf18075afa194e434967637bf164fae3b325",
@@ -470,9 +470,9 @@
             "id": "kernel.info/v1",
             "package_path": "github.com/plystra/kernel/interfaces/kernel/info/v1",
             "module_path": "github.com/plystra/kernel",
-            "module_version": "v0.0.0-20260928160103-31e44ff1a5b6",
-            "directive_source": "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.go:11:1",
-            "metadata_source": "github.com/plystra/kernel@v0.0.0-20260928160103-31e44ff1a5b6/interfaces/kernel/info/v1/interface.yaml",
+            "module_version": "v0.0.0-20260930101550-2e6c78e3ad6d",
+            "directive_source": "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.go:11:1",
+            "metadata_source": "github.com/plystra/kernel@v0.0.0-20260930101550-2e6c78e3ad6d/interfaces/kernel/info/v1/interface.yaml",
             "shape_digest": "sha256:39a2d3c781b168b60e5466acd672e6cd0cf4d7c29038d0f83f6ca5c859816340",
             "contract_digest": "sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
             "documentation_digest": "sha256:69a1583352beb2398c1049435e5c460428fde2e2d3c9a09b9d8b2140887bc886",
@@ -508,7 +508,7 @@
           "mappings": {}
         }
       ],
-      "digest": "sha256:7737bdd3f9b5d141406211fe9432d6b8ad1bc10b4386d3289842b414de60e737"
+      "digest": "sha256:b58b5ad636c709d51d6086ffc4c3b8261cb26398f54ecfd0047fe4e541a29971"
     },
     "transport_toolchain": {
       "schema": "plystra.transport-toolchain/v2",

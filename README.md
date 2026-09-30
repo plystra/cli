@@ -65,8 +65,21 @@ cleanup. Drain and cleanup share the construction/startup cleanup timeout and
 any earlier caller deadline. Failed drain keeps dependencies live for a fresh
 bounded Stop retry. This guarantee covers static Interface attempts; bootstrap
 does not yet drain the transitional legacy Capability dispatcher. Readiness,
-lifecycle-hook dependency access, retries, and separate telemetry
-remain unfinished.
+lifecycle-hook dependency access, and whole-runtime drain remain unfinished.
+
+Generated static calls emit separate Kernel OpenTelemetry histograms for caller
+completion and entered-target termination: `plystra.invocation.caller.duration`
+and `plystra.invocation.target.duration`, in seconds. Counts distinguish logical
+calls from retry attempts; late targets remain tracked through response
+processing and never rewrite the caller outcome. Labels contain only the exact
+binding, safe outcome/code, completion classification, and target lateness.
+Request values, opaque context data, arbitrary errors, and dynamic identities
+never become labels. Configure the standard global MeterProvider before
+bootstrap and shut it down only after successful application drain. Without an
+installed SDK, metrics are no-ops; generated code configures no exporter or
+extra telemetry queue. Nested calls remain independent, and Connect adds no
+invocation or retry telemetry layer. Governed spans and broader telemetry remain
+incomplete.
 
 Each exact binding admits 64 target attempts with no queue. Capacity remains
 held through actual target termination and response copying, including after

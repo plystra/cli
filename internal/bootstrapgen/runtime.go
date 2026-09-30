@@ -18,7 +18,7 @@ const (
 	// for typed current-Project environment composition.
 	YAMLModulePath = "go.yaml.in/yaml/v3"
 	// YAMLModuleVersion is the minimum supported generated-bootstrap YAML runtime.
-	YAMLModuleVersion = "v3.0.4"
+	YAMLModuleVersion = "v3.0.5"
 )
 
 // ConfigurationSchema identifies one selected Plugin configuration declaration

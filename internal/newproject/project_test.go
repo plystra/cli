@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -2289,8 +2290,24 @@ func TestCreatePreservesExistingProject(t *testing.T) {
 func createKernelProxy(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "proxy")
-	copyCachedProxyModule(t, root, "github.com/plystra/kernel", version.KernelVersion)
-	copyCachedProxyModule(t, root, "golang.org/x/mod", "v0.38.0")
+	graph, err := gocommand.Output(t.Context(), gocommand.Options{
+		Directory: filepath.Join("..", ".."), Environment: setEnvironmentValue(os.Environ(), "GOWORK", "off"),
+	}, "list", "-m", "-json", "-mod=readonly", "all")
+	if err != nil {
+		t.Fatalf("resolve fixture dependency graph: %v", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(graph))
+	for {
+		var dependency struct{ Path, Version string }
+		if err := decoder.Decode(&dependency); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			t.Fatalf("decode fixture dependency graph: %v", err)
+		}
+		if dependency.Version != "" {
+			copyCachedProxyModule(t, root, dependency.Path, dependency.Version)
+		}
+	}
 	for _, dependency := range []struct {
 		path    string
 		version string
@@ -2301,7 +2318,8 @@ func createKernelProxy(t *testing.T) string {
 		{path: "github.com/google/go-cmp", version: "v0.7.0"},
 		{path: "golang.org/x/tools", version: "v0.47.0"},
 		{path: bootstrapgen.YAMLModulePath, version: bootstrapgen.YAMLModuleVersion},
-		{path: "gopkg.in/check.v1", version: "v0.0.0-20161208181325-20d25e280405"},
+		// stdr's older module graph also reads its superseded logr requirement.
+		{path: "github.com/go-logr/logr", version: "v1.2.2"},
 	} {
 		copyCachedProxyModule(t, root, dependency.path, dependency.version)
 	}
@@ -2485,9 +2503,16 @@ func assertModuleState(t *testing.T, root, modulePath string) {
 		indirect bool
 	}
 	want := map[string]requirementExpectation{
-		"github.com/plystra/kernel": {version: version.KernelVersion},
-		bootstrapgen.YAMLModulePath: {version: bootstrapgen.YAMLModuleVersion},
-		"golang.org/x/mod":          {version: "v0.38.0", indirect: true},
+		"github.com/plystra/kernel":       {version: version.KernelVersion},
+		bootstrapgen.YAMLModulePath:       {version: bootstrapgen.YAMLModuleVersion},
+		"golang.org/x/mod":                {version: "v0.38.0", indirect: true},
+		"github.com/cespare/xxhash/v2":    {version: "v2.3.0", indirect: true},
+		"github.com/go-logr/logr":         {version: "v1.4.4", indirect: true},
+		"github.com/go-logr/stdr":         {version: "v1.2.2", indirect: true},
+		"go.opentelemetry.io/auto/sdk":    {version: "v1.2.1", indirect: true},
+		"go.opentelemetry.io/otel":        {version: "v1.46.0", indirect: true},
+		"go.opentelemetry.io/otel/metric": {version: "v1.46.0", indirect: true},
+		"go.opentelemetry.io/otel/trace":  {version: "v1.46.0", indirect: true},
 	}
 	if len(parsed.Require) != len(want) {
 		t.Fatalf("requirements = %#v", parsed.Require)

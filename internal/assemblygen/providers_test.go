@@ -134,7 +134,7 @@ go 1.26
 require (
 	example.com/assemblydependency v0.0.0
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -233,6 +233,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	tidyGeneratedModule(t, ctx, applicationRoot)
 	command := exec.CommandContext(ctx, "go", "test", "-mod=readonly", "-count=1", "./...")
 	command.Dir = applicationRoot
 	command.Env = isolatedGoEnvironment(os.Environ())
@@ -253,7 +254,7 @@ go 1.26
 
 require (
 	github.com/plystra/kernel v0.0.0
-	go.yaml.in/yaml/v3 v3.0.4
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -301,12 +302,22 @@ replace github.com/plystra/kernel => %s
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	tidyGeneratedModule(t, ctx, applicationRoot)
 	command := exec.CommandContext(ctx, "go", "test", "-mod=readonly", "-count=1", "./...")
 	command.Dir = applicationRoot
 	command.Env = isolatedGoEnvironment(os.Environ())
 	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generated empty-application bootstrap test: %v\n%s", err, output)
+	}
+}
+
+func tidyGeneratedModule(t *testing.T, ctx context.Context, root string) {
+	t.Helper()
+	command := exec.CommandContext(ctx, "go", "mod", "tidy")
+	command.Dir, command.Env = root, isolatedGoEnvironment(os.Environ())
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("prepare generated module: %v\n%s", err, output)
 	}
 }
 

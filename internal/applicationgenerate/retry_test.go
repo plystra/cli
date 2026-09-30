@@ -15,7 +15,8 @@ import (
 	"github.com/plystra/cli/internal/version"
 )
 
-func TestGeneratedReplaySafeRetryExecution(t *testing.T) {
+func generateRetryProject(t *testing.T) string {
+	t.Helper()
 	testmodulecache.Ensure(t,
 		connectgen.ConnectModulePath+"@"+connectgen.ConnectModuleVersion,
 		connectgen.ProtobufModulePath+"@"+connectgen.ProtobufModuleVersion,
@@ -39,18 +40,23 @@ type Response struct { Value string ~plystra:"1" json:"value"~ }
 	if output, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("prepare authored retry Project: %v\n%s", err, output)
 	}
+	downloadModuleDependencies(t, root)
 	var stdout, stderr bytes.Buffer
 	if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
 		t.Fatalf("generate = %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
 	}
+	return root
+}
+
+func TestGeneratedReplaySafeRetryExecution(t *testing.T) {
+	root := generateRetryProject(t)
 	writeFile(t, filepath.Join(root, "retry_test.go"), generatedRetryTest)
 	cmd := exec.CommandContext(t.Context(), "go", "test", "-race", "-count=1", "./...")
 	cmd.Dir, cmd.Env = root, goEnvironment(map[string]string{"GOWORK": "off", "GOFLAGS": "-mod=readonly"})
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generated retry execution: %v\n%s", err, output)
 	}
-	stdout.Reset()
-	stderr.Reset()
+	var stdout, stderr bytes.Buffer
 	if code := command.RunIn([]string{"generate", "--check"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
 		t.Fatalf("generated retry drift = %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
 	}
@@ -139,6 +145,7 @@ import (
 )
 var Calls, OuterCalls, Stops, Constructions atomic.Int32
 var Entered, Release chan struct{}
+var Late func() (runv1.Response, error)
 type service struct{}
 //plystra:implements work.run/v1
 func New() (*service, error) { Constructions.Add(1); return &service{}, nil }
@@ -173,7 +180,7 @@ func (*service) Run(ctx context.Context, request runv1.Request) (runv1.Response,
 	case "deadline": return runv1.Response{}, failure(invocation.ErrorTimeout)
 	case "denied": return runv1.Response{}, failure(invocation.ErrorDenied)
 	case "budget": time.Sleep(time.Second)
-	case "hold": Entered <- struct{}{}; <-Release
+	case "hold": Entered <- struct{}{}; <-Release; if Late != nil { return Late() }
 	}
 	return runv1.Response{Value: "discard"}, failure(invocation.ErrorUnavailable)
 }
