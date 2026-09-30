@@ -498,7 +498,7 @@ Interface, side, field path, and failed rule; it exposes no submitted value or
 map key. An invalid request never enters the target, and an invalid response
 returns an internal contract error without a result. Pointer-bearing Connect
 exposure still fails closed until transport projections preserve those states.
-Restored response `ValueError` details retain the returned Kernel boundary
+Restored request and response `ValueError` details retain the returned Kernel boundary
 through `Unwrap`; restoration does not depend on boundary pointer identity and
 never replaces cancellation or unknown completion.
 Caller cancellation returns independently with result_unknown after target
@@ -517,10 +517,15 @@ held through actual target termination and response copying, including after
 caller cancellation or timeout. Saturation returns `resource_exhausted` with
 `not_started`; Connect and transitional HTTP use status 429, and JavaScript
 preserves both facts without automatic retries. Generated assembly, the frozen
-model, and Interface provenance v2 record the limit. Installed capability JSON
+model, and Interface provenance v3 record the limit. Installed capability JSON
 reports `defaults.invocation_concurrency` (`default_limit: 64`, `queue: 0`) and
 `limits.invocation_concurrency_limit` (65,536). Authored concurrency, queue,
-retry, circuit, and full compiled-policy compatibility remain unsupported.
+retry, and circuit forms remain unsupported. Complete compiled defaults and
+timeout policies include literal schema, compiler, and defaults identities.
+The default timeout is zero (no added deadline), retries are disabled with one
+attempt, and circuits are disabled. Installed capability facts include those
+identities and positive timeout bounds of 1ns through 2562047h47m16.854775807s,
+with at most 64 bytes per authored duration.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned,
 replaceable shape working record for every visible authored Interface,
@@ -1128,17 +1133,10 @@ model without transferring current-Project ownership. Check mode reports
 generated drift for that model and does not write configuration, generated
 output, or module metadata.
 
-An authored `interfaces.policies.<interface-id>.timeout` remains parseable,
-but the installed Kernel does not yet execute it. `generate`,
-`generate --check`, and `check` reject the policy on a reachable Interface
-with `PLYSTRA_POLICY_NOT_ENFORCED` before rendering or changing the Project.
-The diagnostic identifies the Interface, field, installed support stages, and
-owning configuration documents, including adopted exports. Remove the policy
-from the selected layer or install a compatible stack that both generates and
-executes it; `plystra inspect capabilities --format json` reports those stages.
-Read-only inspection remains available. An unreachable policy is dormant
-intent, not an enforced guarantee, and is checked when its Interface activates.
-This rule applies equally to root, environment, and replacement selections.
+Authored static Interface timeout policies execute through the selected binding. One total budget starts before request validation and copying, is capped by an earlier caller deadline, and includes target and response processing. Absence adds no deadline. Complete compiled policy values and literal schema/compiler/defaults versions are frozen before runtime; mismatches fail closed. Dormant policies remain intent outside executable identity until activation. Inspect capabilities reports support stages, exact defaults, and duration bounds. Authored concurrency, queue, retry, and circuit forms remain unsupported. Transitional legacy Capability wrappers do not include preparation and completion in the Kernel budget; active authored timeouts on that path still fail with PLYSTRA_POLICY_NOT_ENFORCED. Capability discovery reports that exception as legacy.capability-timeout with executed=no and accepted=no.
+This applies to root, environment, adopted-export, and replacement policies.
+Regenerate and rebuild after changing an active timeout; startup rejects a
+changed active policy before any Implementation constructor runs.
 
 `generated/manifest.json` records a versioned canonical constraint projection
 with every resolved canonical Capability ID, its exact contract and constraint
@@ -1188,7 +1186,7 @@ paths. Use the same selection for generation and its check; selecting another
 build-affecting model correctly reports generated drift.
 
 The same manifest requires `interface_provenance` schema
-`plystra.interface-provenance/v2`. This is the non-secret join between authored
+`plystra.interface-provenance/v3`. This is the non-secret join between authored
 Interfaces and generated assembly. It records:
 
 - every visible authored Interface and its module, source, shape, contract,
@@ -1215,7 +1213,7 @@ $manifest.interface_provenance.constructors |
   Select-Object symbol, construction_order, dependencies
 ```
 
-The first command prints `plystra.interface-provenance/v2`. The exact same
+The first command prints `plystra.interface-provenance/v3`. The exact same
 record is embedded under `application_manifest` in
 `generated/.plystra-manifest.json` so recovery and ownership validation use
 the same evidence. Neither copy contains configuration values,

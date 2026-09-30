@@ -44,8 +44,8 @@ func TestRenderProducesDeterministicTypedProxyPackages(t *testing.T) {
 		[]byte(`var _ contract.Interface = Proxy{}`),
 		[]byte(`kernelinvocation.Handle[contract.Request, contract.Response]`),
 		[]byte(`func (proxy Proxy) Create(ctx context.Context, request contract.Request) (contract.Response, error)`),
-		[]byte(`snapshot, err := CopyRequest(request)`),
-		[]byte(`response, err := proxy.handle.InvokeWithResponse(ctx, snapshot,`),
+		[]byte(`snapshot, err := CopyRequest(value)`),
+		[]byte(`response, err := proxy.handle.InvokeWithPreparation(ctx, request,`),
 		[]byte(`copied, err := CopyResponse(value)`),
 		[]byte(`boundary.Completion() == failure.boundary.Completion()`),
 		[]byte(`copied.boundary = boundary`),
@@ -188,8 +188,10 @@ replace github.com/plystra/kernel => %s
 	instrumented += "\nvar TestResponseBarrier = func(string) {}\n"
 	instrumented += "\nvar TestReturnedBoundary atomic.Pointer[kernelinvocation.Error]\n"
 	instrumented += "\nvar TestResponseOutcome = func(err error) error { return err }\n"
+	instrumented = strings.Replace(instrumented, "snapshot, err := CopyRequest(value)", "TestRequestBarrier()\n\t\tsnapshot, err := CopyRequest(value)", 1)
+	instrumented += "\nvar TestRequestBarrier = func() {}\n"
 	writeProxyFile(t, root, files[0].Path(), instrumented)
-	lifetimeTests := generatedResponseLifetimeTests
+	lifetimeTests := generatedResponseLifetimeTests + generatedPreparationTests
 	if shared {
 		lifetimeTests = strings.ReplaceAll(lifetimeTests, "contract.Response", "contract.Request")
 	}
@@ -270,7 +272,7 @@ func TestProxyUsesGovernedHandle(t *testing.T) {
 	build, err := invocation.NewModuleBuild("example.com/proxyfixture", "v1.0.0", "")
 	if err != nil { t.Fatal(err) }
 	binding, err := invocation.NewBinding(invocation.BindingOptions{
-		ConcurrencyLimit: 64,
+		Policy: invocation.Policy{SchemaVersion: 1, CompilerVersion: 1, DefaultsVersion: 1, Timeout: time.Second, ConcurrencyLimit: 64, Retry: invocation.RetryPolicy{MaxAttempts: 1}},
 		Kind: invocation.BindingKindImplementation,
 		Constructor: "example.com/proxyfixture/implementation.New",
 		ModuleBuild: build,
@@ -280,7 +282,7 @@ func TestProxyUsesGovernedHandle(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	catalog, err := invocation.NewCatalog([]invocation.Binding{binding})
 	if err != nil { t.Fatal(err) }
-	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{DefaultTimeout: time.Second})
+	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: invocation.PolicySchemaVersion})
 	if err != nil { t.Fatal(err) }
 	if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
 	handle, err := invocation.NewHandle(dispatcher, contractToken, true)
@@ -342,7 +344,7 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 					build, err := invocation.NewModuleBuild("example.com/proxyfixture", "v1.0.0", "")
 					if err != nil { t.Fatal(err) }
 					binding, err := invocation.NewBinding(invocation.BindingOptions{
-						ConcurrencyLimit: 1,
+						Policy: invocation.Policy{SchemaVersion: 1, CompilerVersion: 1, DefaultsVersion: 1, Timeout: 5 * time.Second, ConcurrencyLimit: 1, Retry: invocation.RetryPolicy{MaxAttempts: 1}},
 						Kind: invocation.BindingKindImplementation, Constructor: "example.com/proxyfixture/implementation.New",
 						ModuleBuild: build, SelectionReason: invocation.SelectionReasonUniqueCompatible,
 						ContractDigest: sha256.Sum256([]byte("order.create/v1")),
@@ -350,7 +352,7 @@ func TestGeneratedResponseProcessingRetainsAttempt(t *testing.T) {
 					if err != nil { t.Fatal(err) }
 					catalog, err := invocation.NewCatalog([]invocation.Binding{binding})
 					if err != nil { t.Fatal(err) }
-					dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{DefaultTimeout: 5*time.Second})
+					dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: invocation.PolicySchemaVersion})
 					if err != nil { t.Fatal(err) }
 					defer func() {
 						unblock()

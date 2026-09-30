@@ -306,7 +306,7 @@ func TestAdapterUsesSelectedUnexportedConcretePointer(t *testing.T) {
 	build, err := invocation.NewModuleBuild("example.com/adapterfixture", "v1.0.0", "")
 	if err != nil { t.Fatal(err) }
 	binding, err := invocation.NewBinding(invocation.BindingOptions{
-		ConcurrencyLimit: 64,
+		Policy: invocation.Policy{SchemaVersion: 1, CompilerVersion: 1, DefaultsVersion: 1, Timeout: time.Second, ConcurrencyLimit: 64, Retry: invocation.RetryPolicy{MaxAttempts: 1}},
 		Kind: invocation.BindingKindImplementation,
 		Constructor: "example.com/adapterfixture/implementation.New",
 		ModuleBuild: build,
@@ -316,7 +316,7 @@ func TestAdapterUsesSelectedUnexportedConcretePointer(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	catalog, err := invocation.NewCatalog([]invocation.Binding{binding})
 	if err != nil { t.Fatal(err) }
-	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{DefaultTimeout: time.Second})
+	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: invocation.PolicySchemaVersion})
 	if err != nil { t.Fatal(err) }
 	if err := dispatcher.Publish(catalog); err != nil { t.Fatal(err) }
 	handle, err := invocation.NewHandle(dispatcher, adapter.Contract(), true)

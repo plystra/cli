@@ -10,6 +10,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/diagnosticschema"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/cli/internal/version"
 	kernelinvocation "github.com/plystra/kernel/invocation"
@@ -26,6 +27,14 @@ func Current() (commandschema.Capabilities, error) {
 		return commandschema.Capabilities{}, fmt.Errorf("%w: transport toolchain: %v", ErrCurrent, err)
 	}
 	capabilities, err := commandschema.NewCapabilities(commandschema.CapabilitiesInput{
+		InvocationPolicy: commandschema.CapabilityInvocationPolicy{
+			SchemaVersion:   kernelinvocation.PolicySchemaVersion,
+			CompilerVersion: kernelinvocation.PolicyCompilerVersion,
+			DefaultsVersion: kernelinvocation.PolicyDefaultsVersion,
+			DurationBytes:   64,
+			MaximumTimeout:  kernelinvocation.MaximumPolicyDuration,
+			DefaultAttempts: invocationpolicy.Default().Retry.MaxAttempts,
+		},
 		CLIVersion:            version.Current,
 		KernelVersion:         version.KernelVersion,
 		SpecificationRevision: version.SpecificationRevision,
@@ -96,14 +105,8 @@ func Current() (commandschema.Capabilities, error) {
 				Executed:  commandschema.SupportYes,
 				Accepted:  commandschema.SupportYes,
 			},
-			{
-				ID:        "interfaces.policies.*.timeout",
-				Specified: commandschema.SupportYes,
-				Parsed:    commandschema.SupportYes,
-				Generated: commandschema.SupportYes,
-				Executed:  commandschema.SupportNo,
-				Accepted:  commandschema.SupportNo,
-			},
+			invocationpolicy.TimeoutSupport(),
+			invocationpolicy.LegacyTimeoutSupport(),
 			{
 				ID:        "resource",
 				Specified: commandschema.SupportYes,

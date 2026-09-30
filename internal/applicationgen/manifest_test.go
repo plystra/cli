@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -18,6 +19,7 @@ import (
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceproxygen"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/testinterface"
 	"github.com/plystra/cli/internal/transporttoolchain"
@@ -612,9 +614,8 @@ func manifestInterfaceProvenance(t testing.TB) interfaceprovenance.Provenance {
 			RequirementSources: []string{packagePath + " //plystra:interface " + identifier},
 			ExposureSources:    []string{},
 			Policy: interfaceprovenance.PolicyInput{
-				ConcurrencyLimit: 64,
-				Timeout:          "30s",
-				Sources:          []string{"built-in Plystra default Interface invocation timeout"},
+				Compiled: invocationpolicy.Default(),
+				Sources:  []string{"built-in Plystra default Interface invocation policy"},
 			},
 		}
 	}
@@ -828,7 +829,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:e155c678b60ef422da8cdd25c5102d8e57a520f90cdf45c67955c67076cc4cfc"
+	const expected = "sha256:69cf91e940443593b8fd6fac625fb1d5f82226a3cd6356acf76b766d2f9e3f35"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}
@@ -1000,7 +1001,7 @@ func TestApplicationModelDigestIncludesImplementationAdaptersDeterministically(t
 	}
 }
 
-func TestApplicationModelDigestIncludesBindingAdmissionLimit(t *testing.T) {
+func TestApplicationModelDigestIncludesCompleteBindingPolicy(t *testing.T) {
 	t.Parallel()
 	identifier, err := interfaceid.Parse("order.create/v1")
 	if err != nil {
@@ -1021,7 +1022,7 @@ func TestApplicationModelDigestIncludesBindingAdmissionLimit(t *testing.T) {
 			Bindings: []implementationassemblygen.BindingInput{{
 				InterfaceID: identifier, PackagePath: applicationModulePath + "/interfaces/order/create/v1",
 				Constructor: constructor, SelectionReason: implementationassemblygen.SelectionUniqueCompatible,
-				ContractDigest: sha256.Sum256([]byte(identifier.String())), ConcurrencyLimit: 64,
+				ContractDigest: sha256.Sum256([]byte(identifier.String())), Policy: invocationpolicy.Default(),
 			}},
 			Constructors: []implementationassemblygen.ConstructorInput{{Symbol: constructor, ModulePath: applicationModulePath}},
 		},
@@ -1030,14 +1031,46 @@ func TestApplicationModelDigestIncludesBindingAdmissionLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.ImplementationAssembly.Bindings[0].ConcurrencyLimit = 32
-	second, err := applicationModelDigest(t, options)
-	if err != nil || first == second {
-		t.Fatalf("admission limit did not change frozen model: %v", err)
+	seen := map[string]bool{first: true}
+	for _, mutate := range []func(*invocationpolicy.Policy){
+		func(p *invocationpolicy.Policy) { p.ConcurrencyLimit = 32 },
+		func(p *invocationpolicy.Policy) { p.Timeout = time.Second },
+		func(p *invocationpolicy.Policy) {
+			p.Timeout = time.Second
+			p.Retry = invocationpolicy.Retry{Eligibility: "replay_safe", MaxAttempts: 2}
+		},
+		func(p *invocationpolicy.Policy) {
+			p.Timeout = time.Second
+			p.Retry = invocationpolicy.Retry{Eligibility: "replay_safe", MaxAttempts: 3}
+		},
+		func(p *invocationpolicy.Policy) {
+			p.Timeout = time.Second
+			p.Retry = invocationpolicy.Retry{Eligibility: "replay_safe", MaxAttempts: 2, Backoff: time.Millisecond}
+		},
+	} {
+		policy := invocationpolicy.Default()
+		mutate(&policy)
+		options.ImplementationAssembly.Bindings[0].Policy = policy
+		digest, err := applicationModelDigest(t, options)
+		if err != nil || seen[digest] {
+			t.Fatalf("compiled policy did not change frozen model: %#v, %v", policy, err)
+		}
+		seen[digest] = true
 	}
-	options.ImplementationAssembly.Bindings[0].ConcurrencyLimit = 0
-	if _, err := applicationModelDigest(t, options); err == nil {
-		t.Fatal("unbounded binding entered frozen model")
+	for _, mutate := range []func(*invocationpolicy.Policy){
+		func(p *invocationpolicy.Policy) { p.ConcurrencyLimit = 0 },
+		func(p *invocationpolicy.Policy) { p.SchemaVersion++ },
+		func(p *invocationpolicy.Policy) { p.CompilerVersion++ },
+		func(p *invocationpolicy.Policy) { p.DefaultsVersion++ },
+		func(p *invocationpolicy.Policy) { p.QueueLimit = 1 },
+		func(p *invocationpolicy.Policy) { p.Circuit.FailureThreshold = 1 },
+	} {
+		policy := invocationpolicy.Default()
+		mutate(&policy)
+		options.ImplementationAssembly.Bindings[0].Policy = policy
+		if _, err := applicationModelDigest(t, options); err == nil {
+			t.Fatalf("unsupported policy entered frozen model: %#v", policy)
+		}
 	}
 }
 

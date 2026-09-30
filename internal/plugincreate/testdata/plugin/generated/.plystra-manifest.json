@@ -7,17 +7,17 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "compatibility:interface-documentation",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -34,17 +34,17 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "compatibility:interface-javascript:sha256:ac1559747ce3d5003afe65d941bd111c7fc5c7aac552210707af224f6f9cff57",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -61,17 +61,17 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "compatibility:interface-metadata:sha256:bb4211882f90e5a9da55f240c4376f912bdb238ba6611bb36587afa4461ee873",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -88,17 +88,17 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "compatibility:interface-transport:sha256:a04f0f29744f2523288b8367997e05cde4756c4d50ce70ffd49e2329e87e6a8c",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -115,17 +115,17 @@
       "generator": "plystra.interface-compatibility/v1",
       "output_kind": "compatibility-working-record",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "compatibility:interface-shape:sha256:fb3f135d4d0f3d717cc46c840fcdd0381b2f2d4cc87c0b9614e2ec20b17625a4",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -142,16 +142,16 @@
       "generator": "plystra.application-entrypoint/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -168,16 +168,16 @@
       "generator": "plystra.kernel-assembly-compatibility/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -190,20 +190,20 @@
     },
     {
       "path": "generated/go/assembly/interfaces_gen.go",
-      "sha256": "sha256:26755bfa45e65b3153b59fe5475dcfe89723f7c188bd81f3fd7572afb91b4307",
+      "sha256": "sha256:84493a63c54288500185caa06e432f42f065a57d16cdc09b5aa5b40a91afaaf7",
       "generator": "plystra.implementation-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -216,20 +216,20 @@
     },
     {
       "path": "generated/go/assembly/invocations_gen.go",
-      "sha256": "sha256:c425d13de78a287a3c11aaeae88a760923f66672c9b7ce1b4766f4ebaea7ae2d",
+      "sha256": "sha256:4aa246de893c89c28c88a5ec7cc03c6ef60aa78520ced3bcd45fefea068c046e",
       "generator": "plystra.invocation-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -246,16 +246,16 @@
       "generator": "plystra.provider-assembly/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -268,20 +268,20 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:fba42ce2d916027507c3998a847f51862fa0c29a035c8dfe16ebf48ee828e2d2",
+      "sha256": "sha256:e1a229ac4d0966da5dd1fc216433a2eece991389317aca86d15eb733a98b9c06",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -298,8 +298,8 @@
       "generator": "plystra.configuration/v1",
       "output_kind": "go-source",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
@@ -309,22 +309,22 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:65ec52c002725c87fe92c193347c2d5bc3a0c39809407ab02e61784c2442ab85",
+      "sha256": "sha256:d5524fa521f1da5d9722f602fd0d54fd1cdaccd228082e5cb83cb2f73d7317bb",
       "generator": "plystra.application-manifest/v1",
       "output_kind": "application-manifest",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "configuration-selection:default:plystra.yaml:sha256:d13c9b06a753179095308ba82e914b17c49dd2f04196d1efbeb9cde8d3dc5359",
         "dependency-composition:sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -341,16 +341,16 @@
       "generator": "plystra.protobuf-descriptor/v1",
       "output_kind": "protobuf-descriptor",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -367,17 +367,17 @@
       "generator": "plystra.proto-wire-map/v5",
       "output_kind": "wire-map",
       "input_record_ids": [
-        "application-model:sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2",
+        "application-model:sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
-        "interface-provenance:sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
         "interface:kernel.health/v1",
         "interface:kernel.info/v1",
         "protobuf-wire-map:sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
-        "built-in Plystra default Interface invocation timeout",
+        "built-in Plystra default Interface invocation policy",
         "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
         "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
         "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
@@ -430,10 +430,10 @@
       "dormant_constructor_configurations": [],
       "dormant_constructor_configurations_digest": "sha256:2c55f3bad8a359bcfc8f72af010d653ec12eba9785a3e73b7b92b988cb80ca41",
       "protobuf_wire_map_digest": "sha256:291fb979cc47f081f48f964b9addaace1aa6dc1c7fb03bb29d16794509461183",
-      "application_model_digest": "sha256:91fd614b64851e4664c5cb2164bafe12ce036053ef34d9f28b7ae8f68cf50ad2"
+      "application_model_digest": "sha256:31216b349ba70daac09d992f42e1a3478ada58968511148c5f57f9b0fde734bc"
     },
     "interface_provenance": {
-      "schema": "plystra.interface-provenance/v1",
+      "schema": "plystra.interface-provenance/v3",
       "interfaces": [],
       "bindings": [],
       "constructors": [],
@@ -456,9 +456,26 @@
           ],
           "exposure_sources": [],
           "policy": {
-            "timeout": "30s",
+            "compiled": {
+              "schema_version": 1,
+              "compiler_version": 1,
+              "defaults_version": 1,
+              "timeout_ns": 0,
+              "concurrency_limit": 64,
+              "queue_limit": 0,
+              "retry": {
+                "eligibility": "",
+                "max_attempts": 1,
+                "backoff_ns": 0
+              },
+              "circuit": {
+                "failure_threshold": 0,
+                "open_for_ns": 0,
+                "probe_limit": 0
+              }
+            },
             "sources": [
-              "built-in Plystra default Interface invocation timeout"
+              "built-in Plystra default Interface invocation policy"
             ]
           },
           "mappings": {}
@@ -481,15 +498,32 @@
           ],
           "exposure_sources": [],
           "policy": {
-            "timeout": "30s",
+            "compiled": {
+              "schema_version": 1,
+              "compiler_version": 1,
+              "defaults_version": 1,
+              "timeout_ns": 0,
+              "concurrency_limit": 64,
+              "queue_limit": 0,
+              "retry": {
+                "eligibility": "",
+                "max_attempts": 1,
+                "backoff_ns": 0
+              },
+              "circuit": {
+                "failure_threshold": 0,
+                "open_for_ns": 0,
+                "probe_limit": 0
+              }
+            },
             "sources": [
-              "built-in Plystra default Interface invocation timeout"
+              "built-in Plystra default Interface invocation policy"
             ]
           },
           "mappings": {}
         }
       ],
-      "digest": "sha256:ad2c32de8d261b4b8f2e9e48ac4c75dfb0bfead20374111a43c1ed77277a4e3e"
+      "digest": "sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763"
     },
     "transport_toolchain": {
       "schema": "plystra.transport-toolchain/v2",

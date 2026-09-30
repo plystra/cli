@@ -1797,8 +1797,8 @@ interfaces:
 		t.Fatalf("DecodeManifestProvenance(default): %v", err)
 	}
 	defaultBootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
-	if !bytes.Contains(defaultBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.preview/v1\",\"timeout\":\"5s\"}]`)) {
-		t.Fatalf("default generated bootstrap omits normalized Interface policy:\n%s", defaultBootstrap)
+	if !bytes.Contains(defaultBootstrap, []byte(`\"interface_policies\":[]`)) || bytes.Contains(defaultBootstrap, []byte("email.preview/v1")) {
+		t.Fatal("dormant policy entered generated bootstrap")
 	}
 	beforeDefaultCheck := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, root, environment)
@@ -1847,12 +1847,12 @@ interfaces:
 	if err != nil || environmentManifest.Mode() != applicationgen.ConfigurationModeEnvironment || environmentManifest.Environment() != "production" {
 		t.Fatalf("environment policy provenance = %#v, %v", environmentManifest, err)
 	}
-	if environmentManifest.ApplicationModelDigest() == defaultManifest.ApplicationModelDigest() {
-		t.Fatal("environment policy replacement did not change the build-affecting application model")
+	if environmentManifest.ApplicationModelDigest() != defaultManifest.ApplicationModelDigest() {
+		t.Fatal("dormant environment policy changed the build-affecting application model")
 	}
 	environmentBootstrap := readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go")
-	if !bytes.Contains(environmentBootstrap, []byte(`\"interface_policies\":[{\"interface\":\"email.preview/v1\",\"timeout\":\"2s\"}]`)) {
-		t.Fatalf("environment generated bootstrap omits selected Interface policy:\n%s", environmentBootstrap)
+	if !bytes.Equal(environmentBootstrap, defaultBootstrap) {
+		t.Fatal("dormant environment policy changed generated bootstrap")
 	}
 	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
 	process.Dir = root
@@ -1865,8 +1865,8 @@ interfaces:
 	process.Dir = root
 	process.Env = environment
 	output, runErr := process.CombinedOutput()
-	if runErr == nil || !strings.Contains(string(output), "runtime configuration is incompatible with compiled application model") || !strings.Contains(string(output), "rebuild with the same --env or --config selection") {
-		t.Fatalf("generated application accepted build-affecting policy drift: %v\n%s", runErr, output)
+	if runErr != nil {
+		t.Fatalf("generated application rejected dormant policy drift: %v\n%s", runErr, output)
 	}
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
 
@@ -1878,8 +1878,11 @@ interfaces:
 	if err != nil || replacementManifest.Mode() != applicationgen.ConfigurationModeExplicit || replacementManifest.SelectedPath() != "deploy/customer.yaml" {
 		t.Fatalf("replacement policy provenance = %#v, %v", replacementManifest, err)
 	}
-	if replacementManifest.ApplicationModelDigest() == defaultManifest.ApplicationModelDigest() || replacementManifest.ApplicationModelDigest() == environmentManifest.ApplicationModelDigest() {
-		t.Fatal("replacement policy did not produce its own build-affecting application model")
+	if replacementManifest.ApplicationModelDigest() != defaultManifest.ApplicationModelDigest() || replacementManifest.ApplicationModelDigest() != environmentManifest.ApplicationModelDigest() {
+		t.Fatal("dormant replacement policy changed the build-affecting application model")
+	}
+	if !bytes.Equal(readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"), defaultBootstrap) {
+		t.Fatal("dormant replacement policy changed generated bootstrap")
 	}
 	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml")
 	process.Dir = root

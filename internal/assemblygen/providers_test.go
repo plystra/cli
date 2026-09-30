@@ -191,12 +191,10 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
-		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/assemblyapp",
 		ApplicationBuildIdentity: "test-build",
 		KernelModuleVersion:      "v0.0.0",
 		KernelBuildIdentity:      "test-build",
-		DefaultTimeout:           30 * time.Second,
 		Providers:                providerInputs,
 	})
 	if err != nil {
@@ -272,12 +270,10 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
-		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/emptyapp",
 		ApplicationBuildIdentity: "test-build",
 		KernelModuleVersion:      "v0.0.0",
 		KernelBuildIdentity:      "test-build",
-		DefaultTimeout:           30 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("RenderInvocations: %v", err)
@@ -330,7 +326,6 @@ func renderEmptyInterfaceAssembly(t testing.TB, modulePath string) implementatio
 		ApplicationBuildIdentity: "test-build",
 		KernelModuleVersion:      "v0.0.0",
 		KernelBuildIdentity:      "test-build",
-		DefaultTimeout:           30 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("implementationassemblygen.Render: %v", err)

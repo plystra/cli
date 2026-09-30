@@ -133,7 +133,7 @@ config:
 		configurationBinding.Selection().Constructor() != configConstructor ||
 		configurationBinding.Selection().Reason() != interfaceprovenance.SelectionUniqueCompatible ||
 		configurationBinding.ConfigurationOwner() != `config["example.com/interface-provenance/configowner.New"]` ||
-		configurationBinding.Policy().Timeout() != "30s" {
+		configurationBinding.Policy().Timeout() != "0s" {
 		t.Fatalf("configuration binding = %#v", configurationBinding)
 	}
 	assertUnexposedOrdinaryMapping(t, configurationBinding.Mappings(), "configuration/owner/v1")
@@ -145,7 +145,7 @@ config:
 		orderBinding.Selection().Constructor() != orderConstructor ||
 		orderBinding.Selection().Reason() != interfaceprovenance.SelectionExplicit ||
 		orderBinding.Selection().ConstructionOrder() != 2 ||
-		orderBinding.Policy().Timeout() != "30s" {
+		orderBinding.Policy().Timeout() != "0s" {
 		t.Fatalf("order binding = %#v", orderBinding)
 	}
 	assertExposedMapping(

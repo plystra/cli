@@ -367,6 +367,9 @@ func runtimeApplicationModelInterfacePolicies(node *yaml.Node) ([]map[string]any
 		if timeoutErr != nil {
 			return nil, timeoutErr
 		}
+		if _, executable := runtimeExecutableInterfaceChoices[interfaceID]; !executable {
+			continue
+		}
 		policies = append(policies, map[string]any{
 			"interface": interfaceID,
 			"timeout":   timeout.Value,

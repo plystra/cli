@@ -133,8 +133,9 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"data|yes|no|no|no|no",
 		"data.compiler|yes|no|no|no|no",
 		"inspect.capabilities|yes|yes|not_applicable|yes|yes",
-		"interfaces.policies.*.timeout|yes|yes|yes|no|no",
+		"interfaces.policies.*.timeout|yes|yes|yes|yes|yes",
 		"invocation.default-concurrency|yes|not_applicable|yes|yes|yes",
+		"legacy.capability-timeout|yes|yes|yes|no|no",
 		"resource|yes|no|no|no|no",
 		"transport.connect|yes|yes|yes|yes|yes",
 	}
@@ -232,6 +233,10 @@ func TestCurrentIsDeterministicAndProjectIndependent(t *testing.T) {
 	}
 	if !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) {
 		t.Fatalf("Current is not deterministic:\nfirst  %s\nsecond %s", first.CanonicalJSON(), second.CanonicalJSON())
+	}
+	policy := first.InvocationPolicy()
+	if first.InvocationTimeout() != 0 || first.InvocationTimeoutText() != "0s" || policy.SchemaVersion != 1 || policy.CompilerVersion != 1 || policy.DefaultsVersion != 1 || policy.MaximumTimeout != 1<<63-1 || policy.DurationBytes != 64 || policy.DefaultAttempts != 1 || policy.CircuitEnabled {
+		t.Fatalf("compiled policy support facts = %#v", policy)
 	}
 	lower := strings.ToLower(string(first.CanonicalJSON()))
 	for _, forbidden := range []string{"working_directory", "environment_name", "configuration_path", "timestamp", `c:\\`, `d:\\`} {

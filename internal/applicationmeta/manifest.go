@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
+	"github.com/plystra/kernel/invocation"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -32,12 +33,11 @@ const (
 	// DefaultStartupTimeout is the runtime provider-startup bound used when
 	// timeouts.startup is omitted.
 	DefaultStartupTimeout = 2 * time.Minute
-	// DefaultInvocationTimeout bounds one raw canonical Kernel dispatch when
-	// the caller and generated application path provide no earlier deadline.
-	DefaultInvocationTimeout = 30 * time.Second
+	// DefaultInvocationTimeout adds no deadline when no binding timeout is authored.
+	DefaultInvocationTimeout = time.Duration(0)
 	// DefaultInvocationConcurrencyLimit bounds executing attempts per exact
 	// ordinary binding, including targets that outlive their callers.
-	DefaultInvocationConcurrencyLimit = 64
+	DefaultInvocationConcurrencyLimit = invocation.DefaultConcurrencyLimit
 )
 
 // ErrInvalidManifest reports unsafe or invalid plystra.yaml metadata.

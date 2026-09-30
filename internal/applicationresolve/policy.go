@@ -10,9 +10,10 @@ import (
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/commandschema"
-	"github.com/plystra/cli/internal/installedcapabilities"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceresolution"
+	"github.com/plystra/cli/internal/invocationpolicy"
+	"github.com/plystra/cli/internal/version"
 )
 
 // ErrPolicyNotEnforced reports an authored active policy whose installed
@@ -83,28 +84,27 @@ func validateExecutablePolicies(manifest applicationmeta.Manifest, interfaces in
 	for _, binding := range interfaces.Graph().Bindings() {
 		active[binding.InterfaceID().String()] = true
 	}
+	legacyActive := make(map[string]bool)
 	for _, requirement := range legacy.Requirements() {
-		active[requirement.String()] = true
+		legacyActive[requirement.String()] = true
 	}
-	capabilities, err := installedcapabilities.Current()
+	timeoutSupport, err := commandschema.NewCapabilitySupport(invocationpolicy.TimeoutSupport())
 	if err != nil {
 		return err
 	}
-	var timeoutSupport commandschema.CapabilitySupport
-	for _, support := range capabilities.Support() {
-		if support.ID() == "interfaces.policies.*.timeout" {
-			timeoutSupport = support
-			break
-		}
-	}
-	if !timeoutSupport.Valid() {
-		return fmt.Errorf("%w: missing timeout policy support facts", installedcapabilities.ErrCurrent)
-	}
-	if timeoutSupport.Generated() == commandschema.SupportYes && timeoutSupport.Executed() == commandschema.SupportYes {
-		return nil
+	legacySupport, err := commandschema.NewCapabilitySupport(invocationpolicy.LegacyTimeoutSupport())
+	if err != nil {
+		return err
 	}
 	for _, policy := range policies {
-		if !active[policy.InterfaceID().String()] {
+		support := timeoutSupport
+		if !active[policy.InterfaceID().String()] && !legacyActive[policy.InterfaceID().String()] {
+			continue
+		}
+		if legacyActive[policy.InterfaceID().String()] {
+			support = legacySupport
+		}
+		if support.Generated() == commandschema.SupportYes && support.Executed() == commandschema.SupportYes {
 			continue
 		}
 		field := fmt.Sprintf("interfaces.policies[%q].timeout", policy.InterfaceID())
@@ -124,7 +124,7 @@ func validateExecutablePolicies(manifest applicationmeta.Manifest, interfaces in
 			}
 			return a.Column - b.Column
 		})
-		return &PolicyNotEnforcedError{interfaceID: policy.InterfaceID(), field: "timeout", cliVersion: capabilities.CLIVersion(), kernelVersion: capabilities.KernelVersion(), support: timeoutSupport, sources: locations}
+		return &PolicyNotEnforcedError{interfaceID: policy.InterfaceID(), field: "timeout", cliVersion: version.Current, kernelVersion: version.KernelVersion, support: support, sources: locations}
 	}
 	return nil
 }

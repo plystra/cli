@@ -24,6 +24,7 @@ import (
 	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceproxygen"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/transporttoolchain"
@@ -541,26 +542,26 @@ type ApplicationModelOptions struct {
 }
 
 type applicationModelDocument struct {
-	DefaultConcurrencyLimit int                                     `json:"default_concurrency_limit"`
-	Version                 int                                     `json:"version"`
-	ModulePath              string                                  `json:"module_path"`
-	JavaScriptPackage       string                                  `json:"javascript_package"`
-	KernelModuleVersion     string                                  `json:"kernel_module_version"`
-	KernelBuildIdentity     string                                  `json:"kernel_build_identity"`
-	HTTPTransports          applicationModelHTTPTransports          `json:"http_transports"`
-	HTTPCORS                *applicationModelHTTPCORS               `json:"http_cors"`
-	ContextDigest           string                                  `json:"context_digest"`
-	AliasDigest             string                                  `json:"alias_digest"`
-	Configurations          []applicationModelConfiguration         `json:"configurations"`
-	Providers               []applicationModelProvider              `json:"providers"`
-	InterfaceProxies        []applicationModelInterfaceProxy        `json:"interface_proxies"`
-	ImplementationAdapters  []applicationModelImplementationAdapter `json:"implementation_adapters"`
-	ImplementationAssembly  applicationModelImplementationAssembly  `json:"implementation_assembly"`
-	InterfacePolicies       []applicationModelInterfacePolicy       `json:"interface_policies"`
-	GenerationExtensions    []applicationModelGenerationExtension   `json:"generation_extensions"`
-	ProtobufProjection      json.RawMessage                         `json:"protobuf_projection"`
-	InterfaceProtobufModel  json.RawMessage                         `json:"interface_protobuf_projection"`
-	ProtobufWireProjection  json.RawMessage                         `json:"protobuf_wire_projection"`
+	PolicyDefaults         invocationpolicy.Policy                 `json:"policy_defaults"`
+	Version                int                                     `json:"version"`
+	ModulePath             string                                  `json:"module_path"`
+	JavaScriptPackage      string                                  `json:"javascript_package"`
+	KernelModuleVersion    string                                  `json:"kernel_module_version"`
+	KernelBuildIdentity    string                                  `json:"kernel_build_identity"`
+	HTTPTransports         applicationModelHTTPTransports          `json:"http_transports"`
+	HTTPCORS               *applicationModelHTTPCORS               `json:"http_cors"`
+	ContextDigest          string                                  `json:"context_digest"`
+	AliasDigest            string                                  `json:"alias_digest"`
+	Configurations         []applicationModelConfiguration         `json:"configurations"`
+	Providers              []applicationModelProvider              `json:"providers"`
+	InterfaceProxies       []applicationModelInterfaceProxy        `json:"interface_proxies"`
+	ImplementationAdapters []applicationModelImplementationAdapter `json:"implementation_adapters"`
+	ImplementationAssembly applicationModelImplementationAssembly  `json:"implementation_assembly"`
+	InterfacePolicies      []applicationModelInterfacePolicy       `json:"interface_policies"`
+	GenerationExtensions   []applicationModelGenerationExtension   `json:"generation_extensions"`
+	ProtobufProjection     json.RawMessage                         `json:"protobuf_projection"`
+	InterfaceProtobufModel json.RawMessage                         `json:"interface_protobuf_projection"`
+	ProtobufWireProjection json.RawMessage                         `json:"protobuf_wire_projection"`
 }
 
 type applicationModelHTTPTransports struct {
@@ -626,19 +627,19 @@ type applicationModelImplementationAssembly struct {
 }
 
 type applicationModelAssemblyBinding struct {
-	InterfaceID      string `json:"interface_id"`
-	PackagePath      string `json:"package_path"`
-	Constructor      string `json:"constructor"`
-	SelectionReason  string `json:"selection_reason"`
-	ContractDigest   string `json:"contract_digest"`
-	ConcurrencyLimit int    `json:"concurrency_limit"`
+	InterfaceID     string                  `json:"interface_id"`
+	PackagePath     string                  `json:"package_path"`
+	Constructor     string                  `json:"constructor"`
+	SelectionReason string                  `json:"selection_reason"`
+	ContractDigest  string                  `json:"contract_digest"`
+	Policy          invocationpolicy.Policy `json:"policy"`
 }
 
 type applicationModelAssemblyIntrinsicBinding struct {
-	ConcurrencyLimit int    `json:"concurrency_limit"`
-	InterfaceID      string `json:"interface_id"`
-	PackagePath      string `json:"package_path"`
-	MethodName       string `json:"method_name"`
+	Policy      invocationpolicy.Policy `json:"policy"`
+	InterfaceID string                  `json:"interface_id"`
+	PackagePath string                  `json:"package_path"`
+	MethodName  string                  `json:"method_name"`
 }
 
 type applicationModelAssemblyConstructor struct {
@@ -659,8 +660,8 @@ type applicationModelAssemblyDependency struct {
 }
 
 type applicationModelInterfacePolicy struct {
-	InterfaceID string `json:"interface_id"`
-	Timeout     string `json:"timeout"`
+	InterfaceID string                  `json:"interface_id"`
+	Policy      invocationpolicy.Policy `json:"policy"`
 }
 
 type applicationModelGenerationExtension struct {
@@ -802,22 +803,24 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	bindingRecords := make([]applicationModelAssemblyBinding, len(assemblyBindings))
 	for index, binding := range assemblyBindings {
 		bindingRecords[index] = applicationModelAssemblyBinding{
-			InterfaceID:      binding.InterfaceID.String(),
-			PackagePath:      binding.PackagePath,
-			Constructor:      binding.Constructor.String(),
-			SelectionReason:  string(binding.SelectionReason),
-			ContractDigest:   "sha256:" + hex.EncodeToString(binding.ContractDigest[:]),
-			ConcurrencyLimit: binding.ConcurrencyLimit,
+			InterfaceID:     binding.InterfaceID.String(),
+			PackagePath:     binding.PackagePath,
+			Constructor:     binding.Constructor.String(),
+			SelectionReason: string(binding.SelectionReason),
+			ContractDigest:  "sha256:" + hex.EncodeToString(binding.ContractDigest[:]),
+			Policy:          binding.Policy,
 		}
 	}
 	assemblyIntrinsics := assemblyFile.IntrinsicBindings()
 	intrinsicBindingRecords := make([]applicationModelAssemblyIntrinsicBinding, len(assemblyIntrinsics))
 	for index, binding := range assemblyIntrinsics {
+		policy := invocationpolicy.Default()
+		policy.ConcurrencyLimit = kernelintrinsic.ConcurrencyLimit
 		intrinsicBindingRecords[index] = applicationModelAssemblyIntrinsicBinding{
-			ConcurrencyLimit: kernelintrinsic.ConcurrencyLimit,
-			InterfaceID:      binding.InterfaceID.String(),
-			PackagePath:      binding.PackagePath,
-			MethodName:       binding.MethodName,
+			Policy:      policy,
+			InterfaceID: binding.InterfaceID.String(),
+			PackagePath: binding.PackagePath,
+			MethodName:  binding.MethodName,
 		}
 	}
 	assemblyConstructors := assemblyFile.Constructors()
@@ -854,7 +857,12 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	sort.Slice(policies, func(left, right int) bool {
 		return policies[left].InterfaceID().String() < policies[right].InterfaceID().String()
 	})
-	policyRecords := make([]applicationModelInterfacePolicy, len(policies))
+	effectivePolicies := make(map[string]invocationpolicy.Policy)
+	for _, requirement := range context.Requirements() {
+		if !strings.HasPrefix(requirement.String(), "kernel.") {
+			effectivePolicies[requirement.String()] = invocationpolicy.Default()
+		}
+	}
 	for index, policy := range policies {
 		identifier := policy.InterfaceID()
 		if identifier.String() == "" || strings.HasPrefix(identifier.Name(), "kernel.") || policy.Timeout() <= 0 {
@@ -863,10 +871,22 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		if index > 0 && policies[index-1].InterfaceID() == identifier {
 			return "", fmt.Errorf("%w: Interface policy %q is duplicated", ErrResolution, identifier.String())
 		}
-		policyRecords[index] = applicationModelInterfacePolicy{
-			InterfaceID: identifier.String(),
-			Timeout:     policy.Timeout().String(),
+		if compiled, active := effectivePolicies[identifier.String()]; active {
+			compiled.Timeout = policy.Timeout()
+			effectivePolicies[identifier.String()] = compiled
 		}
+	}
+	for _, binding := range assemblyBindings {
+		effectivePolicies[binding.InterfaceID.String()] = binding.Policy
+	}
+	policyIDs := make([]string, 0, len(effectivePolicies))
+	for identifier := range effectivePolicies {
+		policyIDs = append(policyIDs, identifier)
+	}
+	sort.Strings(policyIDs)
+	policyRecords := make([]applicationModelInterfacePolicy, 0, len(policyIDs))
+	for _, identifier := range policyIDs {
+		policyRecords = append(policyRecords, applicationModelInterfacePolicy{InterfaceID: identifier, Policy: effectivePolicies[identifier]})
 	}
 	outputs := options.Resolution.Outputs()
 	extensions := make([]applicationModelGenerationExtension, len(outputs))
@@ -895,12 +915,12 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		return "", fmt.Errorf("%w: Protobuf wire map is absent or does not match the normalized Interface and legacy projections", ErrResolution)
 	}
 	document := applicationModelDocument{
-		DefaultConcurrencyLimit: applicationmeta.DefaultInvocationConcurrencyLimit,
-		Version:                 17,
-		ModulePath:              options.ModulePath,
-		JavaScriptPackage:       options.JavaScriptPackage,
-		KernelModuleVersion:     options.KernelModuleVersion,
-		KernelBuildIdentity:     options.KernelBuildIdentity,
+		PolicyDefaults:      invocationpolicy.Default(),
+		Version:             18,
+		ModulePath:          options.ModulePath,
+		JavaScriptPackage:   options.JavaScriptPackage,
+		KernelModuleVersion: options.KernelModuleVersion,
+		KernelBuildIdentity: options.KernelBuildIdentity,
 		HTTPTransports: applicationModelHTTPTransports{
 			Connect: options.HTTPTransports.Connect,
 			REST:    options.HTTPTransports.REST,

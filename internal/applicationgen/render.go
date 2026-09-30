@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
@@ -125,6 +127,11 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	executableInterfaceChoices := make([]string, len(implementationAssemblyOptions.Bindings))
 	for index, binding := range implementationAssemblyOptions.Bindings {
 		executableInterfaceChoices[index] = binding.InterfaceID.String()
+	}
+	for _, requirement := range context.Requirements() {
+		if !strings.HasPrefix(requirement.String(), "kernel.") && !slices.Contains(executableInterfaceChoices, requirement.String()) {
+			executableInterfaceChoices = append(executableInterfaceChoices, requirement.String())
+		}
 	}
 	executableConstructors := make([]string, len(implementationAssemblyOptions.Constructors))
 	for index, constructor := range implementationAssemblyOptions.Constructors {
@@ -476,6 +483,13 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			}
 			invocationInput.ProviderID = selection.PluginID()
 			invocationInput.SelectionReason = reason
+			invocationInput.Policy = invocationpolicy.Default()
+			for _, policy := range options.Composition.Manifest().InterfacePolicies() {
+				if policy.InterfaceID().String() == id.String() {
+					invocationInput.Policy.Timeout = policy.Timeout()
+					break
+				}
+			}
 		}
 		invocationInputs = append(invocationInputs, invocationInput)
 		if target.Exposure().HTTP {
@@ -493,8 +507,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		ApplicationBuildIdentity: context.BuildModelDigest(),
 		KernelModuleVersion:      options.KernelModuleVersion,
 		KernelBuildIdentity:      options.KernelBuildIdentity,
-		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
-		ConcurrencyLimit:         applicationmeta.DefaultInvocationConcurrencyLimit,
 		Providers:                options.Providers,
 		Invocations:              invocationInputs,
 	})
@@ -796,9 +808,6 @@ func normalizeImplementationAssemblyOptions(options implementationassemblygen.Op
 	}
 	if options.KernelBuildIdentity == "" {
 		options.KernelBuildIdentity = kernelBuildIdentity
-	}
-	if options.DefaultTimeout == 0 {
-		options.DefaultTimeout = applicationmeta.DefaultInvocationTimeout
 	}
 	return options
 }

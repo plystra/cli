@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/contractgen"
 	"github.com/plystra/cli/internal/generationlowering"
 	"github.com/plystra/cli/internal/invocationgen"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/testkernel"
 	kernelcatalog "github.com/plystra/kernel/capability/catalog"
 	kernelinvocation "github.com/plystra/kernel/invocation"
@@ -87,22 +88,22 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		{
 			ContractJSON:    []byte(runtimeMessageSchema),
 			ProviderID:      provider.PluginID,
+			Policy:          timeoutPolicy(30 * time.Second),
 			SelectionReason: kernelinvocation.SelectionReasonExplicit,
 			Dependencies:    []string{"policy.check/v1"},
 		},
 		{
 			ContractJSON:    []byte(runtimePolicySchema),
 			ProviderID:      provider.PluginID,
+			Policy:          timeoutPolicy(30 * time.Second),
 			SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
 		},
 	}
 	options := assemblygen.InvocationOptions{
-		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "sha256:0123456789abcdef",
 		KernelModuleVersion:      "v0.1.0",
 		KernelBuildIdentity:      "sha256:0123456789abcdef",
-		DefaultTimeout:           30 * time.Second,
 		Providers:                []assemblygen.ProviderInput{provider},
 		Invocations:              invocations,
 	}
@@ -117,10 +118,10 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 		`kernelintrinsic.NewBindings`,
 		`len(i.catalog.Bindings()) != 4`,
 		`kernelinvocation.NewModuleBuild("example.com/runtime-dependency", "v1.2.3", "sha256:0123456789abcdef")`,
-		`Kind:             kernelinvocation.BindingKindImplementation`,
-		`Constructor:      "example.com/runtime-dependency/remote-service.New"`,
-		`ModuleBuild:      implementationBuild0`,
-		`ConcurrencyLimit: 64,`,
+		`Kind:            kernelinvocation.BindingKindImplementation`,
+		`Constructor:     "example.com/runtime-dependency/remote-service.New"`,
+		`ModuleBuild:     implementationBuild0`,
+		`ConcurrencyLimit: 64, QueueLimit: 0`,
 		`kernelinvocation.SelectionReasonExplicit`,
 		`kernelinvocation.SelectionReasonUniqueCompatible`,
 		`kernelcapability.MustParseContractWithSemanticErrors[contract0.Request, contract0.Response](contract0.CapabilityID, "invalid_recipient")`,
@@ -154,12 +155,10 @@ func TestRenderInvocationsIsDeterministicCanonicalAssembly(t *testing.T) {
 	}
 
 	empty, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
-		ConcurrencyLimit:         64,
 		ModulePath:               options.ModulePath,
 		ApplicationBuildIdentity: options.ApplicationBuildIdentity,
 		KernelModuleVersion:      options.KernelModuleVersion,
 		KernelBuildIdentity:      options.KernelBuildIdentity,
-		DefaultTimeout:           options.DefaultTimeout,
 	})
 	if err != nil {
 		t.Fatalf("RenderInvocations(empty): %v", err)
@@ -182,16 +181,14 @@ func TestRenderInvocationsRejectsInvalidRuntimePlans(t *testing.T) {
 		ImportPath:    "example.com/runtime-dependency/remote-service",
 	}
 	valid := assemblygen.InvocationOptions{
-		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "test-build",
 		KernelModuleVersion:      "v0.1.0",
 		KernelBuildIdentity:      "test-build",
-		DefaultTimeout:           time.Second,
 		Providers:                []assemblygen.ProviderInput{provider},
 		Invocations: []assemblygen.InvocationInput{
-			{ContractJSON: []byte(runtimeMessageSchema), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
-			{ContractJSON: []byte(runtimePolicySchema), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(runtimeMessageSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(runtimePolicySchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: provider.PluginID, SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
 		},
 	}
 	tests := []struct {
@@ -201,11 +198,11 @@ func TestRenderInvocationsRejectsInvalidRuntimePlans(t *testing.T) {
 		text   string
 	}{
 		{name: "invalid application module", edit: func(value *assemblygen.InvocationOptions) { value.ModulePath = "../application" }, reason: assemblygen.ErrInvalidInvocation},
-		{name: "invalid timeout", edit: func(value *assemblygen.InvocationOptions) { value.DefaultTimeout = 0 }, reason: assemblygen.ErrInvalidInvocation},
-		{name: "zero concurrency", edit: func(value *assemblygen.InvocationOptions) { value.ConcurrencyLimit = 0 }, reason: assemblygen.ErrInvalidInvocation},
-		{name: "negative concurrency", edit: func(value *assemblygen.InvocationOptions) { value.ConcurrencyLimit = -1 }, reason: assemblygen.ErrInvalidInvocation},
+		{name: "invalid timeout", edit: func(value *assemblygen.InvocationOptions) { value.Invocations[0].Policy.Timeout = -1 }, reason: assemblygen.ErrInvalidInvocation},
+		{name: "zero concurrency", edit: func(value *assemblygen.InvocationOptions) { value.Invocations[0].Policy.ConcurrencyLimit = 0 }, reason: assemblygen.ErrInvalidInvocation},
+		{name: "negative concurrency", edit: func(value *assemblygen.InvocationOptions) { value.Invocations[0].Policy.ConcurrencyLimit = -1 }, reason: assemblygen.ErrInvalidInvocation},
 		{name: "excessive concurrency", edit: func(value *assemblygen.InvocationOptions) {
-			value.ConcurrencyLimit = kernelinvocation.MaximumConcurrencyLimit + 1
+			value.Invocations[0].Policy.ConcurrencyLimit = kernelinvocation.MaximumConcurrencyLimit + 1
 		}, reason: assemblygen.ErrInvalidInvocation},
 		{name: "missing Kernel provenance", edit: func(value *assemblygen.InvocationOptions) {
 			value.KernelModuleVersion = ""
@@ -369,17 +366,16 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
-		ConcurrencyLimit:         64,
 		ModulePath:               "example.com/runtime-application",
 		ApplicationBuildIdentity: "runtime-build-123",
 		KernelModuleVersion:      "v0.0.0",
 		KernelBuildIdentity:      "runtime-build-123",
-		DefaultTimeout:           30 * time.Second,
 		Providers:                []assemblygen.ProviderInput{provider},
 		Invocations: []assemblygen.InvocationInput{
 			{
 				ContractJSON:    []byte(runtimeMessageSchema),
 				ProviderID:      provider.PluginID,
+				Policy:          timeoutPolicy(30 * time.Second),
 				SelectionReason: kernelinvocation.SelectionReasonExplicit,
 				Dependencies:    messageInvocation.Dependencies(),
 			},
@@ -391,6 +387,7 @@ replace github.com/plystra/kernel => %s
 			{
 				ContractJSON:    []byte(runtimePolicySchema),
 				ProviderID:      provider.PluginID,
+				Policy:          timeoutPolicy(30 * time.Second),
 				SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
 			},
 		},
@@ -438,16 +435,15 @@ func FuzzRenderInvocations(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, schema []byte) {
 		options := assemblygen.InvocationOptions{
-			ConcurrencyLimit:         64,
 			ModulePath:               "example.com/runtime-application",
 			ApplicationBuildIdentity: "fuzz-build",
 			KernelModuleVersion:      "v0.1.0",
 			KernelBuildIdentity:      "fuzz-build",
-			DefaultTimeout:           time.Second,
 			Providers:                []assemblygen.ProviderInput{provider},
 			Invocations: []assemblygen.InvocationInput{{
 				ContractJSON:    schema,
 				ProviderID:      provider.PluginID,
+				Policy:          timeoutPolicy(30 * time.Second),
 				SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
 			}},
 		}
@@ -783,3 +779,9 @@ func TestCanonicalInvocationRuntime(t *testing.T) {
 	}
 }
 `
+
+func timeoutPolicy(timeout time.Duration) invocationpolicy.Policy {
+	policy := invocationpolicy.Default()
+	policy.Timeout = timeout
+	return policy
+}

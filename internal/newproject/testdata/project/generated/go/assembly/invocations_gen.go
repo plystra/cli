@@ -7,14 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	kernelhealthv1 "github.com/plystra/kernel/interfaces/kernel/health/v1"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
 )
-
-const defaultInvocationTimeout = time.Duration(30000000000)
 
 // ErrInvocationAssembly reports a safe canonical runtime construction failure.
 var ErrInvocationAssembly = errors.New("assemble canonical invocation runtime")
@@ -89,7 +86,7 @@ func newPendingInvocations() (pendingInvocations, error) {
 	if err := RequireKernelCompatibility(); err != nil {
 		return pendingInvocations{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrInvocationAssembly, err)
 	}
-	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInvocationTimeout})
+	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: 1})
 	if err != nil {
 		return pendingInvocations{}, fmt.Errorf("%w: canonical dispatcher: %w", ErrInvocationAssembly, err)
 	}
@@ -109,7 +106,7 @@ func publishInvocations(pending pendingInvocations, providers Providers) (Invoca
 		return Invocations{}, fmt.Errorf("%w: selected providers are invalid", ErrInvocationAssembly)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260928141628-5f0fd6f5e90d",
+		ModuleVersion: "v0.0.0-20260928160103-31e44ff1a5b6",
 		BuildIdentity: "",
 	})
 	if err != nil {

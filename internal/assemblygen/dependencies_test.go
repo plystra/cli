@@ -215,17 +215,15 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("RenderProviders: %v", err)
 	}
 	invocationSource, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
-		ConcurrencyLimit:         64,
 		ModulePath:               wiringApplicationModule,
 		ApplicationBuildIdentity: "wiring-test-build",
 		KernelModuleVersion:      "v0.0.0",
 		KernelBuildIdentity:      "wiring-test-build",
-		DefaultTimeout:           30 * time.Second,
 		Providers:                providers,
 		Invocations: []assemblygen.InvocationInput{
-			{ContractJSON: []byte(wiringLookupSchema), ProviderID: "remote.catalog", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
-			{ContractJSON: []byte(wiringOrderSchema), ProviderID: "acme.local-orders", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
-			{ContractJSON: []byte(wiringWorkflowSchema), ProviderID: "remote.workflow", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(wiringLookupSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "remote.catalog", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(wiringOrderSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "acme.local-orders", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
+			{ContractJSON: []byte(wiringWorkflowSchema), Policy: timeoutPolicy(30 * time.Second), ProviderID: "remote.workflow", SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible},
 		},
 	})
 	if err != nil {

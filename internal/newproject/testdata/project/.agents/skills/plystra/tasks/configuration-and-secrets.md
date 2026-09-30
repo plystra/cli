@@ -20,7 +20,7 @@ Do not combine `--env` and `--config`. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` supply
 
 Configuration values belong under the exact constructor-owned `config.<constructor-symbol>` object. Keep Secret values out of YAML, generated source, diagnostics, SDKs, and tests. A Secret field contains only a valid `env` or absolute `file` reference, and generation validates the reference without resolving its value.
 
-Active Interface timeout policies currently fail generation and check with PLYSTRA_POLICY_NOT_ENFORCED because Kernel execution is unsupported. Remove the policy from the selected layer or install a compatible CLI/Kernel pair. Inspect capabilities for support stages; read-only Project inspection remains available. Dormant policies are intent, not enforced guarantees.
+Authored static Interface timeout policies execute through the selected binding. One total budget starts before request validation and copying, is capped by an earlier caller deadline, and includes target and response processing. Absence adds no deadline. Complete compiled policy values and literal schema/compiler/defaults versions are frozen before runtime; mismatches fail closed. Dormant policies remain intent outside executable identity until activation. Inspect capabilities reports support stages, exact defaults, and duration bounds. Authored concurrency, queue, retry, and circuit forms remain unsupported. Transitional legacy Capability wrappers do not include preparation and completion in the Kernel budget; active authored timeouts on that path still fail with PLYSTRA_POLICY_NOT_ENFORCED. Capability discovery reports that exception as legacy.capability-timeout with executed=no and accepted=no.
 
 ## Completion checks
 

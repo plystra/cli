@@ -143,6 +143,11 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 		})
 	}
 	for _, policy := range manifest.InterfacePolicies() {
+		if filterChoices {
+			if _, active := executable[policy.InterfaceID().String()]; !active {
+				continue
+			}
+		}
 		projection.InterfacePolicies = append(projection.InterfacePolicies, applicationModelCompatibilityPolicy{
 			Interface: policy.InterfaceID().String(),
 			Timeout:   policy.Timeout().String(),

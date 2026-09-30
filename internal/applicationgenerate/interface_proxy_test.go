@@ -137,8 +137,8 @@ replace example.com/platform/unused => %s
 	for _, required := range [][]byte{
 		[]byte(`contract "example.com/acme/interface-proxy-app/interfaces/app/run/v1"`),
 		[]byte(`var _ contract.Interface = Proxy{}`),
-		[]byte(`snapshot, err := CopyRequest(request)`),
-		[]byte(`response, err := proxy.handle.InvokeWithResponse(ctx, snapshot,`),
+		[]byte(`snapshot, err := CopyRequest(value)`),
+		[]byte(`response, err := proxy.handle.InvokeWithPreparation(ctx, request,`),
 		[]byte(`copied, err := CopyResponse(value)`),
 	} {
 		if !bytes.Contains(appSource, required) {

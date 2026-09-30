@@ -13,12 +13,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/goname"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/intrinsicinterface"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/version"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
@@ -60,12 +60,12 @@ const (
 
 // BindingInput is one exact reachable Interface-to-constructor binding.
 type BindingInput struct {
-	InterfaceID      interfaceid.Identifier
-	PackagePath      string
-	Constructor      constructorsymbol.Symbol
-	SelectionReason  SelectionReason
-	ContractDigest   [sha256.Size]byte
-	ConcurrencyLimit int
+	InterfaceID     interfaceid.Identifier
+	PackagePath     string
+	Constructor     constructorsymbol.Symbol
+	SelectionReason SelectionReason
+	ContractDigest  [sha256.Size]byte
+	Policy          invocationpolicy.Policy
 }
 
 // IntrinsicBindingInput is one exposed reserved Kernel Interface that needs a
@@ -104,7 +104,6 @@ type Options struct {
 	ApplicationBuildIdentity string
 	KernelModuleVersion      string
 	KernelBuildIdentity      string
-	DefaultTimeout           time.Duration
 	Bindings                 []BindingInput
 	IntrinsicBindings        []IntrinsicBindingInput
 	Constructors             []ConstructorInput
@@ -170,9 +169,6 @@ func planAssembly(options Options) (plan, error) {
 	if err := modulepath.CheckProject(options.ModulePath); err != nil {
 		return plan{}, fmt.Errorf("%w: application Go Module path %q: %v", ErrInvalidInput, options.ModulePath, err)
 	}
-	if options.DefaultTimeout <= 0 {
-		return plan{}, fmt.Errorf("%w: default invocation timeout must be positive", ErrInvalidInput)
-	}
 	if _, err := kernelinvocation.NewModuleBuild(kernelModulePath, options.KernelModuleVersion, options.KernelBuildIdentity); err != nil {
 		return plan{}, fmt.Errorf("%w: Kernel build provenance: %v", ErrInvalidInput, err)
 	}
@@ -196,8 +192,8 @@ func planAssembly(options Options) (plan, error) {
 		if binding.SelectionReason != SelectionExplicit && binding.SelectionReason != SelectionUniqueCompatible {
 			return plan{}, fmt.Errorf("%w: Interface %s has selection reason %q", ErrInvalidInput, identifier, binding.SelectionReason)
 		}
-		if binding.ConcurrencyLimit < 1 || binding.ConcurrencyLimit > kernelinvocation.MaximumConcurrencyLimit {
-			return plan{}, fmt.Errorf("%w: Interface %s concurrency limit must be within 1 through %d", ErrInvalidInput, identifier, kernelinvocation.MaximumConcurrencyLimit)
+		if err := binding.Policy.Validate(); err != nil {
+			return plan{}, fmt.Errorf("%w: Interface %s: %w", ErrInvalidInput, identifier, err)
 		}
 		if _, duplicate := bindingByID[identifier]; duplicate {
 			return plan{}, fmt.Errorf("%w: duplicate Interface binding %s", ErrInvalidInput, identifier)
@@ -427,7 +423,6 @@ func render(planned plan) ([]byte, error) {
 	fmt.Fprintf(&source, "\tkernellifecycle %s\n", strconv.Quote(kernelLifecyclePath))
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
-	fmt.Fprintf(&source, "const defaultInterfaceInvocationTimeout = time.Duration(%d)\n", planned.options.DefaultTimeout)
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "var (")
 	fmt.Fprintln(&source, "\t// ErrInterfaceAssembly reports a safe static constructor or binding failure.")
@@ -638,7 +633,7 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 	fmt.Fprintln(&source, "\tif err := RequireKernelCompatibility(); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: Kernel compatibility: %w\", ErrInterfaceAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tdispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInterfaceInvocationTimeout})")
+	fmt.Fprintf(&source, "\tdispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: %d})\n", kernelinvocation.PolicySchemaVersion)
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: governed dispatcher\", ErrInterfaceAssembly)")
 	fmt.Fprintln(&source, "\t}")
@@ -731,7 +726,11 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 		fmt.Fprintf(&source, "\t\tModuleBuild:     moduleBuild%d,\n", implementationIndex)
 		fmt.Fprintf(&source, "\t\tSelectionReason: kernelinvocation.%s,\n", kernelSelectionName(binding.SelectionReason))
 		fmt.Fprintf(&source, "\t\tContractDigest:  %s,\n", digestLiteral(binding.ContractDigest))
-		fmt.Fprintf(&source, "\t\tConcurrencyLimit: %d,\n", binding.ConcurrencyLimit)
+		policySource, err := binding.Policy.Source()
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(&source, "\t\tPolicy: %s,\n", policySource)
 		fmt.Fprintf(&source, "\t}, endpoint%d)\n", index)
 		fmt.Fprintln(&source, "\tif err != nil {")
 		fmt.Fprintf(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%%w: exact binding %s\", ErrInterfaceAssembly)\n", binding.InterfaceID)

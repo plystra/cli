@@ -218,7 +218,7 @@ func TestOwnedGraphsThroughPublicGeneratedRuntime(t *testing.T) {
 }
 func TestIndependentAttemptsAndConcurrentCallerMutation(t *testing.T) {
 	runtime := runtime(t)
-	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{DefaultTimeout: time.Second})
+	dispatcher, err := invocation.NewDispatcher(invocation.DispatcherOptions{PolicyVersion: invocation.PolicySchemaVersion})
 	if err != nil { t.Fatal(err) }
 	if err := dispatcher.Publish(runtime.Catalog()); err != nil { t.Fatal(err) }
 	handle, err := invocation.NewHandle(dispatcher, adapter.Contract(), true)

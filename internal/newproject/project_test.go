@@ -35,7 +35,6 @@ import (
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectsmoke"
-	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
@@ -465,7 +464,7 @@ composition:
       config:
         example.com/acme/platform/mailer.New:
           sender: adopted-template
-    unenforced:
+    timed:
       interfaces:
         require: [email.send/v1]
         policies:
@@ -598,7 +597,7 @@ var _ sendv1.Interface = (*Service)(nil)
 	if len(binding) != 1 ||
 		binding[0].InterfaceID() != "email.send/v1" ||
 		binding[0].Selection().Constructor() != "example.com/acme/platform/mailer.New" ||
-		binding[0].Policy().Timeout() != "30s" ||
+		binding[0].Policy().Timeout() != "0s" ||
 		binding[0].ConfigurationOwner() != configurationOwner ||
 		len(constructors) != 1 ||
 		constructors[0].Symbol() != "example.com/acme/platform/mailer.New" ||
@@ -617,17 +616,20 @@ var _ sendv1.Interface = (*Service)(nil)
 		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
 	}
 	assertPlystraGuidance(t, target, "example.com/acme/my-app")
-	beforeRejected := snapshotTree(t, parent)
 	stdout.Reset()
 	stderr.Reset()
-	if code := command.RunIn([]string{"new", "rejected-policy", "--module", "example.com/acme/rejected-policy", "--template", templateQuery, "--adopt-export", "unenforced"}, &stdout, &stderr, parent, environment); code != 8 ||
-		stdout.Len() != 0 || !strings.Contains(stderr.String(), "PLYSTRA_POLICY_NOT_ENFORCED") ||
-		!strings.Contains(stderr.String(), "Source: example.com/acme/platform:plystra.yaml:1:1 (configuration-declaration)") {
-		t.Fatalf("unenforced template policy = %d, %q, %q", code, stdout.String(), stderr.String())
+	if code := command.RunIn([]string{"new", "timed-policy", "--module", "example.com/acme/timed-policy", "--template", templateQuery, "--adopt-export", "timed"}, &stdout, &stderr, parent, environment); code != 0 {
+		t.Fatalf("timed template policy = %d, %q, %q", code, stdout.String(), stderr.String())
 	}
-	if afterRejected := snapshotTree(t, parent); !reflect.DeepEqual(afterRejected, beforeRejected) {
-		t.Fatal("rejected template policy left Project or transaction files")
+	timedData, err := os.ReadFile(filepath.Join(parent, "timed-policy", "generated", "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	timed, err := applicationgen.DecodeManifestProvenance(timedData)
+	if err != nil || len(timed.InterfaceProvenance().Bindings()) != 1 || timed.InterfaceProvenance().Bindings()[0].Policy().Timeout() != "7s" {
+		t.Fatalf("timed template provenance = %v, %v", timed, err)
+	}
+	assertNoTransactionFiles(t, parent)
 	if cacheAfter := snapshotTree(t, cacheRoot); !reflect.DeepEqual(cacheAfter, cacheBefore) {
 		t.Fatalf("template Module Cache source changed:\nbefore: %#v\nafter:  %#v", cacheBefore, cacheAfter)
 	}
@@ -1205,18 +1207,38 @@ func TestCreateRunsTemplateLifecycleSmokeAndRollsBackFailure(t *testing.T) {
 	const templateVersion = "v1.0.0"
 	const templateQuery = templatePath + "@" + templateVersion
 	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
-		"template.go":  []byte("package platform\n"),
-		"plystra.yaml": []byte("{}\n"),
+		"plystra.yaml": []byte("composition:\n  exports:\n    defaults:\n      interfaces: {require: [startup.check/v1]}\n"),
+		"interfaces/startup/check/v1/interface.go": []byte(`package checkv1
+import "context"
+//plystra:interface startup.check/v1
+type Interface interface { Check(context.Context, Request) (Response, error) }
+type Request struct{}
+type Response struct{}
+`),
+		"service/service.go": []byte(`package service
+import (
+	"context"
+	"errors"
+	checkv1 "example.com/acme/unhealthy-platform/interfaces/startup/check/v1"
+)
+type Service struct{}
+//plystra:implements startup.check/v1
+func New() (*Service, error) { return &Service{}, nil }
+func (*Service) Check(context.Context, checkv1.Request) (checkv1.Response, error) { return checkv1.Response{}, nil }
+func (*Service) Start(context.Context) error { return errors.New("private startup failure") }
+func (*Service) Stop(context.Context) error { return nil }
+`),
 	})
-	environment := setEnvironmentValue(isolatedGoEnvironment(t, proxy), "PLYSTRA_TEST_HEALTH_UNHEALTHY", "1")
+	environment := isolatedGoEnvironment(t, proxy)
 	parent := t.TempDir()
 
 	_, err := newproject.Create(t.Context(), newproject.Options{
-		Parent:      parent,
-		ProjectName: "my-app",
-		ModulePath:  "example.com/acme/my-app",
-		Template:    templateQuery,
-		Environment: environment,
+		Parent:       parent,
+		ProjectName:  "my-app",
+		ModulePath:   "example.com/acme/my-app",
+		Template:     templateQuery,
+		AdoptExports: []string{"defaults"},
+		Environment:  environment,
 	})
 	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, newproject.ErrInvalidTemplate) || !errors.Is(err, projectsmoke.ErrSmoke) {
 		t.Fatalf("Create error = %v", err)
@@ -2267,76 +2289,8 @@ func TestCreatePreservesExistingProject(t *testing.T) {
 func createKernelProxy(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "proxy")
-	escapedPath, err := module.EscapePath("github.com/plystra/kernel")
-	if err != nil {
-		t.Fatalf("EscapePath: %v", err)
-	}
-	escapedVersion, err := module.EscapeVersion(version.KernelVersion)
-	if err != nil {
-		t.Fatalf("EscapeVersion: %v", err)
-	}
-	versionRoot := filepath.Join(root, filepath.FromSlash(escapedPath), "@v")
-	if err := os.MkdirAll(versionRoot, 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	writeTestFile(t, filepath.Join(versionRoot, "list"), []byte(version.KernelVersion+"\n"))
-	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Appendf(nil, "{\"Version\":%q,\"Time\":\"2026-07-15T00:00:00Z\"}\n", version.KernelVersion))
-	moduleFile := readPinnedKernelFile(t, "go.mod")
-	writeTestFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), moduleFile)
-
-	archiveFile, err := os.Create(filepath.Join(versionRoot, escapedVersion+".zip"))
-	if err != nil {
-		t.Fatalf("Create zip: %v", err)
-	}
-	archive := zip.NewWriter(archiveFile)
-	prefix := "github.com/plystra/kernel@" + version.KernelVersion + "/"
-	files := []struct {
-		name string
-		data []byte
-	}{
-		{name: "assembly/version.go", data: []byte("package assembly\n\nimport \"fmt\"\n\ntype Version uint32\n\nconst V1 Version = 1\n\nfunc RequireVersion(version Version) error {\n\tif version != V1 { return fmt.Errorf(\"unsupported assembly API version %d\", version) }\n\treturn nil\n}\n")},
-		{name: "capability/capability.go", data: []byte("package capability\n\nimport \"context\"\n\ntype Identifier struct { value, name string; major uint32 }\ntype Contract[Request, Response any] struct{ id string }\ntype Handler[Request, Response any] func(context.Context, Request) (Response, error)\n\nfunc ParseIdentifier(id string) (Identifier, error) { return Identifier{value: id, name: id, major: 1}, nil }\nfunc (identifier Identifier) String() string { return identifier.value }\nfunc (identifier Identifier) Name() string { return identifier.name }\nfunc (identifier Identifier) Major() uint32 { return identifier.major }\nfunc MustParseContractWithSemanticErrors[Request, Response any](id string, _ ...string) Contract[Request, Response] {\n\treturn Contract[Request, Response]{id: id}\n}\nfunc (contract Contract[Request, Response]) ID() string { return contract.id }\n")},
-		{name: "configuration/configuration.go", data: []byte("package configuration\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/plugin/manifest\"\n)\n\nconst MaximumSecretValueBytes = 1 << 20\n\nvar ErrSecretExposure = errors.New(\"Secret serialization is prohibited\")\n\ntype ResolverOptions struct { MaximumValueBytes int }\ntype Resolver struct{}\ntype Secret struct{}\ntype Values struct{}\ntype ObjectMap struct{}\ntype StringMap struct{}\n\nfunc NewResolver(ResolverOptions) (*Resolver, error) { return &Resolver{}, nil }\nfunc LoadDocument(path string) ([]byte, error) { return os.ReadFile(path) }\nfunc (ObjectMap) Names() []string { return nil }\nfunc (ObjectMap) YAML(string) ([]byte, bool) { return nil, false }\nfunc (StringMap) Names() []string { return nil }\nfunc (StringMap) Value(string) (string, bool) { return \"\", false }\nfunc ExtractObjectMap([]byte, string) (ObjectMap, error) { return ObjectMap{}, nil }\nfunc ExtractStringMap([]byte, string) (StringMap, error) { return StringMap{}, nil }\nfunc Decode(context.Context, *Resolver, manifest.Config, []byte) (Values, error) { return Values{}, nil }\n")},
-		{name: "go.mod", data: moduleFile},
-		{name: "invocation/dependencies.go", data: []byte("package invocation\n\nimport _ \"golang.org/x/mod/module\"\n")},
-		{name: "invocation/code.go", data: readPinnedKernelFile(t, "invocation/code.go")},
-		{name: "invocation/error.go", data: readPinnedKernelFile(t, "invocation/error.go")},
-		{name: "invocation/semantic_error.go", data: readPinnedKernelFile(t, "invocation/semantic_error.go")},
-		{name: "invocation/completion.go", data: readPinnedKernelFile(t, "invocation/completion.go")},
-		{name: "invocation/error_tree.go", data: readPinnedKernelFile(t, "invocation/error_tree.go")},
-		{name: "capability/semantic_error.go", data: readPinnedKernelFile(t, "capability/semantic_error.go")},
-		{name: "interfaces/kernel/health/v1/interface.go", data: readPinnedKernelFile(t, "interfaces/kernel/health/v1/interface.go")},
-		{name: "interfaces/kernel/health/v1/interface.yaml", data: readPinnedKernelFile(t, "interfaces/kernel/health/v1/interface.yaml")},
-		{name: "interfaces/kernel/info/v1/interface.go", data: readPinnedKernelFile(t, "interfaces/kernel/info/v1/interface.go")},
-		{name: "interfaces/kernel/info/v1/interface.yaml", data: readPinnedKernelFile(t, "interfaces/kernel/info/v1/interface.yaml")},
-		{name: "intrinsic/intrinsic.go", data: []byte("package intrinsic\n\nimport (\n\t\"context\"\n\t\"os\"\n\n\t\"github.com/plystra/kernel/capability\"\n\thealthv1 \"github.com/plystra/kernel/interfaces/kernel/health/v1\"\n\tinfov1 \"github.com/plystra/kernel/interfaces/kernel/info/v1\"\n\t\"github.com/plystra/kernel/invocation\"\n)\n\ntype BindingOptions struct { ModuleVersion, BuildIdentity string }\n\nvar healthContract = capability.MustParseContractWithSemanticErrors[healthv1.Request, healthv1.Response](\"kernel.health/v1\")\nvar infoContract = capability.MustParseContractWithSemanticErrors[infov1.Request, infov1.Response](\"kernel.info/v1\")\n\nfunc HealthContract() capability.Contract[healthv1.Request, healthv1.Response] { return healthContract }\nfunc InfoContract() capability.Contract[infov1.Request, infov1.Response] { return infoContract }\nfunc NewBindings(BindingOptions) ([]invocation.Binding, error) {\n\thealthEndpoint, err := invocation.NewEndpoint(healthContract, func(context.Context, healthv1.Request) (healthv1.Response, error) {\n\t\tif os.Getenv(\"PLYSTRA_TEST_HEALTH_UNHEALTHY\") == \"1\" { return healthv1.Response{}, nil }\n\t\treturn healthv1.Response{Status: healthv1.StatusHealthy}, nil\n\t})\n\tif err != nil { return nil, err }\n\thealth, err := invocation.NewBinding(invocation.BindingOptions{}, healthEndpoint)\n\tif err != nil { return nil, err }\n\tinfoEndpoint, err := invocation.NewEndpoint(infoContract, func(context.Context, infov1.Request) (infov1.Response, error) { return infov1.Response{}, nil })\n\tif err != nil { return nil, err }\n\tinfo, err := invocation.NewBinding(invocation.BindingOptions{}, infoEndpoint)\n\tif err != nil { return nil, err }\n\treturn []invocation.Binding{health, info}, nil\n}\n")},
-		{name: "invocation/invocation.go", data: []byte("package invocation\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"time\"\n\n\t\"github.com/plystra/kernel/capability\"\n)\n\ntype Endpoint struct { id string; invoke func(context.Context, any) (any, error) }\ntype ModuleBuild struct{}\ntype BindingKind string\ntype SelectionReason string\ntype BindingOptions struct {\n\tConcurrencyLimit int\n\tKind BindingKind\n\tConstructor string\n\tModuleBuild ModuleBuild\n\tSelectionReason SelectionReason\n\tContractDigest [32]byte\n}\ntype Binding struct{ endpoint Endpoint }\ntype Catalog struct { bindings []Binding; byID map[string]Binding }\nconst (\n\tBindingKindIntrinsic BindingKind = \"intrinsic\"\n\tBindingKindImplementation BindingKind = \"implementation\"\n\tSelectionReasonIntrinsic SelectionReason = \"intrinsic\"\n\tSelectionReasonUniqueCompatible SelectionReason = \"unique-compatible\"\n\tSelectionReasonExplicit SelectionReason = \"explicit\"\n)\nfunc NewModuleBuild(string, string, string) (ModuleBuild, error) { return ModuleBuild{}, nil }\nfunc NewEndpoint[Request, Response any](contract capability.Contract[Request, Response], handler capability.Handler[Request, Response]) (Endpoint, error) {\n\treturn Endpoint{id: contract.ID(), invoke: func(ctx context.Context, value any) (any, error) {\n\t\trequest, ok := value.(Request); if !ok { return nil, errors.New(\"request type mismatch\") }\n\t\treturn handler(ctx, request)\n\t}}, nil\n}\nfunc NewBinding(_ BindingOptions, endpoint Endpoint) (Binding, error) { return Binding{endpoint: endpoint}, nil }\nfunc NewCatalog(bindings []Binding) (Catalog, error) {\n\tresult := Catalog{bindings: append([]Binding(nil), bindings...), byID: make(map[string]Binding, len(bindings))}\n\tfor _, binding := range bindings { result.byID[binding.endpoint.id] = binding }\n\treturn result, nil\n}\nfunc (c Catalog) Bindings() []Binding { return append([]Binding(nil), c.bindings...) }\ntype DispatcherOptions struct { DefaultTimeout time.Duration }\ntype Dispatcher struct { published bool; closed bool; catalog Catalog }\nfunc NewDispatcher(DispatcherOptions) (*Dispatcher, error) { return &Dispatcher{}, nil }\nfunc (d *Dispatcher) Publish(catalog Catalog) error { d.catalog = catalog; d.published = true; return nil }\nfunc (d *Dispatcher) Published() bool { return d != nil && d.published }\ntype Handle[Request, Response any] struct { dispatcher *Dispatcher; id string; available bool }\nfunc NewHandle[Request, Response any](dispatcher *Dispatcher, contract capability.Contract[Request, Response], available bool) (Handle[Request, Response], error) { return Handle[Request, Response]{dispatcher: dispatcher, id: contract.ID(), available: available}, nil }\nfunc (h Handle[Request, Response]) Available() bool { return h.available }\nfunc (h Handle[Request, Response]) Invoke(ctx context.Context, request Request) (Response, error) {\n\tvar zero Response\n\tif !h.available || h.dispatcher == nil || !h.dispatcher.published || h.dispatcher.closed { return zero, errors.New(\"unavailable\") }\n\tbinding, exists := h.dispatcher.catalog.byID[h.id]; if !exists { return zero, errors.New(\"unavailable\") }\n\tvalue, err := binding.endpoint.invoke(ctx, request); if err != nil { return zero, err }\n\tresponse, ok := value.(Response); if !ok { return zero, errors.New(\"response type mismatch\") }\n\treturn response, nil\n}\nfunc (d *Dispatcher) Drain(context.Context) error { d.closed = true; return nil }\nfunc (h Handle[Request, Response]) InvokeWithResponse(ctx context.Context, request Request, process func(Response) (Response, error)) (Response, error) {\n\tresponse, err := h.Invoke(ctx, request); if err != nil { return response, err }; return process(response)\n}\n")},
-		{name: "lifecycle/lifecycle.go", data: []byte("package lifecycle\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"time\"\n)\n\nvar ErrInvalidContext = errors.New(\"invalid lifecycle context\")\n\ntype Instance interface {\n\tStart(context.Context) error\n\tStop(context.Context) error\n}\n\ntype State string\nconst (\n\tStateNew State = \"new\"\n\tStateStarting State = \"starting\"\n\tStateRunning State = \"running\"\n\tStateStopping State = \"stopping\"\n\tStateStopped State = \"stopped\"\n\tStateFailed State = \"failed\"\n)\nfunc (state State) Valid() bool { return state == StateNew || state == StateStarting || state == StateRunning || state == StateStopping || state == StateStopped || state == StateFailed }\ntype Binding struct{ instance Instance }\ntype Manager struct{ bindings []Binding; started int; state State }\ntype ManagerOptions struct { RollbackTimeout time.Duration }\n\nfunc NewBinding(_ string, instance Instance) (Binding, error) { return Binding{instance: instance}, nil }\nfunc NewManager(_ ManagerOptions, bindings []Binding) (*Manager, error) { return &Manager{bindings: append([]Binding(nil), bindings...), state: StateNew}, nil }\nfunc (manager *Manager) State() State { return manager.state }\nfunc (manager *Manager) Start(ctx context.Context) error {\n\tmanager.state = StateStarting\n\tfor index := range manager.bindings {\n\t\tif err := manager.bindings[index].instance.Start(ctx); err != nil { manager.state = StateFailed; return err }\n\t\tmanager.started++\n\t}\n\tmanager.state = StateRunning\n\treturn nil\n}\nfunc (manager *Manager) Stop(ctx context.Context) error {\n\tmanager.state = StateStopping\n\tfor index := manager.started - 1; index >= 0; index-- {\n\t\tif err := manager.bindings[index].instance.Stop(ctx); err != nil { manager.state = StateFailed; return err }\n\t\tmanager.started--\n\t}\n\tmanager.state = StateStopped\n\treturn nil\n}\n")},
-		{name: "plugin/id.go", data: []byte("package plugin\n\ntype ID struct{ value string }\n\nfunc ParseID(value string) (ID, error) { return ID{value: value}, nil }\nfunc (id ID) String() string { return id.value }\n")},
-		{name: "plugin/manifest/config.go", data: []byte("package manifest\n\ntype Config struct{}\n\nfunc ParseConfig([]byte) (Config, error) { return Config{}, nil }\n")},
-	}
-	for _, file := range files {
-		header := &zip.FileHeader{Name: prefix + file.name, Method: zip.Deflate}
-		header.SetMode(0o644)
-		header.Modified = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
-		writer, err := archive.CreateHeader(header)
-		if err != nil {
-			t.Fatalf("CreateHeader: %v", err)
-		}
-		if _, err := writer.Write(file.data); err != nil {
-			t.Fatalf("write zip entry: %v", err)
-		}
-	}
-	if err := archive.Close(); err != nil {
-		t.Fatalf("close zip: %v", err)
-	}
-	if err := archiveFile.Close(); err != nil {
-		t.Fatalf("close zip file: %v", err)
-	}
-	writeProxyModule(t, root, "golang.org/x/mod", "v0.38.0", map[string][]byte{
-		"go.mod":           []byte("module golang.org/x/mod\n\ngo 1.25.0\n"),
-		"module/module.go": []byte("package module\n"),
-	})
+	copyCachedProxyModule(t, root, "github.com/plystra/kernel", version.KernelVersion)
+	copyCachedProxyModule(t, root, "golang.org/x/mod", "v0.38.0")
 	for _, dependency := range []struct {
 		path    string
 		version string
@@ -2345,21 +2299,13 @@ func createKernelProxy(t *testing.T) string {
 		{path: connectgen.ProtobufModulePath, version: connectgen.ProtobufModuleVersion},
 		{path: "github.com/golang/protobuf", version: "v1.5.0"},
 		{path: "github.com/google/go-cmp", version: "v0.7.0"},
+		{path: "golang.org/x/tools", version: "v0.47.0"},
 		{path: bootstrapgen.YAMLModulePath, version: bootstrapgen.YAMLModuleVersion},
 		{path: "gopkg.in/check.v1", version: "v0.0.0-20161208181325-20d25e280405"},
 	} {
 		copyCachedProxyModule(t, root, dependency.path, dependency.version)
 	}
 	return root
-}
-
-func readPinnedKernelFile(t *testing.T, path string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(testkernel.Root(t), filepath.FromSlash(path)))
-	if err != nil {
-		t.Fatalf("read pinned Kernel file %s: %v", path, err)
-	}
-	return data
 }
 
 func copyCachedProxyModule(t *testing.T, proxyRoot, modulePath, version string) {

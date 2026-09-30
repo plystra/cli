@@ -10,11 +10,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/capabilitymeta"
 	"github.com/plystra/cli/internal/goname"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/modulepath"
 	kernelcatalog "github.com/plystra/kernel/capability/catalog"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
@@ -49,6 +49,7 @@ type InvocationInput struct {
 	ProviderID      string
 	SelectionReason kernelinvocation.SelectionReason
 	Dependencies    []string
+	Policy          invocationpolicy.Policy
 }
 
 // InvocationOptions contains the complete canonical runtime plan and selected
@@ -60,8 +61,6 @@ type InvocationOptions struct {
 	ApplicationBuildIdentity string
 	KernelModuleVersion      string
 	KernelBuildIdentity      string
-	DefaultTimeout           time.Duration
-	ConcurrencyLimit         int
 	Providers                []ProviderInput
 	Invocations              []InvocationInput
 }
@@ -93,15 +92,13 @@ type plannedInvocation struct {
 	dependencies    []capabilityid.Identifier
 	accessor        string
 	index           int
+	policySource    string
 }
 
 // RenderInvocations emits one immutable canonical catalog, one shared Kernel
 // dispatcher, typed ordinary-provider endpoint adapters, raw handles, and
 // generated application invocation handles for every required Capability.
 func RenderInvocations(options InvocationOptions) ([]byte, error) {
-	if options.ConcurrencyLimit < 1 || options.ConcurrencyLimit > kernelinvocation.MaximumConcurrencyLimit {
-		return nil, fmt.Errorf("%w: %w: concurrency limit must be within 1 through %d", ErrRenderInvocations, ErrInvalidInvocation, kernelinvocation.MaximumConcurrencyLimit)
-	}
 	invocations, order, err := planInvocations(options)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRenderInvocations, err)
@@ -119,7 +116,6 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\"errors\"")
 	fmt.Fprintln(&source, "\t\"fmt\"")
 	fmt.Fprintln(&source, "\t\"log/slog\"")
-	fmt.Fprintln(&source, "\t\"time\"")
 	fmt.Fprintln(&source)
 	for _, invocation := range invocations {
 		fmt.Fprintf(&source, "\tapplicationinvocation%d %s\n", invocation.index, strconv.Quote(applicationInvocationPath(options.ModulePath, invocation.id)))
@@ -142,7 +138,6 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\tkernelinvocation \"github.com/plystra/kernel/invocation\"")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
-	fmt.Fprintf(&source, "const defaultInvocationTimeout = time.Duration(%d)\n", options.DefaultTimeout)
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "// ErrInvocationAssembly reports a safe canonical runtime construction failure.")
 	fmt.Fprintln(&source, "var ErrInvocationAssembly = errors.New(\"assemble canonical invocation runtime\")")
@@ -287,7 +282,7 @@ func RenderInvocations(options InvocationOptions) ([]byte, error) {
 	fmt.Fprintln(&source, "\tif err := RequireKernelCompatibility(); err != nil {")
 	fmt.Fprintln(&source, "\t\treturn pendingInvocations{}, fmt.Errorf(\"%w: Kernel compatibility: %w\", ErrInvocationAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tdispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInvocationTimeout})")
+	fmt.Fprintf(&source, "\tdispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: %d})\n", kernelinvocation.PolicySchemaVersion)
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn pendingInvocations{}, fmt.Errorf(\"%w: canonical dispatcher: %w\", ErrInvocationAssembly, err)")
 	fmt.Fprintln(&source, "\t}")
@@ -388,9 +383,6 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 	if err := modulepath.CheckProject(options.ModulePath); err != nil {
 		return nil, nil, fmt.Errorf("%w: application Go Module path %q: %v", ErrInvalidInvocation, options.ModulePath, err)
 	}
-	if options.DefaultTimeout <= 0 {
-		return nil, nil, fmt.Errorf("%w: default invocation timeout must be positive", ErrInvalidInvocation)
-	}
 	if _, err := kernelinvocation.NewModuleBuild(kernelintrinsic.ModulePath, options.KernelModuleVersion, options.KernelBuildIdentity); err != nil {
 		return nil, nil, fmt.Errorf("%w: intrinsic Kernel build provenance: %v", ErrInvalidInvocation, err)
 	}
@@ -422,7 +414,11 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 			return nil, nil, fmt.Errorf("%w: Capability %s must be intrinsic exactly when it uses the reserved kernel.* namespace", ErrInvalidInvocation, identifier)
 		}
 		var provider indexedProvider
+		var policySource string
 		if input.Intrinsic {
+			if input.Policy != (invocationpolicy.Policy{}) {
+				return nil, nil, fmt.Errorf("%w: intrinsic policy cannot be overridden", ErrInvalidInvocation)
+			}
 			if input.ProviderID != "" || input.SelectionReason != kernelinvocation.SelectionReasonIntrinsic {
 				return nil, nil, fmt.Errorf("%w: intrinsic Capability %s cannot select an ordinary provider", ErrInvalidInvocation, identifier)
 			}
@@ -430,6 +426,10 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 				return nil, nil, fmt.Errorf("%w: %v", ErrInvalidInvocation, err)
 			}
 		} else {
+			policySource, err = input.Policy.Source()
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: Capability %s policy: %w", ErrInvalidInvocation, identifier, err)
+			}
 			var exists bool
 			provider, exists = providerByID[input.ProviderID]
 			if !exists {
@@ -465,6 +465,7 @@ func planInvocations(options InvocationOptions) ([]plannedInvocation, []int, err
 			selectionReason: input.SelectionReason,
 			dependencies:    dependencies,
 			accessor:        invocationAccessor(identifier),
+			policySource:    policySource,
 		}
 	}
 	sort.Slice(invocations, func(left, right int) bool { return invocations[left].id.String() < invocations[right].id.String() })
@@ -594,7 +595,7 @@ func renderEndpointBinding(source *strings.Builder, options InvocationOptions, i
 	fmt.Fprintf(source, "\t\tModuleBuild:     implementationBuild%d,\n", invocation.provider.index)
 	fmt.Fprintf(source, "\t\tSelectionReason: kernelinvocation.%s,\n", selectionReasonName(invocation.selectionReason))
 	fmt.Fprintf(source, "\t\tContractDigest:  %s,\n", digestLiteral(invocation.digest))
-	fmt.Fprintf(source, "\t\tConcurrencyLimit: %d,\n", options.ConcurrencyLimit)
+	fmt.Fprintf(source, "\t\tPolicy: %s,\n", invocation.policySource)
 	fmt.Fprintf(source, "\t}, endpoint%d)\n", invocation.index)
 	fmt.Fprintln(source, "\tif err != nil {")
 	fmt.Fprintf(source, "\t\treturn Invocations{}, fmt.Errorf(\"%%w: binding %s to plugin %%q: %%w\", ErrInvocationAssembly, %s, err)\n", invocation.id, strconv.Quote(invocation.provider.PluginID))

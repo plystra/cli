@@ -5,13 +5,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/invocationpolicy"
 )
 
 func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
@@ -36,9 +35,10 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 		`.Contract(), true)`,
 		`kernelinvocation.BindingKindImplementation`,
 		`kernelinvocation.SelectionReasonUniqueCompatible`,
-		`Constructor:      "example.com/application/app.New"`,
-		`ContractDigest:   [32]byte{`,
-		`ConcurrencyLimit: 64,`,
+		`Constructor:     "example.com/application/app.New"`,
+		`ContractDigest:  [32]byte{`,
+		`ConcurrencyLimit: 64, QueueLimit: 0`,
+		`PolicyVersion: 1`,
 		`plystra.Optional[`,
 		`kernelinvocation.NewCatalog(bindings)`,
 		`dispatcher.Publish(catalog)`,
@@ -70,7 +70,7 @@ func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 	if auditLifecycle < 0 || appLifecycle < 0 || auditLifecycle >= appLifecycle {
 		t.Fatalf("lifecycle bindings are not dependency-first:\n%s", source)
 	}
-	if bytes.Count(source, []byte(`Constructor:      "example.com/application/app.New"`)) != 2 {
+	if bytes.Count(source, []byte(`Constructor:     "example.com/application/app.New"`)) != 2 {
 		t.Fatalf("multi-Interface constructor provenance was not retained for two bindings:\n%s", source)
 	}
 	if !bytes.Contains(source, []byte(`.NewEndpoint(implementation1)`)) || bytes.Count(source, []byte(`.NewEndpoint(implementation1)`)) != 2 {
@@ -248,7 +248,7 @@ func TestRenderBindsAndBoundsAdmissionLimits(t *testing.T) {
 	}
 	for _, limit := range []int{-1, 0, 1, 65536, 65537} {
 		options := validOptions(t)
-		options.Bindings[0].ConcurrencyLimit = limit
+		options.Bindings[0].Policy.ConcurrencyLimit = limit
 		file, err := implementationassemblygen.Render(options)
 		if limit < 1 || limit > 65536 {
 			if !errors.Is(err, implementationassemblygen.ErrInvalidInput) || len(file.Data()) != 0 {
@@ -268,7 +268,6 @@ func validOptions(t testing.TB) implementationassemblygen.Options {
 		ModulePath:               "example.com/application",
 		ApplicationBuildIdentity: "sha256:0123456789abcdef",
 		KernelModuleVersion:      "v0.1.0",
-		DefaultTimeout:           time.Second,
 		Bindings: []implementationassemblygen.BindingInput{
 			binding(t, "app.run/v1", "example.com/application/interfaces/app/run/v1", app),
 			binding(t, "audit.write/v1", "example.com/application/interfaces/audit/write/v1", audit),
@@ -303,12 +302,12 @@ func validOptions(t testing.TB) implementationassemblygen.Options {
 func binding(t testing.TB, id, packagePath string, constructor constructorsymbol.Symbol) implementationassemblygen.BindingInput {
 	t.Helper()
 	return implementationassemblygen.BindingInput{
-		ConcurrencyLimit: 64,
-		InterfaceID:      mustInterfaceID(t, id),
-		PackagePath:      packagePath,
-		Constructor:      constructor,
-		SelectionReason:  implementationassemblygen.SelectionUniqueCompatible,
-		ContractDigest:   sha256.Sum256([]byte(id)),
+		Policy:          invocationpolicy.Default(),
+		InterfaceID:     mustInterfaceID(t, id),
+		PackagePath:     packagePath,
+		Constructor:     constructor,
+		SelectionReason: implementationassemblygen.SelectionUniqueCompatible,
+		ContractDigest:  sha256.Sum256([]byte(id)),
 	}
 }
 
@@ -328,13 +327,4 @@ func mustSymbol(t testing.TB, value string) constructorsymbol.Symbol {
 		t.Fatalf("Parse constructor %q: %v", value, err)
 	}
 	return symbol
-}
-
-func containsAll(value string, fragments ...string) bool {
-	for _, fragment := range fragments {
-		if !strings.Contains(value, fragment) {
-			return false
-		}
-	}
-	return true
 }

@@ -243,7 +243,7 @@ func (service *service) Run(ctx context.Context, request runv1.Request) (runv1.R
 	for _, required := range [][]byte{
 		[]byte(`interface1 :=`),
 		[]byte(`plystra.Optional[`),
-		[]byte(`Constructor:      "example.com/acme/static-interface-runtime/app.New"`),
+		[]byte(`Constructor:     "example.com/acme/static-interface-runtime/app.New"`),
 		[]byte(`kernelinvocation.NewCatalog(bindings)`),
 		[]byte(`dispatcher.Publish(catalog)`),
 	} {

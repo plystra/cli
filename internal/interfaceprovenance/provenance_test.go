@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/plystra/cli/internal/interfaceprovenance"
+	"github.com/plystra/cli/internal/invocationpolicy"
 )
 
 func TestProvenanceCanonicalizesCompleteInterfaceAndConstructorGraph(t *testing.T) {
@@ -21,7 +23,7 @@ func TestProvenanceCanonicalizesCompleteInterfaceAndConstructorGraph(t *testing.
 	if !first.Valid() || first.SchemaVersion() != interfaceprovenance.Schema {
 		t.Fatalf("constructed provenance is invalid: schema %q digest %q", first.SchemaVersion(), first.Digest())
 	}
-	const expectedDigest = "sha256:3a1456207493dad0d24922ef8caeb6b8923cf413139598831b3ee6e98473ec09"
+	const expectedDigest = "sha256:7b6b810d2119375461d533b9a27390226d5f794f72737c5568282b1260082f7e"
 	if first.Digest() != expectedDigest {
 		t.Fatalf("digest = %q; want %q", first.Digest(), expectedDigest)
 	}
@@ -209,9 +211,9 @@ func TestProvenanceBindsAndBoundsAdmissionLimits(t *testing.T) {
 		for _, limit := range []int{-1, 0, 1, 65536, 65537} {
 			input := completeInput()
 			if intrinsic {
-				input.Intrinsics[0].Policy.ConcurrencyLimit = limit
+				input.Intrinsics[0].Policy.Compiled.ConcurrencyLimit = limit
 			} else {
-				input.Bindings[0].Policy.ConcurrencyLimit = limit
+				input.Bindings[0].Policy.Compiled.ConcurrencyLimit = limit
 			}
 			got, err := interfaceprovenance.New(input)
 			if limit < 1 || limit > 65536 {
@@ -223,9 +225,37 @@ func TestProvenanceBindsAndBoundsAdmissionLimits(t *testing.T) {
 			}
 		}
 	}
-	oldSchema := bytes.Replace(base.RecordJSON(), []byte(interfaceprovenance.Schema), []byte("plystra.interface-provenance/v1"), 1)
+	oldSchema := bytes.Replace(base.RecordJSON(), []byte(interfaceprovenance.Schema), []byte("plystra.interface-provenance/v2"), 1)
 	if _, err := interfaceprovenance.Decode(oldSchema); !errors.Is(err, interfaceprovenance.ErrRecord) {
 		t.Fatalf("old schema: %v", err)
+	}
+}
+
+func TestProvenanceBindsCompleteCompiledPolicy(t *testing.T) {
+	base, err := interfaceprovenance.New(completeInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*invocationpolicy.Policy){
+		func(p *invocationpolicy.Policy) { p.Timeout = 0 },
+		func(p *invocationpolicy.Policy) {
+			p.Retry = invocationpolicy.Retry{Eligibility: "replay_safe", MaxAttempts: 2}
+		},
+		func(p *invocationpolicy.Policy) {
+			p.Retry = invocationpolicy.Retry{Eligibility: "replay_safe", MaxAttempts: 3, Backoff: time.Millisecond}
+		},
+	} {
+		input := completeInput()
+		mutate(&input.Bindings[0].Policy.Compiled)
+		got, err := interfaceprovenance.New(input)
+		if err != nil || got.Digest() == base.Digest() {
+			t.Fatalf("compiled policy did not affect provenance: %v", err)
+		}
+		copied := got.Bindings()[1].Policy().Compiled()
+		copied.Timeout++
+		if got.Bindings()[1].Policy().Compiled() == copied {
+			t.Fatal("compiled policy was mutable")
+		}
 	}
 }
 
@@ -316,9 +346,8 @@ func completeInput() interfaceprovenance.Input {
 				},
 				ConfigurationOwner: orderConstructor.ConfigurationOwner,
 				Policy: interfaceprovenance.PolicyInput{
-					ConcurrencyLimit: 64,
-					Timeout:          "5s",
-					Sources:          []string{`plystra.yaml interfaces.policies["order.create/v1"].timeout`},
+					Compiled: timeoutPolicy(5 * time.Second),
+					Sources:  []string{`plystra.yaml interfaces.policies["order.create/v1"].timeout`},
 				},
 				Mappings: orderMapping,
 			},
@@ -338,9 +367,8 @@ func completeInput() interfaceprovenance.Input {
 					ConstructionOrder: auditConstructor.ConstructionOrder,
 				},
 				Policy: interfaceprovenance.PolicyInput{
-					ConcurrencyLimit: 64,
-					Timeout:          "2m0s",
-					Sources:          []string{"built-in Plystra default Interface invocation timeout"},
+					Compiled: invocationpolicy.Default(),
+					Sources:  []string{"built-in Plystra default Interface invocation policy"},
 				},
 				Mappings: interfaceprovenance.MappingInput{
 					ProxyPath:    "generated/go/proxies/audit/write/v1/proxy_gen.go",
@@ -367,9 +395,8 @@ func completeInput() interfaceprovenance.Input {
 				RequirementSources: []string{"Kernel intrinsic inventory kernel.health/v1", `plystra.yaml http.expose["kernel.health/v1"]`},
 				ExposureSources:    []string{`plystra.yaml http.expose["kernel.health/v1"]`},
 				Policy: interfaceprovenance.PolicyInput{
-					ConcurrencyLimit: 64,
-					Timeout:          "2m0s",
-					Sources:          []string{"built-in Plystra default Interface invocation timeout"},
+					Compiled: invocationpolicy.Default(),
+					Sources:  []string{"built-in Plystra default Interface invocation policy"},
 				},
 				Mappings: intrinsicMapping(),
 			},
@@ -410,4 +437,10 @@ func intrinsicMapping() interfaceprovenance.MappingInput {
 
 func digest(character string) string {
 	return "sha256:" + strings.Repeat(character, 64)
+}
+
+func timeoutPolicy(timeout time.Duration) invocationpolicy.Policy {
+	policy := invocationpolicy.Default()
+	policy.Timeout = timeout
+	return policy
 }

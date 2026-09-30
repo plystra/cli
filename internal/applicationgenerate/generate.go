@@ -38,6 +38,7 @@ import (
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/intrinsicinterface"
+	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/protobufdescriptor"
@@ -1169,13 +1170,20 @@ func implementationAssemblyInput(resolved applicationresolve.Result, interfaceMo
 		default:
 			return implementationassemblygen.Options{}, fmt.Errorf("reachable Interface %s has unsupported selection reason %q", binding.InterfaceID(), binding.Reason())
 		}
+		policy := invocationpolicy.Default()
+		for _, authored := range resolved.Manifest().InterfacePolicies() {
+			if authored.InterfaceID() == binding.InterfaceID() {
+				policy.Timeout = authored.Timeout()
+				break
+			}
+		}
 		bindings[index] = implementationassemblygen.BindingInput{
-			ConcurrencyLimit: applicationmeta.DefaultInvocationConcurrencyLimit,
-			InterfaceID:      binding.InterfaceID(),
-			PackagePath:      definition.packagePath,
-			Constructor:      binding.Constructor(),
-			SelectionReason:  reason,
-			ContractDigest:   definition.digest,
+			Policy:          policy,
+			InterfaceID:     binding.InterfaceID(),
+			PackagePath:     definition.packagePath,
+			Constructor:     binding.Constructor(),
+			SelectionReason: reason,
+			ContractDigest:  definition.digest,
 		}
 	}
 
@@ -1221,7 +1229,6 @@ func implementationAssemblyInput(resolved applicationresolve.Result, interfaceMo
 		ApplicationBuildIdentity: resolved.Resolution().Context().BuildModelDigest(),
 		KernelModuleVersion:      kernelVersion,
 		KernelBuildIdentity:      kernelBuildIdentity,
-		DefaultTimeout:           applicationmeta.DefaultInvocationTimeout,
 		Bindings:                 bindings,
 		IntrinsicBindings:        intrinsics,
 		Constructors:             constructors,
@@ -1295,22 +1302,21 @@ func buildInterfaceProvenance(
 		policies[policy.InterfaceID().String()] = policy
 	}
 	policyInput := func(identifier string) interfaceprovenance.PolicyInput {
-		limit := applicationmeta.DefaultInvocationConcurrencyLimit
+		compiled := invocationpolicy.Default()
 		if _, intrinsic := intrinsicByID[identifier]; intrinsic {
-			limit = kernelintrinsic.ConcurrencyLimit
+			compiled.ConcurrencyLimit = kernelintrinsic.ConcurrencyLimit
 		}
 		if policy, exists := policies[identifier]; exists {
 			field := fmt.Sprintf("interfaces.policies[%q].timeout", identifier)
+			compiled.Timeout = policy.Timeout()
 			return interfaceprovenance.PolicyInput{
-				ConcurrencyLimit: limit,
-				Timeout:          policy.Timeout().String(),
-				Sources:          provenanceSources(resolved, field, policy.Source()),
+				Compiled: compiled,
+				Sources:  provenanceSources(resolved, field, policy.Source()),
 			}
 		}
 		return interfaceprovenance.PolicyInput{
-			ConcurrencyLimit: limit,
-			Timeout:          applicationmeta.DefaultInvocationTimeout.String(),
-			Sources:          []string{"built-in Plystra default Interface invocation timeout"},
+			Compiled: compiled,
+			Sources:  []string{"built-in Plystra default Interface invocation policy"},
 		}
 	}
 

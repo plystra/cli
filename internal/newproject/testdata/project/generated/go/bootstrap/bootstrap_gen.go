@@ -34,9 +34,9 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1736bf67aa382a810ecba816343f65d1811892a40ab9430ecec636ed43ab60d9\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":3}"
-	compiledApplicationModelCompatibilityDigest = "sha256:f54005f50f383eb88ec9dc98dc4a420d3bc114196ac75917356a500d7877c0ac"
-	compiledApplicationModelDigest              = "sha256:1736bf67aa382a810ecba816343f65d1811892a40ab9430ecec636ed43ab60d9"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":3}"
+	compiledApplicationModelCompatibilityDigest = "sha256:e4a72630b4138367ba0c9db102dee9a6d54958fadeac25c2469e25f282c69e14"
+	compiledApplicationModelDigest              = "sha256:9884108167c07dedc652b32c6b3de1fa02cc76bb3feebfd3771ae0da3e033ecf"
 )
 
 var (
@@ -494,6 +494,9 @@ func runtimeApplicationModelInterfacePolicies(node *yaml.Node) ([]map[string]any
 		timeout, timeoutErr := validateRuntimeInterfacePolicyTimeout(fields["timeout"], path+".timeout")
 		if timeoutErr != nil {
 			return nil, timeoutErr
+		}
+		if _, executable := runtimeExecutableInterfaceChoices[interfaceID]; !executable {
+			continue
 		}
 		policies = append(policies, map[string]any{
 			"interface": interfaceID,

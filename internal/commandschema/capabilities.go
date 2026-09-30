@@ -101,6 +101,14 @@ type CapabilitySupport struct {
 	input CapabilitySupportInput
 }
 
+// NewCapabilitySupport validates one standalone installed support record.
+func NewCapabilitySupport(input CapabilitySupportInput) (CapabilitySupport, error) {
+	if err := validateCapabilitySupport(input); err != nil {
+		return CapabilitySupport{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
+	}
+	return CapabilitySupport{input: input}, nil
+}
+
 // ID returns the stable feature identity.
 func (s CapabilitySupport) ID() string { return s.input.ID }
 
@@ -127,6 +135,7 @@ func (s CapabilitySupport) Valid() bool { return validateCapabilitySupport(s.inp
 // facts. All inputs must describe the running distribution rather than a
 // current Project or caller.
 type CapabilitiesInput struct {
+	InvocationPolicy           CapabilityInvocationPolicy
 	CLIVersion                 string
 	KernelVersion              string
 	SpecificationRevision      string
@@ -150,6 +159,7 @@ type CapabilitiesInput struct {
 
 // Capabilities is one immutable plystra.capabilities/v1 payload.
 type Capabilities struct {
+	invocationPolicy           CapabilityInvocationPolicy
 	cliVersion                 string
 	kernelVersion              string
 	specificationRevision      string
@@ -174,15 +184,28 @@ type Capabilities struct {
 }
 
 type capabilitiesDocument struct {
-	Schema    string                        `json:"schema"`
-	Installed capabilitiesInstalledDocument `json:"installed"`
-	Schemas   []capabilitySchemaDocument    `json:"schemas"`
-	Commands  []capabilityCommandDocument   `json:"commands"`
-	Selectors []capabilitySelectorDocument  `json:"selectors"`
-	Effects   []EffectClass                 `json:"effect_classes"`
-	Limits    capabilitiesLimitsDocument    `json:"limits"`
-	Defaults  capabilitiesDefaultsDocument  `json:"defaults"`
-	Support   []capabilitySupportDocument   `json:"support"`
+	InvocationPolicy CapabilityInvocationPolicy    `json:"invocation_policy"`
+	Schema           string                        `json:"schema"`
+	Installed        capabilitiesInstalledDocument `json:"installed"`
+	Schemas          []capabilitySchemaDocument    `json:"schemas"`
+	Commands         []capabilityCommandDocument   `json:"commands"`
+	Selectors        []capabilitySelectorDocument  `json:"selectors"`
+	Effects          []EffectClass                 `json:"effect_classes"`
+	Limits           capabilitiesLimitsDocument    `json:"limits"`
+	Defaults         capabilitiesDefaultsDocument  `json:"defaults"`
+	Support          []capabilitySupportDocument   `json:"support"`
+}
+
+// CapabilityInvocationPolicy reports the installed compiled-policy protocol and
+// supported timeout bounds. Enabled authored stages are reported separately.
+type CapabilityInvocationPolicy struct {
+	SchemaVersion   int           `json:"schema_version"`
+	CompilerVersion int           `json:"compiler_version"`
+	DefaultsVersion int           `json:"defaults_version"`
+	DurationBytes   int           `json:"duration_bytes"`
+	MaximumTimeout  time.Duration `json:"maximum_timeout_ns"`
+	DefaultAttempts int           `json:"default_attempts"`
+	CircuitEnabled  bool          `json:"circuit_enabled"`
 }
 
 type capabilitiesInstalledDocument struct {
@@ -259,6 +282,7 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
 	}
 	result := Capabilities{
+		invocationPolicy:           input.InvocationPolicy,
 		cliVersion:                 input.CLIVersion,
 		kernelVersion:              input.KernelVersion,
 		specificationRevision:      input.SpecificationRevision,
@@ -381,6 +405,9 @@ func (c Capabilities) InvocationConcurrencyLimit() int { return c.invocationConc
 // MaximumConcurrencyLimit returns the installed Kernel's greatest binding limit.
 func (c Capabilities) MaximumConcurrencyLimit() int { return c.maximumConcurrencyLimit }
 
+// InvocationPolicy returns a value copy of installed protocol and bound facts.
+func (c Capabilities) InvocationPolicy() CapabilityInvocationPolicy { return c.invocationPolicy }
+
 // StartupTimeoutText returns the canonical public duration spelling.
 func (c Capabilities) StartupTimeoutText() string {
 	return formatCapabilitiesDuration(c.startupTimeout)
@@ -402,6 +429,10 @@ func (c Capabilities) CanonicalJSON() []byte { return append([]byte(nil), c.cano
 func (Capabilities) commandPayload() {}
 
 func validateCapabilitiesInput(input CapabilitiesInput) error {
+	p := input.InvocationPolicy
+	if p.SchemaVersion < 1 || p.CompilerVersion < 1 || p.DefaultsVersion < 1 || p.DurationBytes < 1 || p.MaximumTimeout <= 0 || p.DefaultAttempts != 1 || p.CircuitEnabled || input.InvocationTimeout > p.MaximumTimeout {
+		return errors.New("invocation policy protocol, bounds, or absence defaults are invalid")
+	}
 	if strings.HasPrefix(input.CLIVersion, "v") || !semver.IsValid("v"+input.CLIVersion) {
 		return errors.New("cli version must be canonical SemVer without a v prefix")
 	}
@@ -429,8 +460,8 @@ func validateCapabilitiesInput(input CapabilitiesInput) error {
 	if input.ProjectDocumentBytes <= 0 || input.ProjectDocumentBytes > 1<<40 {
 		return errors.New("project document limit is outside the supported range")
 	}
-	if input.StartupTimeout <= 0 || input.InvocationTimeout <= 0 {
-		return errors.New("default timeouts must be positive")
+	if input.StartupTimeout <= 0 || input.InvocationTimeout < 0 {
+		return errors.New("startup timeout must be positive and invocation timeout must be nonnegative")
 	}
 	if input.MaximumConcurrencyLimit < 1 || input.MaximumConcurrencyLimit > 1<<30 || input.InvocationConcurrencyLimit < 1 || input.InvocationConcurrencyLimit > input.MaximumConcurrencyLimit {
 		return errors.New("concurrency limits must be positive and the default must not exceed the maximum")
@@ -584,6 +615,9 @@ func validGoRequirement(value string) bool {
 }
 
 func formatCapabilitiesDuration(value time.Duration) string {
+	if value == 0 {
+		return "0s"
+	}
 	for _, unit := range []struct {
 		duration time.Duration
 		suffix   string
@@ -613,6 +647,7 @@ func (c Capabilities) input() CapabilitiesInput {
 		support[index] = value.input
 	}
 	return CapabilitiesInput{
+		InvocationPolicy:           c.invocationPolicy,
 		CLIVersion:                 c.cliVersion,
 		KernelVersion:              c.kernelVersion,
 		SpecificationRevision:      c.specificationRevision,
@@ -652,7 +687,8 @@ func (c Capabilities) document() capabilitiesDocument {
 		support[index] = capabilitySupportDocument(value.input)
 	}
 	return capabilitiesDocument{
-		Schema: CapabilitiesSchemaV1,
+		InvocationPolicy: c.invocationPolicy,
+		Schema:           CapabilitiesSchemaV1,
 		Installed: capabilitiesInstalledDocument{
 			CLIVersion:            c.cliVersion,
 			KernelVersion:         c.kernelVersion,

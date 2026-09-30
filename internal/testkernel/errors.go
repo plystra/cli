@@ -1,9 +1,12 @@
 package testkernel
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/plystra/kernel/invocation"
 )
 
 // WriteErrorBoundary installs the selected Kernel's production error boundary
@@ -26,5 +29,10 @@ func WriteErrorBoundary(t testing.TB, root string) {
 		if err := os.WriteFile(name, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Error evidence validates attempts against the installed policy bound.
+	data := fmt.Appendf(nil, "package invocation\n\nconst MaximumRetryAttempts = %d\n", invocation.MaximumRetryAttempts)
+	if err := os.WriteFile(filepath.Join(root, "kernel", "invocation", "policy_limits.go"), data, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

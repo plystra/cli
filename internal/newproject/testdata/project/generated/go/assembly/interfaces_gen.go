@@ -14,8 +14,6 @@ import (
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
 )
 
-const defaultInterfaceInvocationTimeout = time.Duration(30000000000)
-
 var (
 	// ErrInterfaceAssembly reports a safe static constructor or binding failure.
 	ErrInterfaceAssembly = errors.New("assemble static Interface runtime")
@@ -203,7 +201,7 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 	if err := RequireKernelCompatibility(); err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: Kernel compatibility: %w", ErrInterfaceAssembly, err)
 	}
-	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: defaultInterfaceInvocationTimeout})
+	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: 1})
 	if err != nil {
 		return InterfaceRuntime{}, fmt.Errorf("%w: governed dispatcher", ErrInterfaceAssembly)
 	}
@@ -212,7 +210,7 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 		return InterfaceRuntime{}, fmt.Errorf("%w: implementation lifecycle: %w", ErrInterfaceAssembly, err)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20260928141628-5f0fd6f5e90d",
+		ModuleVersion: "v0.0.0-20260928160103-31e44ff1a5b6",
 		BuildIdentity: "",
 	})
 	if err != nil {

@@ -7,14 +7,22 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/connectgen"
+	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/version"
 )
 
 func TestGeneratedAdmissionRetainsCapacityUntilTargetTermination(t *testing.T) {
+	testmodulecache.Ensure(t,
+		connectgen.ConnectModulePath+"@"+connectgen.ConnectModuleVersion,
+		connectgen.ProtobufModulePath+"@"+connectgen.ProtobufModuleVersion,
+		"github.com/google/go-cmp@v0.7.0",
+		"github.com/golang/protobuf@v1.5.0",
+	)
 	root := t.TempDir()
 	writeModule(t, root, "example.com/admission", "require github.com/plystra/kernel "+version.KernelVersion+"\n")
 	downloadModuleDependencies(t, root)
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [work.run/v1, work.check/v1]}\nhttp: {expose: {work.run/v1: {transport: connect}}}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [work.run/v1, work.check/v1], policies: {work.run/v1: {timeout: 30s}}}\nhttp: {expose: {work.run/v1: {transport: connect}}}\n")
 	writeAssemblyInterface(t, root, "work/run/v1", "runv1", "work.run/v1", "Run", `
 type Request struct { Mode string `+"`plystra:\"1\"`"+` }
 type Response struct { Value string `+"`plystra:\"1\"`"+` }

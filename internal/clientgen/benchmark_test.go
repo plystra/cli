@@ -113,12 +113,12 @@ func benchmarkHandle(b testing.TB) kernelinvocation.Handle[benchmarkGeneratedReq
 		b.Fatalf("NewModuleBuild: %v", err)
 	}
 	binding, err := kernelinvocation.NewBinding(kernelinvocation.BindingOptions{
-		ConcurrencyLimit: 64,
-		Kind:             kernelinvocation.BindingKindImplementation,
-		Constructor:      "example.com/benchmark/provider.New",
-		ModuleBuild:      providerBuild,
-		SelectionReason:  kernelinvocation.SelectionReasonUniqueCompatible,
-		ContractDigest:   sha256.Sum256([]byte("benchmark.send/v1")),
+		Policy:          kernelinvocation.Policy{SchemaVersion: 1, CompilerVersion: 1, DefaultsVersion: 1, Timeout: 30 * time.Second, ConcurrencyLimit: 64, Retry: kernelinvocation.RetryPolicy{MaxAttempts: 1}},
+		Kind:            kernelinvocation.BindingKindImplementation,
+		Constructor:     "example.com/benchmark/provider.New",
+		ModuleBuild:     providerBuild,
+		SelectionReason: kernelinvocation.SelectionReasonUniqueCompatible,
+		ContractDigest:  sha256.Sum256([]byte("benchmark.send/v1")),
 	}, endpoint)
 	if err != nil {
 		b.Fatalf("NewBinding: %v", err)
@@ -127,7 +127,7 @@ func benchmarkHandle(b testing.TB) kernelinvocation.Handle[benchmarkGeneratedReq
 	if err != nil {
 		b.Fatalf("NewCatalog: %v", err)
 	}
-	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{DefaultTimeout: 30 * time.Second})
+	dispatcher, err := kernelinvocation.NewDispatcher(kernelinvocation.DispatcherOptions{PolicyVersion: kernelinvocation.PolicySchemaVersion})
 	if err != nil {
 		b.Fatalf("NewDispatcher: %v", err)
 	}

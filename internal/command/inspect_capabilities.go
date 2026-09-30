@@ -273,7 +273,11 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 	); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(writer, "Invocation concurrency: default_limit %d, queue 0, maximum %d\nSupport stages:\n", capabilities.InvocationConcurrencyLimit(), capabilities.MaximumConcurrencyLimit()); err != nil {
+	if _, err := fmt.Fprintf(writer, "Invocation concurrency: default_limit %d, queue 0, maximum %d\n", capabilities.InvocationConcurrencyLimit(), capabilities.MaximumConcurrencyLimit()); err != nil {
+		return err
+	}
+	policy := capabilities.InvocationPolicy()
+	if _, err := fmt.Fprintf(writer, "Invocation policy: schema %d, compiler %d, defaults %d; timeout 1ns through %s (%d bytes); default attempts %d, circuit disabled\nSupport stages:\n", policy.SchemaVersion, policy.CompilerVersion, policy.DefaultsVersion, policy.MaximumTimeout, policy.DurationBytes, policy.DefaultAttempts); err != nil {
 		return err
 	}
 	for _, support := range capabilities.Support() {

@@ -6,12 +6,57 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
 )
 
-func TestResolveExecutablePoliciesRejectsReachableDependencies(t *testing.T) {
+func TestResolveExecutablePoliciesRejectsLegacyButAllowsDormantIntent(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "example.com/legacy-policy")
+	writePlugin(t, root, "business", "id: acme.business\nprovides: [audit.write/v1]\n")
+	writeCapability(t, root, "business", "audit.write/v1", "id: audit.write/v1\nrequest: {}\nresponse: {}\n")
+	configuration := "capabilities: {require: [audit.write/v1]}\ninterfaces: {policies: {audit.write/v1: {timeout: 5s}}}\n"
+	writeFile(t, filepath.Join(root, "plystra.yaml"), configuration)
+	options := applicationresolve.Options{
+		Start:                     root,
+		Environment:               goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off", "GOFLAGS": "-mod=readonly"}),
+		RequireExecutablePolicies: true,
+	}
+	before := snapshotTree(t, root)
+	_, err := applicationresolve.Resolve(t.Context(), options)
+	var policy *applicationresolve.PolicyNotEnforcedError
+	if !errors.Is(err, applicationresolve.ErrPolicyNotEnforced) || !errors.As(err, &policy) {
+		t.Fatalf("legacy executable policy = %v", err)
+	}
+	if policy.InterfaceID().String() != "audit.write/v1" || policy.Field() != "timeout" ||
+		policy.Support().ID() != "legacy.capability-timeout" || policy.Support().Executed() != commandschema.SupportNo {
+		t.Fatalf("legacy support = %#v", policy)
+	}
+	sources := policy.Sources()
+	if len(sources) != 1 || sources[0].ModulePath != "example.com/legacy-policy" || sources[0].Path != "plystra.yaml" {
+		t.Fatalf("sources = %#v", sources)
+	}
+	sources[0].Path = "changed"
+	if policy.Sources()[0].Path != "plystra.yaml" {
+		t.Fatal("sources were not defensively copied")
+	}
+	options.RequireExecutablePolicies = false
+	if _, err := applicationresolve.Resolve(t.Context(), options); err != nil {
+		t.Fatalf("read-only legacy policy = %v", err)
+	}
+	if !reflect.DeepEqual(snapshotTree(t, root), before) {
+		t.Fatal("resolution mutated the Project")
+	}
+	writeFile(t, filepath.Join(root, "plystra.yaml"), strings.Replace(configuration, "require: [audit.write/v1]", "require: []", 1))
+	options.RequireExecutablePolicies = true
+	if _, err := applicationresolve.Resolve(t.Context(), options); err != nil {
+		t.Fatalf("dormant legacy policy = %v", err)
+	}
+}
+
+func TestResolveExecutablePoliciesAcceptsReachableDependencies(t *testing.T) {
 	root := writeResolvedInterfaceProject(t)
 	options := applicationresolve.Options{
 		Start:                     root,
@@ -19,29 +64,15 @@ func TestResolveExecutablePoliciesRejectsReachableDependencies(t *testing.T) {
 		RequireExecutablePolicies: true,
 	}
 	before := snapshotTree(t, filepath.Dir(root))
-	var previous string
 	for range 2 {
-		_, err := applicationresolve.Resolve(t.Context(), options)
-		var policy *applicationresolve.PolicyNotEnforcedError
-		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrPolicyNotEnforced) || !errors.As(err, &policy) {
-			t.Fatalf("policy error = %v", err)
+		resolved, err := applicationresolve.Resolve(t.Context(), options)
+		if err != nil {
+			t.Fatalf("executable policy resolution = %v", err)
 		}
-		if policy.InterfaceID().String() != "audit.write/v1" || policy.Field() != "timeout" ||
-			policy.Support().Generated() != commandschema.SupportYes || policy.Support().Executed() != commandschema.SupportNo {
-			t.Fatalf("policy facts = %v", policy)
+		policies := resolved.Manifest().InterfacePolicies()
+		if len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout() != 5*time.Second {
+			t.Fatalf("resolved policies = %#v", policies)
 		}
-		sources := policy.Sources()
-		if len(sources) != 1 || sources[0].ModulePath != "example.com/interface-app" || sources[0].Path != "plystra.yaml" {
-			t.Fatalf("sources = %#v", sources)
-		}
-		sources[0].Path = "mutated"
-		if policy.Sources()[0].Path != "plystra.yaml" {
-			t.Fatal("policy exposes mutable sources")
-		}
-		if previous != "" && previous != err.Error() {
-			t.Fatal("policy error is not deterministic")
-		}
-		previous = err.Error()
 	}
 	options.RequireExecutablePolicies = false
 	if _, err := applicationresolve.Resolve(t.Context(), options); err != nil {
@@ -64,15 +95,13 @@ func TestResolveExecutablePoliciesPreservesAdoptedSourcesAndDormantIntent(t *tes
 		RequireExecutablePolicies: true,
 	}
 	before := snapshotTree(t, filepath.Dir(root))
-	_, err := applicationresolve.Resolve(t.Context(), options)
-	var policy *applicationresolve.PolicyNotEnforcedError
-	if !errors.As(err, &policy) {
+	resolved, err := applicationresolve.Resolve(t.Context(), options)
+	if err != nil {
 		t.Fatalf("adopted policy = %v", err)
 	}
-	sources := policy.Sources()
-	if len(sources) != 1 || sources[0].ModulePath != "example.com/interface-cache" || sources[0].Path != "plystra.yaml" ||
-		!strings.Contains(sources[0].Reference, "composition.exports") {
-		t.Fatalf("adopted sources = %#v", sources)
+	policies := resolved.Manifest().InterfacePolicies()
+	if len(policies) != 1 || policies[0].Timeout() != 5*time.Second || !strings.Contains(policies[0].Source(), "example.com/interface-cache") {
+		t.Fatalf("adopted policies = %#v", policies)
 	}
 	if after := snapshotTree(t, filepath.Dir(root)); !reflect.DeepEqual(after, before) {
 		t.Fatal("adopted policy failure changed input")
