@@ -918,6 +918,9 @@ func setConfigMaintenanceDecision(root *yaml.Node, decision constructorConfigDec
 		value = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	case constructorConfigRemoval:
 		value = nullYAMLNode()
+		if len(decision.segments) == 0 {
+			value = removalYAMLNode()
+		}
 	case constructorConfigValue:
 		value, err = decodeNormalizedConfigNode(decision.yaml)
 		if err != nil {

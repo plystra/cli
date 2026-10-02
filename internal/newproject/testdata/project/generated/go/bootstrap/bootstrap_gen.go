@@ -35,8 +35,8 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":6}"
-	compiledApplicationModelCompatibilityDigest = "sha256:101ee502d8c3e7c8458ca9eac124815623ce09a6a4e9404ba2bc8a04f97c4697"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":7}"
+	compiledApplicationModelCompatibilityDigest = "sha256:366ccd65cc3c6affeed0790621f6c3baa39ba6adc234826042514af624f25d9b"
 	compiledApplicationModelDigest              = "sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4"
 )
 
@@ -440,7 +440,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 6,
+		"version": 7,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -1595,6 +1595,31 @@ func mergeRuntimeConfigurations(lowerNode, upperNode *yaml.Node) (*yaml.Node, bo
 	}
 	result := make(map[string]*yaml.Node)
 	for pluginID := range pluginIDs {
+		lowerValue, upperValue := lower[pluginID], upper[pluginID]
+		path := "config[" + strconv.Quote(pluginID) + "]"
+		for _, value := range []*yaml.Node{lowerValue, upperValue} {
+			if value == nil || runtimeRemovalMapping(value) {
+				continue
+			}
+			fields, err := runtimeMapping(value, path, nil)
+			if err != nil {
+				return nil, false, err
+			}
+			if fields["$remove"] != nil {
+				return nil, false, runtimeConfigurationError("%s must be a mapping or {$remove: true}", path)
+			}
+		}
+		if !validRuntimeConstructorSymbol(pluginID) {
+			if parsed, parseErr := kernelplugin.ParseID(pluginID); parseErr != nil || parsed.String() != pluginID {
+				return nil, false, runtimeConfigurationError("config key %q is not a canonical Plugin ID", pluginID)
+			}
+		}
+		if runtimeRemovalMapping(upperValue) || upperValue == nil && runtimeRemovalMapping(lowerValue) {
+			continue
+		}
+		if runtimeRemovalMapping(lowerValue) {
+			lowerValue = nil
+		}
 		schema, selected := runtimeConfigurationSchemas[pluginID]
 		if !selected {
 			if validRuntimeConstructorSymbol(pluginID) {
@@ -1604,17 +1629,6 @@ func mergeRuntimeConfigurations(lowerNode, upperNode *yaml.Node) (*yaml.Node, bo
 				return nil, false, runtimeConfigurationError("config targets active constructor %q without a generated runtime binding", pluginID)
 			}
 			return nil, false, runtimeConfigurationError("config targets unselected Plugin %q", pluginID)
-		}
-		if parsed, parseErr := kernelplugin.ParseID(pluginID); parseErr != nil || parsed.String() != pluginID {
-			return nil, false, runtimeConfigurationError("config key %q is not a canonical Plugin ID", pluginID)
-		}
-		upperValue, hasUpper := upper[pluginID]
-		if hasUpper && runtimeNull(upperValue) {
-			continue
-		}
-		lowerValue := lower[pluginID]
-		if runtimeNull(lowerValue) {
-			lowerValue = nil
 		}
 		merged, mergeErr := mergeRuntimePluginConfiguration(pluginID, lowerValue, upperValue, schema)
 		if mergeErr != nil {

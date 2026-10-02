@@ -430,9 +430,19 @@ Exact entries in `interfaces.use`, `interfaces.policies`, and `http.expose`
 are removed only by `{$remove: true}`. Null, empty values, false or string-valued
 markers, and markers with sibling fields are invalid. Exclusions remain authored
 intent even when no lower entry exists and survive later dependency additions.
-Generated runtime compatibility version 6 applies the same rule before
+Generated runtime compatibility version 7 applies the same rule before
 construction; regenerate and rebuild older Projects. This does not yet migrate
-the transitional null handling in constructor configuration or CORS.
+the transitional null handling in nested constructor fields or CORS.
+
+Remove a whole `config.<constructor-symbol>` entry only with `{$remove: true}`.
+Null, sequences, malformed markers, and markers with sibling fields are invalid
+at that boundary. An empty mapping remains configuration, not removal. The
+constructor still needs a discovered compiled Config schema, and its exclusion
+survives absent or changed lower configuration without activating it. Inspection
+retains the removal owner and suppressed field sources. Generated runtime
+loading strips whole-entry markers before construction; removing required
+configuration can still fail validation before any constructor runs. Nested
+field removal and nullable typed-value composition remain unfinished.
 
 An `interfaces.require` sequence declares the complete explicit requirement set
 at that layer: `[email.send/v1]` replaces lower requirements and `[]` clears them.
@@ -443,7 +453,7 @@ This does not remove requirements from exposure, constructor parameters, or
 intrinsic Kernel entries. Inspection retains suppressed sources under the
 `interfaces.require` complete-set boundary. New Projects use `require: {}` so
 explicit template adoptions remain effective. Generated runtime compatibility
-version 6 uses the same set semantics for its selected current-Project documents;
+version 7 uses the same set semantics for its selected current-Project documents;
 source-independent adopted-export runtime baselines remain unfinished.
 
 A `composition.adopt` sequence likewise replaces the complete lower adoption

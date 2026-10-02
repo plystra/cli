@@ -630,12 +630,12 @@ func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constru
 		}
 		source := fmt.Sprintf("plystra.yaml config[%q]", value)
 		declarationSource := ConfigurationDeclarationSource{path: "plystra.yaml", line: 1, column: 1}
-		if isNull(values[value]) {
+		if isRemovalMapping(values[value]) {
 			removals = append(removals, constructorConfigurationRemoval{constructor: constructor, source: source, declarationSource: declarationSource})
 			continue
 		}
-		if values[value].Kind != yaml.MappingNode {
-			return nil, nil, invalid("config[%q] must be a mapping or null", value)
+		if values[value].Kind != yaml.MappingNode || mappingChild(values[value], "$remove") != nil {
+			return nil, nil, invalid("config[%q] must be a mapping or {$remove: true}", value)
 		}
 		data, err := yaml.Marshal(values[value])
 		if err != nil {

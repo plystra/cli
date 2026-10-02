@@ -804,13 +804,13 @@ func TestComposeConstructorConfigurationRemovalResolvesWholeObjectConflict(t *te
 	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	dependencies := []applicationmeta.Dependency{
 		{ModulePath: "example.com/value", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: dependency.example}}\n")},
-		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: null}\n")},
+		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {$remove: true}}\n")},
 	}
 	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), lookup)
 	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]`) || !strings.Contains(err.Error(), "object") || !strings.Contains(err.Error(), "removal") {
 		t.Fatalf("whole configuration conflict = %v", err)
 	}
-	removed, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {example.com/acme/smtp.New: null}\n"), lookup)
+	removed, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {example.com/acme/smtp.New: {$remove: true}}\n"), lookup)
 	if err != nil {
 		t.Fatalf("Compose whole removal: %v", err)
 	}
@@ -938,7 +938,7 @@ func FuzzComposeConstructorConfigurationDeterminism(f *testing.F) {
 			"config: {example.com/acme/smtp.New: {settings: {legacy: null}, token: null}}\n",
 		},
 		{
-			"config: {example.com/acme/smtp.New: null}\n",
+			"config: {example.com/acme/smtp.New: {$remove: true}}\n",
 			"config: {example.com/acme/smtp.New: {settings: {enabled: true}}}\n",
 			"config: {example.com/acme/smtp.New: {}}\n",
 		},

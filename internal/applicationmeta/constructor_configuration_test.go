@@ -290,7 +290,7 @@ func TestComposeRejectsUnavailableConstructorConfigurationSchemaWithoutDisclosur
 	})
 
 	t.Run("current environment removal", func(t *testing.T) {
-		manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("config: {"+constructor+": null}\n"))
+		manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("config: {"+constructor+": {$remove: true}}\n"))
 		if err != nil {
 			t.Fatalf("ParseOverlaySource: %v", err)
 		}

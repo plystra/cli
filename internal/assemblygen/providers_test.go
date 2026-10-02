@@ -1232,6 +1232,79 @@ func TestRuntimeInterfaceRequirementCompleteSets(t *testing.T) {
 	}
 }
 
+func TestRuntimeConstructorEntryRemoval(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			writeRuntimeDocument(t, "config:\n  acme.local-service: {label: inherited}\n"+bootstrapRemoteConfiguration)
+			document := "config:\n  acme.local-service: {$remove: true}\n"+bootstrapRemoteConfiguration
+			options := RuntimeOptions{}
+			switch mode {
+			case "default":
+				writeRuntimeDocument(t, document)
+			case "environment":
+				writeEnvironmentDocument(t, "remove-constructor", "config: {acme.local-service: {$remove: true}}\n")
+				options.Arguments = []string{"--env", "remove-constructor"}
+			case "replacement":
+				writeReplacementDocument(t, "remove-constructor.yaml", document)
+				options.Arguments = []string{"--config", "remove-constructor.yaml"}
+			}
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), options)
+			if err != nil || application == nil {
+				t.Fatalf("New with removed constructor configuration = %#v, %v", application, err)
+			}
+			_, configuration := localservice.Snapshot()
+			if configuration.Label != "public-default-label" {
+				t.Fatalf("removed configuration retained inherited label: %q", configuration.Label)
+			}
+			if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
+			if err := application.Stop(context.Background()); err != nil { t.Fatal(err) }
+		})
+	}
+	for _, value := range []string{"null", "~", "[]", "{$remove: false}", "{$remove: true, label: private}", "{$remove: true, $remove: true}"} {
+		for _, mode := range []string{"default", "environment", "replacement"} {
+			t.Run(mode+"/"+value, func(t *testing.T) {
+				writeRuntimeDocument(t, validRuntimeDocument)
+				document := "config:\n  acme.local-service: "+value+"\n"+bootstrapRemoteConfiguration
+				options := RuntimeOptions{}
+				switch mode {
+				case "default": writeRuntimeDocument(t, document)
+				case "environment":
+					writeEnvironmentDocument(t, "invalid-constructor", "config: {acme.local-service: "+value+"}\n")
+					options.Arguments = []string{"--env", "invalid-constructor"}
+				case "replacement":
+					writeReplacementDocument(t, "invalid-constructor.yaml", document)
+					options.Arguments = []string{"--config", "invalid-constructor.yaml"}
+				}
+				localservice.Reset()
+				remotestore.Reset()
+				application, err := New(context.Background(), options)
+				if application != nil || !errors.Is(err, ErrRuntimeConfiguration) {
+					t.Fatalf("New accepted invalid constructor entry: %#v, %v", application, err)
+				}
+				assertNoBootstrapConstructorCalls(t)
+				assertSafeBootstrapError(t, err)
+			})
+		}
+	}
+	writeRuntimeDocument(t, "config:\n  acme.local-service: {$remove: true}\n"+bootstrapRemoteConfiguration)
+	writeEnvironmentDocument(t, "replace-removed", "config: {acme.local-service: {label: replacement}}\n")
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--env", "replace-removed"}})
+	if err != nil || application == nil { t.Fatalf("replace lower removal: %#v, %v", application, err) }
+	_, configuration := localservice.Snapshot()
+	if configuration.Label != "replacement" { t.Fatalf("replacement label = %q", configuration.Label) }
+	if err := application.Stop(context.Background()); err != nil { t.Fatal(err) }
+	writeRuntimeDocument(t, "config: {zeta.remote-store: {$remove: true}}\n")
+	localservice.Reset()
+	remotestore.Reset()
+	if application, err := New(context.Background(), RuntimeOptions{}); application != nil || err == nil {
+		t.Fatalf("required configuration removal accepted: %#v, %v", application, err)
+	}
+	assertNoBootstrapConstructorCalls(t)
+}
+
 func TestRuntimeAdoptionCompleteSets(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	const adoption = "{module: example.com/assemblyapp, export: defaults}"

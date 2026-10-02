@@ -1303,7 +1303,7 @@ config:
     password: null
 `)
 	writeCommandFile(t, filepath.Join(appRoot, "plystra.suppressed.yaml"), `config:
-  example.com/platform/shared.New: null
+  example.com/platform/shared.New: {$remove: true}
 `)
 	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), `composition:
   adopt:

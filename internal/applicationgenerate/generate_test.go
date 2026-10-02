@@ -820,7 +820,7 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		writeApplicationModule(t, root, modulePath)
 		constructor := writeConstructorConfigurationOwner(t, root, modulePath, false)
 		writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: root.internal, label: inherited}}\n", constructor, constructor))
-		writeFile(t, filepath.Join(root, "plystra.production.yaml"), fmt.Sprintf("config: {%s: null}\n", constructor))
+		writeFile(t, filepath.Join(root, "plystra.production.yaml"), fmt.Sprintf("config: {%s: {$remove: true}}\n", constructor))
 
 		if _, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: root, EnvironmentName: "production", Environment: environment, Validate: validate,
