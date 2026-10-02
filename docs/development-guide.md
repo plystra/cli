@@ -1086,9 +1086,8 @@ field, keyed objects merge by declared field path, set fields use their sparse
 Null, empty values, malformed markers, and markers with siblings are invalid in
 those entries. Exclusions remain current-Project intent even with no lower value,
 so later dependency additions cannot restore them. Generated runtime compatibility
-version 7 uses the same rules; regenerate and rebuild older Projects. Nested
-constructor fields and CORS still have transitional null handling pending their
-typed composition migration.
+version 7 uses the same rules; regenerate and rebuild older Projects. CORS
+retains transitional null handling pending its typed composition migration.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
 
@@ -1099,8 +1098,18 @@ needs a discovered compiled `Config` schema. Its exclusion survives absent or
 changed lower configuration without activating it, and inspection retains the
 removal owner and suppressed sources. Generated runtime loading strips whole-entry
 markers before construction; removing required configuration can still fail
-validation before any constructor runs. Nested field removal and nullable
-typed-value composition remain unfinished.
+validation before any constructor runs.
+
+During typed CLI composition, remove a declared field inside a non-pointer
+fixed struct with the same exact `{$remove: true}` marker. Exclusions persist
+even without a lower value, while omission inherits. Literal `null`, `~`, and
+blank values are atomic nil values only for pointers, slices, and maps; nil
+remains distinct from removal and an empty collection. Other compiled types
+reject null. Reserved singleton `$remove` mappings are invalid inside atomic
+values, including pointed-to struct members, list elements, and dynamic-map
+entries. A dynamic map with `$remove` and other keys is an ordinary typed map.
+Standalone typed runtime loading and complete requiredness/default application
+remain unfinished.
 
 A supplied non-null pointer field replaces its complete lower value during typed
 CLI composition, including pointers to structs and multiple pointer layers.
@@ -1109,7 +1118,7 @@ without inheriting its omitted fields. Non-pointer fixed structs still compose
 field by field. Different whole-pointer values in adopted exports conflict even
 when their supplied fields are disjoint; identical normalized values deduplicate.
 Inspection and explanation retain one redacted atomic value and its sources.
-Nullable-value handling and standalone typed runtime loading remain incomplete.
+Standalone typed runtime loading remains incomplete.
 
 For `interfaces.require`, a sequence is a complete-set declaration, including
 `[]` to clear lower explicit requirements. The sparse `{add: [...], remove: [...]}`

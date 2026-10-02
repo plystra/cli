@@ -134,8 +134,8 @@ capabilities:
   aliases: {mail.send/v1: null}
 config:
   example.com/acme/smtp.New:
-    host: null
-    settings: null
+    host: {$remove: true}
+    settings: {$remove: true}
 `))
 	if err != nil {
 		t.Fatalf("ParseOverlaySource: %v", err)

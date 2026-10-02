@@ -724,7 +724,7 @@ config:
   example.com/acme/smtp.New:
     hosts: [smtp-b.example]
     settings:
-      legacy: null
+      legacy: {$remove: true}
       nested:
         other: true
       ratio: 1.0
@@ -735,14 +735,14 @@ config:
 	current := composeManifest(t, `
 config:
   example.com/acme/smtp.New:
-    host: null
+    host: {$remove: true}
     hosts: [smtp-current.example]
     settings:
-      legacy: null
+      legacy: {$remove: true}
       nested:
-        remove: null
+        remove: {$remove: true}
       region: current
-    token: null
+    token: {$remove: true}
 `)
 	composed, err := applicationmeta.Compose(dependencies, current, lookup)
 	if err != nil {
@@ -876,7 +876,7 @@ func TestComposeRejectsInvalidConfigurationAndCrossDocumentAliasChains(t *testin
 		},
 		{
 			name:         "unknown removed configuration field",
-			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: null}}\n")}},
+			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: {$remove: true}}}\n")}},
 			current:      composeManifest(t, "{}\n"),
 			lookup:       lookup,
 			want:         "unknown constructor configuration field",
@@ -940,13 +940,18 @@ func FuzzComposeConstructorConfigurationDeterminism(f *testing.F) {
 		},
 		{
 			"config: {example.com/acme/smtp.New: {settings: {legacy: value}, token: {env: PRIVATE_TOKEN}}}\n",
-			"config: {example.com/acme/smtp.New: {settings: {legacy: null}}}\n",
-			"config: {example.com/acme/smtp.New: {settings: {legacy: null}, token: null}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {legacy: {$remove: true}}}}\n",
+			"config: {example.com/acme/smtp.New: {settings: {legacy: {$remove: true}}, token: {$remove: true}}}\n",
 		},
 		{
 			"config: {example.com/acme/smtp.New: {$remove: true}}\n",
 			"config: {example.com/acme/smtp.New: {settings: {enabled: true}}}\n",
 			"config: {example.com/acme/smtp.New: {}}\n",
+		},
+		{
+			"config: {example.com/acme/smtp.New: {optional: null, hosts: null}}\n",
+			"config: {example.com/acme/smtp.New: {optional: {}, hosts: []}}\n",
+			"config: {example.com/acme/smtp.New: {optional: ~, hosts: {$remove: true}}}\n",
 		},
 		{
 			"config: {example.com/acme/smtp.New: {settings: ,token: {}}}",

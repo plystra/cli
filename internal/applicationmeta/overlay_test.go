@@ -126,7 +126,7 @@ config:
     hosts: [production-a.example]
     settings:
       add: production
-      remove: null
+      remove: {$remove: true}
 `)
 	base, err := applicationmeta.WithProjectModule(base, "example.com/application")
 	if err != nil {

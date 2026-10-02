@@ -115,7 +115,7 @@ capabilities:
   require: {remove: [inventory.read/v1]}
 config:
   example.com/acme/smtp.New:
-    settings: {legacy: null}
+    settings: {legacy: {$remove: true}}
 http:
   expose: {reports.read/v1: {$remove: true}}
 `),
@@ -145,8 +145,8 @@ capabilities:
 config:
   example.com/acme/smtp.New:
     endpoint: current.example
-    settings: {legacy: null, mode: current}
-    token: null
+    settings: {legacy: {$remove: true}, mode: current}
+    token: {$remove: true}
 `)
 }
 
@@ -187,8 +187,8 @@ capabilities:
 config:
   example.com/acme/smtp.New:
     endpoint: customer.example
-    settings: {legacy: null, mode: customer}
-    token: null
+    settings: {legacy: {$remove: true}, mode: customer}
+    token: {$remove: true}
 `)
 }
 

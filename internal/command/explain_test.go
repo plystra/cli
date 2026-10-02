@@ -1300,7 +1300,7 @@ config:
 config:
   example.com/platform/shared.New:
     host: production-private.example
-    password: null
+    password: {$remove: true}
 `)
 	writeCommandFile(t, filepath.Join(appRoot, "plystra.suppressed.yaml"), `config:
   example.com/platform/shared.New: {$remove: true}

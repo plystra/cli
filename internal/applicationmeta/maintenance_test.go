@@ -197,7 +197,7 @@ config:
 		t.Fatalf("Compose old baseline: %v", err)
 	}
 	current := bytes.Replace(initial.Data(), []byte("retained: old"), []byte("retained: local # keep this edit"), 1)
-	current = bytes.Replace(current, []byte("token:\n      env: PRIVATE_OLD_TOKEN"), []byte("token: null # explicit removal"), 1)
+	current = bytes.Replace(current, []byte("token:\n      env: PRIVATE_OLD_TOKEN"), []byte("token: {$remove: true} # explicit removal"), 1)
 	newDependencies := []applicationmeta.Dependency{{
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v2.0.0",
@@ -228,7 +228,7 @@ config:
 		[]byte("inherited: new"),
 		[]byte("introduced: new"),
 		[]byte("retained: local # keep this edit"),
-		[]byte("token: null # explicit removal"),
+		[]byte("token: {$remove: true} # explicit removal"),
 	} {
 		if !bytes.Contains(data, expected) {
 			t.Fatalf("updated YAML omits %q:\n%s", expected, data)

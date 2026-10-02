@@ -259,10 +259,8 @@ func exportContainsRemovalMapping(root *yaml.Node) bool {
 		last := len(stack) - 1
 		node := stack[last]
 		stack = stack[:last]
-		if node.Kind == yaml.MappingNode && len(node.Content) == 2 {
-			if key, err := strictString(node.Content[0]); err == nil && key == "$remove" {
-				return true
-			}
+		if isReservedRemovalMapping(node) {
+			return true
 		}
 		stack = append(stack, node.Content...)
 	}

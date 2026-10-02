@@ -431,8 +431,8 @@ are removed only by `{$remove: true}`. Null, empty values, false or string-value
 markers, and markers with sibling fields are invalid. Exclusions remain authored
 intent even when no lower entry exists and survive later dependency additions.
 Generated runtime compatibility version 7 applies the same rule before
-construction; regenerate and rebuild older Projects. This does not yet migrate
-the transitional null handling in nested constructor fields or CORS.
+construction; regenerate and rebuild older Projects. CORS retains transitional
+null handling pending its typed composition migration.
 
 Remove a whole `config.<constructor-symbol>` entry only with `{$remove: true}`.
 Null, sequences, malformed markers, and markers with sibling fields are invalid
@@ -441,8 +441,18 @@ constructor still needs a discovered compiled Config schema, and its exclusion
 survives absent or changed lower configuration without activating it. Inspection
 retains the removal owner and suppressed field sources. Generated runtime
 loading strips whole-entry markers before construction; removing required
-configuration can still fail validation before any constructor runs. Nested
-field removal and nullable typed-value composition remain unfinished.
+configuration can still fail validation before any constructor runs.
+
+Typed CLI composition uses the same exact marker to remove a declared field
+inside a non-pointer fixed struct. Exclusions survive absent or changed lower
+values; omission inherits. Literal `null` (including `~` or a blank value) is
+an atomic nil value only for pointers, slices, and maps, and remains distinct
+from removal or an empty collection. Other compiled types reject null. The
+reserved singleton `$remove` mapping is invalid inside atomic values, including
+list elements, dynamic-map entries, and pointed-to struct members. A dynamic map
+with `$remove` and other keys is an ordinary typed map, not a tombstone.
+Standalone typed runtime loading and complete requiredness/default application
+remain unfinished.
 
 During typed CLI composition, a supplied non-null pointer field replaces its
 complete lower value, including pointers to structs and multiple pointer layers.
@@ -451,8 +461,7 @@ with an empty object instead of inheriting its omitted fields. Only non-pointer
 fixed structs compose field by field. Different whole-pointer values from
 adopted exports conflict even when they name disjoint fields; identical values
 deduplicate. Inspection records one redacted atomic value with its contributing
-sources. This does not complete nullable-value handling or standalone typed
-runtime loading.
+sources. Standalone typed runtime loading remains incomplete.
 
 An `interfaces.require` sequence declares the complete explicit requirement set
 at that layer: `[email.send/v1]` replaces lower requirements and `[]` clears them.

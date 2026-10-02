@@ -186,11 +186,6 @@ func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, sc
 			return nil, constructorConfigValueError(configured.constructor, configured.source, configured.declarationSource, nil, ErrConfigurationUnknownField)
 		}
 		segments := []string{name}
-		source := constructorConfigDecisionSource(configured.source, segments)
-		if isNull(provided[name]) {
-			result = append(result, newConstructorConfigDecision(configured.constructor, segments, constructorConfigRemoval, "", nil, source))
-			continue
-		}
 		decisions, err := normalizeDeclaredConstructorConfigValue(configured.constructor, segments, field.Value(), provided[name], configured.source, configured.declarationSource, state, 1)
 		if err != nil {
 			return nil, err
@@ -215,6 +210,12 @@ type constructorConfigNormalizeState struct {
 }
 
 func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbol, segments []string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
+	if isReservedRemovalMapping(node) {
+		if err := enterConstructorConfigNode(node, state, depth); err != nil || !isRemovalMapping(node) {
+			return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationInvalidValue)
+		}
+		return []constructorConfigDecision{newConstructorConfigDecision(constructor, segments, constructorConfigRemoval, "", nil, constructorConfigDecisionSource(baseSource, segments))}, nil
+	}
 	if schema.Kind() == implementationinventory.ConfigurationValueObject {
 		return normalizeConstructorConfigObject(constructor, segments, schema.TypeIdentity(), schema, node, baseSource, declarationSource, state, depth)
 	}
@@ -253,10 +254,6 @@ func normalizeConstructorConfigObject(constructor constructorsymbol.Symbol, segm
 			return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationUnknownField)
 		}
 		childSegments := append(append([]string(nil), segments...), name)
-		if isNull(provided[name]) {
-			result = append(result, newConstructorConfigDecision(constructor, childSegments, constructorConfigRemoval, "", nil, constructorConfigDecisionSource(baseSource, childSegments)))
-			continue
-		}
 		children, err := normalizeDeclaredConstructorConfigValue(constructor, childSegments, field.Value(), provided[name], baseSource, declarationSource, state, depth+1)
 		if err != nil {
 			return nil, err
@@ -269,6 +266,10 @@ func normalizeConstructorConfigObject(constructor constructorsymbol.Symbol, segm
 func normalizeConstructorConfigNode(schema implementationinventory.ConfigurationValue, node *yaml.Node, state *constructorConfigNormalizeState, depth int) (*yaml.Node, error) {
 	if err := enterConstructorConfigNode(node, state, depth); err != nil {
 		return nil, err
+	}
+	// Atomic values cannot contain removal operations at any nested boundary.
+	if isReservedRemovalMapping(node) {
+		return nil, ErrConfigurationInvalidValue
 	}
 	invalid := func() (*yaml.Node, error) { return nil, ErrConfigurationInvalidValue }
 	scalar := func(tag, value string) (*yaml.Node, error) {
@@ -371,6 +372,9 @@ func normalizeConstructorConfigNode(schema implementationinventory.Configuration
 		}
 		return normalizeConstructorConfigNode(element, node, state, depth+1)
 	case implementationinventory.ConfigurationValueList:
+		if _, fixed := schema.ArrayLength(); !fixed && isNull(node) {
+			return scalar("!!null", "null")
+		}
 		if node.Kind != yaml.SequenceNode {
 			return invalid()
 		}
@@ -391,6 +395,9 @@ func normalizeConstructorConfigNode(schema implementationinventory.Configuration
 		}
 		return result, nil
 	case implementationinventory.ConfigurationValueMap:
+		if isNull(node) {
+			return scalar("!!null", "null")
+		}
 		if node.Kind != yaml.MappingNode {
 			return invalid()
 		}
@@ -747,7 +754,7 @@ func renderConstructorConfigNode(node *renderedConstructorConfigNode, preserveRe
 	switch node.decision.kind {
 	case constructorConfigRemoval:
 		if preserveRemoval {
-			return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}, true, nil
+			return removalYAMLNode(), true, nil
 		}
 		return nil, false, nil
 	case constructorConfigValue:

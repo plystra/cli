@@ -1287,6 +1287,18 @@ func decodeDocument(data []byte) (*yaml.Node, error) {
 	if err := rejectReferences(&document); err != nil {
 		return nil, err
 	}
+	// YAML's emitter quotes empty null scalars in flow mappings. Preserve their
+	// type before configuration fragments pass through an encode/decode boundary.
+	stack := []*yaml.Node{&document}
+	for len(stack) > 0 {
+		last := len(stack) - 1
+		node := stack[last]
+		stack = stack[:last]
+		if isNull(node) && node.Value == "" {
+			node.Value = "null"
+		}
+		stack = append(stack, node.Content...)
+	}
 	return document.Content[0], nil
 }
 
@@ -1350,12 +1362,16 @@ func isNull(node *yaml.Node) bool {
 	return node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!null"
 }
 
-func isRemovalMapping(node *yaml.Node) bool {
+func isReservedRemovalMapping(node *yaml.Node) bool {
 	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) != 2 {
 		return false
 	}
 	key, err := strictString(node.Content[0])
-	if err != nil || key != "$remove" {
+	return err == nil && key == "$remove"
+}
+
+func isRemovalMapping(node *yaml.Node) bool {
+	if !isReservedRemovalMapping(node) {
 		return false
 	}
 	value, err := strictBool(node.Content[1])

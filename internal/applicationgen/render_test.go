@@ -885,7 +885,7 @@ func testComposition() applicationmeta.Composition {
 func dependencyComposition(t testing.TB) applicationmeta.Composition {
 	t.Helper()
 	schema := applicationConfigurationSchema(t)
-	dependency, err := applicationmeta.Parse([]byte("http: {expose: {diagnostics.internal/v1: {$remove: true}}}\nconfig: {example.com/acme/business.New: {legacy: null, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
+	dependency, err := applicationmeta.Parse([]byte("http: {expose: {diagnostics.internal/v1: {$remove: true}}}\nconfig: {example.com/acme/business.New: {legacy: {$remove: true}, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
 	if err != nil {
 		t.Fatalf("applicationmeta.Parse dependency: %v", err)
 	}

@@ -538,7 +538,7 @@ interfaces:
     email.send/v1: {$remove: true} # explicit policy removal
 config:
   example.com/platform/smtp.New:
-    host: null # explicit field removal
+    host: {$remove: true} # explicit field removal
 `)
 	newDependencies := []applicationmeta.Dependency{{
 		ModulePath:    "example.com/platform",
@@ -568,7 +568,7 @@ config:
 		"cache.read/v1",
 		"audit.write/v1",
 		"email.send/v1: {$remove: true}",
-		"host: null",
+		"host: {$remove: true}",
 	} {
 		if !bytes.Contains(maintained.Data(), []byte(fragment)) {
 			t.Fatalf("maintained removals omit %q:\n%s", fragment, maintained.Data())
