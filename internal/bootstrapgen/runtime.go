@@ -174,6 +174,7 @@ type runtimeSelection struct {
 	path              string
 	environment       string
 	configurationRoot string
+	runtimeBaseline string
 }
 
 func validateRuntimeApplicationModel(document []byte) error {
@@ -431,6 +432,14 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 		return nil, fmt.Errorf("%w: --configuration-root must identify an accessible directory", ErrRuntimeSelector)
 	}
 	defer directory.Close()
+	var baseline runtimebaseline.Document
+	if filepath.IsAbs(selection.runtimeBaseline) {
+		baseline, err = runtimebaseline.Read(selection.runtimeBaseline)
+	} else {
+		baseline, err = runtimebaseline.ReadAt(directory, selection.runtimeBaseline)
+	}
+	if err != nil { return nil, fmt.Errorf("%w: %w", ErrRuntimeConfiguration, err) }
+	if err := validateRuntimeBaseline(baseline); err != nil { return nil, err }
 	root, err := loadRuntimeConfigurationFile(directory, defaultRuntimeDocument)
 	if err != nil {
 		return nil, fmt.Errorf("%w: load default %s: %w", ErrRuntimeSelector, defaultRuntimeDocument, err)
@@ -472,10 +481,11 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 
 func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error) {
 	var root string
+	var baseline string
 	var selectors []string
 	for index := 0; index < len(options.Arguments); index += 2 {
 		if index+1 >= len(options.Arguments) {
-			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory> and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
+			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory>, --runtime-baseline <path>, and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
 		}
 		flag, value := options.Arguments[index], options.Arguments[index+1]
 		switch flag {
@@ -484,15 +494,21 @@ func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error
 				return runtimeSelection{}, fmt.Errorf("%w: --configuration-root requires one nonempty directory", ErrRuntimeSelector)
 			}
 			root = value
+		case "--runtime-baseline":
+			if baseline != "" || strings.TrimSpace(value) == "" || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+				return runtimeSelection{}, fmt.Errorf("%w: --runtime-baseline requires one nonempty path", ErrRuntimeSelector)
+			}
+			baseline = value
 		case "--env", "--config":
 			selectors = append(selectors, flag, value)
 		default:
-			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory> and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
+			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory>, --runtime-baseline <path>, and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
 		}
 	}
 	if root == "" {
 		return runtimeSelection{}, fmt.Errorf("%w: --configuration-root <directory> is required", ErrRuntimeSelector)
 	}
+	if baseline == "" { return runtimeSelection{}, fmt.Errorf("%w: --runtime-baseline <path> is required", ErrRuntimeSelector) }
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return runtimeSelection{}, fmt.Errorf("%w: cannot resolve --configuration-root directory", ErrRuntimeSelector)
@@ -503,6 +519,10 @@ func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error
 		return runtimeSelection{}, err
 	}
 	selection.configurationRoot = root
+	if !filepath.IsAbs(baseline) {
+		if !filepath.IsLocal(baseline) { return runtimeSelection{}, fmt.Errorf("%w: relative --runtime-baseline must stay within the configuration root", ErrRuntimeSelector) }
+	}
+	selection.runtimeBaseline = baseline
 	return selection, nil
 }
 

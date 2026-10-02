@@ -22,6 +22,8 @@ import (
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/constructorconfig"
 	"github.com/plystra/cli/internal/implementationassemblygen"
+	"github.com/plystra/cli/internal/privatefile"
+	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/transportprovenance"
 	"github.com/plystra/kernel/plugin/manifest"
@@ -211,7 +213,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	if err != nil {
 		t.Fatalf("RenderCompatibility: %v", err)
 	}
-	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+	bootstrap, err := renderBootstrapFixture(t, applicationRoot, bootstrapgen.Options{
 		ModulePath:                    "example.com/assemblyapp",
 		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
 		ConfigurationProvenance:       assemblyBootstrapProvenance(t),
@@ -288,7 +290,7 @@ replace github.com/plystra/kernel => %s
 	if err != nil {
 		t.Fatalf("RenderCompatibility: %v", err)
 	}
-	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+	bootstrap, err := renderBootstrapFixture(t, applicationRoot, bootstrapgen.Options{
 		ModulePath:                    "example.com/emptyapp",
 		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
 		ConfigurationProvenance:       assemblyBootstrapProvenance(t),
@@ -398,6 +400,41 @@ func writeBytes(t testing.TB, name string, data []byte) {
 	if err := os.WriteFile(name, data, 0o644); err != nil {
 		t.Fatalf("WriteFile(%s): %v", name, err)
 	}
+}
+
+func renderBootstrapFixture(t testing.TB, root string, options bootstrapgen.Options) ([]byte, error) {
+	t.Helper()
+	for _, name := range []string{"file.go", "file_windows.go", "file_unix.go", "file_linux.go", "file_darwin.go", "file_other.go"} {
+		data, err := privatefile.Source.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeBytes(t, filepath.Join(root, "generated/go/internal/privatefile", name), data)
+	}
+	writeFile(t, filepath.Join(root, "generated/go/internal/runtimebaseline/baseline_gen.go"), strings.ReplaceAll(runtimebaseline.Source, "github.com/plystra/cli/internal/privatefile", options.ModulePath+"/generated/go/internal/privatefile"))
+	document, err := bootstrapgen.RuntimeBaseline(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := runtimebaseline.Encode(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "generated/go/bootstrap/dist/runtime-baseline.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file, err := privatefile.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return bootstrapgen.Render(options)
 }
 
 func repositoryRoot(t testing.TB) string {
@@ -792,7 +829,7 @@ func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
 	remotestore.Reset()
 
 	writeRuntimeDocument(t, validRuntimeDocument)
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -857,10 +894,10 @@ func TestApplicationSelectsOneNamedEnvironment(t *testing.T) {
 
 	tests := map[string]RuntimeOptions{
 		"explicit overrides ambient": {
-			Arguments:   []string{"--configuration-root", ".", "--env", "production"},
+			Arguments:   []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "production"},
 			Environment: []string{"PLYSTRA_ENV=missing", "PLYSTRA_CONFIG=missing.yaml"},
 		},
-		"ambient": {Arguments: []string{"--configuration-root", "."}, Environment: []string{"PLYSTRA_ENV=production"}},
+		"ambient": {Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}, Environment: []string{"PLYSTRA_ENV=production"}},
 	}
 	for name, options := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -890,7 +927,7 @@ func TestApplicationSelectsOneNamedEnvironment(t *testing.T) {
 
 	localservice.Reset()
 	remotestore.Reset()
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil || application == nil || !application.Valid() {
 		t.Fatalf("default New with unselected invalid overlay = %#v, %v", application, err)
 	}
@@ -913,11 +950,11 @@ func TestApplicationSelectsCompleteReplacement(t *testing.T) {
 	}
 
 	tests := map[string]RuntimeOptions{
-		"explicit relative": {Arguments: []string{"--configuration-root", ".", "--config", replacementPath}},
-		"explicit absolute": {Arguments: []string{"--configuration-root", ".", "--config", absolutePath}},
-		"ambient":           {Arguments: []string{"--configuration-root", "."}, Environment: []string{"PLYSTRA_CONFIG=" + replacementPath}},
+		"explicit relative": {Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", replacementPath}},
+		"explicit absolute": {Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", absolutePath}},
+		"ambient":           {Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}, Environment: []string{"PLYSTRA_CONFIG=" + replacementPath}},
 		"explicit overrides ambient selectors": {
-			Arguments:   []string{"--configuration-root", ".", "--config", replacementPath},
+			Arguments:   []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", replacementPath},
 			Environment: []string{"PLYSTRA_CONFIG=missing.yaml", "PLYSTRA_ENV=missing"},
 		},
 	}
@@ -968,7 +1005,7 @@ interfaces:
 ` + "`" + `
 	writeRuntimeDocument(t, root)
 	writeEnvironmentDocument(t, "production", overlay)
-	document, err := loadRuntimeDocument(RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "production"}})
+	document, err := loadRuntimeDocument(RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "production"}})
 	if err != nil {
 		t.Fatalf("loadRuntimeDocument: %v", err)
 	}
@@ -1021,7 +1058,7 @@ func TestRuntimeEnvironmentEmptyExposureMappingPreservesRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtimeApplicationModelCompatibilityDigest(root): %v", err)
 	}
-	effective, err := loadRuntimeDocument(RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "empty-exposure"}})
+	effective, err := loadRuntimeDocument(RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "empty-exposure"}})
 	if err != nil {
 		t.Fatalf("loadRuntimeDocument(empty exposure): %v", err)
 	}
@@ -1057,14 +1094,14 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 	}{
 		{
 			name: "default",
-			options: RuntimeOptions{Arguments: []string{"--configuration-root", "."}},
+			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}},
 			prepare: func(t *testing.T) {
 				writeRuntimeDocument(t, "http: {expose: {kernel.health/v1: {transport: connect}}}\n"+validRuntimeDocument)
 			},
 		},
 		{
 			name: "export adoption",
-			options: RuntimeOptions{Arguments: []string{"--configuration-root", "."}},
+			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}},
 			prepare: func(t *testing.T) {
 				writeRuntimeDocument(t, "composition: {adopt: [{module: example.com/platform, export: defaults}]}\nconfig:\n"+bootstrapRemoteConfiguration)
 			},
@@ -1075,7 +1112,7 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 				writeRuntimeDocument(t, validRuntimeDocument)
 				writeEnvironmentDocument(t, "production", "http: {expose: {kernel.health/v1: {transport: connect}}}\n")
 			},
-			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "production"}},
+			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "production"}},
 		},
 		{
 			name: "full replacement",
@@ -1083,7 +1120,7 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 				writeRuntimeDocument(t, validRuntimeDocument)
 				writeReplacementDocument(t, "changed-model.yaml", "interfaces: {require: [kernel.health/v1]}\n"+validRuntimeDocument)
 			},
-			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "changed-model.yaml"}},
+			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "changed-model.yaml"}},
 		},
 	}
 	for _, test := range tests {
@@ -1133,16 +1170,16 @@ func TestApplicationRejectsInvalidInterfaceEntriesBeforeConstructors(t *testing.
 		for _, mode := range []string{"default", "environment", "replacement"} {
 			t.Run(fmt.Sprintf("%d/%s", index, mode), func(t *testing.T) {
 				writeRuntimeDocument(t, validRuntimeDocument)
-				options := RuntimeOptions{Arguments: []string{"--configuration-root", "."}}
+				options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}
 				switch mode {
 				case "default":
 					writeRuntimeDocument(t, source+validRuntimeDocument)
 				case "environment":
 					writeEnvironmentDocument(t, "invalid-entry", source)
-					options.Arguments = []string{"--configuration-root", ".", "--env", "invalid-entry"}
+					options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "invalid-entry"}
 				case "replacement":
 					writeReplacementDocument(t, "invalid-entry.yaml", source+validRuntimeDocument)
-					options.Arguments = []string{"--configuration-root", ".", "--config", "invalid-entry.yaml"}
+					options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "invalid-entry.yaml"}
 				}
 				localservice.Reset()
 				remotestore.Reset()
@@ -1163,16 +1200,16 @@ func TestRuntimeRejectsEffectiveIntrinsicSelectionBeforeConstructors(t *testing.
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			writeRuntimeDocument(t, validRuntimeDocument)
-			options := RuntimeOptions{Arguments: []string{"--configuration-root", "."}}
+			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}
 			switch mode {
 			case "default":
 				writeRuntimeDocument(t, source+validRuntimeDocument)
 			case "environment":
 				writeEnvironmentDocument(t, "intrinsic-selection", source)
-				options.Arguments = []string{"--configuration-root", ".", "--env", "intrinsic-selection"}
+				options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "intrinsic-selection"}
 			case "replacement":
 				writeReplacementDocument(t, "intrinsic-selection.yaml", source+validRuntimeDocument)
-				options.Arguments = []string{"--configuration-root", ".", "--config", "intrinsic-selection.yaml"}
+				options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "intrinsic-selection.yaml"}
 			}
 			localservice.Reset()
 			remotestore.Reset()
@@ -1202,7 +1239,7 @@ func TestRuntimeInterfaceRequirementCompleteSets(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			writeRuntimeDocument(t, "interfaces: {require: "+test.root+"}\n"+validRuntimeDocument)
 			writeEnvironmentDocument(t, "requirements", "interfaces: {require: "+test.overlay+"}\n")
-			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "requirements"}}
+			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "requirements"}}
 			document, err := loadRuntimeDocument(options)
 			if err != nil {
 				t.Fatal(err)
@@ -1244,16 +1281,16 @@ func TestRuntimeConstructorEntryRemoval(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			writeRuntimeDocument(t, "config:\n  acme.local-service: {label: inherited}\n"+bootstrapRemoteConfiguration)
 			document := "config:\n  acme.local-service: {$remove: true}\n"+bootstrapRemoteConfiguration
-			options := RuntimeOptions{Arguments: []string{"--configuration-root", "."}}
+			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}
 			switch mode {
 			case "default":
 				writeRuntimeDocument(t, document)
 			case "environment":
 				writeEnvironmentDocument(t, "remove-constructor", "config: {acme.local-service: {$remove: true}}\n")
-				options.Arguments = []string{"--configuration-root", ".", "--env", "remove-constructor"}
+				options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "remove-constructor"}
 			case "replacement":
 				writeReplacementDocument(t, "remove-constructor.yaml", document)
-				options.Arguments = []string{"--configuration-root", ".", "--config", "remove-constructor.yaml"}
+				options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "remove-constructor.yaml"}
 			}
 			localservice.Reset()
 			remotestore.Reset()
@@ -1274,15 +1311,15 @@ func TestRuntimeConstructorEntryRemoval(t *testing.T) {
 			t.Run(mode+"/"+value, func(t *testing.T) {
 				writeRuntimeDocument(t, validRuntimeDocument)
 				document := "config:\n  acme.local-service: "+value+"\n"+bootstrapRemoteConfiguration
-				options := RuntimeOptions{Arguments: []string{"--configuration-root", "."}}
+				options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}
 				switch mode {
 				case "default": writeRuntimeDocument(t, document)
 				case "environment":
 					writeEnvironmentDocument(t, "invalid-constructor", "config: {acme.local-service: "+value+"}\n")
-					options.Arguments = []string{"--configuration-root", ".", "--env", "invalid-constructor"}
+					options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "invalid-constructor"}
 				case "replacement":
 					writeReplacementDocument(t, "invalid-constructor.yaml", document)
-					options.Arguments = []string{"--configuration-root", ".", "--config", "invalid-constructor.yaml"}
+					options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "invalid-constructor.yaml"}
 				}
 				localservice.Reset()
 				remotestore.Reset()
@@ -1297,7 +1334,7 @@ func TestRuntimeConstructorEntryRemoval(t *testing.T) {
 	}
 	writeRuntimeDocument(t, "config:\n  acme.local-service: {$remove: true}\n"+bootstrapRemoteConfiguration)
 	writeEnvironmentDocument(t, "replace-removed", "config: {acme.local-service: {label: replacement}}\n")
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "replace-removed"}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "replace-removed"}})
 	if err != nil || application == nil { t.Fatalf("replace lower removal: %#v, %v", application, err) }
 	_, configuration := localservice.Snapshot()
 	if configuration.Label != "replacement" { t.Fatalf("replacement label = %q", configuration.Label) }
@@ -1305,7 +1342,7 @@ func TestRuntimeConstructorEntryRemoval(t *testing.T) {
 	writeRuntimeDocument(t, "config: {zeta.remote-store: {$remove: true}}\n")
 	localservice.Reset()
 	remotestore.Reset()
-	if application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}}); application != nil || err == nil {
+	if application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}); application != nil || err == nil {
 		t.Fatalf("required configuration removal accepted: %#v, %v", application, err)
 	}
 	assertNoBootstrapConstructorCalls(t)
@@ -1329,7 +1366,7 @@ func TestRuntimeAdoptionCompleteSets(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			writeRuntimeDocument(t, "composition: {adopt: "+test.root+"}\nconfig:\n"+bootstrapRemoteConfiguration)
 			writeEnvironmentDocument(t, "adoptions", "composition: {adopt: "+test.overlay+"}\n")
-			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "adoptions"}}
+			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "adoptions"}}
 			document, err := loadRuntimeDocument(options)
 			if err != nil {
 				t.Fatal(err)
@@ -1379,18 +1416,18 @@ func TestRuntimeInterfaceTombstonesAcrossSelections(t *testing.T) {
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			writeRuntimeDocument(t, validRuntimeDocument)
-			options := RuntimeOptions{Arguments: []string{"--configuration-root", "."}}
+			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}
 			switch mode {
 			case "default":
 				writeRuntimeDocument(t, removals+validRuntimeDocument)
 			case "environment":
 				writeRuntimeDocument(t, lower+validRuntimeDocument)
 				writeEnvironmentDocument(t, "removed", removals)
-				options.Arguments = []string{"--configuration-root", ".", "--env", "removed"}
+				options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "removed"}
 			case "replacement":
 				writeRuntimeDocument(t, lower+validRuntimeDocument)
 				writeReplacementDocument(t, "removed.yaml", removals+validRuntimeDocument)
-				options.Arguments = []string{"--configuration-root", ".", "--config", "removed.yaml"}
+				options.Arguments = []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "removed.yaml"}
 			}
 			document, err := loadRuntimeDocument(options)
 			if err != nil {
@@ -1431,15 +1468,15 @@ func TestApplicationRejectsInvalidEnvironmentSelectionBeforeConstructors(t *test
 		options RuntimeOptions
 		reason  error
 	}{
-		{name: "missing", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "missing"}}, reason: ErrRuntimeSelector},
-		{name: "unsafe", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "../production"}}, reason: ErrRuntimeSelector},
-		{name: "duplicate ambient", options: RuntimeOptions{Arguments: []string{"--configuration-root", "."}, Environment: []string{"PLYSTRA_ENV=test", "PLYSTRA_ENV=production"}}, reason: ErrRuntimeSelector},
-		{name: "type change", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "type-change"}}, reason: ErrRuntimeConfiguration},
-		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "unknown-field"}}, reason: ErrRuntimeConfiguration},
-		{name: "YAML reference", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "alias"}}, reason: ErrRuntimeConfiguration},
-		{name: "invalid Interface ID", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "invalid-interface"}}, reason: ErrRuntimeConfiguration},
-		{name: "invalid Implementation constructor", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "invalid-constructor"}}, reason: ErrRuntimeConfiguration},
-		{name: "obsolete capabilities schema", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "obsolete-capabilities"}}, reason: ErrRuntimeConfiguration},
+		{name: "missing", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "missing"}}, reason: ErrRuntimeSelector},
+		{name: "unsafe", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "../production"}}, reason: ErrRuntimeSelector},
+		{name: "duplicate ambient", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}, Environment: []string{"PLYSTRA_ENV=test", "PLYSTRA_ENV=production"}}, reason: ErrRuntimeSelector},
+		{name: "type change", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "type-change"}}, reason: ErrRuntimeConfiguration},
+		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "unknown-field"}}, reason: ErrRuntimeConfiguration},
+		{name: "YAML reference", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "alias"}}, reason: ErrRuntimeConfiguration},
+		{name: "invalid Interface ID", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "invalid-interface"}}, reason: ErrRuntimeConfiguration},
+		{name: "invalid Implementation constructor", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "invalid-constructor"}}, reason: ErrRuntimeConfiguration},
+		{name: "obsolete capabilities schema", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "obsolete-capabilities"}}, reason: ErrRuntimeConfiguration},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1471,18 +1508,18 @@ func TestApplicationRejectsInvalidReplacementBeforeConstructors(t *testing.T) {
 		options RuntimeOptions
 		reason  error
 	}{
-		{name: "missing", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "missing.yaml"}}, reason: ErrRuntimeSelector},
-		{name: "empty", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", ""}}, reason: ErrRuntimeSelector},
-		{name: "outside Project", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", filepath.Join("..", "outside.yaml")}}, reason: ErrRuntimeSelector},
-		{name: "directory", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "replacement-directory"}}, reason: ErrRuntimeSelector},
-		{name: "duplicate explicit", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "invalid-type.yaml", "--config", "unknown-field.yaml"}}, reason: ErrRuntimeSelector},
-		{name: "explicit conflict", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--env", "test", "--config", "invalid-type.yaml"}}, reason: ErrRuntimeSelector},
-		{name: "duplicate ambient", options: RuntimeOptions{Arguments: []string{"--configuration-root", "."}, Environment: []string{"PLYSTRA_CONFIG=invalid-type.yaml", "PLYSTRA_CONFIG=unknown-field.yaml"}}, reason: ErrRuntimeSelector},
-		{name: "ambient conflict", options: RuntimeOptions{Arguments: []string{"--configuration-root", "."}, Environment: []string{"PLYSTRA_CONFIG=invalid-type.yaml", "PLYSTRA_ENV=test"}}, reason: ErrRuntimeSelector},
-		{name: "invalid syntax", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "invalid-syntax.yaml"}}, reason: ErrRuntimeConfiguration},
-		{name: "invalid type", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "invalid-type.yaml"}}, reason: ErrRuntimeConfiguration},
-		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "unknown-field.yaml"}}, reason: ErrRuntimeConfiguration},
-		{name: "YAML reference", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "alias.yaml"}}, reason: ErrRuntimeConfiguration},
+		{name: "missing", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "missing.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "empty", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", ""}}, reason: ErrRuntimeSelector},
+		{name: "outside Project", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", filepath.Join("..", "outside.yaml")}}, reason: ErrRuntimeSelector},
+		{name: "directory", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "replacement-directory"}}, reason: ErrRuntimeSelector},
+		{name: "duplicate explicit", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "invalid-type.yaml", "--config", "unknown-field.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "explicit conflict", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "test", "--config", "invalid-type.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "duplicate ambient", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}, Environment: []string{"PLYSTRA_CONFIG=invalid-type.yaml", "PLYSTRA_CONFIG=unknown-field.yaml"}}, reason: ErrRuntimeSelector},
+		{name: "ambient conflict", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}, Environment: []string{"PLYSTRA_CONFIG=invalid-type.yaml", "PLYSTRA_ENV=test"}}, reason: ErrRuntimeSelector},
+		{name: "invalid syntax", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "invalid-syntax.yaml"}}, reason: ErrRuntimeConfiguration},
+		{name: "invalid type", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "invalid-type.yaml"}}, reason: ErrRuntimeConfiguration},
+		{name: "unknown field", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "unknown-field.yaml"}}, reason: ErrRuntimeConfiguration},
+		{name: "YAML reference", options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "alias.yaml"}}, reason: ErrRuntimeConfiguration},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1509,7 +1546,7 @@ func TestApplicationRejectsSymbolicReplacementBeforeConstructors(t *testing.T) {
 
 	localservice.Reset()
 	remotestore.Reset()
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "linked-replacement.yaml"}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "linked-replacement.yaml"}})
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeSelector) {
 		t.Fatalf("New = %#v, %v", application, err)
 	}
@@ -1527,7 +1564,7 @@ func TestApplicationRequiresRootMarkerForReplacement(t *testing.T) {
 
 	localservice.Reset()
 	remotestore.Reset()
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--config", "replacement.yaml"}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "replacement.yaml"}})
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeSelector) {
 		t.Fatalf("New = %#v, %v", application, err)
 	}
@@ -1547,7 +1584,7 @@ func TestApplicationRejectsInvalidSettingsBeforeConstructors(t *testing.T) {
 			localservice.Reset()
 			remotestore.Reset()
 			writeRuntimeDocument(t, document)
-			application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+			application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeConfiguration) {
 				t.Fatalf("New = %#v, %v", application, err)
 			}
@@ -1564,7 +1601,7 @@ func TestApplicationStartupTimeoutCancelsAndRollsBack(t *testing.T) {
 	lifecycleevents.Reset()
 	document := "timeouts:\n  startup: 25ms\nconfig:\n  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n    startup: wait\n"
 	writeRuntimeDocument(t, document)
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1595,7 +1632,7 @@ func TestApplicationRejectsMissingRuntimeDocument(t *testing.T) {
 	if err := os.Remove(defaultRuntimeDocument); err != nil && !os.IsNotExist(err) {
 		t.Fatalf("remove default runtime document: %v", err)
 	}
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
 		t.Fatalf("New(missing) = %#v, %v", application, err)
 	}
@@ -1616,7 +1653,7 @@ func TestApplicationRejectsSymbolicRuntimeDocument(t *testing.T) {
 		t.Skipf("symbolic links are unavailable: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, kernelconfiguration.ErrLoadDocument) || !errors.Is(err, kernelconfiguration.ErrDocumentUnavailable) {
 		t.Fatalf("New(symbolic link) = %#v, %v", application, err)
 	}
@@ -1629,12 +1666,12 @@ func TestApplicationRejectsInvalidContextsAndValues(t *testing.T) {
 	localservice.Reset()
 	remotestore.Reset()
 	writeRuntimeDocument(t, validRuntimeDocument)
-	if application, err := New(nil, RuntimeOptions{Arguments: []string{"--configuration-root", "."}}); application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrInvalidContext) {
+	if application, err := New(nil, RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}); application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrInvalidContext) {
 		t.Fatalf("New(nil) = %#v, %v", application, err)
 	}
 	assertNoBootstrapConstructorCalls(t)
 
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -1727,7 +1764,7 @@ func TestEmptyApplicationLifecycle(t *testing.T) {
 		t.Fatalf("write runtime document: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(defaultRuntimeDocument) })
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

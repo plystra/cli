@@ -19,7 +19,7 @@ import "os"
 
 func main() {
 	root, err := os.Getwd()
-	if err != nil || len(os.Args) != 4 || os.Args[1] != "--smoke" || os.Args[2] != "--configuration-root" || os.Args[3] != root {
+	if err != nil || len(os.Args) != 6 || os.Args[1] != "--smoke" || os.Args[2] != "--configuration-root" || os.Args[3] != root || os.Args[4] != "--runtime-baseline" || os.Args[5] != "dist/runtime-baseline.json" {
 		os.Exit(2)
 	}
 }

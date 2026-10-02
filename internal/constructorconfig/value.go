@@ -557,8 +557,20 @@ func BindDefaults(s *Schema, t reflect.Type) error {
 				return ErrValue
 			}
 			switch f.Value.Kind {
-			case "string", "duration", "url":
+			case "string":
 				f.Default, _ = json.Marshal(value)
+			case "duration":
+				parsed, err := time.ParseDuration(value)
+				if err != nil {
+					return ErrValue
+				}
+				f.Default, _ = json.Marshal(parsed.String())
+			case "url":
+				parsed, err := url.Parse(value)
+				if err != nil {
+					return ErrValue
+				}
+				f.Default, _ = json.Marshal(parsed.String())
 			case "signed-integer":
 				v, err := strconv.ParseInt(value, 10, f.Value.Bits)
 				if err != nil {
@@ -594,6 +606,26 @@ func BindDefaults(s *Schema, t reflect.Type) error {
 		}
 	}
 	return nil
+}
+
+// DefaultsJSON is private deployment evidence, never a generated-source identity.
+func DefaultsJSON(s Schema) ([]byte, error) {
+	defaults := make(map[string]json.RawMessage)
+	var visit func(Schema, string)
+	visit = func(s Schema, path string) {
+		if s.Element != nil {
+			visit(*s.Element, path+"/*")
+		}
+		for _, f := range s.Fields {
+			key := path + "/" + strings.ReplaceAll(strings.ReplaceAll(f.Name, "~", "~0"), "/", "~1")
+			if f.HasDefault {
+				defaults[key] = f.Default
+			}
+			visit(f.Value, key)
+		}
+	}
+	visit(s, "")
+	return json.Marshal(defaults)
 }
 
 func matchesType(s Schema, t reflect.Type) bool {

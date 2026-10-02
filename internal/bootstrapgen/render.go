@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/transportprovenance"
 )
 
@@ -28,6 +29,7 @@ var (
 // default is embedded, while the application-specific value remains in the
 // runtime document and never enters generated source.
 type Options struct {
+	DependencyExports             []runtimebaseline.Export
 	ModulePath                    string
 	DefaultStartupTimeout         time.Duration
 	ConfigurationSchemas          []ConfigurationSchema
@@ -78,6 +80,10 @@ func Render(options Options) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRender, err)
 	}
+	baseline, err := RuntimeBaseline(options)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRender, err)
+	}
 
 	assemblyPath := path.Join(options.ModulePath, "generated/go/assembly")
 	var source strings.Builder
@@ -112,6 +118,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "\tapplicationassembly %s\n", strconv.Quote(assemblyPath))
 	fmt.Fprintf(&source, "\tconstructorconfig %s\n", strconv.Quote(path.Join(options.ModulePath, "generated/go/internal/constructorconfig")))
+	fmt.Fprintf(&source, "\truntimebaseline %s\n", strconv.Quote(path.Join(options.ModulePath, "generated/go/internal/runtimebaseline")))
 	fmt.Fprintln(&source, "\tkernelconfiguration \"github.com/plystra/kernel/configuration\"")
 	fmt.Fprintln(&source, "\tkernellifecycle \"github.com/plystra/kernel/lifecycle\"")
 	fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
@@ -119,6 +126,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
 	fmt.Fprintln(&source, "const (")
+	fmt.Fprintf(&source, "\tcompiledRuntimeContract = %s\n", strconv.Quote(baseline.ContractID))
 	fmt.Fprintln(&source, "\tdefaultRuntimeDocument = \"plystra.yaml\"")
 	fmt.Fprintf(&source, "\tdefaultStartupTimeout = time.Duration(%d)\n", options.DefaultStartupTimeout)
 	fmt.Fprintln(&source, "\t// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.")
@@ -148,7 +156,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tErrApplicationStop = errors.New(\"generated application shutdown failed\")")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// RuntimeOptions carries the required --configuration-root and one immutable selector invocation into generated bootstrap.")
+	fmt.Fprintln(&source, "// RuntimeOptions carries the required --configuration-root, --runtime-baseline, and one immutable selector invocation into generated bootstrap.")
 	fmt.Fprintln(&source, "type RuntimeOptions struct {")
 	fmt.Fprintln(&source, "\tArguments   []string")
 	fmt.Fprintln(&source, "\tEnvironment []string")
@@ -431,6 +439,7 @@ func (failure *ApplicationAssemblyError) LogValue() slog.Value {
 	fmt.Fprintln(&source)
 	source.WriteString(runtimeSupport)
 	source.WriteString(constructorSupport)
+	source.WriteString(runtimeBaselineSupport)
 
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {

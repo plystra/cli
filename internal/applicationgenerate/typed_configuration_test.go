@@ -2,6 +2,7 @@ package applicationgenerate_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/privatefile"
+	"github.com/plystra/cli/internal/runtimebaseline"
 )
 
 func TestGeneratedBootstrapDeliversTypedConstructorConfiguration(t *testing.T) {
@@ -117,7 +120,73 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response, error) { re
 	configurationRoot := t.TempDir()
 	writeFile(t, filepath.Join(configurationRoot, "plystra.yaml"), "interfaces: {require: [probe.run/v1]}\nconfig:\n  "+module+"/service.New:\n    required: binary\n    mixed: [{public: 2}]\n")
 	marker := filepath.Join(deployment, "constructed")
-	processBinary := exec.CommandContext(t.Context(), binary, "--smoke", "--configuration-root", configurationRoot)
+	baseline := filepath.Join(deployment, "runtime-baseline.json")
+	copyPrivateBaseline(t, filepath.Join(root, "dist/runtime-baseline.json"), baseline)
+	baselineBytes, err := os.ReadFile(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, problem := range []string{"missing", "malformed", "wrong contract", "wrong defaults", "public permissions"} {
+		t.Run("private baseline/"+problem, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "PRIVATE_BASELINE.json")
+			data := bytes.Clone(baselineBytes)
+			switch problem {
+			case "malformed":
+				data = []byte("PRIVATE_MALFORMED")
+			case "wrong contract", "wrong defaults":
+				document, err := runtimebaseline.Decode(data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if problem == "wrong contract" {
+					document.Contract = []byte(`{"module":"example.com/other"}`)
+					document.ContractID = runtimebaseline.ContractID(document.Contract)
+				} else {
+					document.Defaults = map[string]json.RawMessage{}
+				}
+				data, err = runtimebaseline.Encode(document)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if problem == "public permissions" {
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else if problem != "missing" {
+				file, err := privatefile.Create(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := file.Write(data); err != nil {
+					t.Fatal(err)
+				}
+				file.Close()
+			}
+			process := exec.CommandContext(t.Context(), binary, "--smoke", "--configuration-root", configurationRoot, "--runtime-baseline", path)
+			process.Dir = deployment
+			for _, entry := range goEnvironment(map[string]string{"PLYSTRA_TYPED_TEST_MARKER": marker}) {
+				name, _, _ := strings.Cut(entry, "=")
+				if !strings.EqualFold(name, "PLYSTRA_ENV") && !strings.EqualFold(name, "PLYSTRA_CONFIG") {
+					process.Env = append(process.Env, entry)
+				}
+			}
+			output, err := process.CombinedOutput()
+			if err == nil || !bytes.Contains(output, []byte("baseline")) {
+				t.Fatalf("invalid baseline accepted: %v\n%s", err, output)
+			}
+			if bytes.Contains(output, []byte("PRIVATE_")) || bytes.Contains(output, []byte(path)) {
+				t.Fatal("baseline diagnostic exposed private data")
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("invalid baseline entered constructor")
+			}
+		})
+	}
+	processBinary := exec.CommandContext(t.Context(), binary, "--smoke", "--configuration-root", configurationRoot, "--runtime-baseline", baseline)
 	processBinary.Dir = deployment
 	for _, entry := range goEnvironment(map[string]string{"PLYSTRA_TYPED_TEST_MARKER": marker}) {
 		name, _, _ := strings.Cut(entry, "=")
@@ -195,7 +264,7 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response,error) {retu
 		t.Run(tc.name, func(t *testing.T) {
 			writeFile(t, servicePath, strings.Replace(source, tc.from, tc.to, 1))
 			marker := filepath.Join(t.TempDir(), "constructor-entered")
-			process := exec.CommandContext(t.Context(), "go", "run", "-race", "-mod=readonly", "./generated/go/application", "--smoke", "--configuration-root", root)
+			process := exec.CommandContext(t.Context(), "go", "run", "-race", "-mod=readonly", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 			process.Dir = root
 			process.Env = goEnvironment(map[string]string{"PLYSTRA_METADATA_TEST_MARKER": marker})
 			for i := len(process.Env) - 1; i >= 0; i-- {
@@ -226,7 +295,17 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response,error) {retu
 		changed = strings.Replace(changed, `yaml:"value"`, `yaml:"value" json:"value"`, 1)
 		writeFile(t, servicePath, changed)
 		marker := filepath.Join(t.TempDir(), "constructor-entered")
-		process := exec.CommandContext(t.Context(), "go", "run", "-race", "-mod=readonly", "./generated/go/application", "--smoke", "--configuration-root", root)
+		stale := exec.CommandContext(t.Context(), "go", "run", "-race", "-mod=readonly", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
+		stale.Dir, stale.Env = root, goEnvironment(nil)
+		if output, err := stale.CombinedOutput(); err == nil || !bytes.Contains(output, []byte("compiled constructor defaults and private baseline differ")) {
+			t.Fatalf("stale defaults: %v\n%s", err, output)
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
+			t.Fatalf("refresh private baseline: %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
+		}
+		process := exec.CommandContext(t.Context(), "go", "run", "-race", "-mod=readonly", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 		process.Dir = root
 		for _, entry := range goEnvironment(map[string]string{"PLYSTRA_METADATA_TEST_MARKER": marker, "PLYSTRA_METADATA_TEST_SECRET": "private-value"}) {
 			name, _, _ := strings.Cut(entry, "=")
@@ -256,7 +335,7 @@ func TestGeneratedBootstrapRejectsAdoptedTypedConfigurationUntilBaselineAvailabl
 	if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
 		t.Fatalf("generate = %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
 	}
-	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", root)
+	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 	process.Dir, process.Env = root, goEnvironment(nil)
 	output, err := process.CombinedOutput()
 	if err == nil || !bytes.Contains(output, []byte("requires private runtime-baseline support")) {
@@ -281,6 +360,8 @@ import (
 )
 
 func TestTypedStartup(t *testing.T) {
+	baseline, err := filepath.Abs("dist/runtime-baseline.json")
+	if err != nil { t.Fatal(err) }
  t.Setenv("TYPED_RUNTIME_PASSWORD", "resolved-private-password")
  prefix := "interfaces: {require: [probe.run/v1]}\nconfig:\n  example.com/typed-configuration/service.New:\n"
  initial := prefix + "    required: ready\n    mixed: [{public: 2, private: runtime-only}]\n"
@@ -318,7 +399,7 @@ func TestTypedStartup(t *testing.T) {
   t.Run(tc.name,func(t *testing.T){
    root:=t.TempDir()
    if err:=os.WriteFile(filepath.Join(root,"plystra.yaml"),[]byte(tc.base),0600);err!=nil{t.Fatal(err)}
-   args:=[]string{"--configuration-root",root}
+   args:=[]string{"--configuration-root",root,"--runtime-baseline",baseline}
    if tc.overlay!="" {if err:=os.WriteFile(filepath.Join(root,"plystra.test.yaml"),[]byte(tc.overlay),0600);err!=nil{t.Fatal(err)}; args=append(args,"--env","test")}
    if tc.selected!="" {if err:=os.WriteFile(filepath.Join(root,"selected.yaml"),[]byte(tc.selected),0600);err!=nil{t.Fatal(err)}; args=append(args,"--config","selected.yaml")}
    before:=service.Constructions

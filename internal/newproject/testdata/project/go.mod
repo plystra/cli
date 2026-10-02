@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/plystra/kernel v0.0.0-20260930115756-0e0c0f957ef4
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sys v0.47.0
 )
 
 require (

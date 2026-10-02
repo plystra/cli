@@ -63,7 +63,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	if !checked.Checked() || checked.Module().Path() != canonicalFilesystemPath(t, root) || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/go/internal/privatefile/file.go", "generated/go/internal/privatefile/file_darwin.go", "generated/go/internal/privatefile/file_linux.go", "generated/go/internal/privatefile/file_other.go", "generated/go/internal/privatefile/file_unix.go", "generated/go/internal/privatefile/file_windows.go", "generated/go/internal/runtimebaseline/baseline_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -134,7 +134,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 		t.Fatalf("generated bootstrap embeds application-specific startup timeout:\n%s", bootstrap)
 	}
 	for _, required := range [][]byte{
-		[]byte(`defaultRuntimeDocument = "plystra.yaml"`),
+		[]byte(`defaultRuntimeDocument  = "plystra.yaml"`),
 		[]byte("func New(ctx context.Context, options RuntimeOptions)"),
 		[]byte("compiledApplicationModelCompatibilityJSON"),
 		[]byte("compiledApplicationModelCompatibilityDigest"),
@@ -3119,7 +3119,7 @@ import (
 )
 
 func TestUnrequiredCapabilityIsNotRegistered(t *testing.T) {
-	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
@@ -3426,6 +3426,7 @@ require (
 	github.com/plystra/cli v0.0.0
 	github.com/plystra/kernel v0.0.0
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sys v0.47.0
 	golang.org/x/mod v0.38.0 // indirect
 )
 
@@ -3869,6 +3870,7 @@ func writeApplicationModuleDefinition(t testing.TB, root, modulePath string) {
 	extra := fmt.Sprintf(`require (
 	github.com/plystra/kernel v0.0.0
 	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/sys v0.47.0
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

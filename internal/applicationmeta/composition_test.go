@@ -11,6 +11,30 @@ import (
 	"github.com/plystra/cli/internal/implementationinventory"
 )
 
+func TestPrivateExportInventoryExcludesInertDependencyDeclarations(t *testing.T) {
+	first := []byte("http: {address: PRIVATE_INERT}\ncomposition:\n  exports:\n    common: # PRIVATE_COMMENT\n      config:\n        example.com/dependency/service.New: {label: PRIVATE_EXPORT, pointer: null}\n  adopt: [{module: example.com/ignored, export: ignored}]\n")
+	second := []byte("composition: {exports: {common: {config: {example.com/dependency/service.New: {pointer: ~, label: PRIVATE_EXPORT}}}}}\nhttp: {address: OTHER_INERT}\n")
+	a, err := applicationmeta.PrivateExportInventoryYAML(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := applicationmeta.PrivateExportInventoryYAML(second)
+	if err != nil || string(a) != string(b) {
+		t.Fatal("inert or presentation change altered export inventory", err)
+	}
+	for _, forbidden := range []string{"PRIVATE_INERT", "PRIVATE_COMMENT", "ignored"} {
+		if strings.Contains(string(a), forbidden) {
+			t.Fatal("captured non-export data")
+		}
+	}
+	if !strings.Contains(string(a), "PRIVATE_EXPORT") {
+		t.Fatal("lost private export value")
+	}
+	if _, err := applicationmeta.ParseExportInventorySource("plystra.yaml", a); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseReusableConfigurationExportsAndAdoptions(t *testing.T) {
 	t.Parallel()
 

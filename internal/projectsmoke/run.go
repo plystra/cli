@@ -92,7 +92,7 @@ func Run(ctx context.Context, options Options) (result error) {
 	}
 
 	smokeContext, cancelSmoke := context.WithTimeout(ctx, smokeTimeout)
-	process := exec.CommandContext(smokeContext, binaryPath, "--smoke", "--configuration-root", root)
+	process := exec.CommandContext(smokeContext, binaryPath, "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 	process.Dir = root
 	process.Env = append([]string(nil), environment...)
 	process.Stdin = nil

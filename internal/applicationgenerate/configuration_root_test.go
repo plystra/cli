@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/privatefile"
 )
 
 func TestGeneratedBinaryUsesExplicitConfigurationRoot(t *testing.T) {
@@ -46,6 +47,8 @@ func TestGeneratedBinaryUsesExplicitConfigurationRoot(t *testing.T) {
 	writeFile(t, filepath.Join(configuration, "deploy", "customer.yaml"), "timeouts: {startup: 41s}\n")
 	writeFile(t, filepath.Join(configuration, "plystra.ignored.yaml"), "invalid: [\n")
 	writeFile(t, filepath.Join(deployment, "plystra.yaml"), "invalid: [unrelated-working-directory\n")
+	baseline := filepath.Join(deployment, "runtime-baseline.json")
+	copyPrivateBaseline(t, filepath.Join(root, "dist/runtime-baseline.json"), baseline)
 	before := snapshotTree(t, configuration)
 	for _, test := range []struct {
 		name        string
@@ -62,11 +65,12 @@ func TestGeneratedBinaryUsesExplicitConfigurationRoot(t *testing.T) {
 		{name: "ambient replacement", arguments: []string{"--configuration-root", configuration}, selectors: []string{"PLYSTRA_CONFIG=deploy/customer.yaml"}},
 		{name: "missing root", wantFailure: "--configuration-root <directory> is required"},
 		{name: "duplicate root", arguments: []string{"--configuration-root", configuration, "--configuration-root", configuration}, wantFailure: "requires one nonempty directory"},
+		{name: "duplicate baseline", arguments: []string{"--configuration-root", configuration, "--runtime-baseline", baseline}, wantFailure: "requires one nonempty path"},
 		{name: "outside root", arguments: []string{"--configuration-root", configuration, "--config", "../plystra.yaml"}, wantFailure: "within the configuration root"},
 		{name: "conflicting ambient selectors", arguments: []string{"--configuration-root", configuration}, selectors: []string{"PLYSTRA_ENV=production", "PLYSTRA_CONFIG=deploy/customer.yaml"}, wantFailure: "cannot be used together"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			process := exec.CommandContext(t.Context(), binary, append([]string{"--smoke"}, test.arguments...)...)
+			process := exec.CommandContext(t.Context(), binary, append([]string{"--smoke", "--runtime-baseline", baseline}, test.arguments...)...)
 			process.Dir = deployment
 			process.Env = append(append([]string(nil), environment...), test.selectors...)
 			output, err := process.CombinedOutput()
@@ -86,5 +90,37 @@ func TestGeneratedBinaryUsesExplicitConfigurationRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(configuration, "go.mod")); !os.IsNotExist(err) {
 		t.Fatalf("deployment unexpectedly contains a module: %v", err)
+	}
+	missing := exec.CommandContext(t.Context(), binary, "--smoke", "--configuration-root", configuration)
+	missing.Dir, missing.Env = deployment, environment
+	if output, err := missing.CombinedOutput(); err == nil || !bytes.Contains(output, []byte("--runtime-baseline <path> is required")) {
+		t.Fatalf("missing baseline argument accepted: %v\n%s", err, output)
+	}
+	if err := os.Remove(filepath.Join(root, "dist/runtime-baseline.json")); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := command.RunIn([]string{"generate", "--check"}, &stdout, &stderr, root, environment); code != 0 {
+		t.Fatalf("public check requires private output: %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
+	}
+	if _, err := os.Stat(filepath.Join(root, "dist/runtime-baseline.json")); !os.IsNotExist(err) {
+		t.Fatal("read-only check created a private baseline")
+	}
+}
+
+func copyPrivateBaseline(t testing.TB, source, destination string) {
+	t.Helper()
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := privatefile.Create(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write(data); err != nil {
+		t.Fatal(err)
 	}
 }

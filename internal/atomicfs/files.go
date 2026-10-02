@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/plystra/cli/internal/privatefile"
 )
 
 var (
@@ -116,9 +118,11 @@ func canonicalConcurrentChangePaths(paths []string) []string {
 
 // Write describes one complete file replacement.
 type Write struct {
-	Path               string
-	Data               []byte
-	Mode               fs.FileMode
+	Path string
+	Data []byte
+	Mode fs.FileMode
+	// OwnerPrivate applies native owner-only permissions before staging data.
+	OwnerPrivate       bool
 	MustNotExist       bool
 	ParentMustNotExist bool
 	// ExpectedData, when non-nil, requires an existing target with these exact
@@ -134,28 +138,32 @@ type Remove struct {
 }
 
 type plannedWrite struct {
-	path           string
-	osPath         string
-	data           []byte
-	mode           fs.FileMode
-	mustNotExist   bool
-	existed        bool
-	original       []byte
-	originalMode   fs.FileMode
-	expected       []byte
-	expectOriginal bool
-	stagePath      string
-	backupPath     string
-	missingParents []string
+	path                string
+	osPath              string
+	data                []byte
+	mode                fs.FileMode
+	ownerPrivate        bool
+	mustNotExist        bool
+	existed             bool
+	original            []byte
+	originalMode        fs.FileMode
+	originalPermissions [32]byte
+	expected            []byte
+	expectOriginal      bool
+	stagePath           string
+	backupPath          string
+	missingParents      []string
 }
 
 type appliedWrite struct {
-	path       string
-	backupPath string
-	existed    bool
-	installed  bool
-	data       []byte
-	mode       fs.FileMode
+	ownerPrivate bool
+	permissions  [32]byte
+	path         string
+	backupPath   string
+	existed      bool
+	installed    bool
+	data         []byte
+	mode         fs.FileMode
 }
 
 type plannedRemove struct {
@@ -255,11 +263,12 @@ func ApplyFiles(rootPath string, writes []Write, removes []Remove, validate func
 			return err
 		}
 		state := appliedWrite{
-			path:       write.osPath,
-			backupPath: write.backupPath,
-			existed:    write.existed,
-			data:       write.data,
-			mode:       write.mode,
+			ownerPrivate: write.ownerPrivate,
+			path:         write.osPath,
+			backupPath:   write.backupPath,
+			existed:      write.existed,
+			data:         write.data,
+			mode:         write.mode,
 		}
 		if write.existed {
 			if err := root.Rename(write.osPath, write.backupPath); err != nil {
@@ -276,6 +285,12 @@ func ApplyFiles(rootPath string, writes []Write, removes []Remove, validate func
 			return fmt.Errorf("%w: inspect installed %s: %w", ErrWriteFiles, write.path, err)
 		}
 		applied[len(applied)-1].mode = info.Mode().Perm()
+		if write.ownerPrivate {
+			applied[len(applied)-1].permissions, err = privatePermissions(root, write.osPath)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	for index := range plannedRemoves {
 		remove := plannedRemoves[index]
@@ -289,6 +304,16 @@ func ApplyFiles(rootPath string, writes []Write, removes []Remove, validate func
 	}
 	if err := validate(absoluteRoot); err != nil {
 		return fmt.Errorf("%w: validate updated root: %w", ErrWriteFiles, err)
+	}
+	for _, write := range applied {
+		if !write.ownerPrivate {
+			continue
+		}
+		matches, err := fileMatches(root, write.path, write.data, write.mode)
+		permissions, permissionErr := privatePermissions(root, write.path)
+		if err != nil || !matches || permissionErr != nil || permissions != write.permissions {
+			return NewConcurrentChangeError([]string{write.path}, fmt.Errorf("%w: private file changed during validation", ErrConcurrentChange))
+		}
 	}
 	committed = true
 	return nil
@@ -312,6 +337,9 @@ func planWrites(root *os.Root, writes []Write, seen map[string]struct{}) ([]plan
 		}
 		seen[canonical] = struct{}{}
 		mode := write.Mode.Perm()
+		if write.OwnerPrivate {
+			mode = 0o600
+		}
 		if mode == 0 {
 			mode = 0o644
 		}
@@ -320,6 +348,7 @@ func planWrites(root *os.Root, writes []Write, seen map[string]struct{}) ([]plan
 			osPath:         filepath.FromSlash(canonical),
 			data:           append([]byte(nil), write.Data...),
 			mode:           mode,
+			ownerPrivate:   write.OwnerPrivate,
 			mustNotExist:   write.MustNotExist,
 			expectOriginal: write.ExpectedData != nil,
 		}
@@ -352,6 +381,12 @@ func planWrites(root *os.Root, writes []Write, seen map[string]struct{}) ([]plan
 				return nil, fmt.Errorf("%w: %s is not a regular file", ErrUnsafePath, canonical)
 			}
 			item.existed = true
+			if write.OwnerPrivate {
+				item.originalPermissions, err = privatePermissions(root, item.osPath)
+				if err != nil {
+					return nil, err
+				}
+			}
 			item.originalMode = info.Mode().Perm()
 			item.original, err = root.ReadFile(item.osPath)
 			if err != nil {
@@ -363,7 +398,7 @@ func planWrites(root *os.Root, writes []Write, seen map[string]struct{}) ([]plan
 					fmt.Errorf("%w: %w: %s does not match the planned source snapshot", ErrWriteFiles, ErrConcurrentChange, canonical),
 				)
 			}
-			if write.Mode.Perm() == 0 {
+			if write.Mode.Perm() == 0 && !write.OwnerPrivate {
 				item.mode = item.originalMode
 			}
 		case errors.Is(err, fs.ErrNotExist):
@@ -473,7 +508,7 @@ func stageWrites(transactionRoot, transactionName string, planned []plannedWrite
 	for index := range planned {
 		name := fmt.Sprintf("%06d", index)
 		absoluteStage := filepath.Join(stagedDirectory, name)
-		if err := writeSyncedFile(absoluteStage, planned[index].data, planned[index].mode); err != nil {
+		if err := writeSyncedFile(absoluteStage, planned[index].data, planned[index].mode, planned[index].ownerPrivate); err != nil {
 			return fmt.Errorf("%w: stage %s: %w", ErrWriteFiles, planned[index].path, err)
 		}
 		planned[index].stagePath = filepath.Join(transactionName, "staged", name)
@@ -539,6 +574,12 @@ func createParentDirectories(root *os.Root, planned []plannedWrite) ([]string, e
 }
 
 func confirmUnchanged(root *os.Root, write plannedWrite) error {
+	if write.existed && write.ownerPrivate {
+		permissions, err := privatePermissions(root, write.osPath)
+		if err != nil || permissions != write.originalPermissions {
+			return NewConcurrentChangeError([]string{write.path}, fmt.Errorf("%w: private file permissions changed", ErrConcurrentChange))
+		}
+	}
 	info, err := root.Lstat(write.osPath)
 	if !write.existed {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -588,6 +629,13 @@ func rollbackWrites(root *os.Root, applied []appliedWrite, createdDirectories []
 	for index := len(applied) - 1; index >= 0; index-- {
 		write := applied[index]
 		if write.installed {
+			if write.ownerPrivate {
+				permissions, err := privatePermissions(root, write.path)
+				if err != nil || permissions != write.permissions {
+					rollbackErr = errors.Join(rollbackErr, NewConcurrentChangeError([]string{write.path}, fmt.Errorf("%w: private file permissions changed", ErrConcurrentChange)))
+					continue
+				}
+			}
 			matches, err := fileMatches(root, write.path, write.data, write.mode)
 			if err != nil {
 				rollbackErr = errors.Join(rollbackErr, fmt.Errorf("inspect replacement %s: %w", filepath.ToSlash(write.path), err))
@@ -671,8 +719,27 @@ func fileMatches(root *os.Root, name string, data []byte, mode fs.FileMode) (boo
 	return bytes.Equal(current, data), nil
 }
 
-func writeSyncedFile(name string, data []byte, mode fs.FileMode) (writeErr error) {
-	file, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+func privatePermissions(root *os.Root, name string) ([32]byte, error) {
+	var permissions [32]byte
+	file, err := root.Open(name)
+	if err == nil {
+		defer file.Close()
+		permissions, err = privatefile.Snapshot(file)
+	}
+	if err != nil {
+		return permissions, NewConcurrentChangeError([]string{name}, fmt.Errorf("%w: owner-private file permissions changed", ErrConcurrentChange))
+	}
+	return permissions, nil
+}
+
+func writeSyncedFile(name string, data []byte, mode fs.FileMode, ownerPrivate bool) (writeErr error) {
+	var file *os.File
+	var err error
+	if ownerPrivate {
+		file, err = privatefile.Create(name)
+	} else {
+		file, err = os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	}
 	if err != nil {
 		return err
 	}

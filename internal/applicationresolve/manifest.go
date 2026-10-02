@@ -190,6 +190,7 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 
 type dependencyManifestSnapshot struct {
 	modulePath string
+	version    string
 	identity   string
 	root       string
 	snapshot   ManifestSnapshot
@@ -225,6 +226,7 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 		}
 		snapshots = append(snapshots, dependencyManifestSnapshot{
 			modulePath: dependency.Path(),
+			version:    dependency.SelectedVersion(),
 			identity:   dependencyIdentity(dependency),
 			root:       dependency.Root(),
 			snapshot:   snapshot,

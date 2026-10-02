@@ -185,6 +185,8 @@ func artifactUsesGlobalEvidence(filePath string) bool {
 		filePath == "generated/go/application/main_gen.go" ||
 		filePath == "generated/go/bootstrap/bootstrap_gen.go" ||
 		filePath == "generated/go/internal/constructorconfig/value_gen.go" ||
+		strings.HasPrefix(filePath, "generated/go/internal/privatefile/") ||
+		filePath == "generated/go/internal/runtimebaseline/baseline_gen.go" ||
 		filePath == "generated/go/internal/connectschema/schema_gen.go" ||
 		filePath == protobufdescriptor.DescriptorSetPath ||
 		filePath == protobufwiremap.Path {
@@ -285,7 +287,7 @@ func classifyArtifact(filePath string) (artifactIdentity, error) {
 		return artifactIdentity{generator: invocationAssemblyGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
 	case "generated/go/assembly/interfaces_gen.go":
 		return artifactIdentity{generator: implementationAssemblyGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
-	case "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go":
+	case "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/go/internal/runtimebaseline/baseline_gen.go", "generated/go/internal/privatefile/file.go", "generated/go/internal/privatefile/file_unix.go", "generated/go/internal/privatefile/file_linux.go", "generated/go/internal/privatefile/file_darwin.go", "generated/go/internal/privatefile/file_windows.go", "generated/go/internal/privatefile/file_other.go":
 		return artifactIdentity{generator: runtimeBootstrapGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
 	case "generated/go/application/main_gen.go":
 		return artifactIdentity{generator: applicationEntrypointGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil

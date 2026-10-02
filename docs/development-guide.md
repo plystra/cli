@@ -1811,17 +1811,31 @@ For source-tree development, start the generated application with an explicit
 configuration root and the same selector used for generation:
 
 ```powershell
-go run ./generated/go/application --configuration-root .
-go run ./generated/go/application --configuration-root . --env production
-go run ./generated/go/application --configuration-root . --config deploy/customer-a.yaml
+go run ./generated/go/application --configuration-root . --runtime-baseline dist/runtime-baseline.json
+go run ./generated/go/application --configuration-root . --runtime-baseline dist/runtime-baseline.json --env production
+go run ./generated/go/application --configuration-root . --runtime-baseline dist/runtime-baseline.json --config deploy/customer-a.yaml
 ```
 
 The configuration root is required for every invocation. Relative roots resolve
 once at startup; an absolute root lets a built binary run from another working
 directory. Selected paths resolve from that root, including `PLYSTRA_CONFIG`.
 All selected documents use confined, bounded reads and reject symbolic path
-components and observable changes during loading. The private runtime baseline
-and complete source-independent adopted-export composition are still incomplete.
+components and observable changes during loading.
+
+The generated binary also requires `--runtime-baseline <path>`. Generation and
+scaffolding create ignored `dist/runtime-baseline.json` with owner-only native
+permissions, including a protected owner-only Windows ACL. Linux checks ownership
+and mode and fingerprints POSIX ACLs; macOS rejects extended ACLs because they
+can grant access independently of mode bits. Deploy this private
+input with the matching binary; preserve its private permissions when copying.
+Relative baseline paths resolve from the configuration root. Absolute paths may
+point to a separately deployed private input. Startup rejects missing, malformed,
+publicly readable, or incompatible baselines before Secret resolution and
+constructor entry. A compiled private-default edit requires rebuilding and
+refreshing the baseline with `plystra generate`; its bytes and hashes never enter
+public generated artifacts. `generate --check` remains read-only and checks the
+public generated fixed point independently of private build output.
+Complete source-independent adopted-export composition remains incomplete.
 
 Bootstrap validates active current-project Config objects using generated typed
 bindings and shared support under `generated/go/internal/constructorconfig`.

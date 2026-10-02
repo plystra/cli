@@ -283,7 +283,7 @@ import (
 
 func TestRuntime(t *testing.T) {
 	probe.Reset()
-	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
@@ -337,7 +337,7 @@ func TestRuntime(t *testing.T) {
 	probe.Reset()
 	appimplementation.SetStartFailure(true)
 	defer appimplementation.SetStartFailure(false)
-	failed, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	failed, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil || !failed.Valid() {
 		t.Fatalf("bootstrap.New(failing) = %#v, %v", failed, err)
 	}
@@ -356,7 +356,7 @@ func TestRuntime(t *testing.T) {
 
 func TestStaticHookDependenciesRemainGovernedBehindClosedAdmission(t *testing.T) {
 	probe.Reset()
-	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil { t.Fatal(err) }
 	var captured context.Context
 	hooks := 0
@@ -382,7 +382,7 @@ func TestStaticHookDependenciesRemainGovernedBehindClosedAdmission(t *testing.T)
 func TestStaticStartupHookRetainsLateDependencyUntilRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		probe.Reset()
-		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 		if err != nil { t.Fatal(err) }
 		entered, release := make(chan struct{}), make(chan struct{})
 		auditimplementation.BlockCalls(entered, release)
@@ -411,7 +411,7 @@ func TestStaticStartupHookRetainsLateDependencyUntilRetry(t *testing.T) {
 func TestStaticShutdownHookRetainsLateDependencyUntilRetry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		probe.Reset()
-		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 		if err != nil { t.Fatal(err) }
 		if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
 		entered, release := make(chan struct{}), make(chan struct{})
@@ -534,7 +534,7 @@ func TestBootstrapPreservesCleanupRetry(t *testing.T) {
 	probe.Reset()
 	appimplementation.SetConstructorMode("partial-retry")
 	defer appimplementation.SetConstructorMode("")
-	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	var cleanup *assembly.InterfaceAssemblyError
 	if application != nil || !errors.Is(err, bootstrap.ErrBootstrap) || !errors.As(err, &cleanup) {
 		t.Fatalf("bootstrap failure = %v, %v", application, err)
@@ -550,7 +550,7 @@ func TestNeverStartedCleanup(t *testing.T) {
 	for _, mode := range []string{"stop before start", "cancel before start", "dependency failure"} {
 		t.Run(mode, func(t *testing.T) {
 			probe.Reset()
-			application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+			application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 			if err != nil { t.Fatal(err) }
 			want := []string{"construct:audit", "construct:app"}
 			if mode != "stop before start" {
@@ -580,7 +580,7 @@ func TestShutdownRetainsDependenciesUntilLateTargetsTerminate(t *testing.T) {
 						var runtime assembly.InterfaceRuntime
 						var stop func(context.Context) error
 						if surface == "bootstrap" {
-							application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+							application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 							if err != nil { t.Fatal(err) }
 							if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
 							runtime, stop = application.Interfaces(), application.Stop
@@ -651,7 +651,7 @@ func TestInvalidCleanupTimeoutDoesNotConstruct(t *testing.T) {
 func TestApplicationTransitionOwnsFailedDrain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		probe.Reset()
-		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+		application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 		if err != nil { t.Fatal(err) }
 		if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
 		copied := *application

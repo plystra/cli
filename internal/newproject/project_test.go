@@ -302,6 +302,8 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		".github/workflows/ci.yml",
 		".gitignore",
 		"README.md",
+		"dist/.gitignore",
+		"dist/runtime-baseline.json",
 		"generated/.plystra-manifest.json",
 		"generated/compatibility/interface-documentation.json",
 		"generated/compatibility/interface-javascript.json",
@@ -315,6 +317,13 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/internal/constructorconfig/value_gen.go",
+		"generated/go/internal/privatefile/file.go",
+		"generated/go/internal/privatefile/file_darwin.go",
+		"generated/go/internal/privatefile/file_linux.go",
+		"generated/go/internal/privatefile/file_other.go",
+		"generated/go/internal/privatefile/file_unix.go",
+		"generated/go/internal/privatefile/file_windows.go",
+		"generated/go/internal/runtimebaseline/baseline_gen.go",
 		"generated/manifest.json",
 		"generated/proto/descriptor-set.pb",
 		"generated/proto/wire-map.json",
@@ -332,6 +341,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 	goldenTree := snapshotTree(t, "testdata/project")
 	delete(directTree, "go.sum")
+	delete(directTree, "dist/runtime-baseline.json")
 	if *updateProjectGolden {
 		writeGoldenTree(t, "testdata/project", directTree)
 		goldenTree = snapshotTree(t, "testdata/project")
@@ -370,6 +380,11 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 	}
 	assertGitInitialized(t, direct.Path())
 	assertGitInitialized(t, commandTarget)
+	ignored := exec.Command("git", "check-ignore", "--no-index", "dist/runtime-baseline.json")
+	ignored.Dir = direct.Path()
+	if output, err := ignored.CombinedOutput(); err != nil || strings.TrimSpace(string(output)) != "dist/runtime-baseline.json" {
+		t.Fatalf("private baseline is not ignored: %v: %s", err, output)
+	}
 	for name, content := range directTree {
 		if bytes.Contains(content, []byte(directParent)) || bytes.Contains(content, []byte(commandParent)) {
 			t.Fatalf("%s contains a local absolute path", name)
@@ -1435,7 +1450,7 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 			t.Fatalf("generated README advertises unavailable command %q:\n%s", unavailable, readme)
 		}
 	}
-	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra inspect capabilities --format json"), []byte("exact installed commands and arguments"), []byte("Planned commands are absent"), []byte("plystra inspect"), []byte("plystra check"), []byte("plystra guidance check"), []byte("plystra guidance sync --replace-generated"), []byte("go run ./generated/go/application --configuration-root . --env production"), []byte("go run ./generated/go/application --configuration-root . --config deploy/customer-a.yaml"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
+	for _, available := range [][]byte{[]byte("plystra add github.com/acme/platform@v1.0.0"), []byte("plystra plugin create"), []byte("plystra capability create"), []byte("plystra generate --check"), []byte("plystra generate --env"), []byte("PLYSTRA_ENV"), []byte("plystra generate --config"), []byte("PLYSTRA_CONFIG"), []byte("plystra inspect capabilities --format json"), []byte("exact installed commands and arguments"), []byte("Planned commands are absent"), []byte("plystra inspect"), []byte("plystra check"), []byte("plystra guidance check"), []byte("plystra guidance sync --replace-generated"), []byte("go run ./generated/go/application --configuration-root . --runtime-baseline dist/runtime-baseline.json --env production"), []byte("go run ./generated/go/application --configuration-root . --runtime-baseline dist/runtime-baseline.json --config deploy/customer-a.yaml"), []byte("go test ./..."), []byte("go build ./..."), []byte("go vet ./...")} {
 		if !bytes.Contains(readme, available) {
 			t.Fatalf("generated README omits available workflow %q:\n%s", available, readme)
 		}
@@ -2553,6 +2568,7 @@ func assertModuleState(t *testing.T, root, modulePath string) {
 	want := map[string]requirementExpectation{
 		"github.com/plystra/kernel":       {version: version.KernelVersion},
 		bootstrapgen.YAMLModulePath:       {version: bootstrapgen.YAMLModuleVersion},
+		"golang.org/x/sys":                {version: "v0.47.0"},
 		"golang.org/x/mod":                {version: "v0.38.0", indirect: true},
 		"github.com/cespare/xxhash/v2":    {version: "v2.3.0", indirect: true},
 		"github.com/go-logr/logr":         {version: "v1.4.4", indirect: true},

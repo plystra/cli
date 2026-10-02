@@ -16,7 +16,31 @@ import (
 
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/privatefile"
 )
+
+func TestInstallPreservesPrivateAdditionalWritePermissions(t *testing.T) {
+	root := t.TempDir()
+	output, err := generatedfiles.NewOutput([]generatedfiles.File{managedFile(t, "generated/example.txt", []byte("public"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = generatedfiles.InstallWithWrites(root, output, []atomicfs.Write{{Path: "dist/private.json", Data: []byte("PRIVATE_SENTINEL"), OwnerPrivate: true}}, func(root string) error {
+		file, err := os.Open(filepath.Join(root, "dist/private.json"))
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		return privatefile.Check(file)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, generatedfiles.ManifestPath))
+	if err != nil || bytes.Contains(data, []byte("private.json")) || bytes.Contains(data, []byte("PRIVATE_SENTINEL")) {
+		t.Fatal("private output entered generated manifest", err)
+	}
+}
 
 func TestNewOutputRendersDeterministicOwnershipManifest(t *testing.T) {
 	t.Parallel()

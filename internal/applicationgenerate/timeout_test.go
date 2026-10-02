@@ -115,7 +115,7 @@ import (
 	"github.com/plystra/kernel/invocation"
 )
 const timeout = time.Duration(%d)
-var options = bootstrap.RuntimeOptions{Arguments: append([]string{"--configuration-root", "."}, %s...)}
+var options = bootstrap.RuntimeOptions{Arguments: append([]string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}, %s...)}
 const selectedPath = %q
 func TestCompiledBudget(t *testing.T) {
 	t.Chdir("../..")

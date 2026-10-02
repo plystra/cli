@@ -44,6 +44,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
+	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
@@ -779,7 +780,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, agen
 		data []byte
 	}
 	files := []projectFile{
-		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, version.KernelVersion, bootstrapgen.YAMLModuleVersion)},
+		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, version.KernelVersion, bootstrapgen.YAMLModuleVersion, runtimebaseline.PermissionsVersion)},
 		{path: "README.md", data: []byte(readme)},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
@@ -810,7 +811,11 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, agen
 			return fmt.Errorf("write %s: %w", file.path, err)
 		}
 	}
-	return nil
+	writes, err := runtimebaseline.Writes(root, generated.RuntimeBaseline())
+	if err != nil {
+		return err
+	}
+	return atomicfs.WriteFiles(root, writes, func(string) error { return nil })
 }
 
 func initializeGit(ctx context.Context, root, command string, environment []string) error {

@@ -26,6 +26,7 @@ import (
 
 	applicationassembly "example.com/acme/my-app/generated/go/assembly"
 	constructorconfig "example.com/acme/my-app/generated/go/internal/constructorconfig"
+	runtimebaseline "example.com/acme/my-app/generated/go/internal/runtimebaseline"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
 	kernelplugin "github.com/plystra/kernel/plugin"
@@ -33,8 +34,9 @@ import (
 )
 
 const (
-	defaultRuntimeDocument = "plystra.yaml"
-	defaultStartupTimeout  = time.Duration(120000000000)
+	compiledRuntimeContract = "sha256:bb0912eb3785cdef0669553f889a4ac10d85467ba21a3c8015d9a156a9c23264"
+	defaultRuntimeDocument  = "plystra.yaml"
+	defaultStartupTimeout   = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
 	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":8}"
 	compiledApplicationModelCompatibilityDigest = "sha256:c7fb1d66f981056a97aa3e9487b84a7e5f34ee5472a755d5ac0bde0a852d54da"
@@ -62,7 +64,7 @@ var (
 	ErrApplicationStop = errors.New("generated application shutdown failed")
 )
 
-// RuntimeOptions carries the required --configuration-root and one immutable selector invocation into generated bootstrap.
+// RuntimeOptions carries the required --configuration-root, --runtime-baseline, and one immutable selector invocation into generated bootstrap.
 type RuntimeOptions struct {
 	Arguments   []string
 	Environment []string
@@ -408,6 +410,7 @@ type runtimeSelection struct {
 	path              string
 	environment       string
 	configurationRoot string
+	runtimeBaseline   string
 }
 
 func validateRuntimeApplicationModel(document []byte) error {
@@ -665,6 +668,18 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 		return nil, fmt.Errorf("%w: --configuration-root must identify an accessible directory", ErrRuntimeSelector)
 	}
 	defer directory.Close()
+	var baseline runtimebaseline.Document
+	if filepath.IsAbs(selection.runtimeBaseline) {
+		baseline, err = runtimebaseline.Read(selection.runtimeBaseline)
+	} else {
+		baseline, err = runtimebaseline.ReadAt(directory, selection.runtimeBaseline)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRuntimeConfiguration, err)
+	}
+	if err := validateRuntimeBaseline(baseline); err != nil {
+		return nil, err
+	}
 	root, err := loadRuntimeConfigurationFile(directory, defaultRuntimeDocument)
 	if err != nil {
 		return nil, fmt.Errorf("%w: load default %s: %w", ErrRuntimeSelector, defaultRuntimeDocument, err)
@@ -706,10 +721,11 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 
 func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error) {
 	var root string
+	var baseline string
 	var selectors []string
 	for index := 0; index < len(options.Arguments); index += 2 {
 		if index+1 >= len(options.Arguments) {
-			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory> and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
+			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory>, --runtime-baseline <path>, and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
 		}
 		flag, value := options.Arguments[index], options.Arguments[index+1]
 		switch flag {
@@ -718,14 +734,22 @@ func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error
 				return runtimeSelection{}, fmt.Errorf("%w: --configuration-root requires one nonempty directory", ErrRuntimeSelector)
 			}
 			root = value
+		case "--runtime-baseline":
+			if baseline != "" || strings.TrimSpace(value) == "" || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+				return runtimeSelection{}, fmt.Errorf("%w: --runtime-baseline requires one nonempty path", ErrRuntimeSelector)
+			}
+			baseline = value
 		case "--env", "--config":
 			selectors = append(selectors, flag, value)
 		default:
-			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory> and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
+			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory>, --runtime-baseline <path>, and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
 		}
 	}
 	if root == "" {
 		return runtimeSelection{}, fmt.Errorf("%w: --configuration-root <directory> is required", ErrRuntimeSelector)
+	}
+	if baseline == "" {
+		return runtimeSelection{}, fmt.Errorf("%w: --runtime-baseline <path> is required", ErrRuntimeSelector)
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -737,6 +761,12 @@ func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error
 		return runtimeSelection{}, err
 	}
 	selection.configurationRoot = root
+	if !filepath.IsAbs(baseline) {
+		if !filepath.IsLocal(baseline) {
+			return runtimeSelection{}, fmt.Errorf("%w: relative --runtime-baseline must stay within the configuration root", ErrRuntimeSelector)
+		}
+	}
+	selection.runtimeBaseline = baseline
 	return selection, nil
 }
 
@@ -2289,6 +2319,27 @@ func (p *runtimePreparedConfiguration) resolve(ctx context.Context, resolver *ke
 	for _, binding := range p.bindings {
 		if err := constructorconfig.Bind(ctx, resolver, binding.schema, binding.node, binding.target); err != nil {
 			return fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, binding.symbol, err)
+		}
+	}
+	return nil
+}
+
+func validateRuntimeBaseline(document runtimebaseline.Document) error {
+	if document.ContractID != compiledRuntimeContract {
+		return fmt.Errorf("%w: runtime baseline and binary do not match; regenerate and rebuild with the same selector", ErrRuntimeCompatibility)
+	}
+	var configuration applicationassembly.ConstructorConfiguration
+	bindings, err := runtimeConstructorBindings(&configuration)
+	if err != nil {
+		return err
+	}
+	if len(bindings) != len(document.Defaults) {
+		return fmt.Errorf("%w: constructor baseline membership changed; regenerate and rebuild", ErrRuntimeCompatibility)
+	}
+	for _, binding := range bindings {
+		compiled, err := constructorconfig.DefaultsJSON(binding.schema)
+		if err != nil || !bytes.Equal(compiled, document.Defaults[binding.symbol]) {
+			return fmt.Errorf("%w: compiled constructor defaults and private baseline differ; regenerate and rebuild", ErrRuntimeCompatibility)
 		}
 	}
 	return nil

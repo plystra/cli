@@ -75,7 +75,7 @@ func metricApp(t *testing.T) (*bootstrap.Application, *sdkmetric.ManualReader) {
 	prior := otel.GetMeterProvider()
 	otel.SetMeterProvider(provider)
 	t.Cleanup(func() { otel.SetMeterProvider(prior); if err := provider.Shutdown(context.Background()); err != nil { t.Error(err) } })
-	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil { t.Fatal(err) }
 	t.Cleanup(func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } })
 	if err := app.Start(context.Background()); err != nil { t.Fatal(err) }

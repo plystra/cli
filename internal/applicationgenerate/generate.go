@@ -44,6 +44,7 @@ import (
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
+	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 	kernelinvocation "github.com/plystra/kernel/invocation"
@@ -250,7 +251,10 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			}, "test", "-mod=readonly", "./...")
 		}
 	}
-	additional := make([]atomicfs.Write, 0, 1)
+	additional, err := runtimebaseline.Writes(prepared.resolved.Module().Path(), prepared.baseline)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
+	}
 	maintenance := prepared.resolved.ConfigurationMaintenance()
 	if maintenance.Changed() {
 		additional = append(additional, atomicfs.Write{
@@ -272,7 +276,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			if err != nil {
 				return fmt.Errorf("confirm generation inputs: %w", err)
 			}
-			if prepared.fingerprint != confirmed.fingerprint || len(prepared.resolved.ChangedDependencyConfigurationModules(confirmed.resolved)) != 0 {
+			if prepared.fingerprint != confirmed.fingerprint || !bytes.Equal(prepared.baseline, confirmed.baseline) || len(prepared.resolved.ChangedDependencyConfigurationModules(confirmed.resolved)) != 0 {
 				return concurrentChangeSourceError(
 					generationFingerprintChangeSources(prepared, confirmed),
 					fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange),
@@ -450,6 +454,7 @@ func changedGeneratedOutputPaths(left, right generatedfiles.Output) []string {
 }
 
 type preparedGeneration struct {
+	baseline                []byte
 	resolved                applicationresolve.Result
 	output                  generatedfiles.Output
 	runtimeRequirements     []ModuleRequirement
@@ -721,7 +726,12 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 			constructorConfigurations = append(constructorConfigurations, input)
 		}
 	}
+	dependencyExports, err := resolved.DependencyRuntimeExports()
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	output, err := applicationgen.Render(applicationgen.Options{
+		DependencyExports:         dependencyExports,
 		ModulePath:                resolved.Module().ModulePath(),
 		JavaScriptPackage:         javaScriptPackage,
 		KernelModuleVersion:       kernelVersion,
@@ -791,13 +801,14 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
-	fingerprint, err := generationFingerprint(resolved, output)
+	fingerprint, err := generationFingerprint(resolved, output.Output)
 	if err != nil {
 		return preparedGeneration{}, err
 	}
 	return preparedGeneration{
+		baseline:                output.RuntimeBaseline(),
 		resolved:                resolved,
-		output:                  output,
+		output:                  output.Output,
 		runtimeRequirements:     runtimeRequirements,
 		interfaceComparison:     interfaceComparison,
 		metadataComparison:      metadataComparison,
@@ -1001,6 +1012,7 @@ func generatedRuntimeRequirements(model protobufmodel.Model, interfaces protobuf
 		)
 	}
 	inputs = append(inputs, [2]string{bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion})
+	inputs = append(inputs, [2]string{runtimebaseline.PermissionsModule, runtimebaseline.PermissionsVersion})
 	result := make([]ModuleRequirement, len(inputs))
 	for index, input := range inputs {
 		requirement, err := NewModuleRequirement(input[0], input[1])

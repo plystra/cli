@@ -26,6 +26,7 @@ import (
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/resolutionevidence"
+	"github.com/plystra/cli/internal/runtimebaseline"
 	"golang.org/x/mod/modfile"
 )
 
@@ -233,6 +234,20 @@ func (r Result) SelectedConfigurationData() []byte {
 		return r.maintenance.Data()
 	}
 	return r.ConfigurationSource()
+}
+
+// DependencyRuntimeExports returns private, build-bound dependency documents.
+// Only their inert export inventories may be used during runtime composition.
+func (r Result) DependencyRuntimeExports() ([]runtimebaseline.Export, error) {
+	result := make([]runtimebaseline.Export, 0, len(r.dependencySnapshots))
+	for _, dependency := range r.dependencySnapshots {
+		inventory, err := applicationmeta.PrivateExportInventoryYAML(dependency.snapshot.data)
+		if err != nil {
+			return nil, runtimebaseline.ErrBaseline
+		}
+		result = append(result, runtimebaseline.Export{Module: dependency.modulePath, Version: dependency.version, YAML: string(inventory)})
+	}
+	return result, nil
 }
 
 // ChangedDependencyConfigurationModules compares the private dependency inputs

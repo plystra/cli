@@ -22,11 +22,11 @@ func TestApplicationRequiresExplicitConfigurationRoot(t *testing.T) {
 		nil,
 		{"--configuration-root"},
 		{"--configuration-root", ""},
-		{"--configuration-root", ".", "--configuration-root", "."},
-		{"--configuration-root", "runtime-private-missing-root"},
-		{"--configuration-root", "plystra.yaml"},
+		{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"},
+		{"--configuration-root", "runtime-private-missing-root", "--runtime-baseline", "dist/runtime-baseline.json"},
+		{"--configuration-root", "plystra.yaml", "--runtime-baseline", "dist/runtime-baseline.json"},
 		{"--configuration-root", "runtime-private\x00root"},
-		{"--configuration-root", ".", "--runtime-private-option", "value"},
+		{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--runtime-private-option", "value"},
 	} {
 		localservice.Reset()
 		remotestore.Reset()
@@ -52,6 +52,8 @@ func TestApplicationLoadsOnlyExplicitRootFromUnrelatedDirectory(t *testing.T) {
 	write("plystra.production.yaml", "config:\n  acme.local-service: {label: selected-overlay}\n")
 	write("replacement.yaml", "config:\n  acme.local-service: {label: selected-replacement}\n" + bootstrapRemoteConfiguration)
 	write("plystra.ignored.yaml", "invalid: [\n")
+	baseline, err := filepath.Abs("dist/runtime-baseline.json")
+	if err != nil { t.Fatal(err) }
 	t.Chdir(t.TempDir())
 	if err := os.WriteFile("plystra.yaml", []byte("invalid: [\n"), 0600); err != nil { t.Fatal(err) }
 	tests := []struct {
@@ -68,6 +70,7 @@ func TestApplicationLoadsOnlyExplicitRootFromUnrelatedDirectory(t *testing.T) {
 		{[]string{"--configuration-root", root}, []string{"PLYSTRA_CONFIG=replacement.yaml"}, "selected-replacement"},
 	}
 	for _, test := range tests {
+		test.arguments = append(test.arguments, "--runtime-baseline", baseline)
 		localservice.Reset()
 		remotestore.Reset()
 		application, err := New(context.Background(), RuntimeOptions{Arguments: test.arguments, Environment: test.environment})
@@ -86,7 +89,9 @@ func TestApplicationConfinesEveryConfigurationDocumentBeforeConstruction(t *test
 			t.Run(mode+"/"+problem, func(t *testing.T) {
 				root := t.TempDir()
 				documentPath := "plystra.yaml"
-				arguments := []string{"--configuration-root", root}
+				baseline, err := filepath.Abs("dist/runtime-baseline.json")
+				if err != nil { t.Fatal(err) }
+				arguments := []string{"--configuration-root", root, "--runtime-baseline", baseline}
 				switch mode {
 				case "environment": documentPath = "plystra.production.yaml"; arguments = append(arguments, "--env", "production")
 				case "replacement": documentPath = "replacement.yaml"; arguments = append(arguments, "--config", documentPath)

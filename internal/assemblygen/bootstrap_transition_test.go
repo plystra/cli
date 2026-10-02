@@ -23,7 +23,7 @@ func TestApplicationRejectsOverlappingTransitions(t *testing.T) {
 				remotestore.Reset()
 				lifecycleevents.Reset()
 				writeRuntimeDocument(t, validRuntimeDocument)
-				application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+				application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 				if err != nil { t.Fatal(err) }
 				if phase == "shutdown" {
 					if err := application.Start(context.Background()); err != nil { t.Fatal(err) }
@@ -89,7 +89,7 @@ func TestApplicationRejectsReentrantTransitions(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	remotestore.Reset()
 	writeRuntimeDocument(t, validRuntimeDocument)
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil { t.Fatal(err) }
 	defer remotestore.SetHooks(nil, nil)
 	var failures []string
@@ -112,9 +112,9 @@ func TestApplicationTransitionGuardsAreIndependent(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	remotestore.Reset()
 	writeRuntimeDocument(t, validRuntimeDocument)
-	first, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	first, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil { t.Fatal(err) }
-	second, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	second, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil { t.Fatal(err) }
 	type blockingKey struct{}
 	entered, release := make(chan struct{}), make(chan struct{})

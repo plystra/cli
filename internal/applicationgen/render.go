@@ -36,10 +36,12 @@ import (
 	"github.com/plystra/cli/internal/invocationgen"
 	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/javascriptgen"
+	"github.com/plystra/cli/internal/privatefile"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providergen"
+	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/sdkmodel"
 	"github.com/plystra/cli/internal/transportprovenance"
 	kernelinvocation "github.com/plystra/kernel/invocation"
@@ -64,6 +66,7 @@ var (
 
 // Options carries application-owned generated package identities.
 type Options struct {
+	DependencyExports         []runtimebaseline.Export
 	ModulePath                string
 	JavaScriptPackage         string
 	KernelModuleVersion       string
@@ -86,38 +89,49 @@ type Options struct {
 	ProtobufWireMap           protobufwiremap.Map
 }
 
+// Result keeps private build output out of the public generated-file manifest.
+type Result struct {
+	generatedfiles.Output
+	baseline []byte
+}
+
+func (r Result) RuntimeBaseline() []byte { return append([]byte(nil), r.baseline...) }
+
+func (Result) String() string   { return "<application-output: private baseline redacted>" }
+func (Result) GoString() string { return "<application-output: private baseline redacted>" }
+
 // Render lowers final selected contributions once and renders the Kernel
 // assembly compatibility handshake, runtime bootstrap, contracts, providers,
 // canonical and Alias clients, canonical invocation paths, HTTP adapters, the
 // JavaScript SDK, API documentation, and the current Alias manifest into one
 // managed output model.
-func Render(options Options, resolution generationresolution.ExtensionResult) (generatedfiles.Output, error) {
+func Render(options Options, resolution generationresolution.ExtensionResult) (Result, error) {
 	context := resolution.Context()
 	if !validContext(context) {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: final generation context is absent or has an invalid digest", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: final generation context is absent or has an invalid digest", ErrRender, ErrResolution)
 	}
 	aliases := resolution.AliasResolution()
 	if !validAliases(aliases) {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: final Alias map is absent or has an invalid digest", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: final Alias map is absent or has an invalid digest", ErrRender, ErrResolution)
 	}
 	if !options.Composition.Valid() {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: dependency configuration composition is absent or invalid", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: dependency configuration composition is absent or invalid", ErrRender, ErrResolution)
 	}
 	if !options.InterfaceCompatibility.Valid() {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: authored Interface compatibility baseline is absent or invalid", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: authored Interface compatibility baseline is absent or invalid", ErrRender, ErrResolution)
 	}
 	if !options.InterfaceMetadata.Valid() {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface metadata compatibility baseline is absent or invalid", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: Interface metadata compatibility baseline is absent or invalid", ErrRender, ErrResolution)
 	}
 	if !options.InterfaceTransport.Valid() {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface transport compatibility baseline is absent or invalid", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: Interface transport compatibility baseline is absent or invalid", ErrRender, ErrResolution)
 	}
 	if !options.InterfaceJavaScript.Valid() {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface JavaScript compatibility baseline is absent or invalid", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: Interface JavaScript compatibility baseline is absent or invalid", ErrRender, ErrResolution)
 	}
 	interfaceProtobufModel, err := normalizeInterfaceProtobufModel(options.HTTPTransports, options.InterfaceProtobufModel)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface Protobuf projection: %v", ErrRender, ErrResolution, err)
+		return Result{}, fmt.Errorf("%w: %w: Interface Protobuf projection: %v", ErrRender, ErrResolution, err)
 	}
 	implementationAssemblyOptions := normalizeImplementationAssemblyOptions(
 		options.ImplementationAssembly,
@@ -157,47 +171,47 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		InterfaceProtobufModel: interfaceProtobufModel,
 	})
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application model: %v", ErrRender, ErrResolution, err)
+		return Result{}, fmt.Errorf("%w: %w: application model: %v", ErrRender, ErrResolution, err)
 	}
 	if !options.ManifestProvenance.matches(options.Composition, options.ProtobufWireMap.Digest(), modelDigest) {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: application manifest provenance is absent or inconsistent", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: application manifest provenance is absent or inconsistent", ErrRender, ErrResolution)
 	}
 	transportProvenance, err := selectedTransportProvenance(options, context, modelDigest)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: transport configuration provenance: %v", ErrRender, ErrResolution, err)
+		return Result{}, fmt.Errorf("%w: %w: transport configuration provenance: %v", ErrRender, ErrResolution, err)
 	}
 	modelCompatibility, err := bootstrapgen.NewExecutableApplicationModelCompatibility(modelDigest, options.Composition.CurrentManifest(), executableInterfaceChoices)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: runtime application-model compatibility: %v", ErrRender, ErrResolution, err)
+		return Result{}, fmt.Errorf("%w: %w: runtime application-model compatibility: %v", ErrRender, ErrResolution, err)
 	}
 	if err := validateJavaScriptTransport(options, context, aliases); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrRender, err)
 	}
 	if err := validateAssemblyClosure(options, context); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: %v", ErrRender, ErrResolution, err)
+		return Result{}, fmt.Errorf("%w: %w: %v", ErrRender, ErrResolution, err)
 	}
 	protobufProjection, err := ProtobufProjection(options.HTTPTransports, resolution)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf projection: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Protobuf projection: %w", ErrRender, err)
 	}
 	descriptorEvidence, err := protobufdescriptor.BuildWithInterfaces(protobufProjection, options.ProtobufWireMap, interfaceProtobufModel)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
 	}
 	transportBaseline, err := interfacecompatibility.BuildTransport(options.ProtobufWireMap, descriptorEvidence)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Interface transport compatibility baseline: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Interface transport compatibility baseline: %w", ErrRender, err)
 	}
 	if transportBaseline.Digest() != options.InterfaceTransport.Digest() {
-		return generatedfiles.Output{}, fmt.Errorf("%w: %w: Interface transport compatibility baseline does not match generated descriptor, procedure, and wire-map projections", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: Interface transport compatibility baseline does not match generated descriptor, procedure, and wire-map projections", ErrRender, ErrResolution)
 	}
 	plan, err := generationlowering.Lower(options.ModulePath, resolution.Contributions())
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: lower contributions: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: lower contributions: %w", ErrRender, err)
 	}
 	artifactEvidence, err := newArtifactEvidenceIndex(options.ManifestProvenance)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: artifact provenance: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: artifact provenance: %w", ErrRender, err)
 	}
 
 	files := make([]generatedfiles.File, 0)
@@ -222,50 +236,63 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	}
 	proxyFiles, err := interfaceproxygen.Render(options.InterfaceProxies)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: typed Interface proxies: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: typed Interface proxies: %w", ErrRender, err)
 	}
 	for _, file := range proxyFiles {
 		if err := add(file.Path(), file.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: typed Interface proxy %s: %w", ErrRender, file.InterfaceID(), err)
+			return Result{}, fmt.Errorf("%w: typed Interface proxy %s: %w", ErrRender, file.InterfaceID(), err)
 		}
 	}
 	adapterFiles, err := implementationadaptergen.Render(options.ImplementationAdapters)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Implementation adapters: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Implementation adapters: %w", ErrRender, err)
 	}
 	for _, file := range adapterFiles {
 		if err := add(file.Path(), file.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: Implementation adapter %s: %w", ErrRender, file.InterfaceID(), err)
+			return Result{}, fmt.Errorf("%w: Implementation adapter %s: %w", ErrRender, file.InterfaceID(), err)
 		}
 	}
 	implementationAssembly, err := implementationassemblygen.Render(implementationAssemblyOptions)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: static Implementation assembly: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: static Implementation assembly: %w", ErrRender, err)
 	}
 	if err := add(implementationAssembly.Path(), implementationAssembly.Data()); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: static Implementation assembly output: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: static Implementation assembly output: %w", ErrRender, err)
 	}
 	if err := add("generated/go/internal/constructorconfig/value_gen.go", []byte("// Code generated by Plystra CLI. DO NOT EDIT.\n"+constructorconfig.Source)); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: constructor configuration support: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: constructor configuration support: %w", ErrRender, err)
+	}
+	for _, name := range []string{"file.go", "file_unix.go", "file_linux.go", "file_darwin.go", "file_windows.go", "file_other.go"} {
+		data, err := privatefile.Source.ReadFile(name)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := add("generated/go/internal/privatefile/"+name, data); err != nil {
+			return Result{}, err
+		}
+	}
+	baselineSource := strings.ReplaceAll(runtimebaseline.Source, "github.com/plystra/cli/internal/privatefile", options.ModulePath+"/generated/go/internal/privatefile")
+	if err := add("generated/go/internal/runtimebaseline/baseline_gen.go", []byte("// Code generated by Plystra CLI. DO NOT EDIT.\n"+baselineSource)); err != nil {
+		return Result{}, err
 	}
 	if err := add(interfacecompatibility.Path, options.InterfaceCompatibility.RecordJSON()); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: authored Interface compatibility baseline: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: authored Interface compatibility baseline: %w", ErrRender, err)
 	}
 	if err := add(interfacecompatibility.MetadataPath, options.InterfaceMetadata.RecordJSON()); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Interface metadata compatibility baseline: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Interface metadata compatibility baseline: %w", ErrRender, err)
 	}
 	if err := add(interfacecompatibility.TransportPath, options.InterfaceTransport.RecordJSON()); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Interface transport compatibility baseline: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Interface transport compatibility baseline: %w", ErrRender, err)
 	}
 	if err := add(interfacecompatibility.JavaScriptPath, options.InterfaceJavaScript.RecordJSON()); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Interface JavaScript compatibility baseline: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Interface JavaScript compatibility baseline: %w", ErrRender, err)
 	}
 	if err := add(protobufwiremap.Path, options.ProtobufWireMap.CanonicalJSON()); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Protobuf wire map: %w", ErrRender, err)
 	}
 	for _, file := range descriptorEvidence.Files() {
 		if err := add(file.Path(), file.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
+			return Result{}, fmt.Errorf("%w: Protobuf descriptor evidence: %w", ErrRender, err)
 		}
 	}
 	connectFiles, err := connectgen.Render(
@@ -279,11 +306,11 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		transportProvenance,
 	)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Connect handlers: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Connect handlers: %w", ErrRender, err)
 	}
 	for _, file := range connectFiles {
 		if err := add(file.Path(), file.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: Connect handlers: %w", ErrRender, err)
+			return Result{}, fmt.Errorf("%w: Connect handlers: %w", ErrRender, err)
 		}
 	}
 	configurationInputs := append([]configurationgen.Input(nil), options.Configurations...)
@@ -297,14 +324,14 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	for _, input := range configurationInputs {
 		configuration, err := configurationgen.Render(input)
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrRender, input.PluginID, err)
+			return Result{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrRender, input.PluginID, err)
 		}
 		if previous, collision := configurationTypes[configuration.TypeName()]; collision {
-			return generatedfiles.Output{}, fmt.Errorf("%w: configurations for plugins %q and %q both generate Go type %s", ErrRender, previous, input.PluginID, configuration.TypeName())
+			return Result{}, fmt.Errorf("%w: configurations for plugins %q and %q both generate Go type %s", ErrRender, previous, input.PluginID, configuration.TypeName())
 		}
 		configurationTypes[configuration.TypeName()] = input.PluginID
 		if err := add(configuration.Path(), configuration.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrRender, input.PluginID, err)
+			return Result{}, fmt.Errorf("%w: configuration for plugin %q: %w", ErrRender, input.PluginID, err)
 		}
 	}
 	providerInputs := append([]assemblygen.ProviderInput(nil), options.Providers...)
@@ -315,7 +342,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		pluginName, found := strings.CutPrefix(provider.ImportPath, options.ModulePath+"/")
 		if !found || pluginName == "" || strings.Contains(pluginName, "/") {
-			return generatedfiles.Output{}, fmt.Errorf("%w: local plugin %q has invalid import path %q", ErrRender, provider.PluginID, provider.ImportPath)
+			return Result{}, fmt.Errorf("%w: local plugin %q has invalid import path %q", ErrRender, provider.PluginID, provider.ImportPath)
 		}
 		required := make([]string, len(provider.Dependencies))
 		for index, dependency := range provider.Dependencies {
@@ -323,25 +350,25 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		dependencies, err := dependencygen.Render(options.ModulePath, pluginName, provider.PluginID, required)
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
+			return Result{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
 		}
 		if err := add(dependencies.Path(), dependencies.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
+			return Result{}, fmt.Errorf("%w: dependencies for plugin %q: %w", ErrRender, provider.PluginID, err)
 		}
 	}
 	aliasManifest, err := RenderManifest(aliases.CanonicalJSON(), context, options.ManifestProvenance)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: application manifest: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: application manifest: %w", ErrRender, err)
 	}
 	if err := add(aliasManifestPath, aliasManifest); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: application manifest: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: application manifest: %w", ErrRender, err)
 	}
 	compatibility, err := assemblygen.RenderCompatibility("assembly")
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
 	}
 	if err := add(assemblyCompatibilityPath, compatibility); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Kernel assembly compatibility: %w", ErrRender, err)
 	}
 	runtimeConfigurationSchemas := make([]bootstrapgen.ConfigurationSchema, len(providerInputs))
 	for index, provider := range providerInputs {
@@ -354,7 +381,8 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	for i, constructor := range implementationAssembly.Constructors() {
 		constructorOrder[i] = constructor.Symbol.String()
 	}
-	bootstrap, err := bootstrapgen.Render(bootstrapgen.Options{
+	bootstrapOptions := bootstrapgen.Options{
+		DependencyExports:             options.DependencyExports,
 		ModulePath:                    options.ModulePath,
 		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
 		ConfigurationSchemas:          runtimeConfigurationSchemas,
@@ -364,22 +392,31 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		ExecutableConstructors:        executableConstructors,
 		ConfigurationProvenance:       transportProvenance,
 		ApplicationModelCompatibility: modelCompatibility,
-	})
+	}
+	baselineDocument, err := bootstrapgen.RuntimeBaseline(bootstrapOptions)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)
+		return Result{}, err
+	}
+	baseline, err := runtimebaseline.Encode(baselineDocument)
+	if err != nil {
+		return Result{}, err
+	}
+	bootstrap, err := bootstrapgen.Render(bootstrapOptions)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)
 	}
 	if err := add(bootstrapgen.Path, bootstrap); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: runtime bootstrap: %w", ErrRender, err)
 	}
 	entrypoint, err := applicationentrygen.Render(applicationentrygen.Options{
 		ModulePath:      options.ModulePath,
 		ShutdownTimeout: applicationentrygen.DefaultShutdownTimeout,
 	})
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: application entrypoint: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: application entrypoint: %w", ErrRender, err)
 	}
 	if err := add(applicationentrygen.Path, entrypoint); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: application entrypoint: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: application entrypoint: %w", ErrRender, err)
 	}
 
 	requirements := context.Requirements()
@@ -404,7 +441,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		id := developerSurfaceIDs[name]
 		target, exists := context.Capability(id)
 		if !exists {
-			return generatedfiles.Output{}, fmt.Errorf("%w: %w: canonical Capability %s selected for a module-owned developer surface is absent from the final context", ErrRender, ErrResolution, id)
+			return Result{}, fmt.Errorf("%w: %w: canonical Capability %s selected for a module-owned developer surface is absent from the final context", ErrRender, ErrResolution, id)
 		}
 		var contract contractgen.File
 		if target.Intrinsic() {
@@ -413,29 +450,29 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			contract, err = contractgen.Render(target.ContractJSON())
 		}
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
 		}
 		if err := add(contract.Path(), contract.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: contract %s: %w", ErrRender, id, err)
 		}
 		if target.Intrinsic() {
 			continue
 		}
 		provider, err := providergen.Render(options.ModulePath, target.ContractJSON())
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
 		}
 		if err := add(provider.Path(), provider.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: provider %s: %w", ErrRender, id, err)
 		}
 	}
 	if len(requirements) != 0 {
 		invocationContext, err := invocationgen.RenderContext()
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: invocation context: %w", ErrRender, err)
+			return Result{}, fmt.Errorf("%w: invocation context: %w", ErrRender, err)
 		}
 		if err := add(invocationContext.Path(), invocationContext.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: invocation context: %w", ErrRender, err)
+			return Result{}, fmt.Errorf("%w: invocation context: %w", ErrRender, err)
 		}
 	}
 
@@ -445,7 +482,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 	for _, id := range requirements {
 		target, exists := context.Capability(id)
 		if !exists {
-			return generatedfiles.Output{}, fmt.Errorf("%w: %w: required canonical Capability %s is absent from the final context", ErrRender, ErrResolution, id)
+			return Result{}, fmt.Errorf("%w: %w: required canonical Capability %s is absent from the final context", ErrRender, ErrResolution, id)
 		}
 		targets[id] = target
 		if target.Exposure().JavaScript {
@@ -453,21 +490,21 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		}
 		client, err := clientgen.Render(options.ModulePath, target.ContractJSON())
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: client %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: client %s: %w", ErrRender, id, err)
 		}
 		if err := add(client.Path(), client.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: client %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: client %s: %w", ErrRender, id, err)
 		}
 		invocation, err := invocationgen.RenderPlan(options.ModulePath, target.ContractJSON(), plan)
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: invocation %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: invocation %s: %w", ErrRender, id, err)
 		}
 		if err := add(invocation.Path(), invocation.Data()); err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: invocation %s: %w", ErrRender, id, err)
+			return Result{}, fmt.Errorf("%w: invocation %s: %w", ErrRender, id, err)
 		}
 		identifier, err := capabilityid.Parse(id.String())
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: %w: required canonical Capability %s cannot enter runtime assembly", ErrRender, ErrResolution, id)
+			return Result{}, fmt.Errorf("%w: %w: required canonical Capability %s cannot enter runtime assembly", ErrRender, ErrResolution, id)
 		}
 		invocationInput := assemblygen.InvocationInput{
 			ContractJSON: target.ContractJSON(),
@@ -479,7 +516,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		} else {
 			selection, exists := resolution.ActivationResolution().ProviderResolution().SelectedProvider(identifier)
 			if !exists {
-				return generatedfiles.Output{}, fmt.Errorf("%w: %w: required ordinary Capability %s has no selected provider", ErrRender, ErrResolution, id)
+				return Result{}, fmt.Errorf("%w: %w: required ordinary Capability %s has no selected provider", ErrRender, ErrResolution, id)
 			}
 			reason := kernelinvocation.SelectionReasonUniqueCompatible
 			if selection.Explicit() {
@@ -499,19 +536,19 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		if target.Exposure().HTTP {
 			handler, err := httpgen.RenderPlan(options.ModulePath, target, plan, transportProvenance)
 			if err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: HTTP adapter %s: %w", ErrRender, id, err)
+				return Result{}, fmt.Errorf("%w: HTTP adapter %s: %w", ErrRender, id, err)
 			}
 			if err := add(handler.Path(), handler.Data()); err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: HTTP adapter %s: %w", ErrRender, id, err)
+				return Result{}, fmt.Errorf("%w: HTTP adapter %s: %w", ErrRender, id, err)
 			}
 		}
 	}
 	providers, err := assemblygen.RenderProviders(options.ModulePath, options.Providers, invocationInputs)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
 	}
 	if err := add(assemblygen.ProvidersPath, providers); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: selected providers: %w", ErrRender, err)
 	}
 	invocations, err := assemblygen.RenderInvocations(assemblygen.InvocationOptions{
 		ModulePath:               options.ModulePath,
@@ -522,10 +559,10 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		Invocations:              invocationInputs,
 	})
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: canonical invocation assembly: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: canonical invocation assembly: %w", ErrRender, err)
 	}
 	if err := add(assemblygen.InvocationsPath, invocations); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: canonical invocation assembly: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: canonical invocation assembly: %w", ErrRender, err)
 	}
 
 	resolvedAliases := aliases.Aliases()
@@ -536,31 +573,31 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		docAliasViews[index] = alias
 		target, exists := targets[alias.Target()]
 		if !exists {
-			return generatedfiles.Output{}, fmt.Errorf("%w: %w: Alias %s target %s is not a generated requirement", ErrRender, ErrResolution, alias.ID(), alias.Target())
+			return Result{}, fmt.Errorf("%w: %w: Alias %s target %s is not a generated requirement", ErrRender, ErrResolution, alias.ID(), alias.Target())
 		}
 		if alias.Exposure().Go {
 			client, err := clientgen.RenderAlias(options.ModulePath, alias, target)
 			if err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: Alias client %s: %w", ErrRender, alias.ID(), err)
+				return Result{}, fmt.Errorf("%w: Alias client %s: %w", ErrRender, alias.ID(), err)
 			}
 			if err := add(client.Path(), client.Data()); err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: Alias client %s: %w", ErrRender, alias.ID(), err)
+				return Result{}, fmt.Errorf("%w: Alias client %s: %w", ErrRender, alias.ID(), err)
 			}
 		}
 		if alias.Exposure().HTTP {
 			handler, err := httpgen.RenderAlias(options.ModulePath, alias, target, transportProvenance)
 			if err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: Alias HTTP adapter %s: %w", ErrRender, alias.ID(), err)
+				return Result{}, fmt.Errorf("%w: Alias HTTP adapter %s: %w", ErrRender, alias.ID(), err)
 			}
 			if err := add(handler.Path(), handler.Data()); err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: Alias HTTP adapter %s: %w", ErrRender, alias.ID(), err)
+				return Result{}, fmt.Errorf("%w: Alias HTTP adapter %s: %w", ErrRender, alias.ID(), err)
 			}
 		}
 	}
 
 	model, err := sdkmodel.Build(javaScriptTargets, aliasViews)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: SDK model: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: SDK model: %w", ErrRender, err)
 	}
 	javaScriptAPI, err := javascriptgen.BuildPublicAPI(
 		options.JavaScriptPackage,
@@ -568,14 +605,14 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 		interfaceProtobufModel,
 	)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: JavaScript public API: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: JavaScript public API: %w", ErrRender, err)
 	}
 	javaScriptBaseline, err := interfacecompatibility.NewJavaScript(javaScriptAPI)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: Interface JavaScript compatibility baseline: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: Interface JavaScript compatibility baseline: %w", ErrRender, err)
 	}
 	if javaScriptBaseline.Digest() != options.InterfaceJavaScript.Digest() {
-		return generatedfiles.Output{}, fmt.Errorf(
+		return Result{}, fmt.Errorf(
 			"%w: %w: Interface JavaScript compatibility baseline does not match the generated package, client, type, and semantic-error API",
 			ErrRender,
 			ErrResolution,
@@ -593,23 +630,23 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			},
 		}, model)
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: JavaScript SDK: %w", ErrRender, err)
+			return Result{}, fmt.Errorf("%w: JavaScript SDK: %w", ErrRender, err)
 		}
 		for _, file := range javaScript {
 			if err := add(file.Path(), file.Data()); err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: JavaScript SDK: %w", ErrRender, err)
+				return Result{}, fmt.Errorf("%w: JavaScript SDK: %w", ErrRender, err)
 			}
 		}
 	}
 	documentationModel, err := DocumentationModel(resolution)
 	if err != nil {
-		return generatedfiles.Output{}, err
+		return Result{}, err
 	}
 	documentationInputs := make([]interfacecompatibility.DocumentationInput, 0, 2)
 	if len(documentationModel.Operations()) != 0 || len(documentationModel.Aliases()) != 0 {
 		docs, err := apidocgen.Render(documentationModel, docAliasViews, transportProvenance)
 		if err != nil {
-			return generatedfiles.Output{}, fmt.Errorf("%w: API documentation: %w", ErrRender, err)
+			return Result{}, fmt.Errorf("%w: API documentation: %w", ErrRender, err)
 		}
 		for _, file := range docs {
 			var kind interfacecompatibility.DocumentationKind
@@ -619,7 +656,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 			case apidocgen.OpenAPIPath:
 				kind = interfacecompatibility.DocumentationKindOpenAPI
 			default:
-				return generatedfiles.Output{}, fmt.Errorf(
+				return Result{}, fmt.Errorf(
 					"%w: API documentation: unsupported managed artifact %s",
 					ErrRender,
 					file.Path(),
@@ -631,20 +668,20 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 				Data: file.Data(),
 			})
 			if err := add(file.Path(), file.Data()); err != nil {
-				return generatedfiles.Output{}, fmt.Errorf("%w: API documentation: %w", ErrRender, err)
+				return Result{}, fmt.Errorf("%w: API documentation: %w", ErrRender, err)
 			}
 		}
 	}
 	documentationBaseline, err := interfacecompatibility.NewDocumentation(documentationInputs)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf(
+		return Result{}, fmt.Errorf(
 			"%w: Interface documentation compatibility baseline: %w",
 			ErrRender,
 			err,
 		)
 	}
 	if err := add(interfacecompatibility.DocumentationPath, documentationBaseline.RecordJSON()); err != nil {
-		return generatedfiles.Output{}, fmt.Errorf(
+		return Result{}, fmt.Errorf(
 			"%w: Interface documentation compatibility baseline: %w",
 			ErrRender,
 			err,
@@ -653,9 +690,9 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (g
 
 	output, err := generatedfiles.NewOutput(files)
 	if err != nil {
-		return generatedfiles.Output{}, fmt.Errorf("%w: finalize managed output: %w", ErrRender, err)
+		return Result{}, fmt.Errorf("%w: finalize managed output: %w", ErrRender, err)
 	}
-	return output, nil
+	return Result{Output: output, baseline: baseline}, nil
 }
 
 func artifactEvidenceFromInput(input generatedfiles.ArtifactInput) artifactEvidence {

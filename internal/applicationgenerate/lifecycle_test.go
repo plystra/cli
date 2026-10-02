@@ -136,7 +136,7 @@ func TestReadiness(t *testing.T) {
 		}},
 	})
 	var err error
-	app, err = bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	app, err = bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	if err != nil { t.Fatal(err) }
 	assertClosed(t, app)
 	if err := app.Interfaces().OpenAdmission(); !errors.Is(err, lifecycle.ErrState) { t.Fatalf("premature open = %v", err) }
@@ -160,7 +160,7 @@ func TestStartupFailureCleansBothManagers(t *testing.T) {
 					}}
 				}
 				probe.Reset(options)
-				app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+				app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 				if err != nil { t.Fatal(err) }
 				ctx, cancel := context.WithCancel(context.Background()); defer cancel()
 				if phase == "cancel" { cancel() }
@@ -182,7 +182,7 @@ func TestConstructionRetainsBothCleanupOwners(t *testing.T) {
 		"static": {ConstructError: true, Stop: func(context.Context) error { staticStops++; if staticStops == 1 { return errors.New("private-static-stop-secret") }; return nil }},
 		"legacy": {Stop: func(context.Context) error { legacyStops++; if legacyStops == 1 { return errors.New("private-legacy-stop-secret") }; return nil }},
 	})
-	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 	var cleanup *bootstrap.ApplicationAssemblyError
 	if app != nil || !errors.As(err, &cleanup) || strings.Contains(fmt.Sprintf("%#+v", err), "secret") { t.Fatalf("construction = %v, %v", app, err) }
 	if staticStops != 1 || legacyStops != 1 { t.Fatalf("initial stops = %d, %d", staticStops, legacyStops) }
@@ -209,7 +209,7 @@ func TestBothDispatchersDrainBeforeAnyCleanup(t *testing.T) {
 						}}
 					}
 					probe.Reset(options)
-					app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
+					app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}})
 					if err != nil { t.Fatal(err) }
 					if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 					done := make(chan error, 2)

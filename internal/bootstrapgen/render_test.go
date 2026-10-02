@@ -49,7 +49,7 @@ token: {type: secret}
 	}
 	for _, required := range []string{
 		`applicationassembly "example.com/acme/application/generated/go/assembly"`,
-		`defaultRuntimeDocument = "plystra.yaml"`,
+		`defaultRuntimeDocument  = "plystra.yaml"`,
 		"compiledApplicationModelCompatibilityJSON",
 		strconv.Quote(string(options.ApplicationModelCompatibility.CanonicalJSON())),
 		`compiledApplicationModelCompatibilityDigest = "` + options.ApplicationModelCompatibility.Digest() + `"`,

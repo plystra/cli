@@ -53,6 +53,28 @@ func compileConstructorValue(value implementationinventory.ConfigurationValue) c
 	return s
 }
 
+func compileConstructorConfiguration(input ConstructorConfigurationInput) (constructorconfig.Schema, string, error) {
+	schema := constructorconfig.Schema{Kind: "object", Fields: compileConstructorFields(input.Schema.Fields())}
+	var node *yaml.Node
+	if len(input.YAML) != 0 {
+		var doc yaml.Node
+		if err := yaml.Unmarshal(input.YAML, &doc); err != nil || len(doc.Content) != 1 {
+			return schema, "", fmt.Errorf("invalid runtime constructor input %q", input.Symbol)
+		}
+		node = doc.Content[0]
+	}
+	normalized, err := constructorconfig.Normalize(schema, node)
+	if err != nil {
+		return schema, "", fmt.Errorf("constructor %s: %w", input.Symbol, err)
+	}
+	public, err := constructorconfig.PublicJSON(schema, normalized)
+	if err != nil {
+		return schema, "", err
+	}
+	digest := sha256.Sum256(public)
+	return schema, hex.EncodeToString(digest[:]), nil
+}
+
 func renderConstructorConfiguration(inputs []ConstructorConfigurationInput, order []string) (string, error) {
 	indices := make(map[string]int, len(order))
 	for i, symbol := range order {
@@ -78,24 +100,10 @@ func runtimeConstructorBindings(configuration *applicationassembly.ConstructorCo
 		if !exists || i > 0 && inputs[i-1].Symbol == input.Symbol {
 			return "", fmt.Errorf("invalid runtime constructor binding %q", input.Symbol)
 		}
-		schema := constructorconfig.Schema{Kind: "object", Fields: compileConstructorFields(input.Schema.Fields())}
-		var node *yaml.Node
-		if len(input.YAML) != 0 {
-			var doc yaml.Node
-			if err := yaml.Unmarshal(input.YAML, &doc); err != nil || len(doc.Content) != 1 {
-				return "", fmt.Errorf("invalid runtime constructor input %q", input.Symbol)
-			}
-			node = doc.Content[0]
-		}
-		normalized, err := constructorconfig.Normalize(schema, node)
-		if err != nil {
-			return "", fmt.Errorf("constructor %s: %w", input.Symbol, err)
-		}
-		public, err := constructorconfig.PublicJSON(schema, normalized)
+		schema, publicDigest, err := compileConstructorConfiguration(input)
 		if err != nil {
 			return "", err
 		}
-		publicDigest := sha256.Sum256(public)
 		encoded, err := json.Marshal(schema)
 		if err != nil {
 			return "", err
@@ -107,7 +115,7 @@ func runtimeConstructorBindings(configuration *applicationassembly.ConstructorCo
 		if err := constructorconfig.BindDefaults(&schema, reflect.TypeOf(configuration.Config%d)); err != nil { return nil, fmt.Errorf("%%w: compiled constructor Config schema changed; regenerate and rebuild", ErrRuntimeCompatibility) }
 		bindings = append(bindings, runtimeConstructorBinding{symbol: %s, schema: schema, expected: %s, target: &configuration.Config%d})
 	}
-`, strconv.Quote(string(encoded)), index, strconv.Quote(input.Symbol), strconv.Quote(hex.EncodeToString(publicDigest[:])), index)
+`, strconv.Quote(string(encoded)), index, strconv.Quote(input.Symbol), strconv.Quote(publicDigest), index)
 	}
 	source.WriteString(`
 	return bindings, nil

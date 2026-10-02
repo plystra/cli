@@ -99,6 +99,13 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		"generated/go/internal/connectschema/schema_gen.go",
 		"generated/go/internal/constructorconfig/value_gen.go",
 		"generated/go/internal/invocationcontext/context_gen.go",
+		"generated/go/internal/privatefile/file.go",
+		"generated/go/internal/privatefile/file_darwin.go",
+		"generated/go/internal/privatefile/file_linux.go",
+		"generated/go/internal/privatefile/file_other.go",
+		"generated/go/internal/privatefile/file_unix.go",
+		"generated/go/internal/privatefile/file_windows.go",
+		"generated/go/internal/runtimebaseline/baseline_gen.go",
 		"generated/go/invocation/email/send/v1/invocation_gen.go",
 		"generated/go/invocation/kernel/health/v1/invocation_gen.go",
 		"generated/go/providers/email/send/v1/provider_gen.go",
@@ -213,11 +220,11 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		t.Fatalf("repeated Render is not deterministic: %v", err)
 	}
 	root := t.TempDir()
-	report, err := generatedfiles.Install(root, output, func(string) error { return nil })
+	report, err := generatedfiles.Install(root, output.Output, func(string) error { return nil })
 	if err != nil || !report.Clean() {
 		t.Fatalf("Install = %#v, %v", report.Changes(), err)
 	}
-	if checked, err := generatedfiles.Check(root, output); err != nil || !checked.Clean() {
+	if checked, err := generatedfiles.Check(root, output.Output); err != nil || !checked.Clean() {
 		t.Fatalf("Check installed output = %#v, %v", checked.Changes(), err)
 	}
 }
@@ -241,10 +248,10 @@ func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 		t.Fatalf("Render without Aliases: %v", err)
 	}
 	root := t.TempDir()
-	if report, err := generatedfiles.Install(root, withAliases, func(string) error { return nil }); err != nil || !report.Clean() {
+	if report, err := generatedfiles.Install(root, withAliases.Output, func(string) error { return nil }); err != nil || !report.Clean() {
 		t.Fatalf("Install with Aliases = %#v, %v", report.Changes(), err)
 	}
-	report, err := generatedfiles.Check(root, withoutAliases)
+	report, err := generatedfiles.Check(root, withoutAliases.Output)
 	if err != nil {
 		t.Fatalf("Check without Aliases: %v", err)
 	}
@@ -268,7 +275,7 @@ func TestRenderRemovesAliasSurfacesWhenFinalMapChanges(t *testing.T) {
 	if len(report.Missing()) != 0 || len(report.Unexpected()) != 0 || len(report.ManuallyModified()) != 0 {
 		t.Fatalf("Alias removal drift = %#v", report.Changes())
 	}
-	if installed, err := generatedfiles.Install(root, withoutAliases, func(string) error { return nil }); err != nil || !installed.Clean() {
+	if installed, err := generatedfiles.Install(root, withoutAliases.Output, func(string) error { return nil }); err != nil || !installed.Clean() {
 		t.Fatalf("Install without Aliases = %#v, %v", installed.Changes(), err)
 	}
 	for _, filePath := range wantRetired {
@@ -287,7 +294,7 @@ func TestRenderSupportsEmptyApplicationWithoutSDKOrDocumentation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render empty: %v", err)
 	}
-	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
+	if got := outputPaths(output); !slices.Equal(got, []string{"generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/go/internal/privatefile/file.go", "generated/go/internal/privatefile/file_darwin.go", "generated/go/internal/privatefile/file_linux.go", "generated/go/internal/privatefile/file_other.go", "generated/go/internal/privatefile/file_unix.go", "generated/go/internal/privatefile/file_windows.go", "generated/go/internal/runtimebaseline/baseline_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}) {
 		t.Fatalf("empty output paths = %v", got)
 	}
 	wantManifest, err := applicationgen.RenderManifest([]byte(`{"capability_aliases":[]}`), resolution.Context(), options.ManifestProvenance)
@@ -479,10 +486,10 @@ timeout: {type: duration, default: 5s}
 		t.Fatalf("Render without configuration: %v", err)
 	}
 	root := t.TempDir()
-	if report, err := generatedfiles.Install(root, withConfiguration, func(string) error { return nil }); err != nil || !report.Clean() {
+	if report, err := generatedfiles.Install(root, withConfiguration.Output, func(string) error { return nil }); err != nil || !report.Clean() {
 		t.Fatalf("Install with configuration = %#v, %v", report.Changes(), err)
 	}
-	report, err := generatedfiles.Check(root, withoutConfiguration)
+	report, err := generatedfiles.Check(root, withoutConfiguration.Output)
 	if err != nil || !slices.Contains(report.Stale(), configurationPath) {
 		t.Fatalf("configuration cleanup = %#v, %v", report.Changes(), err)
 	}
@@ -595,7 +602,7 @@ func TestRenderSelectionDriftsManifestButKeepsEqualExecutablePublicOutputStable(
 	if !bytes.Equal(defaultBootstrap, environmentBootstrap) || !bytes.Equal(defaultBootstrap, explicitBootstrap) {
 		t.Fatal("selector-only provenance changed generated bootstrap for an equal executable model")
 	}
-	for name, output := range map[string]generatedfiles.Output{"environment": environmentOutput, "explicit": explicitOutput} {
+	for name, output := range map[string]applicationgen.Result{"environment": environmentOutput, "explicit": explicitOutput} {
 		if !sameTransportOutput(defaultOutput, output) {
 			t.Fatalf("%s selection changed transport source for an equal effective build model", name)
 		}
@@ -793,7 +800,7 @@ func testConfigurationLayerDigest(t testing.TB, data []byte, overlay bool) strin
 	return digest
 }
 
-func assertBootstrapExcludesSelectorOnlyProvenance(t testing.TB, output generatedfiles.Output, options applicationgen.Options) {
+func assertBootstrapExcludesSelectorOnlyProvenance(t testing.TB, output applicationgen.Result, options applicationgen.Options) {
 	t.Helper()
 	manifest := options.ManifestProvenance
 	provenance, err := transportprovenance.New(transportprovenance.Input{
@@ -823,7 +830,7 @@ func assertBootstrapExcludesSelectorOnlyProvenance(t testing.TB, output generate
 	}
 }
 
-func assertCompleteArtifactProvenance(t testing.TB, output generatedfiles.Output) {
+func assertCompleteArtifactProvenance(t testing.TB, output applicationgen.Result) {
 	t.Helper()
 	files := output.Files()
 	artifacts := output.Artifacts()
@@ -1148,7 +1155,7 @@ const querySemanticsYAML = `semantics:
   data: {request: public, response: public}
 `
 
-func outputPaths(output generatedfiles.Output) []string {
+func outputPaths(output applicationgen.Result) []string {
 	files := output.Files()
 	paths := make([]string, len(files))
 	for index, file := range files {
@@ -1157,7 +1164,7 @@ func outputPaths(output generatedfiles.Output) []string {
 	return paths
 }
 
-func outputData(t testing.TB, output generatedfiles.Output, filePath string) []byte {
+func outputData(t testing.TB, output applicationgen.Result, filePath string) []byte {
 	t.Helper()
 	data, exists := outputFile(output, filePath)
 	if !exists {
@@ -1166,7 +1173,7 @@ func outputData(t testing.TB, output generatedfiles.Output, filePath string) []b
 	return data
 }
 
-func outputFile(output generatedfiles.Output, filePath string) ([]byte, bool) {
+func outputFile(output applicationgen.Result, filePath string) ([]byte, bool) {
 	for _, file := range output.Files() {
 		if file.Path() == filePath {
 			return file.Data(), true
@@ -1175,7 +1182,7 @@ func outputFile(output generatedfiles.Output, filePath string) ([]byte, bool) {
 	return nil, false
 }
 
-func sameOutput(left, right generatedfiles.Output) bool {
+func sameOutput(left, right applicationgen.Result) bool {
 	leftFiles, rightFiles := left.Files(), right.Files()
 	if len(leftFiles) != len(rightFiles) || !bytes.Equal(left.ManifestJSON(), right.ManifestJSON()) {
 		return false
@@ -1188,7 +1195,7 @@ func sameOutput(left, right generatedfiles.Output) bool {
 	return true
 }
 
-func sameTransportOutput(left, right generatedfiles.Output) bool {
+func sameTransportOutput(left, right applicationgen.Result) bool {
 	leftFiles := make(map[string][]byte)
 	for _, file := range left.Files() {
 		if transportPath(file.Path()) {

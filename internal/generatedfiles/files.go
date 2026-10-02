@@ -254,6 +254,7 @@ func install(rootPath string, output Output, additional []atomicfs.Write, valida
 			Path:               write.Path,
 			Data:               append([]byte(nil), write.Data...),
 			Mode:               write.Mode,
+			OwnerPrivate:       write.OwnerPrivate,
 			MustNotExist:       write.MustNotExist,
 			ParentMustNotExist: write.ParentMustNotExist,
 			ExpectedData:       expectedData,

@@ -605,8 +605,9 @@ Active configurable constructors with effective adoptions fail explicitly until
 private runtime-baseline reconstruction is available. Regenerate and rebuild
 for runtime compatibility version 8.
 
-Every generated-binary invocation requires `--configuration-root <directory>`.
-For source-tree development, use `go run ./generated/go/application --configuration-root .`.
+Every generated-binary invocation requires `--configuration-root <directory>`
+and `--runtime-baseline <path>`.
+For source-tree development, use `go run ./generated/go/application --configuration-root . --runtime-baseline dist/runtime-baseline.json`.
 An absolute root permits startup from an unrelated working directory; a relative
 root is resolved once at startup. Both explicit and ambient replacement paths
 resolve from this root. Root, overlay, and replacement documents must be
@@ -614,9 +615,21 @@ nonsymbolic regular files of at most 1 MiB; every path component stays within
 the opened directory, and observable file replacement or modification during
 loading fails before construction. Missing or invalid roots produce redacted
 selector errors without exposing the supplied directory. Regenerate and rebuild
-older generated entrypoints for this required argument. The private runtime
-baseline and complete source-independent adopted-export composition remain
-unimplemented; an explicit root alone does not establish that deployment contract.
+older generated entrypoints for these required arguments.
+
+Generation and scaffolding write `dist/runtime-baseline.json` with native
+owner-only permissions and an ignore rule. Deploy that private file with the
+matching binary. Linux checks ownership and mode; macOS also rejects extended
+ACLs, and Windows requires a protected owner-only DACL. Relative baseline paths
+resolve from the configuration root; an absolute path may identify a separately
+deployed private file. Startup checks
+the public runtime-contract identity and compiled constructor defaults before
+Secret resolution or construction. A private default edit requires rebuilding
+and refreshing the baseline with `plystra generate`, without publishing private
+defaults or their hashes in generated source. Missing, malformed, mismatched,
+or publicly readable baselines fail with redacted recovery. `generate --check`
+checks public generated output without creating or refreshing private output.
+Complete source-independent adopted-export composition remains incomplete.
 
 `Application.Interfaces` exposes the frozen governed typed Interface runtime after successful construction, while `Application.Invocations` retains the existing canonical invocation handles during the migration. `Application.Start` starts lifecycle-aware static Implementations in constructor dependency order within `timeouts.startup`; failure is redacted and rolls back the full constructed lifecycle set, including never-started instances. `Application.Stop` coordinates reverse-order shutdown, remains retryable after a bounded failure, and reports the combined application state. The CLI-owned `generated/go/application` process entrypoint delegates configuration selection to bootstrap, waits for `SIGINT` or `SIGTERM` during normal execution, and owns bounded shutdown. No runtime value or Secret reference target is embedded in generated source.
 

@@ -112,6 +112,51 @@ func (m Manifest) ExportAdoptions() []ExportAdoption {
 	return append([]ExportAdoption(nil), m.exportAdoptions...)
 }
 
+// PrivateExportInventoryYAML preserves export values for private deployment
+// without copying inert application declarations, comments, or formatting.
+func PrivateExportInventoryYAML(data []byte) ([]byte, error) {
+	if _, err := ParseExportInventorySource("plystra.yaml", data); err != nil {
+		return nil, err
+	}
+	root, err := decodeDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	values, err := mapping(root, "document")
+	if err != nil {
+		return nil, err
+	}
+	if values["composition"] == nil {
+		return []byte("{}\n"), nil
+	}
+	composition, err := mapping(values["composition"], "composition")
+	if err != nil {
+		return nil, err
+	}
+	exports := composition["exports"]
+	if exports == nil || len(exports.Content) == 0 {
+		return []byte("{}\n"), nil
+	}
+	var normalize func(*yaml.Node)
+	normalize = func(node *yaml.Node) {
+		node.HeadComment, node.LineComment, node.FootComment = "", "", ""
+		node.Style = 0
+		if isNull(node) {
+			node.Value = "null"
+		}
+		for _, child := range node.Content {
+			normalize(child)
+		}
+		sortYAMLMapping(node)
+	}
+	normalize(exports)
+	return yaml.Marshal(&yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+		stringYAMLNode("composition"), {Kind: yaml.MappingNode, Tag: "!!map", Content: []*yaml.Node{
+			stringYAMLNode("exports"), exports,
+		}},
+	}})
+}
+
 // ParseExportInventorySource reads only the inert root export inventory from a
 // dependency Project. Other dependency root declarations are consumer-inert
 // and are deliberately neither parsed nor validated here.
