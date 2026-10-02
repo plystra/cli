@@ -2392,22 +2392,25 @@ func validateRuntimeExport(fields map[string]*yaml.Node) error {
 	if _, _, err := mergeRuntimeInterfacePolicies(interfaces["policies"], nil); err != nil {
 		return err
 	}
-	// Exports have no lower layer. Reserved removals remain invalid inside
-	// dormant or suppressed objects as well as active typed values.
-	for _, node := range []*yaml.Node{interfaces["use"], interfaces["policies"], fields["config"]} {
-		values, err := runtimeOptionalMapping(node, "adopted declarations", nil)
-		if err != nil {
+	if node := fields["resources"]; node != nil {
+		if err := validateRuntimeExportResources(node); err != nil {
 			return err
 		}
-		stack := make([]*yaml.Node, 0, len(values))
-		for _, value := range values {
-			stack = append(stack, value)
-		}
+	}
+	// Exports have no lower layer. Reserved removals remain invalid inside
+	// dormant or suppressed objects as well as active typed values.
+	for _, node := range fields {
+		stack := []*yaml.Node{node}
 		for len(stack) > 0 {
 			value := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			if value.Kind == yaml.MappingNode && len(value.Content) == 2 && value.Content[0].Value == "$remove" {
-				return runtimeConfigurationError("adopted exports cannot contain reserved removal mappings")
+			if value.Kind == yaml.MappingNode {
+				if len(value.Content) == 2 && value.Content[0].Value == "$remove" {
+					return runtimeConfigurationError("adopted exports cannot contain reserved removal mappings")
+				}
+				if _, err := runtimeMapping(value, "export mapping", nil); err != nil {
+					return runtimeConfigurationError("export mappings require unique string keys")
+				}
 			}
 			stack = append(stack, value.Content...)
 		}
@@ -2425,6 +2428,84 @@ func validateRuntimeExport(fields map[string]*yaml.Node) error {
 		}
 	}
 	return nil
+}
+
+// Resource inventories remain inert. Validate only authored syntax, without
+// requiring complete providers or resolving cross-export binding targets.
+func validateRuntimeExportResources(node *yaml.Node) error {
+	fields, err := runtimeMapping(node, "export resources", runtimeKeySet("instances", "bind"))
+	if err != nil {
+		return err
+	}
+	instances, err := runtimeOptionalMapping(fields["instances"], "resource instances", nil)
+	if err != nil {
+		return err
+	}
+	for name, instance := range instances {
+		if !validRuntimeResourceInstanceName(name) {
+			return runtimeConfigurationError("invalid Resource instance name")
+		}
+		declaration, err := runtimeMapping(instance, "resource instance", runtimeKeySet("use", "config"))
+		if err != nil {
+			return err
+		}
+		if use := declaration["use"]; use != nil {
+			symbol, err := runtimeString(use)
+			if err != nil || !validRuntimeConstructorSymbol(symbol) {
+				return runtimeConfigurationError("invalid Resource provider symbol")
+			}
+		}
+		if config := declaration["config"]; config != nil {
+			if _, err := runtimeMapping(config, "resource configuration", nil); err != nil {
+				return err
+			}
+		}
+	}
+	bindings, err := runtimeOptionalMapping(fields["bind"], "resource bindings", runtimeKeySet("implementations", "instances"))
+	if err != nil {
+		return err
+	}
+	for namespace, node := range bindings {
+		consumers, err := runtimeMapping(node, "resource binding namespace", nil)
+		if err != nil {
+			return err
+		}
+		for consumer, node := range consumers {
+			if namespace == "implementations" {
+				if !validRuntimeConstructorSymbol(consumer) {
+					return runtimeConfigurationError("invalid Resource consumer constructor")
+				}
+			} else if !validRuntimeResourceInstanceName(consumer) {
+				return runtimeConfigurationError("invalid Resource consumer instance")
+			}
+			parameters, err := runtimeMapping(node, "resource binding parameters", nil)
+			if err != nil {
+				return err
+			}
+			for parameter, node := range parameters {
+				if parameter == "_" || !token.IsIdentifier(parameter) {
+					return runtimeConfigurationError("invalid Resource parameter identifier")
+				}
+				target, err := runtimeString(node)
+				if err != nil || !validRuntimeResourceInstanceName(target) {
+					return runtimeConfigurationError("invalid Resource binding target")
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validRuntimeResourceInstanceName(value string) bool {
+	if !validRuntimeExportName(value) {
+		return false
+	}
+	for _, segment := range strings.Split(value, ".") {
+		if segment[0] < 'a' || segment[0] > 'z' {
+			return false
+		}
+	}
+	return true
 }
 
 func composeRuntimeExportInterfaces(peers []map[string]*yaml.Node, lowerNode, upperNode *yaml.Node) (*yaml.Node, error) {

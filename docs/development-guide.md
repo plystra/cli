@@ -961,6 +961,10 @@ non-string keys. Malformed syntax is rejected even in unadopted exports, with
 value-redacted Project-marker diagnostics. Missing fields and cross-fragment
 references are left for composition and typed resolution, not inferred during
 inert inventory parsing.
+Generated startup validates the same syntax in private dependency inventories
+and live root exports, including replacement mode, before Secret lookup or
+constructor entry. Inert Resource fragments remain inactive; malformed names,
+bindings, mappings, and nested removal markers still fail.
 
 Adopted exports compose as one unordered lower-precedence layer. Identical
 declarations deduplicate, incompatible declarations fail with every selected

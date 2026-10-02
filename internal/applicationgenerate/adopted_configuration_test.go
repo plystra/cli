@@ -169,11 +169,12 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 		}
 		d.Exports[dependencyIndex].YAML = string(data)
 	}
-	for _, tc := range []struct {
+	type runtimeCase struct {
 		name, root, overlay, selected, rule string
 		edit                                func(*runtimebaseline.Document)
 		check                               func(*testing.T, map[string]any)
-	}{
+	}
+	cases := []runtimeCase{
 		{name: "dependency-only deployment", check: func(t *testing.T, got map[string]any) {
 			if got["first"] != "private-first" || got["second"] != "private-second" || got["public"] != float64(7) || got["secret"] != "private-resolved" || got["nested"].(map[string]any)["Count"] != float64(5) {
 				t.Fatal("adopted inputs were not delivered")
@@ -252,9 +253,62 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 			change(d, dependency+"/service.Other", "first", "interfaces", "use", "probe.run/v1")
 			change(d, dependency+"/service.Other", "second", "interfaces", "use", "probe.run/v1")
 		}, rule: "build-affecting"},
+		{name: "inert resource syntax", edit: func(d *runtimebaseline.Document) {
+			change(d, "{instances: {database: {use: example.com/data.New, config: {private: null}}}, bind: {instances: {cache: {upstream: database}}}}", "unused", "resources")
+		}},
+		{name: "inert resource shape rejected", edit: func(d *runtimebaseline.Document) {
+			change(d, "[]", "unused", "resources")
+		}, rule: "baseline"},
+		{name: "inert resource instance name rejected", edit: func(d *runtimebaseline.Document) {
+			change(d, "{instances: {Database: {}}}", "unused", "resources")
+		}, rule: "baseline"},
+		{name: "inert resource provider rejected", edit: func(d *runtimebaseline.Document) {
+			change(d, "{instances: {database: {use: private-invalid}}}", "unused", "resources")
+		}, rule: "baseline"},
+		{name: "inert resource binding rejected", edit: func(d *runtimebaseline.Document) {
+			change(d, "{bind: {instances: {cache: {if: database}}}}", "unused", "resources")
+		}, rule: "baseline"},
+		{name: "inert resource nested removal rejected", edit: func(d *runtimebaseline.Document) {
+			change(d, "{instances: {database: {config: {private: [{$remove: false}]}}}}", "unused", "resources")
+		}, rule: "baseline"},
+		{name: "inert resource nested duplicate rejected", edit: func(d *runtimebaseline.Document) {
+			change(d, "{instances: {database: {config: {private: {private-key: 1, private-key: 2}}}}}", "unused", "resources")
+		}, rule: "baseline"},
+		{name: "live root resource removal rejected", root: strings.Replace(adopt, "composition: {", "composition: {exports: {unused: {resources: {instances: {database: {config: {private: {$remove: true}}}}}}}, ", 1), rule: "invalid declarations"},
+		{name: "replacement root resource removal rejected", root: "composition: {exports: {unused: {resources: {instances: {database: {config: {private: {$remove: true}}}}}}}}\n", selected: adopt, rule: "invalid declarations"},
 		{name: "required field removed", overlay: config("{first: {$remove: true}}"), rule: "required field is absent"},
 		{name: "object removed", overlay: config("{$remove: true}"), rule: "required field is absent"},
+	}
+	for _, resource := range []string{
+		`null`, `{private-key: private-value}`, `{instances: null}`, `{instances: []}`,
+		`{instances: {database.1: {}}}`, `{instances: {database--primary: {}}}`,
+		`{instances: {` + strings.Repeat("a", 129) + `: {}}}`,
+		`{instances: {database: null}}`, `{instances: {database: {private-key: private-value}}}`,
+		`{instances: {database: {use: example.com/db.new}}}`, `{instances: {database: {use: null}}}`,
+		`{instances: {database: {config: null}}}`, `{instances: {database: {config: []}}}`,
+		`{instances: {database: {config: {private: {1: private-value}}}}}`,
+		`{bind: null}`, `{bind: {private-key: private-value}}`, `{bind: {instances: null}}`,
+		`{bind: {implementations: {private-key: {database: primary}}}}`,
+		`{bind: {instances: {Bad: {database: primary}}}}`, `{bind: {instances: {primary: []}}}`,
+		`{bind: {instances: {primary: {_ : secondary}}}}`, `{bind: {instances: {primary: {database: null}}}}`,
+		`{bind: {instances: {primary: {database: Database}}}}`, `{bind: {instances: {primary: {database: {instance: secondary}}}}}`,
 	} {
+		cases = append(cases, runtimeCase{name: "invalid inert resource/" + resource, rule: "baseline", edit: func(d *runtimebaseline.Document) {
+			change(d, resource, "unused", "resources")
+		}}, runtimeCase{name: "invalid live resource/" + resource, rule: "invalid declarations",
+			root: "composition: {exports: {unused: {resources: " + resource + "}}}\n", selected: adopt})
+	}
+	for _, resource := range []string{
+		`{}`, `{instances: {database: {}}}`, `{instances: {` + strings.Repeat("a", 128) + `: {}}}`,
+		`{instances: {database-1.primary: {use: example.com/db.New, config: {private: null, options: [], labels: {$remove: true, ordinary: 1}}}}}`,
+		`{bind: {implementations: {example.com/service.New: {Database: database-1.primary}}, instances: {cache: {"\u03b4": database}}}}`,
+	} {
+		cases = append(cases, runtimeCase{name: "valid inert resource/" + resource, edit: func(d *runtimebaseline.Document) {
+			change(d, resource, "unused", "resources")
+		}}, runtimeCase{name: "valid live resource/" + resource,
+			root: "composition: {exports: {unused: {resources: " + resource + "}}}\n", selected: adopt})
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			document, err := runtimebaseline.Decode(baselineBytes)
 			if err != nil {

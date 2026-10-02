@@ -425,6 +425,9 @@ binding parameters are nonblank Go identifiers and binding values are instance
 names. Configuration objects and structural containers require mappings with
 unique string keys. Provider types, required fields, and target existence still
 need composition and resolution; this syntax check does not enable adoption.
+Generated startup repeats these checks for private dependency inventories and
+live root exports, including replacement mode. Invalid inert Resource syntax
+or nested removal mappings fail before Secret resolution or constructor entry.
 
 Exact entries in `interfaces.use`, `interfaces.policies`, and `http.expose`
 are removed only by `{$remove: true}`. Null, empty values, false or string-valued
