@@ -119,8 +119,11 @@ config:
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), data) {
 		t.Fatalf("repeated maintenance = changed %t, err %v\nfirst: %s\nagain: %s", repeated.Changed(), err, data, repeated.Data())
 	}
-	// A public baseline cannot prove equality or ownership of a private reference.
-	wantLocal := append(maintained.LocalPaths(), `config["example.com/acme/smtp.New"]["token"]`)
+	// A public baseline cannot prove equality or ownership of private values.
+	wantLocal := append(maintained.LocalPaths(),
+		`config["example.com/acme/smtp.New"]["settings"]`,
+		`config["example.com/acme/smtp.New"]["settings"]["region"]`,
+		`config["example.com/acme/smtp.New"]["token"]`)
 	slices.Sort(wantLocal)
 	if !slices.Equal(wantLocal, repeated.LocalPaths()) {
 		t.Fatalf("repeated local paths = %v, want %v", repeated.LocalPaths(), wantLocal)
@@ -227,8 +230,9 @@ config:
 	data := maintained.Data()
 	for _, expected := range [][]byte{
 		[]byte("audit.write/v1"),
-		[]byte("host: new.example"),
-		[]byte("inherited: new"),
+		// Matching a historical public record cannot demote private local intent.
+		[]byte("host: old.example"),
+		[]byte("inherited: old"),
 		[]byte("introduced: new"),
 		[]byte("retained: local # keep this edit"),
 		[]byte("token: {$remove: true} # explicit removal"),
@@ -241,7 +245,7 @@ config:
 		[]byte("records.old/v1"),
 		[]byte("records.new/v1"),
 		[]byte("records.stable/v1"),
-		[]byte("old.example"),
+		[]byte("new.example"),
 		[]byte("PRIVATE_OLD_TOKEN"),
 		[]byte("PRIVATE_NEW_TOKEN"),
 		[]byte("retained: dependency-new"),

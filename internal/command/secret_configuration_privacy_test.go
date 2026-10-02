@@ -10,6 +10,29 @@ import (
 )
 
 func TestPublicSecretReferenceChangesKeepGeneratedIdentity(t *testing.T) {
+	testPublicPrivateConfigurationIdentity(t, "Password configuration.Secret\nNested struct { Token configuration.Secret }", []string{
+		"{password: {env: PRIVATE_FIRST}, nested: {token: {env: PRIVATE_FIRST}}}",
+		"{password: {env: PRIVATE_SECOND}, nested: {token: {env: PRIVATE_SECOND}}}",
+		"{password: {file: /PRIVATE_FILE}, nested: {token: {file: /PRIVATE_FILE}}}",
+	}, "")
+}
+
+func TestPublicRuntimeOnlyChangesKeepGeneratedIdentity(t *testing.T) {
+	testPublicPrivateConfigurationIdentity(t, `Password configuration.Secret
+	Scalar string
+	List []string
+	Map map[string]string
+	Pointer *string
+	Mixed []struct { Private string; Public string `+"`plystra:\"build-visible\"`"+` }
+	Fixed struct { Value string } `+"`plystra:\"build-visible\"`", []string{
+		"{scalar: PRIVATE_FIRST, list: [PRIVATE_FIRST], map: {PRIVATE_KEY: PRIVATE_FIRST}, pointer: PRIVATE_FIRST, mixed: [{private: PRIVATE_FIRST, public: stable}], fixed: {value: stable}}",
+		"{scalar: PRIVATE_SECOND, list: null, map: null, pointer: null, mixed: [{public: stable}], fixed: {value: stable}}",
+		"{scalar: '', list: [], map: {}, pointer: '', mixed: [{private: PRIVATE_SECOND, public: stable}], fixed: {value: stable}}",
+	}, "{scalar: '', list: [], map: {}, pointer: '', mixed: [{public: changed}], fixed: {value: changed}}")
+}
+
+func testPublicPrivateConfigurationIdentity(t *testing.T, fields string, values []string, publicChange string) {
+	t.Helper()
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		for _, ownership := range []string{"active", "dormant", "adopted"} {
 			t.Run(mode+"/"+ownership, func(t *testing.T) {
@@ -23,8 +46,7 @@ import (
 )
 
 type Config struct {
-	Password configuration.Secret
-	Nested struct { Token configuration.Secret }
+`+fields+`
 }
 type Service struct{}
 //plystra:implements email.send/v1
@@ -46,8 +68,8 @@ func (*Service) Send(context.Context, contract.Request) (contract.Response, erro
 					selectedPath = "deploy/customer.yaml"
 					selector = []string{"--config", selectedPath}
 				}
-				document := func(reference string) string {
-					return "config: {example.com/acme/implementation-use/smtp.New: {password: " + reference + ", nested: {token: " + reference + "}}}\n"
+				document := func(value string) string {
+					return "config: {example.com/acme/implementation-use/smtp.New: " + value + "}\n"
 				}
 				write := func(reference string) {
 					selected := "interfaces:\n  use: {email.send/v1: example.com/acme/implementation-use/smtp.New}\n"
@@ -79,24 +101,40 @@ func (*Service) Send(context.Context, contract.Request) (contract.Response, erro
 					}
 					return stdout
 				}
-				write("{env: PRIVATE_FIRST}")
+				write(values[0])
 				invoke("generate")
 				before := commandTree(t, filepath.Join(root, "generated"))
 				inspection := invoke("inspect", "configuration", "--format", "json")
-				for _, reference := range []string{"{env: PRIVATE_SECOND}", "{file: /PRIVATE_FILE}"} {
+				for _, reference := range values[1:] {
 					write(reference)
 					unchanged := commandTree(t, root)
 					invoke("generate", "--check")
 					invoke("check")
 					if got := invoke("inspect", "configuration", "--format", "json"); got != inspection {
-						t.Fatal("Secret reference changed public inspection")
+						t.Fatal("private configuration changed public inspection")
 					}
 					if !reflect.DeepEqual(commandTree(t, root), unchanged) {
 						t.Fatal("read-only checks mutated the Project")
 					}
 					invoke("generate")
 					if !reflect.DeepEqual(commandTree(t, filepath.Join(root, "generated")), before) {
-						t.Fatal("Secret reference changed public generated artifacts")
+						t.Fatal("private configuration changed public generated artifacts")
+					}
+				}
+				if publicChange != "" {
+					write(publicChange)
+					unchanged := commandTree(t, root)
+					arguments := append([]string{"generate", "--check"}, selector...)
+					if code, _, stderr := runCommand(t, arguments, root, commandGoEnvironment()); code == 0 || !strings.Contains(stderr, "PLYSTRA_GENERATED_DRIFT") {
+						t.Fatalf("build-visible change did not report generated drift: %d, %s", code, stderr)
+					}
+					if !reflect.DeepEqual(commandTree(t, root), unchanged) {
+						t.Fatal("failed drift check mutated the Project")
+					}
+					invoke("generate")
+					invoke("generate", "--check")
+					if reflect.DeepEqual(commandTree(t, filepath.Join(root, "generated")), before) {
+						t.Fatal("build-visible change did not change public artifacts")
 					}
 				}
 				assertNoCommandTransactions(t, root)

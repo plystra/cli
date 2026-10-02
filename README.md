@@ -527,9 +527,17 @@ reference leaves generated output and inspection unchanged. Private comparisons
 still reject conflicting adopted references; explicit current values or
 tombstones resolve them without publishing private equality through provenance.
 Generation separately compares private root, selected-document, and dependency
-snapshots to reject concurrent edits and preserve the changed source. Broader
-runtime-only value privacy, build-visible freezing, defaults, and standalone
-typed runtime loading remain incomplete.
+snapshots to reject concurrent edits and preserve the changed source.
+Validated runtime-only constructor values likewise exclude contents from public
+identity. A `build-visible` field includes its whole value and descendants;
+otherwise only build-visible descendants contribute. Entirely private atomic
+pointers, lists, arrays, and maps hide contents, keys, cardinality, and nil/empty
+differences. Mixed atomic containers retain positions, map keys, order, and
+nullness needed to locate public descendants, but exclude private siblings.
+Declared field presence, sources, and tombstones remain provenance. Private
+equality still governs composition conflicts. Build-visible value edits cause
+public generation drift; frozen build-visible runtime enforcement, defaults,
+and standalone typed runtime loading remain incomplete.
 
 The required top-level `interface_provenance` record in
 `generated/manifest.json` uses schema `plystra.interface-provenance/v3`. It

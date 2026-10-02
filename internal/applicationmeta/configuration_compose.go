@@ -39,6 +39,7 @@ type constructorConfigDecision struct {
 	valueType         string
 	yaml              []byte
 	digest            string
+	publicDigest      string
 	source            string
 	declarationSource ConfigurationDeclarationSource
 }
@@ -186,7 +187,7 @@ func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, sc
 			return nil, constructorConfigValueError(configured.constructor, configured.source, configured.declarationSource, nil, ErrConfigurationUnknownField)
 		}
 		segments := []string{name}
-		decisions, err := normalizeDeclaredConstructorConfigValue(configured.constructor, segments, field.Value(), provided[name], configured.source, configured.declarationSource, state, 1)
+		decisions, err := normalizeDeclaredConstructorConfigValue(configured.constructor, segments, field.Value(), field.BuildVisible(), provided[name], configured.source, configured.declarationSource, state, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -209,7 +210,7 @@ type constructorConfigNormalizeState struct {
 	nodes int
 }
 
-func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbol, segments []string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
+func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbol, segments []string, schema implementationinventory.ConfigurationValue, buildVisible bool, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
 	if isReservedRemovalMapping(node) {
 		if err := enterConstructorConfigNode(node, state, depth); err != nil || !isRemovalMapping(node) {
 			return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationInvalidValue)
@@ -217,7 +218,7 @@ func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbo
 		return []constructorConfigDecision{newConstructorConfigDecision(constructor, segments, constructorConfigRemoval, "", nil, constructorConfigDecisionSource(baseSource, segments))}, nil
 	}
 	if schema.Kind() == implementationinventory.ConfigurationValueObject {
-		return normalizeConstructorConfigObject(constructor, segments, schema.TypeIdentity(), schema, node, baseSource, declarationSource, state, depth)
+		return normalizeConstructorConfigObject(constructor, segments, schema.TypeIdentity(), schema, buildVisible, node, baseSource, declarationSource, state, depth)
 	}
 	normalized, err := normalizeConstructorConfigNode(schema, node, state, depth)
 	if err != nil {
@@ -228,18 +229,29 @@ func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbo
 		return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationInvalidValue)
 	}
 	valueType := constructorConfigDeclaredType(schema)
+	publicDigest := digestStrings("config.runtime-value/v1", valueType)
+	if schema.Kind() == implementationinventory.ConfigurationValueSecret {
+		publicDigest = digestStrings("config.secret-reference/v1", valueType)
+	} else if projected := publicConstructorConfigNode(schema, buildVisible, normalized); projected != nil {
+		publicData, err := marshalConstructorConfigNode(projected)
+		if err != nil {
+			return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationInvalidValue)
+		}
+		publicDigest = digestStrings("config.value", valueType, string(publicData))
+	}
 	return []constructorConfigDecision{{
-		constructor: constructor,
-		segments:    append([]string(nil), segments...),
-		kind:        constructorConfigValue,
-		valueType:   valueType,
-		yaml:        data,
-		digest:      digestStrings("config.value", valueType, string(data)),
-		source:      constructorConfigDecisionSource(baseSource, segments),
+		constructor:  constructor,
+		segments:     append([]string(nil), segments...),
+		kind:         constructorConfigValue,
+		valueType:    valueType,
+		yaml:         data,
+		digest:       digestStrings("config.value", valueType, string(data)),
+		publicDigest: publicDigest,
+		source:       constructorConfigDecisionSource(baseSource, segments),
 	}}, nil
 }
 
-func normalizeConstructorConfigObject(constructor constructorsymbol.Symbol, segments []string, declaredType string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
+func normalizeConstructorConfigObject(constructor constructorsymbol.Symbol, segments []string, declaredType string, schema implementationinventory.ConfigurationValue, buildVisible bool, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
 	if err := enterConstructorConfigNode(node, state, depth); err != nil || node.Kind != yaml.MappingNode {
 		return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationInvalidValue)
 	}
@@ -254,7 +266,7 @@ func normalizeConstructorConfigObject(constructor constructorsymbol.Symbol, segm
 			return nil, constructorConfigValueError(constructor, baseSource, declarationSource, segments, ErrConfigurationUnknownField)
 		}
 		childSegments := append(append([]string(nil), segments...), name)
-		children, err := normalizeDeclaredConstructorConfigValue(constructor, childSegments, field.Value(), provided[name], baseSource, declarationSource, state, depth+1)
+		children, err := normalizeDeclaredConstructorConfigValue(constructor, childSegments, field.Value(), buildVisible || field.BuildVisible(), provided[name], baseSource, declarationSource, state, depth+1)
 		if err != nil {
 			return nil, err
 		}
@@ -524,13 +536,14 @@ func newConstructorConfigDecision(constructor constructorsymbol.Symbol, segments
 		kindName = "removed"
 	}
 	return constructorConfigDecision{
-		constructor: constructor,
-		segments:    append([]string(nil), segments...),
-		kind:        kind,
-		valueType:   valueType,
-		yaml:        append([]byte(nil), data...),
-		digest:      digestStrings("config."+kindName, path, valueType),
-		source:      source,
+		constructor:  constructor,
+		segments:     append([]string(nil), segments...),
+		kind:         kind,
+		valueType:    valueType,
+		yaml:         append([]byte(nil), data...),
+		digest:       digestStrings("config."+kindName, path, valueType),
+		publicDigest: digestStrings("config."+kindName, path, valueType),
+		source:       source,
 	}
 }
 
@@ -583,12 +596,57 @@ func constructorConfigCandidateKey(decision constructorConfigDecision) string {
 }
 
 func constructorConfigPublicDigest(decision constructorConfigDecision) string {
-	if decision.kind == constructorConfigValue && strings.HasPrefix(decision.valueType, "secret:") {
-		// Private equality still compares the normalized reference. Public evidence
-		// records only its declared type, never its resolver kind or target.
-		return digestStrings("config.secret-reference/v1", decision.valueType)
+	return decision.publicDigest
+}
+
+// Projection follows the compiled schema only after complete private validation.
+// Mixed atomic containers retain positions; wholly private containers reveal no shape.
+func publicConstructorConfigNode(schema implementationinventory.ConfigurationValue, buildVisible bool, node *yaml.Node) *yaml.Node {
+	if buildVisible {
+		return node
 	}
-	return decision.digest
+	if !constructorConfigHasPublicDescendant(schema) {
+		return nil
+	}
+	if isNull(node) {
+		return node
+	}
+	result := &yaml.Node{Kind: node.Kind, Tag: node.Tag}
+	switch schema.Kind() {
+	case implementationinventory.ConfigurationValueObject:
+		for index := 0; index < len(node.Content); index += 2 {
+			field, _ := lookupConstructorConfigField(schema.Fields(), node.Content[index].Value)
+			if child := publicConstructorConfigNode(field.Value(), field.BuildVisible(), node.Content[index+1]); child != nil {
+				result.Content = append(result.Content, node.Content[index], child)
+			}
+		}
+	case implementationinventory.ConfigurationValuePointer:
+		element, _ := schema.Element()
+		return publicConstructorConfigNode(element, false, node)
+	case implementationinventory.ConfigurationValueList:
+		element, _ := schema.Element()
+		for _, child := range node.Content {
+			result.Content = append(result.Content, publicConstructorConfigNode(element, false, child))
+		}
+	case implementationinventory.ConfigurationValueMap:
+		element, _ := schema.Element()
+		for index := 0; index < len(node.Content); index += 2 {
+			result.Content = append(result.Content, node.Content[index], publicConstructorConfigNode(element, false, node.Content[index+1]))
+		}
+	}
+	return result
+}
+
+func constructorConfigHasPublicDescendant(schema implementationinventory.ConfigurationValue) bool {
+	for _, field := range schema.Fields() {
+		if field.BuildVisible() || constructorConfigHasPublicDescendant(field.Value()) {
+			return true
+		}
+	}
+	if element, exists := schema.Element(); exists {
+		return constructorConfigHasPublicDescendant(element)
+	}
+	return false
 }
 
 func cloneConstructorConfigDecision(decision constructorConfigDecision) constructorConfigDecision {

@@ -66,7 +66,7 @@ func TestComposeNormalizesEveryCompiledConstructorConfigurationValue(t *testing.
 	Unsigned64 uint64
 	PortableUint uint
 	Float32 float32
-	Float64 float64
+	Float64 float64 `+"`plystra:\"build-visible\"`"+`
 	Delay time.Duration
 	Endpoint url.URL
 	Password configuration.Secret

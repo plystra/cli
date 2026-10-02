@@ -16,6 +16,15 @@ import (
 )
 
 func TestGenerateDetectsConcurrentSecretReferenceChanges(t *testing.T) {
+	testGenerateDetectsConcurrentPrivateValueChanges(t, "password: {env: PRIVATE_FIRST}")
+}
+
+func TestGenerateDetectsConcurrentRuntimeOnlyChanges(t *testing.T) {
+	testGenerateDetectsConcurrentPrivateValueChanges(t, "endpoint: PRIVATE_FIRST")
+}
+
+func testGenerateDetectsConcurrentPrivateValueChanges(t *testing.T, value string) {
+	t.Helper()
 	for _, mode := range []string{"default", "environment", "replacement", "dependency", "inert-dependency"} {
 		t.Run(mode, func(t *testing.T) {
 			const modulePath = "example.com/acme/private-secret-reference"
@@ -25,7 +34,7 @@ func TestGenerateDetectsConcurrentSecretReferenceChanges(t *testing.T) {
 			options := applicationgenerate.Options{Start: root, Environment: goEnvironment(nil)}
 			sourceModule, sourcePath := modulePath, "plystra.yaml"
 			manifestPath := filepath.Join(root, sourcePath)
-			configured := fmt.Sprintf("config: {%s: {password: {env: PRIVATE_FIRST}}}\n", owner)
+			configured := fmt.Sprintf("config: {%s: {%s}}\n", owner, value)
 			first := "interfaces: {use: {configuration.owner/v1: " + owner + "}}\n" + configured
 			switch mode {
 			case "environment":
@@ -65,7 +74,7 @@ func TestGenerateDetectsConcurrentSecretReferenceChanges(t *testing.T) {
 			}
 			_, err := applicationgenerate.Generate(t.Context(), options)
 			if !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
-				t.Fatalf("concurrent Secret reference edit = %v", err)
+				t.Fatalf("concurrent private value edit = %v", err)
 			}
 			assertConcurrentGenerationSource(t, err, sourceModule, sourcePath, "configuration-declaration")
 			if strings.Contains(err.Error(), "PRIVATE_") || string(readAbsoluteFile(t, manifestPath)) != second {

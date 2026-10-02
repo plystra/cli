@@ -47,8 +47,8 @@ type ConfigurationDecision struct {
 // Path returns the canonical schema path represented by the decision.
 func (d ConfigurationDecision) Path() string { return d.path }
 
-// Digest returns the normalized public decision digest. Secret references
-// contribute their declared type, never their resolver kind or target.
+// Digest returns the normalized public decision digest. Runtime-only constructor
+// contents and Secret reference kinds and targets never contribute to this identity.
 func (d ConfigurationDecision) Digest() string { return d.digest }
 
 // Summary returns a bounded redacted type description.
@@ -67,7 +67,7 @@ func (d ConfigurationDecision) DependencyComposable() bool { return d.dependency
 
 // ConfigurationDecisions returns deterministic typed decisions for one parsed
 // configuration layer. Values are represented only by a digest and a bounded
-// summary; Secret values and Secret reference targets are never returned.
+// summary; runtime-only constructor contents and Secret targets are excluded.
 func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]ConfigurationDecision, error) {
 	if schemas == nil {
 		return nil, fmt.Errorf("configuration decision schema lookup is nil")
@@ -151,8 +151,8 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 // configuration document after current-layer validation. YAML presentation,
 // declaration order for schema-defined sets, equivalent typed scalar
 // spellings, and the source filename do not enter the digest. Explicit
-// removals and ordered typed values do. Unvalidated constructor objects in
-// inert exports or excluded documents contribute only their constructor and an
+// removals and build-visible typed projections do. Unvalidated constructor
+// objects in inert exports or excluded documents contribute only their constructor and an
 // opaque object marker. Without typed validation no field, value, or reference
 // target is known to be safe for public identity. This fallback grants no
 // current-project authority and does not replace selected-model validation.

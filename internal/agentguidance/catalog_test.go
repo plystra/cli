@@ -142,6 +142,10 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Private equality still detects conflicting adopted references",
 		"Public provenance never exposes private reference equality",
 		"Generation compares private root, selected-document, and dependency snapshots",
+		"Validated runtime-only constructor values exclude contents from public identity",
+		"A build-visible tag includes the whole value and descendants",
+		"nil/empty differences",
+		"Build-visible edits cause public generation drift",
 		"Resource export syntax is checked even without adoption",
 		"Resource adoption remains unsupported",
 	} {

@@ -904,8 +904,16 @@ conflicts and deduplication, while public provenance groups redacted references
 without exposing their private equality. Current values and tombstones retain
 replacement authority. Private root, selected-document, and dependency snapshots
 remain transaction-local so concurrent edits are detected and preserved.
-Broader runtime-only value privacy, build-visible freezing, defaults, and
-standalone typed runtime loading remain incomplete.
+Validated runtime-only constructor values also exclude contents from public
+identity. A `build-visible` tag includes the complete value and descendants.
+Without that tag, only tagged descendants contribute. Entirely private atomic
+pointers, lists, arrays, and maps hide keys, contents, cardinality, and nil/empty
+differences. Mixed containers retain positions, keys, order, and nullness needed
+to locate public descendants, excluding private siblings. Declared field
+presence, source ownership, and tombstones remain provenance; private equality
+still controls conflicts. Build-visible edits cause public generation drift.
+Frozen build-visible runtime enforcement, defaults, and standalone typed runtime
+loading remain incomplete.
 
 The selected current Project activates that exact module/export identity:
 

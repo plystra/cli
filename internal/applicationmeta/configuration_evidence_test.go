@@ -206,7 +206,7 @@ func TestConfigurationLayerDigestUsesTypedNormalizedDecisions(t *testing.T) {
 	t.Parallel()
 
 	schema := composeSchema(t, `
-	Delay time.Duration
+	Delay time.Duration `+"`plystra:\"build-visible\"`"+`
 	Endpoint string
 	Targets []string
 `)
