@@ -446,6 +446,15 @@ explicit template adoptions remain effective. Generated runtime compatibility
 version 6 uses the same set semantics for its selected current-Project documents;
 source-independent adopted-export runtime baselines remain unfinished.
 
+A `composition.adopt` sequence likewise replaces the complete lower adoption
+set, and `[]` clears it. Omission or `{}` inherits; sparse `add` and `remove`
+entries modify exact module/export identities. Complete and sparse declarations
+have distinct layer identities even when their current members match.
+Inspection and explanation retain excluded lower members beneath the
+`composition.adopt` complete-set boundary and identify its owning document.
+A replacement document never inherits root adoptions. These rules do not yet
+provide source-independent adopted-export runtime composition.
+
 Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `{$remove: true}` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
 
 `plystra generate --config deploy/customer-a.yaml` instead uses that one complete

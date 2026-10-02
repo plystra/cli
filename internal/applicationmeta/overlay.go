@@ -67,6 +67,10 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
 	}
 	exportAdoptions, removedExportAdoptions := overlayExportAdoptions(base, overlay)
+	adoptionMode := base.adoptionMode
+	if adoptionMode == adoptionSetAbsent || overlay.adoptionMode == adoptionSetComplete {
+		adoptionMode = overlay.adoptionMode
+	}
 
 	return Manifest{
 		modulePath:                    projectModule,
@@ -74,7 +78,7 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 		exports:                       append([]ConfigurationExport(nil), base.exports...),
 		exportAdoptions:               exportAdoptions,
 		removedExportAdoptions:        removedExportAdoptions,
-		adoptionMode:                  adoptionSetComplete,
+		adoptionMode:                  adoptionMode,
 		httpAddress:                   httpAddress,
 		hasHTTPAddress:                hasHTTPAddress,
 		removeHTTPAddress:             removeHTTPAddress,

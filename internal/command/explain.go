@@ -695,8 +695,10 @@ func suppressingConfigurationField(evidence resolutionevidence.Evidence, path st
 }
 
 func explainConfigurationPathAncestors(value string) []string {
-	if strings.HasPrefix(value, "interfaces.require[") {
-		return []string{"interfaces.require"}
+	for _, setPath := range []string{"interfaces.require", "composition.adopt"} {
+		if strings.HasPrefix(value, setPath+"[") {
+			return []string{setPath}
+		}
 	}
 	if strings.HasPrefix(value, "config[") {
 		var result []string

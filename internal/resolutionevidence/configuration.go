@@ -233,10 +233,12 @@ func selectConfigurationFields(groups map[string][]configurationCandidate) ([]Co
 			continue
 		}
 		minimumPrecedence := 0
-		if strings.HasPrefix(path, "interfaces.require[") {
-			for _, boundary := range groups["interfaces.require"] {
-				if boundary.summary == string(applicationmeta.ConfigurationSummaryCompleteSet) && boundary.precedence > minimumPrecedence {
-					minimumPrecedence = boundary.precedence
+		for _, setPath := range []string{"interfaces.require", "composition.adopt"} {
+			if strings.HasPrefix(path, setPath+"[") {
+				for _, boundary := range groups[setPath] {
+					if boundary.summary == string(applicationmeta.ConfigurationSummaryCompleteSet) && boundary.precedence > minimumPrecedence {
+						minimumPrecedence = boundary.precedence
+					}
 				}
 			}
 		}
@@ -469,7 +471,7 @@ func safeConfigurationDocumentPath(value string) bool {
 
 func validConfigurationFieldPath(value string) bool {
 	switch value {
-	case "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup", "interfaces.require":
+	case "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup", "interfaces.require", "composition.adopt":
 		return true
 	}
 	if keys, ok := configurationPathKeys(value, "composition.exports"); ok && len(keys) == 1 {

@@ -1232,6 +1232,67 @@ func TestRuntimeInterfaceRequirementCompleteSets(t *testing.T) {
 	}
 }
 
+func TestRuntimeAdoptionCompleteSets(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	const adoption = "{module: example.com/assemblyapp, export: defaults}"
+	const other = "{module: example.com/assemblyapp, export: other}"
+	for _, test := range []struct {
+		name, root, overlay, want string
+	}{
+		{"subset", "["+adoption+", "+other+"]", "["+adoption+"]", "defaults"},
+		{"empty", "["+adoption+"]", "[]", ""},
+		{"sparse empty", "["+adoption+"]", "{}", "defaults"},
+		{"sparse addition", "["+adoption+"]", "{add: ["+other+"]}", "defaults,other"},
+		{"sparse removal", "["+adoption+"]", "{remove: ["+adoption+"]}", ""},
+		{"sparse over empty", "[]", "{add: ["+adoption+"]}", "defaults"},
+		{"complete over removal", "{remove: ["+adoption+"]}", "["+adoption+"]", "defaults"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writeRuntimeDocument(t, "composition: {adopt: "+test.root+"}\nconfig:\n"+bootstrapRemoteConfiguration)
+			writeEnvironmentDocument(t, "adoptions", "composition: {adopt: "+test.overlay+"}\n")
+			options := RuntimeOptions{Arguments: []string{"--env", "adoptions"}}
+			document, err := loadRuntimeDocument(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer clear(document)
+			var effective struct { Composition struct { Adopt []struct { Module, Export string } } }
+			if err := yaml.Unmarshal(document, &effective); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, value := range effective.Composition.Adopt {
+				if value.Module != "example.com/assemblyapp" {
+					t.Fatalf("unexpected adoption module: %s", value.Module)
+				}
+				names = append(names, value.Export)
+			}
+			if got := strings.Join(names, ","); got != test.want {
+				t.Fatalf("adoptions = %q, want %q", got, test.want)
+			}
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), options)
+			if test.want != "" {
+				if application != nil || !errors.Is(err, ErrRuntimeCompatibility) {
+					t.Fatalf("changed adoptions accepted: %#v, %v", application, err)
+				}
+				assertNoBootstrapConstructorCalls(t)
+				return
+			}
+			if err != nil || application == nil {
+				t.Fatalf("New after clearing lower adoptions = %#v, %v", application, err)
+			}
+			if err := application.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := application.Stop(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestRuntimeInterfaceTombstonesAcrossSelections(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	removals := "interfaces:\n  use: {records.read/v1: {$remove: true}, kernel.info/v1: {$remove: true}}\n  policies: {records.read/v1: {$remove: true}}\nhttp: {expose: {kernel.health/v1: {$remove: true}}}\n"

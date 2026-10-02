@@ -488,6 +488,14 @@ func compositionConfigurationDecisions(manifest Manifest, schemas SchemaLookup) 
 	if source == "" {
 		source = "plystra.yaml"
 	}
+	if manifest.adoptionMode == adoptionSetComplete {
+		result = append(result, ConfigurationDecision{
+			path:    "composition.adopt",
+			digest:  digestStrings("composition.adopt", "complete-set"),
+			summary: ConfigurationSummaryCompleteSet,
+			source:  source,
+		})
+	}
 	for _, export := range manifest.exports {
 		digest, err := ConfigurationLayerDigest(export.manifest, schemas)
 		if err != nil {
