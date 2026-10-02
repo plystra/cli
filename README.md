@@ -444,6 +444,16 @@ loading strips whole-entry markers before construction; removing required
 configuration can still fail validation before any constructor runs. Nested
 field removal and nullable typed-value composition remain unfinished.
 
+During typed CLI composition, a supplied non-null pointer field replaces its
+complete lower value, including pointers to structs and multiple pointer layers.
+Omitted pointer fields inherit; an explicit `{}` replaces a pointed-to struct
+with an empty object instead of inheriting its omitted fields. Only non-pointer
+fixed structs compose field by field. Different whole-pointer values from
+adopted exports conflict even when they name disjoint fields; identical values
+deduplicate. Inspection records one redacted atomic value with its contributing
+sources. This does not complete nullable-value handling or standalone typed
+runtime loading.
+
 An `interfaces.require` sequence declares the complete explicit requirement set
 at that layer: `[email.send/v1]` replaces lower requirements and `[]` clears them.
 Omission or `{}` inherits; `{add: [...], remove: [...]}` changes only the listed

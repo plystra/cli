@@ -215,9 +215,8 @@ type constructorConfigNormalizeState struct {
 }
 
 func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbol, segments []string, schema implementationinventory.ConfigurationValue, node *yaml.Node, baseSource string, declarationSource ConfigurationDeclarationSource, state *constructorConfigNormalizeState, depth int) ([]constructorConfigDecision, error) {
-	objectSchema, object := constructorConfigObjectSchema(schema)
-	if object {
-		return normalizeConstructorConfigObject(constructor, segments, schema.TypeIdentity(), objectSchema, node, baseSource, declarationSource, state, depth)
+	if schema.Kind() == implementationinventory.ConfigurationValueObject {
+		return normalizeConstructorConfigObject(constructor, segments, schema.TypeIdentity(), schema, node, baseSource, declarationSource, state, depth)
 	}
 	normalized, err := normalizeConstructorConfigNode(schema, node, state, depth)
 	if err != nil {
@@ -468,18 +467,6 @@ func normalizeConstructorSecretReference(node *yaml.Node) (*yaml.Node, error) {
 		{Kind: yaml.ScalarNode, Tag: "!!str", Value: kind},
 		{Kind: yaml.ScalarNode, Tag: "!!str", Value: target},
 	}}, nil
-}
-
-func constructorConfigObjectSchema(schema implementationinventory.ConfigurationValue) (implementationinventory.ConfigurationValue, bool) {
-	current := schema
-	for current.Kind() == implementationinventory.ConfigurationValuePointer {
-		element, exists := current.Element()
-		if !exists {
-			return implementationinventory.ConfigurationValue{}, false
-		}
-		current = element
-	}
-	return current, current.Kind() == implementationinventory.ConfigurationValueObject
 }
 
 func lookupConstructorConfigField(fields []implementationinventory.ConfigurationField, name string) (implementationinventory.ConfigurationField, bool) {

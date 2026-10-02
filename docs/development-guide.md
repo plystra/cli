@@ -1102,6 +1102,15 @@ markers before construction; removing required configuration can still fail
 validation before any constructor runs. Nested field removal and nullable
 typed-value composition remain unfinished.
 
+A supplied non-null pointer field replaces its complete lower value during typed
+CLI composition, including pointers to structs and multiple pointer layers.
+Omission inherits, while `{}` replaces a pointed-to struct with an empty object
+without inheriting its omitted fields. Non-pointer fixed structs still compose
+field by field. Different whole-pointer values in adopted exports conflict even
+when their supplied fields are disjoint; identical normalized values deduplicate.
+Inspection and explanation retain one redacted atomic value and its sources.
+Nullable-value handling and standalone typed runtime loading remain incomplete.
+
 For `interfaces.require`, a sequence is a complete-set declaration, including
 `[]` to clear lower explicit requirements. The sparse `{add: [...], remove: [...]}`
 form changes only named members; omission and `{}` inherit. Adopted exports

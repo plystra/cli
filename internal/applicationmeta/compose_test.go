@@ -917,6 +917,7 @@ func TestComposeRejectsInvalidConfigurationAndCrossDocumentAliasChains(t *testin
 func FuzzComposeConstructorConfigurationDeterminism(f *testing.F) {
 	schema := composeSchema(f, `
 	Hosts []string
+	Optional *struct { Region string; Zone string }
 	Settings struct {
 		Region string
 		Zone string
@@ -927,6 +928,11 @@ func FuzzComposeConstructorConfigurationDeterminism(f *testing.F) {
 `)
 	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	seeds := [][3]string{
+		{
+			"config: {example.com/acme/smtp.New: {optional: {region: one}}}\n",
+			"config: {example.com/acme/smtp.New: {optional: {zone: two}}}\n",
+			"config: {example.com/acme/smtp.New: {optional: {}}}\n",
+		},
 		{
 			"config: {example.com/acme/smtp.New: {settings: {region: one}, hosts: [a]}}\n",
 			"config: {example.com/acme/smtp.New: {settings: {zone: two}}}\n",
