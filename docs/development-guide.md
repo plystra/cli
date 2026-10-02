@@ -1130,7 +1130,7 @@ field, keyed objects merge by declared field path, set fields use their sparse
 Null, empty values, malformed markers, and markers with siblings are invalid in
 those entries. Exclusions remain current-Project intent even with no lower value,
 so later dependency additions cannot restore them. Generated runtime compatibility
-version 9 uses the same rules; regenerate and rebuild older Projects. CORS
+version 10 uses the same rules; regenerate and rebuild older Projects. CORS
 retains transitional null handling pending its typed composition migration.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
@@ -1186,8 +1186,13 @@ that root excluded. Exposure, required constructor parameters, and intrinsic
 Kernel requirements remain independent. `inspect configuration` and `explain
 config` retain the complete-set boundary and suppressed sources. New
 Projects use `require: {}` to preserve explicit template adoptions. Generated
-runtime compatibility version 9 applies these set rules above adopted exports
+runtime compatibility version 10 applies these set rules above adopted exports
 from the private baseline, retaining current exclusions until composition ends.
+Exact adoption identities remain provenance rather than runtime compatibility
+inputs. Equivalent export swaps and redundant empty adoptions update manifest
+provenance without changing executable generated source or the runtime contract.
+Startup still resolves every selected export and rejects conflicts or changed
+effective build-affecting declarations before Secrets or constructors.
 
 `http.expose` is keyed by exact Interface ID. Each entry requires the supported
 transport explicitly:

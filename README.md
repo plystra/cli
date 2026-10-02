@@ -433,7 +433,7 @@ Exact entries in `interfaces.use`, `interfaces.policies`, and `http.expose`
 are removed only by `{$remove: true}`. Null, empty values, false or string-valued
 markers, and markers with sibling fields are invalid. Exclusions remain authored
 intent even when no lower entry exists and survive later dependency additions.
-Generated runtime compatibility version 9 applies the same rule before
+Generated runtime compatibility version 10 applies the same rule before
 construction; regenerate and rebuild older Projects. CORS retains transitional
 null handling pending its typed composition migration.
 
@@ -487,7 +487,7 @@ This does not remove requirements from exposure, constructor parameters, or
 intrinsic Kernel entries. Inspection retains suppressed sources under the
 `interfaces.require` complete-set boundary. New Projects use `require: {}` so
 explicit template adoptions remain effective. Generated runtime compatibility
-version 9 applies these set semantics above adopted exports reconstructed from
+version 10 applies these set semantics above adopted exports reconstructed from
 the private baseline, preserving complete-set boundaries and sparse removals.
 
 A `composition.adopt` sequence likewise replaces the complete lower adoption
@@ -499,6 +499,11 @@ Inspection and explanation retain excluded lower members beneath the
 A replacement document never inherits root adoptions. Startup resolves dependency
 exports from the private baseline and self-adopted exports from the live root
 inventory in every selector mode.
+Exact adoption identities remain configuration provenance. Switching equivalent
+exports or adding an empty adoption preserves generated executable source and
+runtime compatibility when effective build-affecting declarations stay equal.
+Missing exports, invalid inventories, conflicts, and effective model drift
+still fail before Secrets or constructors.
 
 Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `{$remove: true}` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
 
@@ -607,7 +612,7 @@ metadata on ignored or unexported fields, and invalid defaults hidden by runtime
 overrides. Regenerate and rebuild after correcting the authored Go declaration.
 Adopted exports form one unordered lower layer. Equal declarations deduplicate;
 conflicts require a current-project replacement or removal at the exact path.
-Compatibility version 9 compares effective requirements, selections, and policies
+Compatibility version 10 compares effective requirements, selections, and policies
 including adopted declarations. Regenerate and rebuild older generated output.
 
 Every generated-binary invocation requires `--configuration-root <directory>`

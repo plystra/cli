@@ -198,10 +198,6 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	adoptions, err := runtimeApplicationModelAdoptions(values["composition"])
-	if err != nil {
-		return "", err
-	}
 	cors, exposures, err := runtimeApplicationModelHTTP(values["http"])
 	if err != nil {
 		return "", err
@@ -213,14 +209,13 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	canonical, err := json.Marshal(map[string]any{
 		"application_model_digest": compiledApplicationModelDigest,
 		"projection": map[string]any{
-			"export_adoptions":       adoptions,
 			"http_cors":              cors,
 			"http_exposures":         exposures,
 			"implementation_choices": implementations,
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 9,
+		"version": 10,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")

@@ -116,7 +116,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	configuration := byPath[Root+"/tasks/configuration-and-secrets.md"]
 	for _, phrase := range []string{
 		"Remove exact interfaces.use, interfaces.policies, and http.expose entries only with {$remove: true}",
-		"runtime compatibility version 9",
+		"runtime compatibility version 10",
 		"Remove a whole config.<constructor-symbol> entry only with {$remove: true}",
 		"{} remains configuration, not removal",
 		"remove a declared field inside a non-pointer fixed struct with {$remove: true}",
@@ -140,6 +140,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"A composition.adopt sequence replaces the complete lower adoption set; [] clears it",
 		"Complete and sparse declarations have distinct layer identities",
 		"A replacement document never inherits root adoptions",
+		"Exact adoption identities remain provenance rather than runtime compatibility inputs",
 		"cannot contain the reserved one-entry $remove mapping",
 		"nested configuration, collections, or an unadopted Resource fragment",
 		"adopted values still require compiled-type validation",

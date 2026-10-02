@@ -70,8 +70,7 @@ http:
 	canonical := string(left.CanonicalJSON())
 	for _, required := range []string{
 		`"application_model_digest":"` + digest + `"`,
-		`"version":9`,
-		`"export_adoptions":[{"export":"runtime","module":"example.com/alpha"},{"export":"defaults","module":"example.com/zeta"}]`,
+		`"version":10`,
 		`"http_exposures":[{"interface":"records.read/v1","transport":"connect"}]`,
 		`"interface_requirements":["records.read/v1"]`,
 		`"interface":"records.read/v1"`,
@@ -95,6 +94,9 @@ http:
 		`"config"`,
 		`"secret"`,
 		`"http_transports"`,
+		`"export_adoptions"`,
+		"example.com/alpha",
+		"example.com/zeta",
 	} {
 		if strings.Contains(canonical, forbidden) {
 			t.Fatalf("canonical projection contains runtime-only or secret-bearing input %q: %s", forbidden, canonical)
@@ -119,7 +121,6 @@ func TestApplicationModelCompatibilityChangesForEveryBuildAffectingDeclaration(t
 		yaml string
 	}{
 		{name: "CORS", yaml: "http: {cors: {allowed_origins: [https://app.example]}}\n"},
-		{name: "export adoption", yaml: "composition: {adopt: [{module: example.com/platform, export: defaults}]}\n"},
 		{name: "exposure", yaml: "http: {expose: {kernel.health/v1: {transport: connect}}}\n"},
 		{name: "Interface requirement", yaml: "interfaces: {require: [records.read/v1]}\n"},
 		{name: "Implementation choice", yaml: "interfaces: {use: {records.read/v1: example.com/acme/records.New}}\n"},
@@ -172,6 +173,22 @@ func TestApplicationModelCompatibilityRejectsInvalidCompiledDigest(t *testing.T)
 		compatibility, err := bootstrapgen.NewApplicationModelCompatibility(digest, applicationmeta.Manifest{})
 		if compatibility.Valid() || !errors.Is(err, bootstrapgen.ErrInvalidApplicationModelCompatibility) {
 			t.Fatalf("NewApplicationModelCompatibility(%q) = %#v, %v", digest, compatibility, err)
+		}
+	}
+}
+
+func TestExecutableCompatibilityExcludesEquivalentAdoptionIdentity(t *testing.T) {
+	const effective = "interfaces: {require: [records.read/v1], use: {records.read/v1: example.com/acme/records.New}, policies: {records.read/v1: {timeout: 5s}}}\n"
+	var expected []byte
+	for _, adoption := range []string{"", "composition: {adopt: [{module: example.com/first, export: defaults}]}\n", "composition: {adopt: [{module: example.com/second, export: equivalent}]}\n"} {
+		projection, err := bootstrapgen.NewExecutableApplicationModelCompatibility(bootstrapDigest("e"), compatibilityManifest(t, adoption+effective), []string{"records.read/v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if expected == nil {
+			expected = projection.CanonicalJSON()
+		} else if !bytes.Equal(expected, projection.CanonicalJSON()) {
+			t.Fatal("equivalent effective declarations changed compatibility through adoption identity")
 		}
 	}
 }

@@ -203,6 +203,13 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 			}
 		}},
 		{name: "adoption order", root: "composition: {adopt: [{module: " + dependency + ", export: second}, {module: " + dependency + ", export: first}]}\n"},
+		{name: "redundant empty adoption", root: strings.Replace(adopt, "}]}", "}, {module: "+dependency+", export: unused}]}", 1), edit: func(d *runtimebaseline.Document) {
+			change(d, "{}", "unused")
+		}},
+		{name: "equivalent export swap", root: strings.Replace(adopt, "export: second", "export: equivalent", 1), edit: func(d *runtimebaseline.Document) {
+			change(d, "interfaces: {require: [probe.run/v1], use: {probe.run/v1: "+symbol+"}, policies: {probe.run/v1: {timeout: 1s}}}\nconfig: {"+symbol+": {second: private-second, nested: {count: 5}, password: {env: PRIVATE_ADOPTED_SECRET}}}", "equivalent")
+		}},
+		{name: "local values replace adoption", root: strings.Replace(adopt, ", {module: "+dependency+", export: second}", "", 1) + config("{second: private-second, nested: {count: 5}, password: {env: PRIVATE_ADOPTED_SECRET}}")},
 		{name: "sparse requirement removal", root: adopt + "interfaces: {require: {add: [unused.intent/v1], remove: []}}\n", overlay: "interfaces: {require: {remove: [unused.intent/v1]}}\n"},
 		{name: "complete requirement suppression", root: adopt + "interfaces: {require: [probe.run/v1]}\n", edit: func(d *runtimebaseline.Document) {
 			change(d, "[probe.run/v1, unused.intent/v1]", "first", "interfaces", "require")

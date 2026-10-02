@@ -34,12 +34,12 @@ import (
 )
 
 const (
-	compiledRuntimeContract = "sha256:ccf11d65559992dc4674f276a9fbc507f48bebf4402fe3a870883fe62a16e5b8"
+	compiledRuntimeContract = "sha256:b68a53d3163f3919181080e4cbbc8b81fd8b19428a65707756395d1ff06438ab"
 	defaultRuntimeDocument  = "plystra.yaml"
 	defaultStartupTimeout   = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":9}"
-	compiledApplicationModelCompatibilityDigest = "sha256:606968166fb3746670e48481c0d07c88312619b42c07c44c884bf5eed014bec8"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":10}"
+	compiledApplicationModelCompatibilityDigest = "sha256:679bb8b341bdadd3f2252a383495d8328ed96258c6bbadffd185e6fc7385bb66"
 	compiledApplicationModelDigest              = "sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4"
 )
 
@@ -433,10 +433,6 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	adoptions, err := runtimeApplicationModelAdoptions(values["composition"])
-	if err != nil {
-		return "", err
-	}
 	cors, exposures, err := runtimeApplicationModelHTTP(values["http"])
 	if err != nil {
 		return "", err
@@ -448,14 +444,13 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	canonical, err := json.Marshal(map[string]any{
 		"application_model_digest": compiledApplicationModelDigest,
 		"projection": map[string]any{
-			"export_adoptions":       adoptions,
 			"http_cors":              cors,
 			"http_exposures":         exposures,
 			"implementation_choices": implementations,
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 9,
+		"version": 10,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")

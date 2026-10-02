@@ -15,7 +15,7 @@ import (
 	"github.com/plystra/cli/internal/invocationpolicy"
 )
 
-const applicationModelCompatibilityVersion = 9
+const applicationModelCompatibilityVersion = 10
 
 // ErrInvalidApplicationModelCompatibility reports a compatibility projection
 // that cannot be tied to one complete generated application model.
@@ -41,15 +41,9 @@ type applicationModelCompatibilityDocument struct {
 type applicationModelCompatibilityProjection struct {
 	HTTPCORS              *applicationModelCompatibilityHTTPCORS        `json:"http_cors"`
 	HTTPExposures         []applicationModelCompatibilityExposure       `json:"http_exposures"`
-	ExportAdoptions       []applicationModelCompatibilityAdoption       `json:"export_adoptions"`
 	InterfaceRequirements []string                                      `json:"interface_requirements"`
 	ImplementationChoices []applicationModelCompatibilityImplementation `json:"implementation_choices"`
 	InterfacePolicies     []applicationModelCompatibilityPolicy         `json:"interface_policies"`
-}
-
-type applicationModelCompatibilityAdoption struct {
-	Module string `json:"module"`
-	Export string `json:"export"`
 }
 
 type applicationModelCompatibilityExposure struct {
@@ -75,7 +69,8 @@ type applicationModelCompatibilityPolicy struct {
 
 // NewApplicationModelCompatibility projects one final typed application
 // manifest without process settings, ordinary Plugin configuration, Secret
-// references, source paths, or resolved Secret values.
+// references, adoption identities, source paths, or resolved Secret values.
+// Adopted exports must already be composed into the supplied manifest.
 func NewApplicationModelCompatibility(applicationModelDigest string, manifest applicationmeta.Manifest) (ApplicationModelCompatibility, error) {
 	return newApplicationModelCompatibility(applicationModelDigest, manifest, nil, false)
 }
@@ -105,7 +100,6 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 	}
 	projection := applicationModelCompatibilityProjection{
 		HTTPExposures:         make([]applicationModelCompatibilityExposure, 0),
-		ExportAdoptions:       make([]applicationModelCompatibilityAdoption, 0),
 		InterfaceRequirements: make([]string, 0),
 		ImplementationChoices: make([]applicationModelCompatibilityImplementation, 0),
 		InterfacePolicies:     make([]applicationModelCompatibilityPolicy, 0),
@@ -123,11 +117,6 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 	for _, exposure := range manifest.HTTPExposures() {
 		projection.HTTPExposures = append(projection.HTTPExposures, applicationModelCompatibilityExposure{
 			Interface: exposure.ID().String(), Transport: string(exposure.Transport()),
-		})
-	}
-	for _, adoption := range manifest.ExportAdoptions() {
-		projection.ExportAdoptions = append(projection.ExportAdoptions, applicationModelCompatibilityAdoption{
-			Module: adoption.ModulePath(), Export: adoption.ExportName(),
 		})
 	}
 	for _, requirement := range manifest.InterfaceRequirements() {
@@ -158,12 +147,6 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 	}
 	sort.Slice(projection.HTTPExposures, func(left, right int) bool {
 		return projection.HTTPExposures[left].Interface < projection.HTTPExposures[right].Interface
-	})
-	sort.Slice(projection.ExportAdoptions, func(left, right int) bool {
-		if projection.ExportAdoptions[left].Module != projection.ExportAdoptions[right].Module {
-			return projection.ExportAdoptions[left].Module < projection.ExportAdoptions[right].Module
-		}
-		return projection.ExportAdoptions[left].Export < projection.ExportAdoptions[right].Export
 	})
 	sort.Strings(projection.InterfaceRequirements)
 	sort.Slice(projection.ImplementationChoices, func(left, right int) bool {
@@ -243,13 +226,6 @@ func applicationModelCompatibilityDigest(canonical []byte) string {
 }
 
 func encodeApplicationModelCompatibility(document applicationModelCompatibilityDocument) ([]byte, error) {
-	adoptions := make([]map[string]any, len(document.Projection.ExportAdoptions))
-	for index, adoption := range document.Projection.ExportAdoptions {
-		adoptions[index] = map[string]any{
-			"export": adoption.Export,
-			"module": adoption.Module,
-		}
-	}
 	implementations := make([]map[string]any, len(document.Projection.ImplementationChoices))
 	for index, implementation := range document.Projection.ImplementationChoices {
 		implementations[index] = map[string]any{
@@ -279,7 +255,6 @@ func encodeApplicationModelCompatibility(document applicationModelCompatibilityD
 	return json.Marshal(map[string]any{
 		"application_model_digest": document.ApplicationModelDigest,
 		"projection": map[string]any{
-			"export_adoptions":       adoptions,
 			"http_cors":              cors,
 			"http_exposures":         document.Projection.HTTPExposures,
 			"implementation_choices": implementations,
