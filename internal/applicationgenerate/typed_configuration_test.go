@@ -325,11 +325,13 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response,error) {retu
 	})
 }
 
-func TestGeneratedBootstrapRejectsAdoptedTypedConfigurationUntilBaselineAvailable(t *testing.T) {
+func TestGeneratedBootstrapLoadsSelfAdoptedTypedConfiguration(t *testing.T) {
 	root := t.TempDir()
 	const module = "example.com/adopted-runtime-config"
 	writeApplicationModule(t, root, module)
 	owner := writeConstructorConfigurationOwner(t, root, module, false)
+	implementation := filepath.Join(root, "configowner/implementation.go")
+	writeFile(t, implementation, strings.Replace(string(readAbsoluteFile(t, implementation)), "//plystra:implements configuration.owner/v1\nfunc New(Config) (*Service, error) { return &Service{}, nil }", "var Last Config\n//plystra:implements configuration.owner/v1\nfunc New(c Config) (*Service, error) { Last = c; return &Service{}, nil }", 1))
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [configuration.owner/v1]}\ncomposition:\n  exports:\n    common:\n      config:\n        "+owner+": {label: private-adopted-value}\n  adopt: [{module: "+module+", export: common}]\n")
 	var stdout, stderr bytes.Buffer
 	if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
@@ -338,11 +340,52 @@ func TestGeneratedBootstrapRejectsAdoptedTypedConfigurationUntilBaselineAvailabl
 	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 	process.Dir, process.Env = root, goEnvironment(nil)
 	output, err := process.CombinedOutput()
-	if err == nil || !bytes.Contains(output, []byte("requires private runtime-baseline support")) {
+	if err != nil {
 		t.Fatalf("adopted startup = %v\n%s", err, output)
 	}
 	if bytes.Contains(output, []byte("private-adopted-value")) {
 		t.Fatal("error leaked adopted value")
+	}
+	writeFile(t, filepath.Join(root, "adoption_test.go"), `package application_test
+import (
+ "context"
+ "os"
+ "path/filepath"
+ "testing"
+ "example.com/adopted-runtime-config/configowner"
+ "example.com/adopted-runtime-config/generated/go/bootstrap"
+)
+func TestSelfAdoption(t *testing.T) {
+ baseline,err:=filepath.Abs("dist/runtime-baseline.json");if err!=nil{t.Fatal(err)}
+ const exports="composition:\n  exports:\n    common:\n      interfaces: {require: [configuration.owner/v1]}\n      config:\n        example.com/adopted-runtime-config/configowner.New: {label: private-live-root-export}\n"
+ const adoption="  adopt: [{module: example.com/adopted-runtime-config, export: common}]\n"
+ for _,mode:=range []string{"default","environment","replacement"} {
+  t.Run(mode,func(t *testing.T){
+   root:=t.TempDir()
+   document:=exports+adoption
+   args:=[]string{"--configuration-root",root,"--runtime-baseline",baseline}
+   if mode=="environment" {
+    if err:=os.WriteFile(filepath.Join(root,"plystra.test.yaml"),[]byte("composition:\n"+adoption),0600);err!=nil{t.Fatal(err)}
+    args=append(args,"--env","test")
+   }
+   if mode=="replacement" {
+    document=exports+"interfaces: {require: [missing.inert/v1]}\nconfig: {example.com/adopted-runtime-config/configowner.New: {label: wrong}}\n"
+    if err:=os.WriteFile(filepath.Join(root,"selected.yaml"),[]byte("composition:\n"+adoption),0600);err!=nil{t.Fatal(err)}
+    args=append(args,"--config","selected.yaml")
+   }
+   if err:=os.WriteFile(filepath.Join(root,"plystra.yaml"),[]byte(document),0600);err!=nil{t.Fatal(err)}
+   app,err:=bootstrap.New(context.Background(),bootstrap.RuntimeOptions{Arguments:args,Environment:[]string{}})
+   if err!=nil{t.Fatal(err)}
+   if configowner.Last.Label!="private-live-root-export"{t.Fatal("self-adoption did not read the live root inventory")}
+   if err:=app.Stop(context.Background());err!=nil{t.Fatal(err)}
+  })
+ }
+}
+`)
+	process = exec.CommandContext(t.Context(), "go", "test", "-race", "-mod=readonly", ".")
+	process.Dir, process.Env = root, goEnvironment(nil)
+	if output, err := process.CombinedOutput(); err != nil {
+		t.Fatalf("self-adoption runtime: %v\n%s", err, output)
 	}
 }
 

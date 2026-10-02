@@ -5,8 +5,14 @@ import (
 	"sort"
 
 	"github.com/plystra/cli/internal/constructorconfig"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/runtimebaseline"
 )
+
+type baselineModule struct {
+	Module  string `json:"module"`
+	Version string `json:"version"`
+}
 
 // RuntimeBaseline produces private build output from the same inputs as bootstrap.
 func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
@@ -33,19 +39,27 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 		constructors = append(constructors, constructor{input.Symbol, schema, digest})
 	}
 	sort.Slice(constructors, func(i, j int) bool { return constructors[i].Symbol < constructors[j].Symbol })
+	exports := append([]runtimebaseline.Export{}, options.DependencyExports...)
+	sort.Slice(exports, func(i, j int) bool { return exports[i].Module < exports[j].Module })
+	modules := make([]baselineModule, len(exports))
+	for i, export := range exports {
+		if _, err := constructorsymbol.Parse(export.Module + ".New"); err != nil || export.Module == options.ModulePath || i > 0 && exports[i-1].Module == export.Module {
+			return runtimebaseline.Document{}, ErrInvalidOptions
+		}
+		modules[i] = baselineModule{export.Module, export.Version}
+	}
 	contract, err := json.Marshal(struct {
-		Schema               string          `json:"baseline_schema"`
-		Module               string          `json:"module"`
-		ApplicationModel     string          `json:"application_model"`
-		Compatibility        json.RawMessage `json:"compatibility"`
-		Constructors         []constructor   `json:"constructors"`
-		RuntimeProcessFields []string        `json:"runtime_process_fields"`
-	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, []string{"http.address", "timeouts.startup"}})
+		Schema               string           `json:"baseline_schema"`
+		Module               string           `json:"module"`
+		ApplicationModel     string           `json:"application_model"`
+		Compatibility        json.RawMessage  `json:"compatibility"`
+		Constructors         []constructor    `json:"constructors"`
+		DependencyModules    []baselineModule `json:"dependency_modules"`
+		RuntimeProcessFields []string         `json:"runtime_process_fields"`
+	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, modules, []string{"http.address", "timeouts.startup"}})
 	if err != nil {
 		return runtimebaseline.Document{}, ErrInvalidOptions
 	}
-	exports := append([]runtimebaseline.Export{}, options.DependencyExports...)
-	sort.Slice(exports, func(i, j int) bool { return exports[i].Module < exports[j].Module })
 	return runtimebaseline.Document{Schema: runtimebaseline.Schema, ContractID: runtimebaseline.ContractID(contract), Contract: contract, Defaults: defaults, Exports: exports}, nil
 }
 

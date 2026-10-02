@@ -145,9 +145,6 @@ func prepareRuntimeConstructorConfiguration(document []byte) (*runtimePreparedCo
 	if err != nil { return nil, err }
 	fields, err := runtimeMapping(root, "configuration", nil)
 	if err != nil { return nil, err }
-	if len(bindings) != 0 && fields["composition"] != nil {
-		return nil, fmt.Errorf("%w: adopted constructor configuration requires private runtime-baseline support", ErrRuntimeConfiguration)
-	}
 	objects, err := runtimeOptionalMapping(fields["config"], "config", nil)
 	if err != nil { return nil, err }
 	for i := range bindings {

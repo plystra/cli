@@ -1607,7 +1607,8 @@ interfaces:
 		}
 	}
 
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "root: [intentionally-invalid\n")
+	const inertRoot = "interfaces: {require: PRIVATE_INERT_REQUIREMENTS}\nhttp: PRIVATE_INERT_PROCESS\nconfig: PRIVATE_INERT_CONFIGURATION\ncomposition: {exports: {}}\n"
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), inertRoot)
 	runtimeOutsidePath := filepath.Join(root, "runtime-outside.yaml")
 	writeCommandFile(t, runtimeOutsidePath, "{}\n")
 	runtimeCases := []struct {
@@ -1687,6 +1688,13 @@ interfaces:
 			t.Fatalf("remove runtime configuration path alias: %v", err)
 		}
 	}
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: [PRIVATE_INVALID_YAML\n")
+	invalidRoot := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "deploy/customer.yaml")
+	invalidRoot.Dir, invalidRoot.Env = applicationRoot, environment
+	if output, err := invalidRoot.CombinedOutput(); err == nil || !bytes.Contains(output, []byte("decode plystra.yaml YAML")) || bytes.Contains(output, []byte("PRIVATE_INVALID_YAML")) {
+		t.Fatalf("replacement did not reject malformed root export inventory: %v\n%s", err, output)
+	}
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), inertRoot)
 	changedSelected := bytes.Replace(selected, []byte("expose: {kernel.info/v1: {transport: connect}}"), []byte("expose: {kernel.health/v1: {transport: connect}}"), 1)
 	if bytes.Equal(changedSelected, selected) {
 		t.Fatal("test replacement did not contain the compiled exposure declaration")

@@ -34,12 +34,12 @@ import (
 )
 
 const (
-	compiledRuntimeContract = "sha256:bb0912eb3785cdef0669553f889a4ac10d85467ba21a3c8015d9a156a9c23264"
+	compiledRuntimeContract = "sha256:ccf11d65559992dc4674f276a9fbc507f48bebf4402fe3a870883fe62a16e5b8"
 	defaultRuntimeDocument  = "plystra.yaml"
 	defaultStartupTimeout   = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":8}"
-	compiledApplicationModelCompatibilityDigest = "sha256:c7fb1d66f981056a97aa3e9487b84a7e5f34ee5472a755d5ac0bde0a852d54da"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":9}"
+	compiledApplicationModelCompatibilityDigest = "sha256:606968166fb3746670e48481c0d07c88312619b42c07c44c884bf5eed014bec8"
 	compiledApplicationModelDigest              = "sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4"
 )
 
@@ -455,7 +455,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 8,
+		"version": 9,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -687,7 +687,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 	defer clear(root)
 	switch selection.mode {
 	case runtimeSelectionDefault:
-		document, err := normalizeRuntimeDocument(root, defaultRuntimeDocument)
+		document, err := composeRuntimeAdoptedDocument(baseline, root, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: default %s: %v", ErrRuntimeConfiguration, defaultRuntimeDocument, err)
 		}
@@ -698,7 +698,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, selection.environment, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(overlay)
-		document, err := composeRuntimeDocuments(root, overlay)
+		document, err := composeRuntimeAdoptedDocument(baseline, root, nil, overlay)
 		if err != nil {
 			return nil, fmt.Errorf("%w: apply environment %q from %s: %v", ErrRuntimeConfiguration, selection.environment, filepath.ToSlash(selection.path), err)
 		}
@@ -709,7 +709,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: load full-replacement configuration %s: %w", ErrRuntimeSelector, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(selected)
-		document, err := normalizeRuntimeDocument(selected, filepath.ToSlash(selection.path))
+		document, err := composeRuntimeAdoptedDocument(baseline, root, selected, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: full-replacement configuration %s: %v", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
 		}
@@ -990,37 +990,6 @@ func loadRuntimeConfigurationFile(root *os.Root, path string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentChanged)
 	}
 	return data, nil
-}
-
-func composeRuntimeDocuments(rootData, overlayData []byte) ([]byte, error) {
-	root, err := decodeRuntimeDocument(rootData, defaultRuntimeDocument)
-	if err != nil {
-		return nil, err
-	}
-	var overlay *yaml.Node
-	if overlayData != nil {
-		overlay, err = decodeRuntimeDocument(overlayData, "environment overlay")
-		if err != nil {
-			return nil, err
-		}
-	}
-	merged, err := mergeRuntimeDocument(root, overlay)
-	if err != nil {
-		return nil, err
-	}
-	return encodeRuntimeDocument(merged)
-}
-
-func normalizeRuntimeDocument(data []byte, source string) ([]byte, error) {
-	root, err := decodeRuntimeDocument(data, source)
-	if err != nil {
-		return nil, err
-	}
-	normalized, err := mergeRuntimeDocument(root, nil)
-	if err != nil {
-		return nil, err
-	}
-	return encodeRuntimeDocument(normalized)
 }
 
 func encodeRuntimeDocument(document *yaml.Node) ([]byte, error) {
@@ -2235,6 +2204,414 @@ func runtimeConfigurationError(format string, arguments ...any) error {
 	return fmt.Errorf("%w: %s", ErrRuntimeConfiguration, fmt.Sprintf(format, arguments...))
 }
 
+// Resolve adoptions before normalizing current intent: normalization would
+// otherwise discard exclusions needed to suppress lower exports.
+func composeRuntimeAdoptedDocument(baseline runtimebaseline.Document, rootData, selectedData, overlayData []byte) ([]byte, error) {
+	root, err := decodeRuntimeDocument(rootData, defaultRuntimeDocument)
+	if err != nil {
+		return nil, err
+	}
+	current := root
+	if selectedData != nil {
+		current, err = decodeRuntimeDocument(selectedData, "replacement configuration")
+		if err != nil {
+			return nil, err
+		}
+	}
+	var overlay *yaml.Node
+	if overlayData != nil {
+		overlay, err = decodeRuntimeDocument(overlayData, "environment overlay")
+		if err != nil {
+			return nil, err
+		}
+	}
+	allowed := runtimeKeySet("composition", "http", "timeouts", "interfaces", "config")
+	lower, err := runtimeMapping(current, "configuration", allowed)
+	if err != nil {
+		return nil, err
+	}
+	upper, err := runtimeOptionalMapping(overlay, "environment overlay", allowed)
+	if err != nil {
+		return nil, err
+	}
+	if selectedData != nil {
+		if _, err := runtimeOptionalMapping(lower["composition"], "composition", runtimeKeySet("adopt")); err != nil {
+			return nil, err
+		}
+	}
+	composition, _, err := mergeRuntimeComposition(lower["composition"], upper["composition"])
+	if err != nil {
+		return nil, err
+	}
+	adoptions, err := runtimeApplicationModelAdoptions(composition)
+	if err != nil {
+		return nil, err
+	}
+	inventories, err := runtimeExportInventories(baseline, root)
+	if err != nil {
+		return nil, err
+	}
+	peers := make([]map[string]*yaml.Node, 0, len(adoptions))
+	sources := make([]string, 0, len(adoptions))
+	for _, adoption := range adoptions {
+		module, name := adoption["module"].(string), adoption["export"].(string)
+		exports, exists := inventories[module]
+		if !exists {
+			return nil, runtimeConfigurationError("adoption %s#%s refers to a module outside the runtime baseline", module, name)
+		}
+		export, exists := exports[name]
+		if !exists {
+			return nil, runtimeConfigurationError("adoption %s#%s has no export in the runtime inventory", module, name)
+		}
+		fields, err := runtimeMapping(export, "adopted export", runtimeKeySet("interfaces", "config"))
+		if err != nil {
+			return nil, runtimeConfigurationError("adoption %s#%s contains unsupported declarations", module, name)
+		}
+		if err := validateRuntimeExport(fields); err != nil {
+			return nil, fmt.Errorf("%w: adoption %s#%s", err, module, name)
+		}
+		peers = append(peers, fields)
+		sources = append(sources, module+":plystra.yaml:composition.exports["+strconv.Quote(name)+"]")
+	}
+	interfaces, err := composeRuntimeExportInterfaces(peers, lower["interfaces"], upper["interfaces"])
+	if err != nil {
+		return nil, runtimeAdoptionError(err, sources)
+	}
+	configuration, err := composeRuntimeExportConfigurations(peers, lower["config"], upper["config"])
+	if err != nil {
+		return nil, runtimeAdoptionError(err, sources)
+	}
+	// The remaining fields are owned exclusively by the current Project.
+	delete(lower, "interfaces")
+	delete(upper, "interfaces")
+	delete(lower, "config")
+	delete(upper, "config")
+	result, err := mergeRuntimeDocument(runtimeMappingNode(lower), runtimeMappingNode(upper))
+	if err != nil {
+		return nil, err
+	}
+	fields, err := runtimeMapping(result, "effective configuration", nil)
+	if err != nil {
+		return nil, err
+	}
+	fields["interfaces"], fields["config"] = interfaces, configuration
+	return encodeRuntimeDocument(runtimeMappingNode(fields))
+}
+
+func runtimeAdoptionError(err error, sources []string) error {
+	if len(sources) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w; selected exports: %s", err, strings.Join(sources, ", "))
+}
+
+func runtimeExportInventories(baseline runtimebaseline.Document, root *yaml.Node) (map[string]map[string]*yaml.Node, error) {
+	var contract struct {
+		Module       string
+		Dependencies []struct {
+			Module  string
+			Version string
+		} `json:"dependency_modules"`
+	}
+	if json.Unmarshal(baseline.Contract, &contract) != nil || len(contract.Dependencies) != len(baseline.Exports) {
+		return nil, runtimebaseline.ErrBaseline
+	}
+	local, err := runtimeExportInventory(root, false)
+	if err != nil {
+		return nil, err
+	}
+	inventories := map[string]map[string]*yaml.Node{contract.Module: local}
+	for i, dependency := range baseline.Exports {
+		expected := contract.Dependencies[i]
+		if dependency.Module != expected.Module || dependency.Version != expected.Version {
+			return nil, runtimebaseline.ErrBaseline
+		}
+		if _, exists := inventories[dependency.Module]; exists {
+			return nil, runtimebaseline.ErrBaseline
+		}
+		document, err := decodeRuntimeDocument([]byte(dependency.YAML), "private dependency export inventory")
+		if err != nil {
+			return nil, runtimebaseline.ErrBaseline
+		}
+		exports, err := runtimeExportInventory(document, true)
+		if err != nil {
+			return nil, runtimebaseline.ErrBaseline
+		}
+		inventories[dependency.Module] = exports
+	}
+	return inventories, nil
+}
+
+func runtimeExportInventory(root *yaml.Node, dependency bool) (map[string]*yaml.Node, error) {
+	allowed := runtimeKeySet("composition", "http", "timeouts", "interfaces", "config", "resources", "data", "capabilities")
+	if dependency {
+		allowed = runtimeKeySet("composition")
+	}
+	fields, err := runtimeMapping(root, "export inventory", allowed)
+	if err != nil {
+		return nil, err
+	}
+	allowed = runtimeKeySet("adopt", "exports")
+	if dependency {
+		allowed = runtimeKeySet("exports")
+	}
+	composition, err := runtimeOptionalMapping(fields["composition"], "composition", allowed)
+	if err != nil {
+		return nil, err
+	}
+	exports, err := runtimeOptionalMapping(composition["exports"], "composition.exports", nil)
+	if err != nil {
+		return nil, err
+	}
+	for name, export := range exports {
+		if !validRuntimeExportName(name) {
+			return nil, runtimeConfigurationError("invalid export name in inventory")
+		}
+		fields, err := runtimeMapping(export, "export", runtimeKeySet("interfaces", "config", "resources"))
+		if err != nil {
+			return nil, runtimeConfigurationError("export %s contains unsupported declarations", name)
+		}
+		if err := validateRuntimeExport(fields); err != nil {
+			return nil, runtimeConfigurationError("export %s has invalid declarations or reserved removal mappings", name)
+		}
+	}
+	return exports, nil
+}
+
+func validateRuntimeExport(fields map[string]*yaml.Node) error {
+	interfaces, err := runtimeOptionalMapping(fields["interfaces"], "adopted interfaces", runtimeKeySet("require", "use", "policies"))
+	if err != nil {
+		return err
+	}
+	if _, err := runtimeInterfaceSequence(interfaces["require"], "adopted interfaces.require"); err != nil {
+		return err
+	}
+	if _, _, err := mergeRuntimeImplementationChoices(interfaces["use"], nil); err != nil {
+		return err
+	}
+	if _, _, err := mergeRuntimeInterfacePolicies(interfaces["policies"], nil); err != nil {
+		return err
+	}
+	// Exports have no lower layer. Reserved removals remain invalid inside
+	// dormant or suppressed objects as well as active typed values.
+	for _, node := range []*yaml.Node{interfaces["use"], interfaces["policies"], fields["config"]} {
+		values, err := runtimeOptionalMapping(node, "adopted declarations", nil)
+		if err != nil {
+			return err
+		}
+		stack := make([]*yaml.Node, 0, len(values))
+		for _, value := range values {
+			stack = append(stack, value)
+		}
+		for len(stack) > 0 {
+			value := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if value.Kind == yaml.MappingNode && len(value.Content) == 2 && value.Content[0].Value == "$remove" {
+				return runtimeConfigurationError("adopted exports cannot contain reserved removal mappings")
+			}
+			stack = append(stack, value.Content...)
+		}
+	}
+	objects, err := runtimeOptionalMapping(fields["config"], "adopted config", nil)
+	if err != nil {
+		return err
+	}
+	for symbol, node := range objects {
+		if !validRuntimeConstructorSymbol(symbol) {
+			return runtimeConfigurationError("adopted config contains an invalid constructor symbol")
+		}
+		if _, err := runtimeMapping(node, "adopted config", nil); err != nil {
+			return runtimeConfigurationError("adopted config contains an invalid object")
+		}
+	}
+	return nil
+}
+
+func composeRuntimeExportInterfaces(peers []map[string]*yaml.Node, lowerNode, upperNode *yaml.Node) (*yaml.Node, error) {
+	allowed := runtimeKeySet("require", "use", "policies")
+	lower, err := runtimeOptionalMapping(lowerNode, "interfaces", allowed)
+	if err != nil {
+		return nil, err
+	}
+	upper, err := runtimeOptionalMapping(upperNode, "interfaces", allowed)
+	if err != nil {
+		return nil, err
+	}
+	requirements := make(map[string]struct{})
+	var inheritedUse, inheritedPolicies []*yaml.Node
+	for _, peer := range peers {
+		fields, err := runtimeOptionalMapping(peer["interfaces"], "adopted interfaces", allowed)
+		if err != nil {
+			return nil, err
+		}
+		values, err := runtimeInterfaceSequence(fields["require"], "adopted interfaces.require")
+		if err != nil {
+			return nil, err
+		}
+		for id := range values {
+			requirements[id] = struct{}{}
+		}
+		inheritedUse = append(inheritedUse, fields["use"])
+		inheritedPolicies = append(inheritedPolicies, fields["policies"])
+	}
+	for _, node := range []*yaml.Node{lower["require"], upper["require"]} {
+		if err := applyRuntimeInterfaceSet(requirements, node, "interfaces.require"); err != nil {
+			return nil, err
+		}
+	}
+	ids := make([]string, 0, len(requirements))
+	for id := range requirements {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	uses, err := composeRuntimeExportEntries("interfaces.use", inheritedUse, lower["use"], upper["use"], mergeRuntimeImplementationChoices)
+	if err != nil {
+		return nil, err
+	}
+	policies, err := composeRuntimeExportEntries("interfaces.policies", inheritedPolicies, lower["policies"], upper["policies"], mergeRuntimeInterfacePolicies)
+	if err != nil {
+		return nil, err
+	}
+	return runtimeMappingNode(map[string]*yaml.Node{"require": runtimeStringSequence(ids), "use": uses, "policies": policies}), nil
+}
+
+func composeRuntimeExportEntries(path string, peers []*yaml.Node, lowerNode, upperNode *yaml.Node, normalize func(*yaml.Node, *yaml.Node) (*yaml.Node, bool, error)) (*yaml.Node, error) {
+	local := make(map[string]*yaml.Node)
+	for _, layer := range []*yaml.Node{lowerNode, upperNode} {
+		if _, _, err := normalize(layer, nil); err != nil {
+			return nil, err
+		}
+		entries, err := runtimeOptionalMapping(layer, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		for key, value := range entries {
+			local[key] = value
+		}
+	}
+	inherited := make(map[string]*yaml.Node)
+	for _, peer := range peers {
+		normalized, _, err := normalize(peer, nil)
+		if err != nil {
+			return nil, err
+		}
+		entries, err := runtimeOptionalMapping(normalized, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		keys := make([]string, 0, len(entries))
+		for key := range entries {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if local[key] != nil {
+				continue
+			}
+			if previous := inherited[key]; previous != nil && !runtimeEqualNodes(previous, entries[key]) {
+				return nil, runtimeConfigurationError("adopted exports conflict at %s[%q]; set or remove that exact key", path, key)
+			}
+			inherited[key] = entries[key]
+		}
+	}
+	result, _, err := normalize(runtimeMappingNode(inherited), runtimeMappingNode(local))
+	return result, err
+}
+
+func composeRuntimeExportConfigurations(peers []map[string]*yaml.Node, lowerNode, upperNode *yaml.Node) (*yaml.Node, error) {
+	lower, err := runtimeOptionalMapping(lowerNode, "config", nil)
+	if err != nil {
+		return nil, err
+	}
+	upper, err := runtimeOptionalMapping(upperNode, "config", nil)
+	if err != nil {
+		return nil, err
+	}
+	inherited := make(map[string][]*yaml.Node)
+	for _, peer := range peers {
+		objects, err := runtimeOptionalMapping(peer["config"], "adopted config", nil)
+		if err != nil {
+			return nil, err
+		}
+		for symbol, node := range objects {
+			inherited[symbol] = append(inherited[symbol], node)
+		}
+	}
+	symbols := make(map[string]struct{})
+	for symbol := range inherited {
+		symbols[symbol] = struct{}{}
+	}
+	for symbol := range lower {
+		symbols[symbol] = struct{}{}
+	}
+	for symbol := range upper {
+		symbols[symbol] = struct{}{}
+	}
+	ordered := make([]string, 0, len(symbols))
+	for symbol := range symbols {
+		ordered = append(ordered, symbol)
+	}
+	sort.Strings(ordered)
+	result := make(map[string]*yaml.Node)
+	for _, symbol := range ordered {
+		schema, typed, err := runtimeConstructorSchema(symbol)
+		if err != nil {
+			return nil, err
+		}
+		if typed {
+			node, err := constructorconfig.ComposeAdopted(schema, inherited[symbol], lower[symbol], upper[symbol])
+			if err != nil {
+				return nil, fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, symbol, err)
+			}
+			if node != nil {
+				result[symbol] = node
+			}
+			continue
+		}
+		// Dormant constructor objects have no compiled runtime binding. Preserve
+		// the existing runtime boundary; generation owns their schema validation.
+		for _, node := range inherited[symbol] {
+			if _, _, err := mergeRuntimeConfigurations(runtimeMappingNode(map[string]*yaml.Node{symbol: node}), nil); err != nil {
+				return nil, err
+			}
+		}
+		lo, hi := make(map[string]*yaml.Node), make(map[string]*yaml.Node)
+		if lower[symbol] != nil {
+			lo[symbol] = lower[symbol]
+		}
+		if upper[symbol] != nil {
+			hi[symbol] = upper[symbol]
+		}
+		node, _, err := mergeRuntimeConfigurations(runtimeMappingNode(lo), runtimeMappingNode(hi))
+		if err != nil {
+			return nil, err
+		}
+		values, err := runtimeMapping(node, "config", nil)
+		if err != nil {
+			return nil, err
+		}
+		if values[symbol] != nil {
+			result[symbol] = values[symbol]
+		}
+	}
+	return runtimeMappingNode(result), nil
+}
+
+func runtimeEqualNodes(a, b *yaml.Node) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Kind != b.Kind || a.Tag != b.Tag || a.Value != b.Value || len(a.Content) != len(b.Content) {
+		return false
+	}
+	for i := range a.Content {
+		if !runtimeEqualNodes(a.Content[i], b.Content[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 type runtimeConstructorBinding struct {
 	symbol   string
 	schema   constructorconfig.Schema
@@ -2282,9 +2659,6 @@ func prepareRuntimeConstructorConfiguration(document []byte) (*runtimePreparedCo
 	fields, err := runtimeMapping(root, "configuration", nil)
 	if err != nil {
 		return nil, err
-	}
-	if len(bindings) != 0 && fields["composition"] != nil {
-		return nil, fmt.Errorf("%w: adopted constructor configuration requires private runtime-baseline support", ErrRuntimeConfiguration)
 	}
 	objects, err := runtimeOptionalMapping(fields["config"], "config", nil)
 	if err != nil {

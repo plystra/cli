@@ -152,6 +152,7 @@ func renderRuntimeConfigurationSupport(schemas []runtimeConfigurationSchema, exe
 	}
 	source.WriteString("}\n\n")
 	source.WriteString(runtimeConfigurationSupport)
+	source.WriteString(runtimeAdoptionSupport)
 	return source.String(), nil
 }
 
@@ -219,7 +220,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 8,
+		"version": 9,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -447,7 +448,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 	defer clear(root)
 	switch selection.mode {
 	case runtimeSelectionDefault:
-		document, err := normalizeRuntimeDocument(root, defaultRuntimeDocument)
+		document, err := composeRuntimeAdoptedDocument(baseline, root, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: default %s: %v", ErrRuntimeConfiguration, defaultRuntimeDocument, err)
 		}
@@ -458,7 +459,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, selection.environment, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(overlay)
-		document, err := composeRuntimeDocuments(root, overlay)
+		document, err := composeRuntimeAdoptedDocument(baseline, root, nil, overlay)
 		if err != nil {
 			return nil, fmt.Errorf("%w: apply environment %q from %s: %v", ErrRuntimeConfiguration, selection.environment, filepath.ToSlash(selection.path), err)
 		}
@@ -469,7 +470,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: load full-replacement configuration %s: %w", ErrRuntimeSelector, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(selected)
-		document, err := normalizeRuntimeDocument(selected, filepath.ToSlash(selection.path))
+		document, err := composeRuntimeAdoptedDocument(baseline, root, selected, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: full-replacement configuration %s: %v", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
 		}
@@ -746,37 +747,6 @@ func loadRuntimeConfigurationFile(root *os.Root, path string) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentChanged)
 	}
 	return data, nil
-}
-
-func composeRuntimeDocuments(rootData, overlayData []byte) ([]byte, error) {
-	root, err := decodeRuntimeDocument(rootData, defaultRuntimeDocument)
-	if err != nil {
-		return nil, err
-	}
-	var overlay *yaml.Node
-	if overlayData != nil {
-		overlay, err = decodeRuntimeDocument(overlayData, "environment overlay")
-		if err != nil {
-			return nil, err
-		}
-	}
-	merged, err := mergeRuntimeDocument(root, overlay)
-	if err != nil {
-		return nil, err
-	}
-	return encodeRuntimeDocument(merged)
-}
-
-func normalizeRuntimeDocument(data []byte, source string) ([]byte, error) {
-	root, err := decodeRuntimeDocument(data, source)
-	if err != nil {
-		return nil, err
-	}
-	normalized, err := mergeRuntimeDocument(root, nil)
-	if err != nil {
-		return nil, err
-	}
-	return encodeRuntimeDocument(normalized)
 }
 
 func encodeRuntimeDocument(document *yaml.Node) ([]byte, error) {

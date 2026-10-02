@@ -1126,7 +1126,7 @@ field, keyed objects merge by declared field path, set fields use their sparse
 Null, empty values, malformed markers, and markers with siblings are invalid in
 those entries. Exclusions remain current-Project intent even with no lower value,
 so later dependency additions cannot restore them. Generated runtime compatibility
-version 8 uses the same rules; regenerate and rebuild older Projects. CORS
+version 9 uses the same rules; regenerate and rebuild older Projects. CORS
 retains transitional null handling pending its typed composition migration.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
@@ -1160,8 +1160,8 @@ or nil pointers and empty slices/maps have no child values to validate. Failure
 uses `PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID`, a safe declared path,
 and the selected current document, before mutation. Supply the missing field in
 that document or an adopted export, or correct a tombstone that removed it.
-Current-project startup now applies these rules and compiled scalar defaults;
-adopted-export runtime reconstruction remains incomplete.
+Generated startup applies these rules and compiled scalar defaults after
+composing active constructor values from adopted exports and selected layers.
 
 A supplied non-null pointer field replaces its complete lower value during typed
 CLI composition, including pointers to structs and multiple pointer layers.
@@ -1170,8 +1170,8 @@ without inheriting its omitted fields. Non-pointer fixed structs still compose
 field by field. Different whole-pointer values in adopted exports conflict even
 when their supplied fields are disjoint; identical normalized values deduplicate.
 Inspection and explanation retain one redacted atomic value and its sources.
-Current-project runtime loading applies the same pointer replacement rules;
-adopted-export runtime reconstruction remains incomplete.
+Generated runtime loading applies the same pointer replacement rules to
+adopted exports and selected current-project layers.
 
 For `interfaces.require`, a sequence is a complete-set declaration, including
 `[]` to clear lower explicit requirements. The sparse `{add: [...], remove: [...]}`
@@ -1182,8 +1182,8 @@ that root excluded. Exposure, required constructor parameters, and intrinsic
 Kernel requirements remain independent. `inspect configuration` and `explain
 config` retain the complete-set boundary and suppressed sources. New
 Projects use `require: {}` to preserve explicit template adoptions. Generated
-runtime compatibility version 8 applies these set rules to selected current-Project
-documents; source-independent adopted-export runtime baselines remain unfinished.
+runtime compatibility version 9 applies these set rules above adopted exports
+from the private baseline, retaining current exclusions until composition ends.
 
 `http.expose` is keyed by exact Interface ID. Each entry requires the supported
 transport explicitly:
@@ -1835,9 +1835,17 @@ constructor entry. A compiled private-default edit requires rebuilding and
 refreshing the baseline with `plystra generate`; its bytes and hashes never enter
 public generated artifacts. `generate --check` remains read-only and checks the
 public generated fixed point independently of private build output.
-Complete source-independent adopted-export composition remains incomplete.
+Startup reconstructs active constructor configuration and Interface declarations
+from the private dependency-export inventory. Its exact module/version membership
+is part of the public runtime contract; private values and hashes are excluded.
+Self-adoption uses root exports even with a replacement selector. Equal peer
+exports deduplicate; unresolved conflicts fail before Secrets or constructors.
+Current layers retain exact-path replacement, removals, and complete-set authority.
+Deploy only the binary, baseline, selected configuration documents, and external
+Secret inputs. Resource configuration and complete frozen-model compatibility
+remain separate unfinished work.
 
-Bootstrap validates active current-project Config objects using generated typed
+Bootstrap validates composed active Config objects using generated typed
 bindings and shared support under `generated/go/internal/constructorconfig`.
 It composes fixed structs by field, replaces atomic pointers and collections,
 and distinguishes nil, empty values, and tombstones. Requiredness and scalar
@@ -1851,15 +1859,16 @@ Startup checks the complete tag syntax and policy of the recompiled Config,
 including ignored and unexported fields. An authored runtime value cannot hide
 an invalid compiled default. These failures reject the schema before Secret
 lookup or constructor entry with redacted regeneration and rebuild guidance.
-Dormant objects create no runtime binding. Effective adoptions with active
-configurable constructors fail explicitly until private-baseline reconstruction
-is implemented. This bounded current-project path does not complete Gate 9.
+Dormant objects create no runtime binding. Active configurable constructors
+receive adopted exports below the selected current-project layers. Dormant
+runtime validation, Resource configuration, and complete frozen-model
+compatibility remain incomplete, so this path does not complete Gate 9.
 
 The first command loads only root `plystra.yaml`. The second requires
 `plystra.production.yaml` and applies it as one typed sparse overlay above the
-root document. The third requires root `plystra.yaml` only as the regular
-Project marker, then loads and normalizes the selected complete document
-without parsing or merging root configuration. `PLYSTRA_ENV=production` and
+root document. The third reads root `plystra.yaml` as the regular Project marker
+and self-adoption export inventory, then loads and normalizes the selected
+complete document without merging root application declarations. `PLYSTRA_ENV=production` and
 `PLYSTRA_CONFIG=deploy/customer-a.yaml` are the ambient equivalents when no
 explicit selector is present. An explicit selector overrides both variables;
 the environment and replacement modes cannot be combined. Relative and

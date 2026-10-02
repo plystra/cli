@@ -87,37 +87,111 @@ func mapping(n *yaml.Node, path string) (map[string]*yaml.Node, error) {
 // Compose validates both partial layers before applying schema-defined removal
 // and replacement. Defaults and requiredness belong to Normalize, after merging.
 func Compose(s Schema, lower, upper *yaml.Node) (*yaml.Node, error) {
-	state := 0
-	lo, err := walk(s, lower, false, true, "config", &state, 0)
-	if err != nil {
-		return nil, err
-	}
-	hi, err := walk(s, upper, false, true, "config", &state, 0)
-	if err != nil {
-		return nil, err
-	}
-	return merge(s, lo, hi), nil
+	return ComposeAdopted(s, nil, lower, upper)
 }
 
-func merge(s Schema, lo, hi *yaml.Node) *yaml.Node {
+// ComposeAdopted combines unordered positive exports below ordered current-project
+// layers. It preserves current tombstones until every lower export has been applied.
+// Validation precedes conflict suppression; defaults and requiredness remain final.
+func ComposeAdopted(s Schema, exports []*yaml.Node, layers ...*yaml.Node) (*yaml.Node, error) {
+	state := 0
+	peers := make([]*yaml.Node, len(exports))
+	for i, export := range exports {
+		var err error
+		peers[i], err = walk(s, export, false, false, "config", &state, 0)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var current *yaml.Node
+	for _, layer := range layers {
+		n, err := walk(s, layer, false, true, "config", &state, 0)
+		if err != nil {
+			return nil, err
+		}
+		current = mergeIntent(s, current, n)
+	}
+	return composePeers(s, peers, current, "config")
+}
+
+func mergeIntent(s Schema, lo, hi *yaml.Node) *yaml.Node {
 	if hi == nil {
-		hi, lo = lo, nil
+		return lo
 	}
-	if removal(hi) {
-		return nil
-	}
-	if s.Kind != "object" || hi == nil {
+	if s.Kind != "object" || removal(hi) {
 		return hi
 	}
 	l, _ := mapping(lo, "")
 	h, _ := mapping(hi, "")
 	r := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	for _, f := range s.Fields {
-		if n := merge(f.Value, l[f.Name], h[f.Name]); n != nil {
+		if n := mergeIntent(f.Value, l[f.Name], h[f.Name]); n != nil {
 			r.Content = append(r.Content, scalar("!!str", f.Name), n)
 		}
 	}
 	return r
+}
+
+func composePeers(s Schema, peers []*yaml.Node, current *yaml.Node, path string) (*yaml.Node, error) {
+	if removal(current) {
+		return nil, nil
+	}
+	if s.Kind != "object" {
+		if current != nil {
+			return current, nil
+		}
+		var selected *yaml.Node
+		for _, peer := range peers {
+			if peer == nil {
+				continue
+			}
+			if selected != nil && !equalNodes(selected, peer) {
+				return nil, invalid(path, "adopted exports conflict; set or remove this exact field")
+			}
+			selected = peer
+		}
+		return selected, nil
+	}
+	values := make([]map[string]*yaml.Node, len(peers))
+	present := current != nil
+	for i, peer := range peers {
+		values[i], _ = mapping(peer, "")
+		present = present || peer != nil
+	}
+	if !present {
+		return nil, nil
+	}
+	local, _ := mapping(current, "")
+	result := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for _, field := range s.Fields {
+		children := make([]*yaml.Node, len(peers))
+		for i, value := range values {
+			children[i] = value[field.Name]
+		}
+		child, err := composePeers(field.Value, children, local[field.Name], path+"."+field.Name)
+		if err != nil {
+			return nil, err
+		}
+		if child != nil {
+			result.Content = append(result.Content, scalar("!!str", field.Name), child)
+		}
+	}
+	return result, nil
+}
+
+func equalNodes(a, b *yaml.Node) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Kind != b.Kind || a.Tag != b.Tag || a.Value != b.Value || len(a.Content) != len(b.Content) {
+		return false
+	}
+	for i := range a.Content {
+		if !equalNodes(a.Content[i], b.Content[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Normalize materializes defaults and Go zero values and checks requiredness.

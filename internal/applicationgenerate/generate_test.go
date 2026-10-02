@@ -144,7 +144,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 		[]byte(`case "--env":`),
 		[]byte(`case "--config":`),
 		[]byte("runtimeRootRelativeConfigurationPath"),
-		[]byte("normalizeRuntimeDocument"),
+		[]byte("composeRuntimeAdoptedDocument"),
 	} {
 		if !bytes.Contains(bootstrap, required) {
 			t.Fatalf("generated bootstrap omits default configuration selection %q:\n%s", required, bootstrap)

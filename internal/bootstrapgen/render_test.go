@@ -69,7 +69,7 @@ token: {type: secret}
 		"os.OpenRoot(selection.configurationRoot)",
 		"inspectRuntimeConfigurationPath",
 		"sameRuntimeConfigurationPathStates",
-		"normalizeRuntimeDocument",
+		"composeRuntimeAdoptedDocument",
 		`"acme.audit": {`,
 		`"acme.records": {`,
 		`"headers":    runtimeConfigurationObject`,
