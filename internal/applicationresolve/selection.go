@@ -222,7 +222,7 @@ func projectRelativeConfigurationPath(moduleRoot, selected string) (string, erro
 			return "", fmt.Errorf("inspect Project root: %w", statErr)
 		}
 		if !rootInfo.IsDir() {
-			return "", errors.New("Project root is not a directory")
+			return "", errors.New("expected the Project root to be a directory")
 		}
 		if aliasRelative, matched := projectRootAliasRelativePath(rootInfo, candidate); matched {
 			if clean, valid := validProjectRelativeConfigurationPath(aliasRelative); valid {

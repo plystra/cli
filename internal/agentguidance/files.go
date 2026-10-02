@@ -25,7 +25,7 @@ var (
 	ErrManifest = errors.New("invalid Plystra Agent guidance manifest")
 	// ErrDrift reports guidance state that cannot be changed without explicit
 	// authority or without first restoring a missing owned path.
-	ErrDrift = errors.New("Plystra Agent guidance drift")
+	ErrDrift = errors.New("detected Plystra Agent guidance drift")
 )
 
 const maximumGuidanceDirectoryEntries = 4096
@@ -340,7 +340,7 @@ func inspectWith(rootPath string, projection Projection, inspectFile inspectActu
 		return inspectedState{}, fmt.Errorf("inspect Project root: %w", err)
 	}
 	if !info.IsDir() {
-		return inspectedState{}, errors.New("Project root is not a directory")
+		return inspectedState{}, errors.New("expected the Project root to be a directory")
 	}
 	root, err := os.OpenRoot(absoluteRoot)
 	if err != nil {
