@@ -922,6 +922,13 @@ remain provenance. Private snapshots detect concurrent edits. Startup loads the
 selected timeout without regeneration. CORS, exposure, and invocation policies
 remain build-affecting and still require regeneration when changed.
 
+Public configuration type descriptions omit raw anonymous-struct tags, including
+containers and generic arguments. Nested defaults stay out of logs, diagnostics,
+and public value hashes; compiled field names, policy, default presence, and
+private default access remain intact. A public type description is not a complete
+schema or Go assignment identity. Authored Go default changes still require a
+rebuild, and default application remains unfinished.
+
 The selected current Project activates that exact module/export identity:
 
 ```yaml

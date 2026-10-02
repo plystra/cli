@@ -106,7 +106,7 @@ func TestDiscoverIncludesDirectAndTransitiveDependencyProjectsButNotOrdinaryModu
 	writeProject(t, transitiveRoot, "example.com/transitive")
 	writeFile(t, filepath.Join(transitiveRoot, "interfaces", "transitive", "v1", "interface.go"), interfaceSource("transitivev1", "dependency.transitive.run/v1", "Run"))
 	writeProject(t, directRoot, "example.com/direct")
-	writeFile(t, filepath.Join(directRoot, "go.mod"), fmt.Sprintf("module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.2.0\n"))
+	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.2.0\n")
 	writeFile(t, filepath.Join(directRoot, "api", "interface.go"), interfaceSource("api", "dependency.direct.run/v1", "Run"))
 	writeFile(t, filepath.Join(directRoot, "internal", "private", "interface.go"), interfaceSource("private", "dependency.private.run/v1", "Run"))
 

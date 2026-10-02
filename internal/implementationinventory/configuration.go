@@ -3,6 +3,8 @@ package implementationinventory
 import (
 	"encoding/json"
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"go/types"
 	"log/slog"
 	"math"
@@ -76,7 +78,8 @@ type ConfigurationValue struct {
 // Kind returns the closed normalized Go value kind.
 func (v ConfigurationValue) Kind() ConfigurationValueKind { return v.kind }
 
-// TypeIdentity returns the deterministic canonical Go type identity.
+// TypeIdentity returns the public-safe Go shape identity. Named types keep
+// their fully qualified names; anonymous struct tag literals are omitted.
 func (v ConfigurationValue) TypeIdentity() string { return v.typeIdentity }
 
 // Element returns the immutable element for a pointer, list, or map.
@@ -141,8 +144,8 @@ type Configuration struct {
 }
 
 // ConfigurationField is one immutable exported field in a constructor-owned
-// Config type. Name is the canonical YAML key while GoName and TypeIdentity
-// retain the exact authored Go field identity for later typed parsing.
+// Config type. Name is the canonical YAML key, GoName is the exact exported Go
+// field name, and TypeIdentity is the public-safe Go shape description.
 type ConfigurationField struct {
 	name         string
 	goName       string
@@ -158,7 +161,7 @@ func (f ConfigurationField) Name() string { return f.name }
 // GoName returns the exact exported authored Go field name.
 func (f ConfigurationField) GoName() string { return f.goName }
 
-// TypeIdentity returns the deterministic fully qualified Go type identity.
+// TypeIdentity returns the public-safe Go shape identity without struct tags.
 func (f ConfigurationField) TypeIdentity() string { return f.value.typeIdentity }
 
 // Value returns the recursively compiled immutable Go value schema.
@@ -280,33 +283,33 @@ func CompileConfiguration(compiled *types.Package, function *types.Func) (Config
 			continue
 		}
 		if index != 0 {
-			return Configuration{}, false, fmt.Errorf("Config must be the first constructor parameter, found parameter %d", index+1)
+			return Configuration{}, false, fmt.Errorf("constructor Config must be the first constructor parameter, found parameter %d", index+1)
 		}
 		if reference.indirect {
-			return Configuration{}, false, fmt.Errorf("Config must be passed as a struct value, not through %s", types.TypeString(parameters.At(index).Type(), nil))
+			return Configuration{}, false, fmt.Errorf("constructor Config must be passed as a struct value, not through %s", configurationTypeIdentity(parameters.At(index).Type()))
 		}
 		if reference.alias != nil {
-			return Configuration{}, false, fmt.Errorf("Config must be a defined struct, not a type alias")
+			return Configuration{}, false, fmt.Errorf("constructor Config must be a defined struct, not a type alias")
 		}
 		named := reference.named
 		if named == nil || named.Obj() == nil || named.Obj().Pkg() != compiled {
-			return Configuration{}, false, fmt.Errorf("Config must be defined by constructor package %s", compiled.Path())
+			return Configuration{}, false, fmt.Errorf("constructor Config must be defined by constructor package %s", compiled.Path())
 		}
 		if named.Obj().Name() != "Config" || !named.Obj().Exported() {
 			return Configuration{}, false, fmt.Errorf("configuration type must be the exported same-package type Config")
 		}
 		if named.TypeParams() != nil && named.TypeParams().Len() != 0 || named.TypeArgs() != nil && named.TypeArgs().Len() != 0 {
-			return Configuration{}, false, fmt.Errorf("Config must not be generic")
+			return Configuration{}, false, fmt.Errorf("constructor Config must not be generic")
 		}
 		if _, ok := named.Underlying().(*types.Struct); !ok {
-			return Configuration{}, false, fmt.Errorf("Config must be a struct")
+			return Configuration{}, false, fmt.Errorf("constructor Config must be a struct")
 		}
 		value, err := compileConfigurationValue(named, &configurationCompileState{active: make(map[types.Type]struct{})}, 0)
 		if err != nil {
 			return Configuration{}, false, err
 		}
 		if value.kind != ConfigurationValueObject {
-			return Configuration{}, false, fmt.Errorf("Config must compile to an object")
+			return Configuration{}, false, fmt.Errorf("constructor Config must compile to an object")
 		}
 		fields := value.fields
 		configuration = Configuration{packagePath: compiled.Path(), typeName: "Config", fields: fields, named: named}
@@ -328,7 +331,7 @@ func compileConfigurationFields(structure *types.Struct, state *configurationCom
 		rawTag := structure.Tag(index)
 		tags, err := parseConfigurationStructTags(rawTag)
 		if err != nil {
-			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+			return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 		}
 		yamlTag, tagged := tags["yaml"]
 		_, hasPlystraMetadata := tags["plystra"]
@@ -347,42 +350,42 @@ func compileConfigurationFields(structure *types.Struct, state *configurationCom
 		}
 		name, ignored, err := configurationFieldName(field.Name(), yamlTag, tagged)
 		if err != nil {
-			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+			return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 		}
 		if ignored {
 			if hasPlystraMetadata || hasDefault {
-				return nil, fmt.Errorf("Config field %s excluded with yaml:\"-\" must not declare Plystra configuration metadata", field.Name())
+				return nil, fmt.Errorf("constructor Config field %s excluded with yaml:\"-\" must not declare Plystra configuration metadata", field.Name())
 			}
 			continue
 		}
 		if previous, duplicate := seen[name]; duplicate {
-			return nil, fmt.Errorf("Config fields %s and %s declare duplicate YAML key %q", previous, field.Name(), name)
+			return nil, fmt.Errorf("constructor Config fields %s and %s declare duplicate YAML key %q", previous, field.Name(), name)
 		}
 		state.fields++
 		if state.fields > maximumConfigurationFields {
-			return nil, fmt.Errorf("Config schema exceeds %d fields", maximumConfigurationFields)
+			return nil, fmt.Errorf("constructor Config schema exceeds %d fields", maximumConfigurationFields)
 		}
 		value, err := compileConfigurationValue(field.Type(), state, depth+1)
 		if err != nil {
-			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+			return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 		}
 		required, buildVisible, err := configurationFieldPolicy(tags)
 		if err != nil {
-			return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+			return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 		}
 		var defaultJSON func() string
 		if rawDefault, exists := tags["plystra-default"]; exists {
 			if required {
-				return nil, fmt.Errorf("Config field %s: required fields must not declare a default", field.Name())
+				return nil, fmt.Errorf("constructor Config field %s: required fields must not declare a default", field.Name())
 			}
 			normalizedDefault, err := compileConfigurationDefault(value, rawDefault)
 			if err != nil {
-				return nil, fmt.Errorf("Config field %s: %v", field.Name(), err)
+				return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 			}
 			defaultJSON = configurationDefaultAccessor(normalizedDefault)
 		}
 		if buildVisible && configurationContainsSecret(value) {
-			return nil, fmt.Errorf("Config field %s: Secret-bearing configuration must remain runtime-only", field.Name())
+			return nil, fmt.Errorf("constructor Config field %s: Secret-bearing configuration must remain runtime-only", field.Name())
 		}
 		seen[name] = field.Name()
 		fields = append(fields, ConfigurationField{
@@ -445,7 +448,7 @@ func compileConfigurationValue(value types.Type, state *configurationCompileStat
 			return ConfigurationValue{}, err
 		}
 		if configurationContainsSecret(element) {
-			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+			return ConfigurationValue{}, fmt.Errorf("a Secret configuration must be a direct named field, not %s", identity)
 		}
 		return ConfigurationValue{kind: ConfigurationValuePointer, typeIdentity: identity, element: &element}, nil
 	case *types.Slice:
@@ -454,7 +457,7 @@ func compileConfigurationValue(value types.Type, state *configurationCompileStat
 			return ConfigurationValue{}, err
 		}
 		if configurationContainsSecret(element) {
-			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+			return ConfigurationValue{}, fmt.Errorf("a Secret configuration must be a direct named field, not %s", identity)
 		}
 		return ConfigurationValue{kind: ConfigurationValueList, typeIdentity: identity, element: &element}, nil
 	case *types.Array:
@@ -463,7 +466,7 @@ func compileConfigurationValue(value types.Type, state *configurationCompileStat
 			return ConfigurationValue{}, err
 		}
 		if configurationContainsSecret(element) {
-			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+			return ConfigurationValue{}, fmt.Errorf("a Secret configuration must be a direct named field, not %s", identity)
 		}
 		return ConfigurationValue{kind: ConfigurationValueList, typeIdentity: identity, element: &element, arrayLength: typed.Len(), isArray: true}, nil
 	case *types.Map:
@@ -477,7 +480,7 @@ func compileConfigurationValue(value types.Type, state *configurationCompileStat
 			return ConfigurationValue{}, err
 		}
 		if configurationContainsSecret(element) {
-			return ConfigurationValue{}, fmt.Errorf("Secret configuration must be a direct named field, not %s", identity)
+			return ConfigurationValue{}, fmt.Errorf("a Secret configuration must be a direct named field, not %s", identity)
 		}
 		return ConfigurationValue{kind: ConfigurationValueMap, typeIdentity: identity, element: &element}, nil
 	case *types.Struct:
@@ -629,7 +632,7 @@ func compileConfigurationDefault(value ConfigurationValue, raw string) (string, 
 		}
 		return marshalConfigurationDefaultString(parsed.String()), nil
 	case ConfigurationValueSecret:
-		return "", fmt.Errorf("Secret configuration must not declare a default")
+		return "", fmt.Errorf("a Secret configuration must not declare a default")
 	default:
 		return "", fmt.Errorf("defaults are supported only for scalar configuration fields, not %s", value.typeIdentity)
 	}
@@ -736,12 +739,36 @@ func configurationFieldName(goName, yamlTag string, tagged bool) (string, bool, 
 
 func configurationTypeIdentity(value types.Type) string {
 	value = types.Unalias(value)
-	return types.TypeString(value, func(pkg *types.Package) string {
+	identity := types.TypeString(value, func(pkg *types.Package) string {
 		if pkg == nil {
 			return ""
 		}
 		return pkg.Path()
 	})
+	if !strings.ContainsAny(identity, "\"`") {
+		return identity
+	}
+	// Go's type printer includes raw tags in anonymous structs, even inside
+	// containers and generic arguments. Tokenize so escaped tag contents cannot
+	// become public identity or diagnostics; compiled fields retain the policy.
+	file := token.NewFileSet().AddFile("", -1, len(identity))
+	var lexer scanner.Scanner
+	lexer.Init(file, []byte(identity), nil, 0)
+	var public strings.Builder
+	start := 0
+	for {
+		position, kind, literal := lexer.Scan()
+		if kind == token.EOF {
+			break
+		}
+		if kind == token.STRING {
+			offset := file.Offset(position)
+			public.WriteString(strings.TrimRight(identity[start:offset], " "))
+			start = offset + len(literal)
+		}
+	}
+	public.WriteString(identity[start:])
+	return public.String()
 }
 
 func validConfigurationFieldName(value string) bool {

@@ -546,6 +546,13 @@ and removal intent remain visible. Private snapshots still detect concurrent
 edits. Startup reads the selected timeout without regeneration. CORS, exposure,
 and invocation policies remain build-affecting, not runtime-only process values.
 
+Public configuration type descriptions omit raw anonymous-struct tags, including
+inside containers and generic arguments, so nested defaults cannot enter logs,
+diagnostics, or public value hashes. Compiled field names, policy, default
+presence, and private default access remain intact. These descriptions are not
+complete schema or Go assignment identities. Changing an authored Go default
+still requires rebuilding; default application remains unfinished.
+
 The required top-level `interface_provenance` record in
 `generated/manifest.json` uses schema `plystra.interface-provenance/v3`. It
 identifies every visible authored Interface, every reachable ordinary binding,

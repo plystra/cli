@@ -148,6 +148,8 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Build-visible edits cause public generation drift",
 		"Current-Project http.address and timeouts.startup values are runtime-only and absent from public hashes",
 		"Startup loads the selected timeout without regeneration",
+		"Public configuration type descriptions omit raw anonymous-struct tags",
+		"Authored Go default changes still require a rebuild",
 		"Resource export syntax is checked even without adoption",
 		"Resource adoption remains unsupported",
 	} {
