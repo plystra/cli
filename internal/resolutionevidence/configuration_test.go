@@ -16,6 +16,50 @@ import (
 	"github.com/plystra/cli/internal/resolutionevidence"
 )
 
+func TestSecretReferenceProvenanceDoesNotPublishPrivateEquality(t *testing.T) {
+	t.Parallel()
+	lookup := configurationSchemaLookup(t)
+	manifest := func(reference string) applicationmeta.Manifest {
+		return configurationManifest(t, "plystra.yaml", "config: {example.com/acme/smtp.New: {password: "+reference+"}}")
+	}
+	for _, local := range []string{"{env: PRIVATE_LOCAL}", "{$remove: true}"} {
+		var first []byte
+		for _, reference := range []string{"{env: PRIVATE_FIRST}", "{env: PRIVATE_SECOND}", "{file: /PRIVATE_FILE}"} {
+			root := manifest(local)
+			composition, err := applicationmeta.Compose([]applicationmeta.Dependency{
+				{ModulePath: "example.com/a", Manifest: manifest("{env: PRIVATE_FIRST}")},
+				{ModulePath: "example.com/b", Manifest: manifest(reference)},
+			}, root, lookup)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", composition,
+				[]resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: configurationDecisions(t, root, lookup)}},
+				[]resolutionevidence.ModuleInput{
+					{Path: "example.com/app", Role: resolutionevidence.ModuleRoleCurrent, SourceModulePath: "example.com/app"},
+					{Path: "example.com/a", Role: resolutionevidence.ModuleRoleDependency, Workspace: true, SourceModulePath: "example.com/a"},
+					{Path: "example.com/b", Role: resolutionevidence.ModuleRoleDependency, Workspace: true, SourceModulePath: "example.com/b"},
+				})
+			evidence, err := resolutionevidence.Build(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			field := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["password"]`)
+			if !field.Effective() || field.Owner() != resolutionevidence.ConfigurationOwnerRoot || field.Removed() != (local == "{$remove: true}") {
+				t.Fatal("private equality changed current-Project ownership or removal")
+			}
+			contributors := field.Contributors()
+			if len(contributors) != 2 || contributors[0].Effective() || len(contributors[0].Sources()) != 2 {
+				t.Fatal("private equality changed suppressed adopted contribution grouping")
+			}
+			if first != nil && !bytes.Equal(first, evidence.CanonicalJSON()) {
+				t.Fatal("private reference kind, target, or equality changed public provenance")
+			}
+			first = evidence.CanonicalJSON()
+		}
+	}
+}
+
 func TestBuildRecordsConfigurationOwnershipAndReplacementSafeProvenance(t *testing.T) {
 	t.Parallel()
 

@@ -62,7 +62,7 @@ func composeConstructorConfigurations(dependencies []Dependency, current Manifes
 			decision.source = dependencySource(dependency, decision.source)
 			decision.declarationSource = dependencyConfigurationDeclarationSource(dependency)
 			path := constructorConfigPath(decision.constructor, decision.segments)
-			addProvenance(records, path, decision.digest, decision.source, decision.kind == constructorConfigRemoval)
+			addProvenance(records, path, constructorConfigPublicDigest(decision), decision.source, decision.kind == constructorConfigRemoval)
 			byDecision := inherited[path]
 			if byDecision == nil {
 				byDecision = make(map[string]*constructorConfigCandidate)
@@ -580,6 +580,15 @@ func canonicalConstructorConfigUnsignedInteger(value string) bool {
 
 func constructorConfigCandidateKey(decision constructorConfigDecision) string {
 	return fmt.Sprintf("%d\x00%s\x00%s", decision.kind, decision.valueType, decision.digest)
+}
+
+func constructorConfigPublicDigest(decision constructorConfigDecision) string {
+	if decision.kind == constructorConfigValue && strings.HasPrefix(decision.valueType, "secret:") {
+		// Private equality still compares the normalized reference. Public evidence
+		// records only its declared type, never its resolver kind or target.
+		return digestStrings("config.secret-reference/v1", decision.valueType)
+	}
+	return decision.digest
 }
 
 func cloneConstructorConfigDecision(decision constructorConfigDecision) constructorConfigDecision {

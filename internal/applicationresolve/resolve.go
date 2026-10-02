@@ -147,6 +147,7 @@ type Result struct {
 	currentManifest     applicationmeta.Manifest
 	composition         applicationmeta.Composition
 	dependencies        moduledependency.Index
+	dependencySnapshots []dependencyManifestSnapshot
 	interfaces          interfaceinventory.Index
 	implementations     implementationinventory.Index
 	interfaceResolution interfaceresolution.Result
@@ -224,6 +225,38 @@ func (r Result) ResolutionEvidence() resolutionevidence.Evidence { return r.evid
 // generated provenance. It includes planned root maintenance in default and
 // environment modes.
 func (r Result) RootConfigurationData() []byte { return append([]byte(nil), r.rootData...) }
+
+// SelectedConfigurationData returns the selected document bytes after planned
+// maintenance. These private transaction inputs never enter public provenance.
+func (r Result) SelectedConfigurationData() []byte {
+	if r.selection.Path() == r.maintenancePath {
+		return r.maintenance.Data()
+	}
+	return r.ConfigurationSource()
+}
+
+// ChangedDependencyConfigurationModules compares the private dependency inputs
+// of two resolutions and returns only the sorted module identities that changed.
+// Public provenance hashes cannot detect edits to private export values.
+func (r Result) ChangedDependencyConfigurationModules(other Result) []string {
+	before := make(map[string]ManifestSnapshot, len(r.dependencySnapshots))
+	for _, dependency := range r.dependencySnapshots {
+		before[dependency.modulePath] = dependency.snapshot
+	}
+	var changed []string
+	for _, dependency := range other.dependencySnapshots {
+		previous, exists := before[dependency.modulePath]
+		if !exists || !sameManifestSnapshot(previous, dependency.snapshot) {
+			changed = append(changed, dependency.modulePath)
+		}
+		delete(before, dependency.modulePath)
+	}
+	for modulePath := range before {
+		changed = append(changed, modulePath)
+	}
+	sort.Strings(changed)
+	return changed
+}
 
 // RootConfigurationDigest returns the normalized identity of the mandatory
 // root configuration document represented by generated provenance.
@@ -523,6 +556,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		currentManifest:     currentManifest,
 		composition:         composition,
 		dependencies:        dependencies,
+		dependencySnapshots: dependencySnapshots,
 		interfaces:          interfaces,
 		implementations:     implementations,
 		interfaceResolution: interfaceResolution,

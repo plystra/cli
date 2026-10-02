@@ -138,6 +138,10 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"cannot contain the reserved one-entry $remove mapping",
 		"nested configuration, collections, or an unadopted Resource fragment",
 		"adopted values still require compiled-type validation",
+		"Validated Secret fields exclude reference kind and target from public identity",
+		"Private equality still detects conflicting adopted references",
+		"Public provenance never exposes private reference equality",
+		"Generation compares private root, selected-document, and dependency snapshots",
 		"Resource export syntax is checked even without adoption",
 		"Resource adoption remains unsupported",
 	} {

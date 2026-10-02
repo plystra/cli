@@ -272,7 +272,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			if err != nil {
 				return fmt.Errorf("confirm generation inputs: %w", err)
 			}
-			if prepared.fingerprint != confirmed.fingerprint {
+			if prepared.fingerprint != confirmed.fingerprint || len(prepared.resolved.ChangedDependencyConfigurationModules(confirmed.resolved)) != 0 {
 				return concurrentChangeSourceError(
 					generationFingerprintChangeSources(prepared, confirmed),
 					fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange),
@@ -403,10 +403,14 @@ func generationFingerprintChangeSources(prepared, confirmed preparedGeneration) 
 		preparedSelection.Environment() != confirmedSelection.Environment() ||
 		preparedSelection.Path() != confirmedSelection.Path() ||
 		preparedSelection.Digest() != confirmedSelection.Digest() ||
+		!bytes.Equal(prepared.resolved.SelectedConfigurationData(), confirmed.resolved.SelectedConfigurationData()) ||
 		prepared.resolved.Configurations().Digest() != confirmed.resolved.Configurations().Digest() {
 		for _, sourcePath := range []string{preparedSelection.Path(), confirmedSelection.Path()} {
 			sources = append(sources, concurrentChangeSource(modulePath, sourcePath, "configuration-declaration"))
 		}
+	}
+	for _, dependency := range prepared.resolved.ChangedDependencyConfigurationModules(confirmed.resolved) {
+		sources = append(sources, concurrentChangeSource(dependency, "plystra.yaml", "configuration-declaration"))
 	}
 	for _, sourcePath := range changedGeneratedOutputPaths(prepared.output, confirmed.output) {
 		sources = append(sources, concurrentChangeSource(modulePath, sourcePath, "generated-artifact"))
@@ -1679,18 +1683,19 @@ func exposesJavaScript(context generation.Context) bool {
 }
 
 type fingerprintDocument struct {
-	ModulePath                  string                 `json:"module_path"`
-	ConfigurationMode           string                 `json:"configuration_mode"`
-	ConfigurationEnvironment    string                 `json:"configuration_environment,omitempty"`
-	ConfigurationPath           string                 `json:"configuration_path"`
-	SelectedConfigurationDigest string                 `json:"selected_configuration_digest"`
-	PrivateConfigurationDigest  string                 `json:"private_configuration_digest"`
-	PrivateRootDocumentDigest   [sha256.Size]byte      `json:"private_root_document_digest"`
-	ContextDigest               string                 `json:"context_digest"`
-	AliasDigest                 string                 `json:"alias_digest"`
-	Passes                      int                    `json:"passes"`
-	Extensions                  []extensionFingerprint `json:"extensions"`
-	OutputOwnership             json.RawMessage        `json:"output_ownership"`
+	ModulePath                    string                 `json:"module_path"`
+	ConfigurationMode             string                 `json:"configuration_mode"`
+	ConfigurationEnvironment      string                 `json:"configuration_environment,omitempty"`
+	ConfigurationPath             string                 `json:"configuration_path"`
+	SelectedConfigurationDigest   string                 `json:"selected_configuration_digest"`
+	PrivateConfigurationDigest    string                 `json:"private_configuration_digest"`
+	PrivateRootDocumentDigest     [sha256.Size]byte      `json:"private_root_document_digest"`
+	PrivateSelectedDocumentDigest [sha256.Size]byte      `json:"private_selected_document_digest"`
+	ContextDigest                 string                 `json:"context_digest"`
+	AliasDigest                   string                 `json:"alias_digest"`
+	Passes                        int                    `json:"passes"`
+	Extensions                    []extensionFingerprint `json:"extensions"`
+	OutputOwnership               json.RawMessage        `json:"output_ownership"`
 }
 
 type extensionFingerprint struct {
@@ -1715,18 +1720,19 @@ func generationFingerprint(resolved applicationresolve.Result, output generatedf
 		}
 	}
 	document := fingerprintDocument{
-		ModulePath:                  resolved.Module().ModulePath(),
-		ConfigurationMode:           resolved.ConfigurationSelection().Mode(),
-		ConfigurationEnvironment:    resolved.ConfigurationSelection().Environment(),
-		ConfigurationPath:           resolved.ConfigurationSelection().Path(),
-		SelectedConfigurationDigest: resolved.ConfigurationSelection().Digest(),
-		PrivateConfigurationDigest:  resolved.Configurations().Digest(),
-		PrivateRootDocumentDigest:   sha256.Sum256(resolved.RootConfigurationData()),
-		ContextDigest:               resolution.Context().Digest(),
-		AliasDigest:                 resolution.AliasResolution().Digest(),
-		Passes:                      resolution.Passes(),
-		Extensions:                  extensions,
-		OutputOwnership:             output.ManifestJSON(),
+		ModulePath:                    resolved.Module().ModulePath(),
+		ConfigurationMode:             resolved.ConfigurationSelection().Mode(),
+		ConfigurationEnvironment:      resolved.ConfigurationSelection().Environment(),
+		ConfigurationPath:             resolved.ConfigurationSelection().Path(),
+		SelectedConfigurationDigest:   resolved.ConfigurationSelection().Digest(),
+		PrivateConfigurationDigest:    resolved.Configurations().Digest(),
+		PrivateRootDocumentDigest:     sha256.Sum256(resolved.RootConfigurationData()),
+		PrivateSelectedDocumentDigest: sha256.Sum256(resolved.SelectedConfigurationData()),
+		ContextDigest:                 resolution.Context().Digest(),
+		AliasDigest:                   resolution.AliasResolution().Digest(),
+		Passes:                        resolution.Passes(),
+		Extensions:                    extensions,
+		OutputOwnership:               output.ManifestJSON(),
 	}
 	canonical, err := json.Marshal(document)
 	if err != nil {

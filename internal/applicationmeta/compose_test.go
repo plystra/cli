@@ -672,7 +672,7 @@ func TestComposeMergesConfigurationByDeclaredFieldAndRedactsConflicts(t *testing
 	if !bytes.Contains(configured.YAML(), []byte("host: current.example")) || !bytes.Contains(configured.YAML(), []byte("CURRENT_TOKEN")) {
 		t.Fatalf("current configuration replacement = %s", configured.YAML())
 	}
-	if records := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["token"]`); len(records) != 2 {
+	if records := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["token"]`); len(records) != 1 || len(records[0].Sources()) != 3 {
 		t.Fatalf("configuration baseline provenance = %#v", provenanceStrings(records))
 	}
 }

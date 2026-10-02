@@ -52,7 +52,9 @@ type SchemaLookup func(constructor constructorsymbol.Symbol) (implementationinve
 
 // Provenance records one dependency-derived typed field value without storing
 // the value itself. Several records may share a Path when dependencies
-// contribute incompatible values that a current-project replacement resolves.
+// contribute incompatible public identities that a current-project replacement
+// resolves. Secret references share one public identity regardless of private
+// equality; composition validates their conflicts before publishing provenance.
 type Provenance struct {
 	path    string
 	digest  string
@@ -63,7 +65,7 @@ type Provenance struct {
 // Path returns the stable schema field or canonical declaration key.
 func (p Provenance) Path() string { return p.path }
 
-// Digest returns the normalized value digest.
+// Digest returns the normalized public identity, excluding Secret targets.
 func (p Provenance) Digest() string { return p.digest }
 
 // Removed reports whether this baseline record is an explicit typed

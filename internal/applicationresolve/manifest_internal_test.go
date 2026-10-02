@@ -5,11 +5,49 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/atomicfs"
 )
+
+func TestChangedDependencyConfigurationModulesUsesPrivateSnapshots(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, applicationManifestName)
+	if err := os.WriteFile(path, []byte("config: {private: first}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first, err := ReadManifestSnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("config: {private: second}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := ReadManifestSnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := Result{dependencySnapshots: []dependencyManifestSnapshot{
+		{modulePath: "example.com/changed", snapshot: first},
+		{modulePath: "example.com/removed", snapshot: first},
+		{modulePath: "example.com/unchanged", snapshot: first},
+	}}
+	after := Result{dependencySnapshots: []dependencyManifestSnapshot{
+		{modulePath: "example.com/unchanged", snapshot: first},
+		{modulePath: "example.com/changed", snapshot: second},
+		{modulePath: "example.com/added", snapshot: second},
+	}}
+	want := []string{"example.com/added", "example.com/changed", "example.com/removed"}
+	if got := before.ChangedDependencyConfigurationModules(after); !reflect.DeepEqual(got, want) {
+		t.Fatalf("changed dependency modules = %v, want %v", got, want)
+	}
+	if got := before.ChangedDependencyConfigurationModules(before); len(got) != 0 {
+		t.Fatalf("identical private snapshots changed: %v", got)
+	}
+}
 
 func TestRecheckDependencyManifestsRejectsConcurrentChange(t *testing.T) {
 	t.Parallel()

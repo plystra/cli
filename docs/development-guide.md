@@ -895,10 +895,17 @@ When an inert export's constructor schema is unavailable or its object cannot
 be typed, public document identity retains only the constructor and an opaque
 object marker, not hashes of fields, values, or Secret-reference targets.
 Editing only that private content does not make generated output stale.
-Adoption still validates the exact schema and values before mutation. Private
-root-document fingerprints remain transaction-local so concurrent edits are
-detected and preserved. Identity separation for validated constructor values
-and standalone typed runtime loading remains incomplete.
+Adoption still validates the exact schema and values before mutation. Validated
+Secret fields contribute only their declared type to public value identity,
+never the environment/file kind or target. Direct and nested Secret-reference
+edits leave generated output and inspection unchanged, including dormant and
+adopted configuration. Private reference equality still controls composition
+conflicts and deduplication, while public provenance groups redacted references
+without exposing their private equality. Current values and tombstones retain
+replacement authority. Private root, selected-document, and dependency snapshots
+remain transaction-local so concurrent edits are detected and preserved.
+Broader runtime-only value privacy, build-visible freezing, defaults, and
+standalone typed runtime loading remain incomplete.
 
 The selected current Project activates that exact module/export identity:
 

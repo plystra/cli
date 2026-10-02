@@ -119,8 +119,11 @@ config:
 	if err != nil || repeated.Changed() || !bytes.Equal(repeated.Data(), data) {
 		t.Fatalf("repeated maintenance = changed %t, err %v\nfirst: %s\nagain: %s", repeated.Changed(), err, data, repeated.Data())
 	}
-	if !slices.Equal(maintained.LocalPaths(), repeated.LocalPaths()) {
-		t.Fatalf("repeated local paths = %v, want %v", repeated.LocalPaths(), maintained.LocalPaths())
+	// A public baseline cannot prove equality or ownership of a private reference.
+	wantLocal := append(maintained.LocalPaths(), `config["example.com/acme/smtp.New"]["token"]`)
+	slices.Sort(wantLocal)
+	if !slices.Equal(wantLocal, repeated.LocalPaths()) {
+		t.Fatalf("repeated local paths = %v, want %v", repeated.LocalPaths(), wantLocal)
 	}
 }
 

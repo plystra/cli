@@ -15,6 +15,76 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 )
 
+func TestGenerateDetectsConcurrentSecretReferenceChanges(t *testing.T) {
+	for _, mode := range []string{"default", "environment", "replacement", "dependency", "inert-dependency"} {
+		t.Run(mode, func(t *testing.T) {
+			const modulePath = "example.com/acme/private-secret-reference"
+			root := t.TempDir()
+			writeApplicationModule(t, root, modulePath)
+			owner := writeConstructorConfigurationOwner(t, root, modulePath, true)
+			options := applicationgenerate.Options{Start: root, Environment: goEnvironment(nil)}
+			sourceModule, sourcePath := modulePath, "plystra.yaml"
+			manifestPath := filepath.Join(root, sourcePath)
+			configured := fmt.Sprintf("config: {%s: {password: {env: PRIVATE_FIRST}}}\n", owner)
+			first := "interfaces: {use: {configuration.owner/v1: " + owner + "}}\n" + configured
+			switch mode {
+			case "environment":
+				options.EnvironmentName = "production"
+				sourcePath = "plystra.production.yaml"
+				manifestPath = filepath.Join(root, sourcePath)
+				writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			case "replacement":
+				options.ConfigurationPath = "deploy/customer.yaml"
+				sourcePath = options.ConfigurationPath
+				manifestPath = filepath.Join(root, filepath.FromSlash(sourcePath))
+				writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			case "dependency", "inert-dependency":
+				sourceModule = "example.com/acme/private-secret-export"
+				dependency := t.TempDir()
+				writeFile(t, filepath.Join(dependency, "go.mod"), "module "+sourceModule+"\n\ngo 1.26\n")
+				writeFile(t, filepath.Join(dependency, "export.go"), "package exports\n")
+				writeFile(t, filepath.Join(root, "dependency.go"), "package app\nimport _ \""+sourceModule+"\"\n")
+				writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+sourceModule+" v0.0.0\nreplace "+sourceModule+" => "+filepath.ToSlash(dependency)+"\n")
+				selected := "interfaces: {use: {configuration.owner/v1: " + owner + "}}\n"
+				if mode == "dependency" {
+					selected += "composition: {adopt: [{module: " + sourceModule + ", export: shared}]}\n"
+				}
+				writeFile(t, filepath.Join(root, "plystra.yaml"), selected)
+				manifestPath = filepath.Join(dependency, "plystra.yaml")
+				first = "composition:\n  exports:\n    shared:\n      " + configured
+			}
+			second := strings.ReplaceAll(first, "PRIVATE_FIRST", "PRIVATE_SECOND")
+			writeFile(t, manifestPath, first)
+			if _, err := applicationgenerate.Generate(t.Context(), options); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotGenerated(t, root)
+			options.Validate = func(context.Context, string) error {
+				writeFile(t, manifestPath, second)
+				return nil
+			}
+			_, err := applicationgenerate.Generate(t.Context(), options)
+			if !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
+				t.Fatalf("concurrent Secret reference edit = %v", err)
+			}
+			assertConcurrentGenerationSource(t, err, sourceModule, sourcePath, "configuration-declaration")
+			if strings.Contains(err.Error(), "PRIVATE_") || string(readAbsoluteFile(t, manifestPath)) != second {
+				t.Fatal("concurrent reference was exposed or overwritten")
+			}
+			if !reflect.DeepEqual(snapshotGenerated(t, root), before) {
+				t.Fatal("concurrent reference edit changed generated output")
+			}
+			assertNoTransactions(t, root)
+			options.Validate = nil
+			options.Check = true
+			checked, err := applicationgenerate.Generate(t.Context(), options)
+			if err != nil || !checked.Report().Clean() {
+				t.Fatalf("private-only edit left public output stale: %v", err)
+			}
+		})
+	}
+}
+
 func TestGenerateDetectsConcurrentUnvalidatedExportChange(t *testing.T) {
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {

@@ -47,7 +47,8 @@ type ConfigurationDecision struct {
 // Path returns the canonical schema path represented by the decision.
 func (d ConfigurationDecision) Path() string { return d.path }
 
-// Digest returns the normalized non-secret decision digest.
+// Digest returns the normalized public decision digest. Secret references
+// contribute their declared type, never their resolver kind or target.
 func (d ConfigurationDecision) Digest() string { return d.digest }
 
 // Summary returns a bounded redacted type description.
@@ -89,6 +90,10 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 		})
 	}
 	for _, decision := range maintenance {
+		digest := decision.digest
+		if decision.field == maintenanceConstructorConfig {
+			digest = constructorConfigPublicDigest(decision.config)
+		}
 		summary := ConfigurationSummaryRemoval
 		if !decision.removed {
 			switch decision.field {
@@ -110,7 +115,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 		}
 		result = append(result, ConfigurationDecision{
 			path:                 decision.path,
-			digest:               decision.digest,
+			digest:               digest,
 			summary:              summary,
 			removed:              decision.removed,
 			source:               source,
@@ -231,7 +236,7 @@ func constructorConfigurationDecision(decision constructorConfigDecision) Config
 	}
 	return ConfigurationDecision{
 		path:                 constructorConfigPath(decision.constructor, decision.segments),
-		digest:               decision.digest,
+		digest:               constructorConfigPublicDigest(decision),
 		summary:              summary,
 		removed:              removed,
 		source:               decision.source,

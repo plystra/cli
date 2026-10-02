@@ -521,10 +521,15 @@ names, container shapes, values, and Secret-reference targets are not safe to
 publish, even as hashes. Private-only edits to those objects leave generated
 output current; changing their constructor, export name, or adoption still
 changes provenance. Adoption must pass the ordinary typed validation first.
-The generation transaction separately fingerprints root-document bytes in
-memory to reject concurrent edits without publishing that private fingerprint.
-This does not yet complete public/private identity separation for validated
-constructor configuration or standalone typed runtime loading.
+Validated Secret fields also exclude reference kind and target from public
+document, export, and composition identities. Changing an environment or file
+reference leaves generated output and inspection unchanged. Private comparisons
+still reject conflicting adopted references; explicit current values or
+tombstones resolve them without publishing private equality through provenance.
+Generation separately compares private root, selected-document, and dependency
+snapshots to reject concurrent edits and preserve the changed source. Broader
+runtime-only value privacy, build-visible freezing, defaults, and standalone
+typed runtime loading remain incomplete.
 
 The required top-level `interface_provenance` record in
 `generated/manifest.json` uses schema `plystra.interface-provenance/v3`. It
