@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/plystra/cli/internal/constructorconfig"
 	"go.yaml.in/yaml/v3"
@@ -171,5 +173,91 @@ func TestBindDefaultsRejectsStaleCompiledShape(t *testing.T) {
 		if err := constructorconfig.BindDefaults(&s, typ); !errors.Is(err, constructorconfig.ErrValue) {
 			t.Fatal("stale compiled schema was accepted")
 		}
+	}
+}
+
+func TestBindDefaultsRejectsInvalidCompiledMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		tag   string
+		typ   reflect.Type
+		field constructorconfig.Field
+	}{
+		{name: "empty policy", tag: `plystra:""`},
+		{name: "duplicate YAML tag", tag: `yaml:"value" yaml:"private-other"`},
+		{name: "duplicate policy tag", tag: `plystra:"required" plystra:"private-other"`, field: constructorconfig.Field{Required: true}},
+		{name: "duplicate option", tag: `plystra:"required,required"`, field: constructorconfig.Field{Required: true}},
+		{name: "empty option", tag: `plystra:"required,"`, field: constructorconfig.Field{Required: true}},
+		{name: "malformed unrelated tag", tag: `json:"value"private-invalid`},
+		{name: "duplicate default", tag: `plystra-default:"private-first" plystra-default:"private-second"`, field: constructorconfig.Field{HasDefault: true}},
+		{name: "required default", tag: `plystra:"required" plystra-default:"private-default"`, field: constructorconfig.Field{Required: true, HasDefault: true}},
+		{name: "invalid boolean default", tag: `plystra-default:"private-invalid"`, typ: reflect.TypeFor[bool](), field: constructorconfig.Field{HasDefault: true, Value: constructorconfig.Schema{Kind: "boolean"}}},
+		{name: "invalid duration default", tag: `plystra-default:"private-invalid"`, typ: reflect.TypeFor[time.Duration](), field: constructorconfig.Field{HasDefault: true, Value: constructorconfig.Schema{Kind: "duration"}}},
+		{name: "invalid URL default", tag: `plystra-default:"https://private.example/%zz"`, typ: reflect.TypeFor[url.URL](), field: constructorconfig.Field{HasDefault: true, Value: constructorconfig.Schema{Kind: "url"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.typ == nil {
+				tc.typ = reflect.TypeFor[string]()
+			}
+			field := tc.field
+			field.Name, field.GoName = "value", "Value"
+			if field.Value.Kind == "" {
+				field.Value.Kind = "string"
+			}
+			s := object(field)
+			typ := reflect.StructOf([]reflect.StructField{{Name: "Value", Type: tc.typ, Tag: reflect.StructTag(tc.tag)}})
+			err := constructorconfig.BindDefaults(&s, typ)
+			if !errors.Is(err, constructorconfig.ErrValue) {
+				t.Fatalf("invalid metadata was accepted: %v", err)
+			}
+			if strings.Contains(err.Error(), "private-") || strings.Contains(err.Error(), "private.example") {
+				t.Fatal("private tag entered diagnostic")
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		field reflect.StructField
+	}{
+		{"ignored policy", reflect.StructField{Name: "Ignored", Type: reflect.TypeFor[string](), Tag: `yaml:"-" plystra:"required"`}},
+		{"ignored default", reflect.StructField{Name: "Ignored", Type: reflect.TypeFor[string](), Tag: `yaml:"-" plystra-default:"private-default"`}},
+		{"unexported YAML", reflect.StructField{Name: "hidden", PkgPath: "example.com/private", Type: reflect.TypeFor[string](), Tag: `yaml:"hidden"`}},
+		{"unexported policy", reflect.StructField{Name: "hidden", PkgPath: "example.com/private", Type: reflect.TypeFor[string](), Tag: `plystra:"required"`}},
+		{"unexported default", reflect.StructField{Name: "hidden", PkgPath: "example.com/private", Type: reflect.TypeFor[string](), Tag: `plystra-default:"private-default"`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := object()
+			if err := constructorconfig.BindDefaults(&s, reflect.StructOf([]reflect.StructField{tc.field})); !errors.Is(err, constructorconfig.ErrValue) {
+				t.Fatalf("invalid hidden metadata was accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestBindDefaultsAcceptsUnrelatedTagsAndValidPrivateDefaultEdits(t *testing.T) {
+	type Config struct {
+		Value   string `yaml:"" plystra-default:"edited-private-default"`
+		Ignored string `yaml:"-"`
+		hidden  string `yaml:"-"`
+	}
+	s := object(constructorconfig.Field{Name: "value", GoName: "Value", HasDefault: true, Value: constructorconfig.Schema{Kind: "string"}})
+	if err := constructorconfig.BindDefaults(&s, reflect.TypeFor[Config]()); err != nil {
+		t.Fatal(err)
+	}
+	n, err := constructorconfig.Normalize(s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result Config
+	if err := constructorconfig.Bind(context.Background(), nil, s, n, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Value != "edited-private-default" || result.Ignored != "" || result.hidden != "" {
+		t.Fatal("private default or excluded field changed")
+	}
+	typ := reflect.StructOf([]reflect.StructField{{Name: "Value", Type: reflect.TypeFor[string](), Tag: `yaml:"value" json:"one" json:"two" plystra:"build-visible,required"`}})
+	s = object(constructorconfig.Field{Name: "value", GoName: "Value", Required: true, BuildVisible: true, Value: constructorconfig.Schema{Kind: "string"}})
+	if err := constructorconfig.BindDefaults(&s, typ); err != nil {
+		t.Fatal("unowned duplicate tags or valid reversed policy rejected")
 	}
 }

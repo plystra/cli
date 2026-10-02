@@ -294,7 +294,7 @@
     },
     {
       "path": "generated/go/internal/constructorconfig/value_gen.go",
-      "sha256": "sha256:1cadb3b0e51c995c89549c7b485cd785949bfbf3d9d103f4e02b4fb9a6ae56ae",
+      "sha256": "sha256:8e8f470230b266dfca593fbefd9962fab778962829c7e896521d5a48c0e21166",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [

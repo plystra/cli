@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/plystra/cli/internal/constructorconfig"
 )
 
 const (
@@ -329,7 +331,7 @@ func compileConfigurationFields(structure *types.Struct, state *configurationCom
 	for index := 0; index < structure.NumFields(); index++ {
 		field := structure.Field(index)
 		rawTag := structure.Tag(index)
-		tags, err := parseConfigurationStructTags(rawTag)
+		tags, err := constructorconfig.ParseStructTags(rawTag)
 		if err != nil {
 			return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 		}
@@ -369,7 +371,7 @@ func compileConfigurationFields(structure *types.Struct, state *configurationCom
 		if err != nil {
 			return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 		}
-		required, buildVisible, err := configurationFieldPolicy(tags)
+		required, buildVisible, err := constructorconfig.FieldPolicy(tags)
 		if err != nil {
 			return nil, fmt.Errorf("constructor Config field %s: %v", field.Name(), err)
 		}
@@ -541,35 +543,6 @@ func configurationBasicKind(kind types.BasicKind) (ConfigurationValueKind, int, 
 	}
 }
 
-func configurationFieldPolicy(tags map[string]string) (bool, bool, error) {
-	value, exists := tags["plystra"]
-	if !exists {
-		return false, false, nil
-	}
-	if value == "" {
-		return false, false, fmt.Errorf("plystra configuration tag must name at least one option")
-	}
-	required := false
-	buildVisible := false
-	for _, option := range strings.Split(value, ",") {
-		switch option {
-		case "required":
-			if required {
-				return false, false, fmt.Errorf("duplicate plystra configuration option %q", option)
-			}
-			required = true
-		case "build-visible":
-			if buildVisible {
-				return false, false, fmt.Errorf("duplicate plystra configuration option %q", option)
-			}
-			buildVisible = true
-		default:
-			return false, false, fmt.Errorf("unknown plystra configuration option %q", option)
-		}
-	}
-	return required, buildVisible, nil
-}
-
 func compileConfigurationDefault(value ConfigurationValue, raw string) (string, error) {
 	switch value.kind {
 	case ConfigurationValueString:
@@ -645,61 +618,6 @@ func marshalConfigurationDefaultString(value string) string {
 
 func configurationDefaultAccessor(value string) func() string {
 	return func() string { return value }
-}
-
-func parseConfigurationStructTags(tag string) (map[string]string, error) {
-	values := make(map[string]string)
-	entries := 0
-	for tag != "" {
-		if entries > 0 && tag[0] != ' ' {
-			return nil, fmt.Errorf("invalid Go struct tag syntax: entries must be separated by spaces")
-		}
-		index := 0
-		for index < len(tag) && tag[index] == ' ' {
-			index++
-		}
-		tag = tag[index:]
-		if tag == "" {
-			break
-		}
-
-		index = 0
-		for index < len(tag) && tag[index] > ' ' && tag[index] != ':' && tag[index] != '"' && tag[index] != 0x7f {
-			index++
-		}
-		if index == 0 || index+1 >= len(tag) || tag[index] != ':' || tag[index+1] != '"' {
-			return nil, fmt.Errorf("invalid Go struct tag syntax")
-		}
-		key := tag[:index]
-		tag = tag[index+1:]
-
-		index = 1
-		for index < len(tag) && tag[index] != '"' {
-			if tag[index] == '\\' {
-				index++
-			}
-			index++
-		}
-		if index >= len(tag) {
-			return nil, fmt.Errorf("invalid Go struct tag syntax")
-		}
-		quotedValue := tag[:index+1]
-		tag = tag[index+1:]
-		value, err := strconv.Unquote(quotedValue)
-		if err != nil {
-			return nil, fmt.Errorf("invalid Go struct tag syntax")
-		}
-		if _, duplicate := values[key]; duplicate {
-			switch key {
-			case "yaml", "plystra", "plystra-default":
-				return nil, fmt.Errorf("duplicate Go struct tag key %q", key)
-			}
-		} else {
-			values[key] = value
-		}
-		entries++
-	}
-	return values, nil
 }
 
 func configurationContainsSecret(value ConfigurationValue) bool {

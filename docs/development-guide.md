@@ -1833,6 +1833,10 @@ build-visible projection before resolving Secrets or entering constructors.
 Binding never invokes custom YAML unmarshalling. Runtime-only values may change
 without regenerating; build-visible drift requires regeneration and rebuild.
 Private defaults come from compiled Go tags and are absent from generated source.
+Startup checks the complete tag syntax and policy of the recompiled Config,
+including ignored and unexported fields. An authored runtime value cannot hide
+an invalid compiled default. These failures reject the schema before Secret
+lookup or constructor entry with redacted regeneration and rebuild guidance.
 Dormant objects create no runtime binding. Effective adoptions with active
 configurable constructors fail explicitly until private-baseline reconstruction
 is implemented. This bounded current-project path does not complete Gate 9.

@@ -142,6 +142,110 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response, error) { re
 	}
 }
 
+func TestGeneratedBootstrapRejectsInvalidRecompiledConfigurationMetadata(t *testing.T) {
+	root := t.TempDir()
+	const module = "example.com/recompiled-configuration"
+	writeApplicationModule(t, root, module)
+	writeAssemblyInterface(t, root, "probe/run/v1", "runv1", "probe.run/v1", "Run", "type Request struct{}\ntype Response struct{}\n")
+	source := strings.ReplaceAll(`package service
+import (
+ "context"
+ "net/url"
+ "os"
+ "time"
+ "github.com/plystra/kernel/configuration"
+ runv1 "example.com/recompiled-configuration/interfaces/probe/run/v1"
+)
+type Config struct {
+ Value string @@yaml:"value" plystra:"required"@@
+ Enabled bool @@yaml:"enabled" plystra-default:"true"@@
+ Duration time.Duration @@yaml:"duration" plystra-default:"1s"@@
+ URL url.URL @@yaml:"url" plystra-default:"https://example.test"@@
+ Password configuration.Secret @@yaml:"password"@@
+ Ignored string @@yaml:"-"@@
+ hidden string
+}
+type service struct{}
+//plystra:implements probe.run/v1
+func New(config Config) (*service, error) {
+ if err:=os.WriteFile(os.Getenv("PLYSTRA_METADATA_TEST_MARKER"), []byte("constructed"), 0600);err!=nil{return nil,err}
+ return &service{},nil
+}
+func (*service) Run(context.Context, runv1.Request) (runv1.Response,error) {return runv1.Response{},nil}
+`, "@@", "`")
+	servicePath := filepath.Join(root, "service", "service.go")
+	writeFile(t, servicePath, source)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [probe.run/v1]}\nconfig:\n  "+module+"/service.New:\n    value: ready\n    enabled: false\n    duration: 2s\n    url: https://runtime.example.test\n    password: {env: PLYSTRA_METADATA_TEST_SECRET}\n")
+	var stdout, stderr bytes.Buffer
+	if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
+		t.Fatalf("generate = %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
+	}
+	generated := snapshotGenerated(t, root)
+	for _, tc := range []struct{ name, from, to string }{
+		{"duplicate policy option", `plystra:"required"`, `plystra:"required,required"`},
+		{"empty policy option", `plystra:"required"`, `plystra:"required,"`},
+		{"duplicate YAML tag", `yaml:"value"`, `yaml:"value" yaml:"private-invalid-key"`},
+		{"malformed tag", `yaml:"value"`, `yaml:"value"private-invalid`},
+		{"masked boolean default", `plystra-default:"true"`, `plystra-default:"private-invalid"`},
+		{"masked duration default", `plystra-default:"1s"`, `plystra-default:"private-invalid"`},
+		{"masked URL default", `plystra-default:"https://example.test"`, `plystra-default:"https://private.example/%zz"`},
+		{"ignored policy", `yaml:"-"`, `yaml:"-" plystra:"required"`},
+		{"private field default", "hidden string", "hidden string `plystra-default:\"private-invalid\"`"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeFile(t, servicePath, strings.Replace(source, tc.from, tc.to, 1))
+			marker := filepath.Join(t.TempDir(), "constructor-entered")
+			process := exec.CommandContext(t.Context(), "go", "run", "-race", "-mod=readonly", "./generated/go/application", "--smoke", "--configuration-root", root)
+			process.Dir = root
+			process.Env = goEnvironment(map[string]string{"PLYSTRA_METADATA_TEST_MARKER": marker})
+			for i := len(process.Env) - 1; i >= 0; i-- {
+				name, _, _ := strings.Cut(process.Env[i], "=")
+				if strings.EqualFold(name, "PLYSTRA_METADATA_TEST_SECRET") || strings.EqualFold(name, "PLYSTRA_ENV") || strings.EqualFold(name, "PLYSTRA_CONFIG") {
+					process.Env = append(process.Env[:i], process.Env[i+1:]...)
+				}
+			}
+			output, err := process.CombinedOutput()
+			if err == nil || !bytes.Contains(output, []byte("compiled constructor Config schema changed; regenerate and rebuild")) {
+				t.Fatalf("stale compiled metadata = %v\n%s", err, output)
+			}
+			for _, private := range []string{"private-invalid", "private.example", "PLYSTRA_METADATA_TEST_SECRET", root} {
+				if bytes.Contains(output, []byte(private)) {
+					t.Fatal("compiled metadata diagnostic leaked private input")
+				}
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatal("invalid compiled metadata entered constructor")
+			}
+			if !reflect.DeepEqual(generated, snapshotGenerated(t, root)) {
+				t.Fatal("startup modified generated output")
+			}
+		})
+	}
+	t.Run("compatible recompiled metadata", func(t *testing.T) {
+		changed := strings.Replace(source, `plystra-default:"true"`, `plystra-default:"false"`, 1)
+		changed = strings.Replace(changed, `yaml:"value"`, `yaml:"value" json:"value"`, 1)
+		writeFile(t, servicePath, changed)
+		marker := filepath.Join(t.TempDir(), "constructor-entered")
+		process := exec.CommandContext(t.Context(), "go", "run", "-race", "-mod=readonly", "./generated/go/application", "--smoke", "--configuration-root", root)
+		process.Dir = root
+		for _, entry := range goEnvironment(map[string]string{"PLYSTRA_METADATA_TEST_MARKER": marker, "PLYSTRA_METADATA_TEST_SECRET": "private-value"}) {
+			name, _, _ := strings.Cut(entry, "=")
+			if !strings.EqualFold(name, "PLYSTRA_ENV") && !strings.EqualFold(name, "PLYSTRA_CONFIG") {
+				process.Env = append(process.Env, entry)
+			}
+		}
+		if output, err := process.CombinedOutput(); err != nil {
+			t.Fatalf("compatible recompiled metadata = %v\n%s", err, output)
+		}
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatal("compatible metadata did not enter constructor")
+		}
+		if !reflect.DeepEqual(generated, snapshotGenerated(t, root)) {
+			t.Fatal("compatible metadata changed generated output")
+		}
+	})
+}
+
 func TestGeneratedBootstrapRejectsAdoptedTypedConfigurationUntilBaselineAvailable(t *testing.T) {
 	root := t.TempDir()
 	const module = "example.com/adopted-runtime-config"

@@ -395,6 +395,93 @@ func project(s Schema, n *yaml.Node, all bool) any {
 	}
 }
 
+// ParseStructTags checks the full Go tag syntax and rejects repeated owned keys.
+// Values are private metadata and must never be copied into public artifacts.
+func ParseStructTags(tag string) (map[string]string, error) {
+	values := make(map[string]string)
+	entries := 0
+	for tag != "" {
+		if entries > 0 && tag[0] != ' ' {
+			return nil, fmt.Errorf("invalid Go struct tag syntax: entries must be separated by spaces")
+		}
+		index := 0
+		for index < len(tag) && tag[index] == ' ' {
+			index++
+		}
+		tag = tag[index:]
+		if tag == "" {
+			break
+		}
+
+		index = 0
+		for index < len(tag) && tag[index] > ' ' && tag[index] != ':' && tag[index] != '"' && tag[index] != 0x7f {
+			index++
+		}
+		if index == 0 || index+1 >= len(tag) || tag[index] != ':' || tag[index+1] != '"' {
+			return nil, fmt.Errorf("invalid Go struct tag syntax")
+		}
+		key := tag[:index]
+		tag = tag[index+1:]
+
+		index = 1
+		for index < len(tag) && tag[index] != '"' {
+			if tag[index] == '\\' {
+				index++
+			}
+			index++
+		}
+		if index >= len(tag) {
+			return nil, fmt.Errorf("invalid Go struct tag syntax")
+		}
+		quotedValue := tag[:index+1]
+		tag = tag[index+1:]
+		value, err := strconv.Unquote(quotedValue)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Go struct tag syntax")
+		}
+		if _, duplicate := values[key]; duplicate {
+			switch key {
+			case "yaml", "plystra", "plystra-default":
+				return nil, fmt.Errorf("duplicate Go struct tag key %q", key)
+			}
+		} else {
+			values[key] = value
+		}
+		entries++
+	}
+	return values, nil
+}
+
+// FieldPolicy validates the closed Plystra policy options used by discovery and startup.
+func FieldPolicy(tags map[string]string) (bool, bool, error) {
+	value, exists := tags["plystra"]
+	if !exists {
+		return false, false, nil
+	}
+	if value == "" {
+		return false, false, fmt.Errorf("plystra configuration tag must name at least one option")
+	}
+	required := false
+	buildVisible := false
+	for _, option := range strings.Split(value, ",") {
+		switch option {
+		case "required":
+			if required {
+				return false, false, fmt.Errorf("duplicate plystra configuration option %q", option)
+			}
+			required = true
+		case "build-visible":
+			if buildVisible {
+				return false, false, fmt.Errorf("duplicate plystra configuration option %q", option)
+			}
+			buildVisible = true
+		default:
+			return false, false, fmt.Errorf("unknown plystra configuration option %q", option)
+		}
+	}
+	return required, buildVisible, nil
+}
+
 // BindDefaults reads defaults from the already compiled Config type. Generated
 // source contains no copied default literal or digest of private defaults.
 func BindDefaults(s *Schema, t reflect.Type) error {
@@ -410,35 +497,62 @@ func BindDefaults(s *Schema, t reflect.Type) error {
 		}
 		return BindDefaults(s.Element, t.Elem())
 	}
+	fieldTags := make(map[string]map[string]string, len(s.Fields))
+	if s.Kind == "object" {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			tags, err := ParseStructTags(string(field.Tag))
+			if err != nil {
+				return ErrValue
+			}
+			yamlName, tagged := tags["yaml"]
+			_, policy := tags["plystra"]
+			_, defaulted := tags["plystra-default"]
+			if !field.IsExported() {
+				if tagged && yamlName != "-" || policy || defaulted {
+					return ErrValue
+				}
+				continue
+			}
+			if field.Anonymous {
+				return ErrValue
+			}
+			if yamlName == "-" {
+				if policy || defaulted {
+					return ErrValue
+				}
+				continue
+			}
+			fieldTags[field.Name] = tags
+		}
+	}
 	for i := range s.Fields {
 		f := &s.Fields[i]
 		goField, ok := t.FieldByName(f.GoName)
 		if !ok || goField.PkgPath != "" {
 			return ErrValue
 		}
-		name := goField.Tag.Get("yaml")
+		tags, exists := fieldTags[f.GoName]
+		if !exists {
+			return ErrValue
+		}
+		name := tags["yaml"]
 		if name == "" {
 			name = strings.ToLower(goField.Name)
 		}
-		policy := strings.Split(goField.Tag.Get("plystra"), ",")
-		required, public := false, false
-		for _, option := range policy {
-			switch option {
-			case "required":
-				required = true
-			case "build-visible":
-				public = true
-			case "":
-			default:
-				return ErrValue
-			}
+		required, public, err := FieldPolicy(tags)
+		if err != nil {
+			return ErrValue
 		}
-		_, hasDefault := goField.Tag.Lookup("plystra-default")
+		_, hasDefault := tags["plystra-default"]
 		if goField.Anonymous || name != f.Name || required != f.Required || public != f.BuildVisible || hasDefault != f.HasDefault {
 			return ErrValue
 		}
+		if required && hasDefault {
+			return ErrValue
+		}
 		if f.HasDefault {
-			value, exists := goField.Tag.Lookup("plystra-default")
+			value, exists := tags["plystra-default"]
 			if !exists {
 				return ErrValue
 			}
@@ -465,6 +579,14 @@ func BindDefaults(s *Schema, t reflect.Type) error {
 				f.Default = []byte(strconv.FormatFloat(v, 'g', -1, f.Value.Bits))
 			default:
 				f.Default = []byte(value)
+			}
+			// An authored override must not hide an invalid compiled default.
+			node, err := defaultNode(f.Value, f.Default)
+			if err != nil {
+				return ErrValue
+			}
+			if _, err := Normalize(f.Value, node); err != nil {
+				return ErrValue
 			}
 		}
 		if err := BindDefaults(&f.Value, goField.Type); err != nil {

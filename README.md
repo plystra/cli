@@ -598,6 +598,9 @@ All active objects and build-visible values are checked before any Secret is
 resolved or constructor runs. Binding invokes no custom YAML unmarshalling.
 Defaults come from the compiled Go type; private values, defaults, and reference
 targets stay out of generated source. Dormant objects create no runtime binding.
+Startup rejects invalid recompiled field metadata, including duplicate tags,
+metadata on ignored or unexported fields, and invalid defaults hidden by runtime
+overrides. Regenerate and rebuild after correcting the authored Go declaration.
 Active configurable constructors with effective adoptions fail explicitly until
 private runtime-baseline reconstruction is available. Regenerate and rebuild
 for runtime compatibility version 8.
