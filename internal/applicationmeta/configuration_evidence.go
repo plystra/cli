@@ -47,8 +47,8 @@ type ConfigurationDecision struct {
 // Path returns the canonical schema path represented by the decision.
 func (d ConfigurationDecision) Path() string { return d.path }
 
-// Digest returns the normalized public decision digest. Runtime-only constructor
-// contents and Secret reference kinds and targets never contribute to this identity.
+// Digest returns the normalized public decision digest. Runtime-only contents
+// and Secret reference kinds and targets never contribute to this identity.
 func (d ConfigurationDecision) Digest() string { return d.digest }
 
 // Summary returns a bounded redacted type description.
@@ -67,7 +67,7 @@ func (d ConfigurationDecision) DependencyComposable() bool { return d.dependency
 
 // ConfigurationDecisions returns deterministic typed decisions for one parsed
 // configuration layer. Values are represented only by a digest and a bounded
-// summary; runtime-only constructor contents and Secret targets are excluded.
+// summary; runtime-only contents and Secret targets are excluded.
 func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]ConfigurationDecision, error) {
 	if schemas == nil {
 		return nil, fmt.Errorf("configuration decision schema lookup is nil")
@@ -323,7 +323,7 @@ func processConfigurationDecisions(manifest Manifest) []ConfigurationDecision {
 	if manifest.hasHTTPAddress || manifest.removeHTTPAddress {
 		digest := digestStrings("http.address", "removed")
 		if manifest.hasHTTPAddress {
-			digest = digestStrings("http.address", manifest.httpAddress)
+			digest = digestStrings("process.runtime-value/v1", "http.address", "string")
 		}
 		add("http.address", digest, ConfigurationSummaryString, manifest.removeHTTPAddress)
 	}
@@ -348,7 +348,7 @@ func processConfigurationDecisions(manifest Manifest) []ConfigurationDecision {
 	if manifest.hasStartupTimeout || manifest.removeStartupTimeout {
 		digest := digestStrings("timeouts.startup", "removed")
 		if manifest.hasStartupTimeout {
-			digest = digestStrings("timeouts.startup", manifest.startupTimeout.String())
+			digest = digestStrings("process.runtime-value/v1", "timeouts.startup", "duration")
 		}
 		add("timeouts.startup", digest, ConfigurationSummaryDuration, manifest.removeStartupTimeout)
 	}

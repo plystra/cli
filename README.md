@@ -539,6 +539,13 @@ equality still governs composition conflicts. Build-visible value edits cause
 public generation drift; frozen build-visible runtime enforcement, defaults,
 and standalone typed runtime loading remain incomplete.
 
+The current-Project process settings `http.address` and `timeouts.startup`
+also exclude their values from public hashes. Valid edits leave generated
+output, inspection, and explanation unchanged; declared presence, type, source,
+and removal intent remain visible. Private snapshots still detect concurrent
+edits. Startup reads the selected timeout without regeneration. CORS, exposure,
+and invocation policies remain build-affecting, not runtime-only process values.
+
 The required top-level `interface_provenance` record in
 `generated/manifest.json` uses schema `plystra.interface-provenance/v3`. It
 identifies every visible authored Interface, every reachable ordinary binding,

@@ -146,6 +146,8 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"A build-visible tag includes the whole value and descendants",
 		"nil/empty differences",
 		"Build-visible edits cause public generation drift",
+		"Current-Project http.address and timeouts.startup values are runtime-only and absent from public hashes",
+		"Startup loads the selected timeout without regeneration",
 		"Resource export syntax is checked even without adoption",
 		"Resource adoption remains unsupported",
 	} {

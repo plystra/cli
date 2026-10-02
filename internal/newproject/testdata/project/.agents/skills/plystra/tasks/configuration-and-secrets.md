@@ -24,6 +24,8 @@ Validated Secret fields exclude reference kind and target from public identity. 
 
 Validated runtime-only constructor values exclude contents from public identity. A build-visible tag includes the whole value and descendants; otherwise only tagged descendants contribute. Entirely private atomic pointers, lists, arrays, and maps hide keys, contents, cardinality, and nil/empty differences. Mixed containers retain positions, keys, order, and nullness needed to locate public descendants, excluding private siblings. Declared field presence, sources, and tombstones remain provenance. Private equality still controls conflicts. Build-visible edits cause public generation drift; frozen runtime enforcement, defaults, and standalone typed runtime loading remain unfinished.
 
+Current-Project http.address and timeouts.startup values are runtime-only and absent from public hashes. Valid value edits preserve generated output, inspection, and explanation; presence, type, source, and removal intent remain provenance. Private snapshots detect concurrent edits. Startup loads the selected timeout without regeneration. CORS, exposure, and invocation policies remain build-affecting and still require regeneration when changed.
+
 Resource export syntax is checked even without adoption: instances contain only use and config; bind contains only implementations and instances. Instance names use dot-separated lower-kebab segments within 128 ASCII bytes, constructors use exact symbols, and binding leaves map nonblank Go parameter identifiers to instance names. Structural and configuration mappings need unique string keys. Resource adoption remains unsupported; syntax validation does not resolve provider types, required fields, or binding targets.
 
 ## Select the document

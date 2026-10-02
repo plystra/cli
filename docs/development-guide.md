@@ -915,6 +915,13 @@ still controls conflicts. Build-visible edits cause public generation drift.
 Frozen build-visible runtime enforcement, defaults, and standalone typed runtime
 loading remain incomplete.
 
+Current-Project `http.address` and `timeouts.startup` values are runtime-only
+and absent from public hashes. Valid value edits preserve generated output,
+inspection, and explanation, while presence, type, source, and removal intent
+remain provenance. Private snapshots detect concurrent edits. Startup loads the
+selected timeout without regeneration. CORS, exposure, and invocation policies
+remain build-affecting and still require regeneration when changed.
+
 The selected current Project activates that exact module/export identity:
 
 ```yaml
