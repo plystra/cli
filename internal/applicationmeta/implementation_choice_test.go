@@ -62,7 +62,7 @@ interfaces:
   require:
     remove: [debug.trace/v1]
   use:
-    email.send/v1: null # replace this tombstone
+    email.send/v1: {$remove: true} # replace this tombstone
 `)
 	id := mustImplementationChoiceInterfaceID(t, "email.send/v1")
 	constructor := mustImplementationChoiceConstructor(t, "example.com/email/production.New")

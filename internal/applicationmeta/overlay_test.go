@@ -108,7 +108,7 @@ http:
   expose:
     reports.read/v1:
       transport: connect
-    audit.write/v1: null
+    audit.write/v1: {$remove: true}
 timeouts: {startup: null}
 capabilities:
   require:

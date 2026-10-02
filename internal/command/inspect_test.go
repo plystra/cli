@@ -1051,7 +1051,7 @@ config:
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), `interfaces:
   require: [cache.read/v1, reports.read/v1]
   use:
-    cache.read/v1: null
+    cache.read/v1: {$remove: true}
 config:
   example.com/acme/interface-library/cache.New:
     endpoint: private-production-cache-endpoint-marker

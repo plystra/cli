@@ -181,7 +181,7 @@ func TestParseDerivesTransportsFromCanonicalExposure(t *testing.T) {
 		},
 		{
 			name: "removed exposure",
-			data: "http: {expose: {kernel.health/v1: null}}\n",
+			data: "http: {expose: {kernel.health/v1: {$remove: true}}}\n",
 			want: applicationmeta.HTTPTransports{},
 		},
 	}
@@ -504,10 +504,10 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"http: {}\n",
 		"http: {cors: {allowed_origins: [https://example.com, http://localhost:80], allow_credentials: true}}\n",
 		"http: {cors: null}\n",
-		"http: {address: null, expose: {kernel.health/v1: {transport: connect}, order.create/v1: null}}\n",
+		"http: {address: null, expose: {kernel.health/v1: {transport: connect}, order.create/v1: {$remove: true}}}\n",
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
-		"interfaces: {policies: {email.send/v1: {timeout: 5000ms}, audit.write/v1: null}}\n",
+		"interfaces: {policies: {email.send/v1: {timeout: 5000ms}, audit.write/v1: {$remove: true}}}\n",
 		"config: {example.com/acme/plugin.New: null}\n",
 		"config: {example.com/acme/plugin.New: {settings: {legacy: null, nested: {enabled: true}}}}\n",
 		"capabilities: {require: [kernel.health/v1, order.create/v1], use: {order.create/v1: acme.orders}, aliases: {}}\n",

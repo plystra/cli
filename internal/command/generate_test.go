@@ -1811,7 +1811,7 @@ interfaces:
 	removedOverlay := `# environment-specific policy removal
 interfaces:
   policies:
-    email.preview/v1: null
+    email.preview/v1: {$remove: true}
 `
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), removedOverlay)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)

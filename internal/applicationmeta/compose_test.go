@@ -245,7 +245,7 @@ func TestComposeDerivesTransportFromEffectiveExposure(t *testing.T) {
 		},
 		{
 			name:    "removed exposure selects no transport",
-			current: "http: {expose: {kernel.health/v1: null}}\n",
+			current: "http: {expose: {kernel.health/v1: {$remove: true}}}\n",
 		},
 		{
 			name: "dependency exposure is ignored without transport",
@@ -457,7 +457,7 @@ capabilities:
 	current := composeManifest(t, `
 http:
   address: null
-  expose: {email.send/v1: null}
+  expose: {email.send/v1: {$remove: true}}
 timeouts: {startup: null}
 capabilities:
   require: {remove: [audit.write/v1]}
@@ -567,7 +567,7 @@ func TestComposeIgnoresDependencyHTTPExposureConflicts(t *testing.T) {
 
 	dependencies := []applicationmeta.Dependency{
 		{ModulePath: "example.com/add", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: {transport: connect}}}\n")},
-		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: null}}\n")},
+		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: {$remove: true}}}\n")},
 	}
 	current := composeManifest(t, "http: {expose: {app.health/v1: {transport: connect}}}\n")
 	composed, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
@@ -590,7 +590,7 @@ func TestComposeDeduplicatesCompatibleInheritedRemovals(t *testing.T) {
 	t.Parallel()
 
 	source := `
-http: {expose: {email.send/v1: null}}
+http: {expose: {email.send/v1: {$remove: true}}}
 capabilities:
   require: {remove: [audit.write/v1]}
   use: {email.send/v1: null}

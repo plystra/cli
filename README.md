@@ -426,7 +426,15 @@ names. Configuration objects and structural containers require mappings with
 unique string keys. Provider types, required fields, and target existence still
 need composition and resolution; this syntax check does not enable adoption.
 
-Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `null` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
+Exact entries in `interfaces.use`, `interfaces.policies`, and `http.expose`
+are removed only by `{$remove: true}`. Null, empty values, false or string-valued
+markers, and markers with sibling fields are invalid. Exclusions remain authored
+intent even when no lower entry exists and survive later dependency additions.
+Generated runtime compatibility version 5 applies the same rule before
+construction; regenerate and rebuild older Projects. This does not yet migrate
+the transitional null handling in constructor configuration or CORS.
+
+Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `{$remove: true}` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: null` disables inherited current-project CORS. The overlay may replace or sparsely add and remove exact export adoptions. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
 
 `plystra generate --config deploy/customer-a.yaml` instead uses that one complete
 document as the current-Project layer and resolves the adoption set declared in
@@ -1197,7 +1205,7 @@ copy.
 current-Project choice identifies only the selected root, environment, or
 complete-replacement document; an adopted choice identifies every same-valued
 selected module/export contributor in deterministic order. For
-an intrinsic choice, set the entry to `null` in the selected current-Project
+an intrinsic choice, set the entry to `{$remove: true}` in the selected current-Project
 document to remove the local or adopted effective selection; Kernel supplies
 that Interface intrinsically.
 `PLYSTRA_CONFIGURATION_INHERITED_CONFLICT` reports every explicitly adopted

@@ -778,7 +778,7 @@ func TestWriteCommandFailureReportsIntrinsicImplementationSelectionSources(t *te
 	wantSuffix := "\n\n" +
 		"Source: example.com/a:plystra.yaml:1:1 (implementation-selection)\n" +
 		"Source: example.com/z:plystra.yaml:1:1 (implementation-selection)\n\n" +
-		"Recovery:\nSet the reported interfaces.use entry to null in deploy/customer.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.\n\n" +
+		"Recovery:\nSet the reported interfaces.use entry to {$remove: true} in deploy/customer.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.\n\n" +
 		"Diagnostic: " + diagnosticResolveIntrinsicInterfaceSelection + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
 		t.Fatalf("intrinsic Implementation selection output = %q, want suffix %q", got, wantSuffix)

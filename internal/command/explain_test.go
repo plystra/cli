@@ -1162,7 +1162,7 @@ http:
   address: generation-private-marker
   expose: {order.create/v1: {transport: connect}}
 `)
-	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {order.create/v1: null}}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "http: {expose: {order.create/v1: {$remove: true}}}\n")
 	writeCommandFile(t, filepath.Join(root, "business", "plugin.yaml"), "id: example.business\nprovides: [order.create/v1]\n")
 	writeCommandFile(t, filepath.Join(root, "business", "capabilities", "order.create", "v1", "capability.yaml"), `id: order.create/v1
 request: {}

@@ -550,7 +550,7 @@ func TestResolvePreservesInheritedReplacementAndRemovalForDormantSelections(t *t
 		},
 		{
 			name:          "removal",
-			configuration: "interfaces: {use: {email.send/v1: null}}\n",
+			configuration: "interfaces: {use: {email.send/v1: {$remove: true}}}\n",
 		},
 	}
 	for _, test := range tests {
@@ -610,7 +610,7 @@ replace example.com/dormant-platform => ../platform
 			if effective := compositionProvenance(resolved.Composition().ResolutionSources(), selectionPath); len(effective) != 0 {
 				t.Fatalf("superseded dormant selection retained dependency resolution authority: %#v", effective)
 			}
-			if test.wantConstructor == "" && !strings.Contains(string(resolved.ConfigurationMaintenance().Data()), "email.send/v1: null") {
+			if test.wantConstructor == "" && !strings.Contains(string(resolved.ConfigurationMaintenance().Data()), "email.send/v1: {$remove: true}") {
 				t.Fatalf("dormant removal tombstone was not preserved:\n%s", resolved.ConfigurationMaintenance().Data())
 			}
 			if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
@@ -1042,7 +1042,7 @@ require example.com/platform v1.0.0
 
 replace example.com/platform => ../platform
 `)
-		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: {adopt: [{module: example.com/platform, export: defaults}]}\ninterfaces: {use: {kernel.health/v1: null}}\n")
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: {adopt: [{module: example.com/platform, export: defaults}]}\ninterfaces: {use: {kernel.health/v1: {$remove: true}}}\n")
 		before := snapshotTree(t, parent)
 
 		resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -1055,7 +1055,7 @@ replace example.com/platform => ../platform
 		if choices := resolved.Manifest().ImplementationChoices(); len(choices) != 0 {
 			t.Fatalf("removed inherited intrinsic choice remains effective: %#v", choices)
 		}
-		if !strings.Contains(string(resolved.ConfigurationMaintenance().Data()), "kernel.health/v1: null") {
+		if !strings.Contains(string(resolved.ConfigurationMaintenance().Data()), "kernel.health/v1: {$remove: true}") {
 			t.Fatalf("intrinsic removal tombstone was not preserved:\n%s", resolved.ConfigurationMaintenance().Data())
 		}
 		if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {

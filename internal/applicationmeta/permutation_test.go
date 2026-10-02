@@ -117,7 +117,7 @@ config:
   example.com/acme/smtp.New:
     settings: {legacy: null}
 http:
-  expose: {reports.read/v1: null}
+  expose: {reports.read/v1: {$remove: true}}
 `),
 		},
 	}
@@ -134,7 +134,7 @@ http:
   expose:
     kernel.health/v1:
       transport: connect
-    reports.read/v1: null
+    reports.read/v1: {$remove: true}
 timeouts: {startup: 7s}
 capabilities:
   require:
@@ -179,7 +179,7 @@ func permutationFullReplacementManifest(t testing.TB) applicationmeta.Manifest {
 	return composeManifest(t, `
 http:
   address: ":9000"
-  expose: {reports.read/v1: null}
+  expose: {reports.read/v1: {$remove: true}}
 capabilities:
   require: {remove: [inventory.read/v1]}
   use: {email.send/v1: acme.smtp.customer}

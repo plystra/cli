@@ -113,7 +113,7 @@ func TestResolveExecutablePoliciesPreservesAdoptedSourcesAndDormantIntent(t *tes
 	}
 	// The selected overlay can explicitly remove an active inherited policy.
 	writeFile(t, filepath.Join(root, "plystra.yaml"), configuration)
-	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces:\n  policies: {audit.write/v1: null}\n")
+	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces:\n  policies: {audit.write/v1: {$remove: true}}\n")
 	options.EnvironmentName = "production"
 	if _, err := applicationresolve.Resolve(t.Context(), options); err != nil {
 		t.Fatalf("removed adopted policy = %v", err)

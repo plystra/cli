@@ -23,7 +23,7 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 	const modulePath = "example.com/application"
 	root := t.TempDir()
 	rootData := []byte("http:\n  cors:\n    allowed_origins: [https://app.example.com]\n")
-	overlayData := []byte("# Production.\nhttp:\n  cors:\n    # Inherit root origins.\n    allow_credentials: true\n  expose:\n    records.read/v1: null\n    records.write/v1: null\n")
+	overlayData := []byte("# Production.\nhttp:\n  cors:\n    # Inherit root origins.\n    allow_credentials: true\n  expose:\n    records.read/v1: {$remove: true}\n    records.write/v1: {$remove: true}\n")
 	replacementData := []byte("# Customer.\nhttp: {expose: {}}\n")
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), rootData)
 	writeExposureFile(t, filepath.Join(root, "plystra.production.yaml"), overlayData)
@@ -39,7 +39,7 @@ func TestSelectedManifestWriteUsesEnvironmentAndReplacementTargets(t *testing.T)
 		[]byte("# Inherit root origins."),
 		[]byte("allow_credentials: true"),
 		[]byte("records.read/v1:\n      transport: connect"),
-		[]byte("records.write/v1: null"),
+		[]byte("records.write/v1: {$remove: true}"),
 	} {
 		if !bytes.Contains(overlayWrite.Data, retained) {
 			t.Fatalf("environment write omits %q:\n%s", retained, overlayWrite.Data)
@@ -103,7 +103,7 @@ func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
 
 	const modulePath = "example.com/application"
 	root := t.TempDir()
-	original := []byte("# Selected environment.\nhttp:\n  expose:\n    records.read/v1: null\n    records.write/v1: null\n")
+	original := []byte("# Selected environment.\nhttp:\n  expose:\n    records.read/v1: {$remove: true}\n    records.write/v1: {$remove: true}\n")
 	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), original)
 
 	write, changed, err := capabilityexpose.ManifestWrite(modulePath, root, mustCapabilityID(t, "records.read/v1"))
@@ -113,7 +113,7 @@ func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
 	for _, expected := range [][]byte{
 		[]byte("# Selected environment."),
 		[]byte("records.read/v1:\n      transport: connect"),
-		[]byte("records.write/v1: null"),
+		[]byte("records.write/v1: {$remove: true}"),
 	} {
 		if !bytes.Contains(write.Data, expected) {
 			t.Fatalf("ManifestWrite data omits %q:\n%s", expected, write.Data)

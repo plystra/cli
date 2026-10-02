@@ -707,7 +707,7 @@ func parseHTTPExposures(node *yaml.Node) ([]HTTPExposure, []interfaceRemoval, er
 		}
 		field := fmt.Sprintf("http.expose[%q]", key)
 		source := "plystra.yaml " + field
-		if isNull(values[key]) {
+		if isRemovalMapping(values[key]) {
 			removals = append(removals, interfaceRemoval{id: id, source: source})
 			continue
 		}
@@ -1346,6 +1346,18 @@ func strictBool(node *yaml.Node) (bool, error) {
 
 func isNull(node *yaml.Node) bool {
 	return node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!null"
+}
+
+func isRemovalMapping(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) != 2 {
+		return false
+	}
+	key, err := strictString(node.Content[0])
+	if err != nil || key != "$remove" {
+		return false
+	}
+	value, err := strictBool(node.Content[1])
+	return err == nil && value
 }
 
 func sortedNodeKeys(values map[string]*yaml.Node) []string {

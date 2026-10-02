@@ -22,10 +22,10 @@ interfaces:
     remove: [cache.read/v1]
   use:
     email.send/v1: github.com/acme/app/smtp.New
-    cache.read/v1: null
+    cache.read/v1: {$remove: true}
   policies:
     email.send/v1: {timeout: 5000ms}
-    audit.write/v1: null
+    audit.write/v1: {$remove: true}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestParsePreservesIntrinsicImplementationChoiceForResolutionValidation(t *t
 	manifest, err := applicationmeta.ParseSource("deploy/customer.yaml", []byte(`interfaces:
   use:
     kernel.health/v1: example.com/acme/health.New
-    kernel.info/v1: null
+    kernel.info/v1: {$remove: true}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestParseRejectsInvalidInterfaceConfiguration(t *testing.T) {
 		{name: "unknown sparse edit", data: "interfaces: {require: {append: [email.send/v1]}}\n", want: "unknown sparse-edit key"},
 		{name: "invalid choice key", data: "interfaces: {use: {email/v1: github.com/acme/smtp.New}}\n", want: "not a canonical Interface ID"},
 		{name: "invalid constructor", data: "interfaces: {use: {email.send/v1: acme.smtp}}\n", want: "not a fully qualified constructor symbol"},
-		{name: "nonstring constructor", data: "interfaces: {use: {email.send/v1: true}}\n", want: "must be a fully qualified constructor symbol or null"},
+		{name: "nonstring constructor", data: "interfaces: {use: {email.send/v1: true}}\n", want: "must be a fully qualified constructor symbol or {$remove: true}"},
 		{name: "policies nonmapping", data: "interfaces: {policies: []}\n", want: "interfaces.policies must be a mapping"},
 		{name: "invalid policy key", data: "interfaces: {policies: {email/v1: {timeout: 1s}}}\n", want: "not a canonical Interface ID"},
 		{name: "intrinsic policy", data: "interfaces: {policies: {kernel.health/v1: {timeout: 1s}}}\n", want: "intrinsic kernel.* Interface"},
@@ -244,7 +244,7 @@ func TestComposePolicyResolutionSourcesTrackOnlyEffectiveValues(t *testing.T) {
 		{"inherited", "{}", 1},
 		{"equal", "interfaces: {policies: {email.send/v1: {timeout: 5s}}}", 1},
 		{"replaced", "interfaces: {policies: {email.send/v1: {timeout: 2s}}}", 0},
-		{"removed", "interfaces: {policies: {email.send/v1: null}}", 0},
+		{"removed", "interfaces: {policies: {email.send/v1: {$remove: true}}}", 0},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			composed, err := applicationmeta.Compose(dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
@@ -342,7 +342,7 @@ func TestComposeInterfacePoliciesDeterministicallyWithCurrentReplacement(t *test
 	}) {
 		t.Fatalf("current policy replacement = %v", got)
 	}
-	removed, err := applicationmeta.Compose(conflicting, composeManifest(t, "interfaces: {policies: {email.send/v1: null}}\n"), composeSchemaLookup(nil))
+	removed, err := applicationmeta.Compose(conflicting, composeManifest(t, "interfaces: {policies: {email.send/v1: {$remove: true}}}\n"), composeSchemaLookup(nil))
 	if err != nil || len(removed.Manifest().InterfacePolicies()) != 0 {
 		t.Fatalf("current policy removal = %#v, %v", removed.Manifest().InterfacePolicies(), err)
 	}
@@ -368,10 +368,10 @@ interfaces:
     remove: [audit.write/v1]
   use:
     audit.write/v1: github.com/acme/auditprod.New
-    email.send/v1: null
+    email.send/v1: {$remove: true}
   policies:
     audit.write/v1: {timeout: 2s}
-    email.send/v1: null
+    email.send/v1: {$remove: true}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -533,9 +533,9 @@ interfaces:
     remove:
       - audit.write/v1 # explicit requirement removal
   use:
-    email.send/v1: null # explicit selection removal
+    email.send/v1: {$remove: true} # explicit selection removal
   policies:
-    email.send/v1: null # explicit policy removal
+    email.send/v1: {$remove: true} # explicit policy removal
 config:
   example.com/platform/smtp.New:
     host: null # explicit field removal
@@ -567,7 +567,7 @@ config:
 		"# explicit field removal",
 		"cache.read/v1",
 		"audit.write/v1",
-		"email.send/v1: null",
+		"email.send/v1: {$remove: true}",
 		"host: null",
 	} {
 		if !bytes.Contains(maintained.Data(), []byte(fragment)) {

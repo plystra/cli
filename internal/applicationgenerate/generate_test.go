@@ -2440,7 +2440,7 @@ func TestGenerateKeyedExposureChangesCauseApplicationModelDrift(t *testing.T) {
 			rootData:     "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
 			selectedData: "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
-			changedData:  "http: {expose: {kernel.health/v1: null, kernel.info/v1: {transport: connect}}}\n",
+			changedData:  "http: {expose: {kernel.health/v1: {$remove: true}, kernel.info/v1: {transport: connect}}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.EnvironmentName = "production"
 			},
@@ -2661,7 +2661,7 @@ func TestGenerateSelectedExposureCausesApplicationModelDrift(t *testing.T) {
 			rootData:     "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
 			selectedData: "{}\n",
-			changedData:  "http:\n  expose: {kernel.health/v1: {transport: connect}, kernel.info/v1: null}\n",
+			changedData:  "http:\n  expose: {kernel.health/v1: {transport: connect}, kernel.info/v1: {$remove: true}}\n",
 			configure: func(options *applicationgenerate.Options) {
 				options.EnvironmentName = "production"
 			},

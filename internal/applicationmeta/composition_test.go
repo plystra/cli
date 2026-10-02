@@ -128,7 +128,7 @@ func TestParseRejectsInvalidReusableConfiguration(t *testing.T) {
 		{name: "recursive export", yaml: "composition: {exports: {defaults: {composition: {adopt: []}}}}\n", want: "may contain only interfaces, config, and resources"},
 		{name: "export data member", yaml: "composition: {exports: {defaults: {data: {members: {orders: {}}}}}}\n", want: "may contain only interfaces, config, and resources"},
 		{name: "sparse export requirement", yaml: "composition: {exports: {defaults: {interfaces: {require: {add: [email.send/v1]}}}}}\n", want: "positive sequence"},
-		{name: "export removal", yaml: "composition: {exports: {defaults: {interfaces: {use: {email.send/v1: null}}}}}\n", want: "cannot contain removals"},
+		{name: "export removal", yaml: "composition: {exports: {defaults: {interfaces: {use: {email.send/v1: {$remove: true}}}}}}\n", want: "cannot contain reserved $remove mappings"},
 		{name: "missing adoption module", yaml: "composition: {adopt: [{export: defaults}]}\n", want: "exactly module and export"},
 		{name: "extra adoption key", yaml: "composition: {adopt: [{module: example.com/acme/platform, export: defaults, version: v1.0.0}]}\n", want: "exactly module and export"},
 		{name: "invalid adoption module", yaml: "composition: {adopt: [{module: '../platform', export: defaults}]}\n", want: "valid Go Module path"},

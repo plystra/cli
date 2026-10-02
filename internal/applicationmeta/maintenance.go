@@ -756,7 +756,7 @@ func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) er
 func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error {
 	switch decision.field {
 	case maintenanceHTTPExposure:
-		value := nullYAMLNode()
+		value := removalYAMLNode()
 		if !decision.removed {
 			value = httpExposureYAML(decision.exposure)
 		}
@@ -772,13 +772,13 @@ func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error
 	case maintenanceInterfaceRequirement:
 		return setSetMaintenanceDecision(root, []string{"interfaces", "require"}, decision.interfaceID.String(), decision.removed)
 	case maintenanceImplementationChoice:
-		value := nullYAMLNode()
+		value := removalYAMLNode()
 		if !decision.removed {
 			value = stringYAMLNode(decision.constructor.String())
 		}
 		return setKeyedMaintenanceDecision(root, []string{"interfaces", "use"}, decision.interfaceID.String(), value)
 	case maintenanceInterfacePolicy:
-		value := nullYAMLNode()
+		value := removalYAMLNode()
 		if !decision.removed {
 			value = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 			setMappingValue(value, "timeout", stringYAMLNode(decision.policy.timeout.String()))
@@ -1080,6 +1080,13 @@ func boolYAMLNode(value bool) *yaml.Node {
 
 func nullYAMLNode() *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
+}
+
+func removalYAMLNode() *yaml.Node {
+	return &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle, Content: []*yaml.Node{
+		stringYAMLNode("$remove"),
+		{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"},
+	}}
 }
 
 func encodeMaintainedDocument(root *yaml.Node) ([]byte, error) {

@@ -628,7 +628,7 @@ func TestPublicResolvingCommandsReportIntrinsicImplementationChoiceSources(t *te
 				arguments := append(append([]string(nil), command...), test.selectors...)
 				exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
 				wantSource := "Source: example.com/intrinsic-choice-command:" + test.selectedPath + ":1:1 (implementation-selection)"
-				wantRecovery := "Recovery:\nSet the reported interfaces.use entry to null in " + test.selectedPath + " to remove the effective selection; Kernel supplies that Interface intrinsically.\n"
+				wantRecovery := "Recovery:\nSet the reported interfaces.use entry to {$remove: true} in " + test.selectedPath + " to remove the effective selection; Kernel supplies that Interface intrinsically.\n"
 				if exitCode != 1 || stdout != "" || !commandContainsAll(
 					stderr,
 					"kernel.health/v1",
@@ -706,7 +706,7 @@ replace github.com/plystra/kernel => %s
 				"Source: example.com/zeta:plystra.yaml:1:1 (implementation-selection)",
 				"",
 				"Recovery:",
-				"Set the reported interfaces.use entry to null in plystra.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.",
+				"Set the reported interfaces.use entry to {$remove: true} in plystra.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.",
 				"",
 				"Diagnostic: " + diagnosticcode.ResolveIntrinsicInterfaceSelection,
 				"",

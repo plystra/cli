@@ -386,7 +386,7 @@ func TestRunCapabilityExposeSelectsEnvironmentAndReplacementConfiguration(t *tes
 	root := writeCapabilityCommandModule(t)
 	pluginRoot := filepath.Join(root, "records")
 	rootData := "# Shared defaults.\n{}\n"
-	productionData := "# Production choices.\nhttp:\n  expose:\n    kernel.health/v1: null\n    kernel.info/v1: null\n"
+	productionData := "# Production choices.\nhttp:\n  expose:\n    kernel.health/v1: {$remove: true}\n    kernel.info/v1: {$remove: true}\n"
 	stagingData := "# Staging choices.\n{}\n"
 	customerData := "# Customer A.\n{}\n"
 	automationData := "# Automation.\n{}\n"
@@ -407,7 +407,7 @@ func TestRunCapabilityExposeSelectsEnvironmentAndReplacementConfiguration(t *tes
 		t.Fatalf("explicit environment expose = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	production := string(readCommandFile(t, root, "plystra.production.yaml"))
-	for _, retained := range []string{"# Production choices.", "kernel.health/v1:\n      transport: connect", "kernel.info/v1: null"} {
+	for _, retained := range []string{"# Production choices.", "kernel.health/v1:\n      transport: connect", "kernel.info/v1: {$remove: true}"} {
 		if !strings.Contains(production, retained) {
 			t.Fatalf("production overlay omits %q:\n%s", retained, production)
 		}

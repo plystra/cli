@@ -217,7 +217,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 4,
+		"version": 5,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -994,7 +994,7 @@ func mergeRuntimeExposures(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, e
 			if !validRuntimeInterfaceID(identifier) {
 				return nil, false, runtimeConfigurationError("http.expose key %q is not a canonical Interface ID", identifier)
 			}
-			if runtimeNull(entries[identifier]) {
+			if runtimeRemovalMapping(entries[identifier]) {
 				delete(result, identifier)
 				continue
 			}
@@ -1213,16 +1213,16 @@ func mergeRuntimeImplementationChoices(lowerNode, upperNode *yaml.Node) (*yaml.N
 			return nil, false, err
 		}
 		for interfaceID, value := range mapping {
-			if !validRuntimeSelectableInterfaceID(interfaceID) {
-				return nil, false, runtimeConfigurationError("interfaces.use key %q is not a selectable canonical Interface ID", interfaceID)
+			if !validRuntimeInterfaceID(interfaceID) {
+				return nil, false, runtimeConfigurationError("interfaces.use key %q is not a canonical Interface ID", interfaceID)
 			}
-			if runtimeNull(value) {
+			if runtimeRemovalMapping(value) {
 				delete(values, interfaceID)
 				continue
 			}
 			constructor, valueErr := runtimeString(value)
 			if valueErr != nil || !validRuntimeConstructorSymbol(constructor) {
-				return nil, false, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol or null", interfaceID)
+				return nil, false, runtimeConfigurationError("interfaces.use[%q] must be a fully qualified Implementation constructor symbol or {$remove: true}", interfaceID)
 			}
 			values[interfaceID] = runtimeClone(value)
 		}
@@ -1244,7 +1244,7 @@ func mergeRuntimeInterfacePolicies(lowerNode, upperNode *yaml.Node) (*yaml.Node,
 			if !validRuntimeSelectableInterfaceID(interfaceID) {
 				return nil, false, runtimeConfigurationError("interfaces.policies key %q is not a selectable canonical Interface ID", interfaceID)
 			}
-			if runtimeNull(value) {
+			if runtimeRemovalMapping(value) {
 				delete(values, interfaceID)
 				continue
 			}
@@ -1805,6 +1805,18 @@ func runtimeString(node *yaml.Node) (string, error) {
 
 func runtimeNull(node *yaml.Node) bool {
 	return node != nil && node.Kind == yaml.ScalarNode && node.Tag == "!!null"
+}
+
+func runtimeRemovalMapping(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.MappingNode || len(node.Content) != 2 {
+		return false
+	}
+	key, err := runtimeString(node.Content[0])
+	if err != nil || key != "$remove" {
+		return false
+	}
+	value := node.Content[1]
+	return value.Kind == yaml.ScalarNode && value.Tag == "!!bool" && value.Value == "true"
 }
 
 func runtimeClone(node *yaml.Node) *yaml.Node {

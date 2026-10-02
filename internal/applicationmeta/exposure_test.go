@@ -115,8 +115,8 @@ http:
   expose:
     records.write/v1:
       transport: connect
-    kernel.health/v1: null
-    records.read/v1: null
+    kernel.health/v1: {$remove: true}
+    records.read/v1: {$remove: true}
 `)
 	updated, changed, err := applicationmeta.AddHTTPExposure(input, mustExposureID(t, "kernel.health/v1"))
 	if err != nil || !changed {
@@ -126,7 +126,7 @@ http:
 		[]byte("# Environment-specific exposure decisions."),
 		[]byte("kernel.health/v1:\n      transport: connect"),
 		[]byte("records.write/v1:\n      transport: connect"),
-		[]byte("records.read/v1: null"),
+		[]byte("records.read/v1: {$remove: true}"),
 	} {
 		if !bytes.Contains(updated, retained) {
 			t.Fatalf("updated sparse edit omits %q:\n%s", retained, updated)
@@ -147,8 +147,8 @@ http:
     # Inherit allowed_origins from root.
     allow_credentials: true
   expose:
-    kernel.health/v1: null
-    records.read/v1: null
+    kernel.health/v1: {$remove: true}
+    records.read/v1: {$remove: true}
 capabilities:
   use:
     email.send/v1: acme.email.smtp # keep provider choice
@@ -162,7 +162,7 @@ capabilities:
 		[]byte("# Inherit allowed_origins from root."),
 		[]byte("allow_credentials: true"),
 		[]byte("kernel.health/v1:\n      transport: connect"),
-		[]byte("records.read/v1: null"),
+		[]byte("records.read/v1: {$remove: true}"),
 		[]byte("email.send/v1: acme.email.smtp # keep provider choice"),
 	} {
 		if !bytes.Contains(updated, retained) {

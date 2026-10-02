@@ -1335,7 +1335,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, interfaceresolution.ErrReservedInterface):
 		return recoveryDiagnostic(diagnosticResolveReservedInterface, "Remove the reported local kernel.* Interface declaration and import the canonical Kernel Interface package instead.")
 	case errors.Is(err, interfaceresolution.ErrIntrinsicChoice):
-		return recoveryDiagnostic(diagnosticResolveIntrinsicInterfaceSelection, "Set the reported interfaces.use entry to null in "+context.configurationTarget()+" to remove the effective selection; Kernel supplies that Interface intrinsically.")
+		return recoveryDiagnostic(diagnosticResolveIntrinsicInterfaceSelection, "Set the reported interfaces.use entry to {$remove: true} in "+context.configurationTarget()+" to remove the effective selection; Kernel supplies that Interface intrinsically.")
 	case errors.Is(err, implementationdecl.ErrInvalid):
 		return recoveryDiagnostic(diagnosticImplementationDeclarationInvalid, "Correct the reported //plystra:implements directive so it immediately documents one exported package-level constructor and names canonical Interface IDs, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidConfiguration):

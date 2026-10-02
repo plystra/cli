@@ -79,7 +79,7 @@ func (p InterfacePolicy) RetryBackoff() time.Duration { return p.retry.Backoff }
 // Source returns stable configuration-field provenance for diagnostics.
 func (p InterfacePolicy) Source() string { return p.source }
 
-// interfaceRemoval is one typed null or sparse-set tombstone retained until
+// interfaceRemoval is one exact-key or sparse-set tombstone retained until
 // schema-aware overlay or adopted-export composition applies it.
 type interfaceRemoval struct {
 	id     interfaceid.Identifier
@@ -224,13 +224,13 @@ func parseImplementationChoices(node *yaml.Node) ([]ImplementationChoice, []inte
 			return nil, nil, invalid("interfaces.use key %q is not a canonical Interface ID", value)
 		}
 		source := fmt.Sprintf("plystra.yaml interfaces.use[%q]", identifier.String())
-		if isNull(values[value]) {
+		if isRemovalMapping(values[value]) {
 			removals = append(removals, interfaceRemoval{id: identifier, source: source})
 			continue
 		}
 		selected, err := strictString(values[value])
 		if err != nil {
-			return nil, nil, invalid("interfaces.use[%q] must be a fully qualified constructor symbol or null", value)
+			return nil, nil, invalid("interfaces.use[%q] must be a fully qualified constructor symbol or {$remove: true}", value)
 		}
 		constructor, err := constructorsymbol.Parse(selected)
 		if err != nil {
@@ -264,7 +264,7 @@ func parseInterfacePolicies(node *yaml.Node) ([]InterfacePolicy, []interfaceRemo
 			return nil, nil, invalid("interfaces.policies key %q configures an intrinsic kernel.* Interface", value)
 		}
 		path := fmt.Sprintf("interfaces.policies[%q]", identifier.String())
-		if isNull(values[value]) {
+		if isRemovalMapping(values[value]) {
 			removals = append(removals, interfaceRemoval{id: identifier, source: "plystra.yaml " + path})
 			continue
 		}

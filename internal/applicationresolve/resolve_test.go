@@ -1041,7 +1041,7 @@ func TestResolveDerivesExposureFromEverySelectedConfigurationMode(t *testing.T) 
 			mode:         applicationgen.ConfigurationModeEnvironment,
 			rootData:     "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 			selectedPath: "plystra.production.yaml",
-			selectedData: "http:\n  expose: {kernel.health/v1: {transport: connect}, kernel.info/v1: null}\n",
+			selectedData: "http:\n  expose: {kernel.health/v1: {transport: connect}, kernel.info/v1: {$remove: true}}\n",
 			configure: func(options *applicationresolve.Options) {
 				options.EnvironmentName = "production"
 			},

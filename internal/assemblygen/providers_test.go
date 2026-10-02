@@ -954,7 +954,7 @@ config: {}
   expose:
     kernel.info/v1:
       transport: connect
-    kernel.health/v1: null
+    kernel.health/v1: {$remove: true}
 timeouts: {startup: 45s}
 interfaces:
   require:
@@ -1098,9 +1098,21 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 	}
 }
 
-func TestApplicationRejectsInvalidExposureBeforeConstructors(t *testing.T) {
+func TestApplicationRejectsInvalidInterfaceEntriesBeforeConstructors(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	invalid := []string{
+		"interfaces: {use: {records.read/v1: null}}\n",
+		"interfaces: {policies: {records.read/v1: null}}\n",
+		"http: {expose: {kernel.health/v1: null}}\n",
+		"interfaces: {use: {records.read/v1: {$remove: false}}}\n",
+		"interfaces: {policies: {records.read/v1: {$remove: false}}}\n",
+		"http: {expose: {kernel.health/v1: {$remove: false}}}\n",
+		"interfaces: {use: {records.read/v1: {$remove: true, extra: true}}}\n",
+		"interfaces: {policies: {records.read/v1: {$remove: true, timeout: 1s}}}\n",
+		"http: {expose: {kernel.health/v1: {$remove: true, transport: connect}}}\n",
+		"interfaces: {use: {records.read/v1: {$remove: 'true'}}}\n",
+		"interfaces: {policies: {records.read/v1: {$remove: 'true'}}}\n",
+		"http: {expose: {kernel.health/v1: {$remove: 'true'}}}\n",
 		"http: {transports: {connect: true}}\n",
 		"http: {expose: [kernel.health/v1]}\n",
 		"http: {expose: {add: [kernel.health/v1]}}\n",
@@ -1120,22 +1132,95 @@ func TestApplicationRejectsInvalidExposureBeforeConstructors(t *testing.T) {
 				case "default":
 					writeRuntimeDocument(t, source+validRuntimeDocument)
 				case "environment":
-					writeEnvironmentDocument(t, "invalid-exposure", source)
-					options.Arguments = []string{"--env", "invalid-exposure"}
+					writeEnvironmentDocument(t, "invalid-entry", source)
+					options.Arguments = []string{"--env", "invalid-entry"}
 				case "replacement":
-					writeReplacementDocument(t, "invalid-exposure.yaml", source+validRuntimeDocument)
-					options.Arguments = []string{"--config", "invalid-exposure.yaml"}
+					writeReplacementDocument(t, "invalid-entry.yaml", source+validRuntimeDocument)
+					options.Arguments = []string{"--config", "invalid-entry.yaml"}
 				}
 				localservice.Reset()
 				remotestore.Reset()
 				application, err := New(context.Background(), options)
 				if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeConfiguration) {
-					t.Fatalf("New accepted invalid exposure: %#v, %v", application, err)
+					t.Fatalf("New accepted invalid Interface entry: %#v, %v", application, err)
 				}
 				assertNoBootstrapConstructorCalls(t)
 				assertSafeBootstrapError(t, err)
 			})
 		}
+	}
+}
+
+func TestRuntimeRejectsEffectiveIntrinsicSelectionBeforeConstructors(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	source := "interfaces: {use: {kernel.info/v1: example.com/assemblyapp/local-service.New}}\n"
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			writeRuntimeDocument(t, validRuntimeDocument)
+			options := RuntimeOptions{}
+			switch mode {
+			case "default":
+				writeRuntimeDocument(t, source+validRuntimeDocument)
+			case "environment":
+				writeEnvironmentDocument(t, "intrinsic-selection", source)
+				options.Arguments = []string{"--env", "intrinsic-selection"}
+			case "replacement":
+				writeReplacementDocument(t, "intrinsic-selection.yaml", source+validRuntimeDocument)
+				options.Arguments = []string{"--config", "intrinsic-selection.yaml"}
+			}
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), options)
+			if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeCompatibility) {
+				t.Fatalf("New accepted intrinsic selection: %#v, %v", application, err)
+			}
+			assertNoBootstrapConstructorCalls(t)
+			assertSafeBootstrapError(t, err)
+		})
+	}
+}
+
+func TestRuntimeInterfaceTombstonesAcrossSelections(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	removals := "interfaces:\n  use: {records.read/v1: {$remove: true}, kernel.info/v1: {$remove: true}}\n  policies: {records.read/v1: {$remove: true}}\nhttp: {expose: {kernel.health/v1: {$remove: true}}}\n"
+	lower := "interfaces:\n  use: {records.read/v1: example.com/assemblyapp/local-service.New, kernel.info/v1: example.com/assemblyapp/local-service.New}\n  policies: {records.read/v1: {timeout: 1s}}\nhttp: {expose: {kernel.health/v1: {transport: connect}}}\n"
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			writeRuntimeDocument(t, validRuntimeDocument)
+			options := RuntimeOptions{}
+			switch mode {
+			case "default":
+				writeRuntimeDocument(t, removals+validRuntimeDocument)
+			case "environment":
+				writeRuntimeDocument(t, lower+validRuntimeDocument)
+				writeEnvironmentDocument(t, "removed", removals)
+				options.Arguments = []string{"--env", "removed"}
+			case "replacement":
+				writeRuntimeDocument(t, lower+validRuntimeDocument)
+				writeReplacementDocument(t, "removed.yaml", removals+validRuntimeDocument)
+				options.Arguments = []string{"--config", "removed.yaml"}
+			}
+			document, err := loadRuntimeDocument(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer clear(document)
+			if bytes.Contains(document, []byte("$remove")) || bytes.Contains(document, []byte("records.read/v1")) || bytes.Contains(document, []byte("kernel.health/v1")) || bytes.Contains(document, []byte("kernel.info/v1")) {
+				t.Fatal("removal intent reached effective runtime entries")
+			}
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), options)
+			if err != nil || application == nil {
+				t.Fatalf("New with tombstones = %#v, %v", application, err)
+			}
+			if err := application.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := application.Stop(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

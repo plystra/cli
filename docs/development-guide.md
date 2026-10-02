@@ -1027,7 +1027,7 @@ current-Project replacement or removal at that field.
 
 Dependency exposure is ignored and requires no consumer removal. To remove an
 exposure inherited from this Project's root, set its exact `http.expose` entry
-to `null` in the selected environment overlay.
+to `{$remove: true}` in the selected environment overlay.
 
 After manually changing a replacement or dependency version, run:
 
@@ -1060,7 +1060,7 @@ in `plystra.production.yaml`:
 ```yaml
 http:
   expose:
-    kernel.health/v1: null
+    kernel.health/v1: {$remove: true}
     kernel.info/v1:
       transport: connect
   cors:
@@ -1081,7 +1081,14 @@ named exports adopted by root plus the selected overlay, root `plystra.yaml`,
 then that sparse overlay.
 Omitted fields inherit. Scalars and declared arrays replace at their typed
 field, keyed objects merge by declared field path, set fields use their sparse
-`add` and `remove` form, and `null` keeps its existing exact tombstone meaning.
+`add` and `remove` form. Exact entries in `interfaces.use`,
+`interfaces.policies`, and `http.expose` use only `{$remove: true}` for removal.
+Null, empty values, malformed markers, and markers with siblings are invalid in
+those entries. Exclusions remain current-Project intent even with no lower value,
+so later dependency additions cannot restore them. Generated runtime compatibility
+version 5 uses the same rules; regenerate and rebuild older Projects. Constructor
+configuration and CORS still have transitional null handling pending their typed
+composition migration.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
 
@@ -1101,7 +1108,7 @@ transport is selected. JavaScript SDK generation requires Connect, which is
 selected by each canonical exposure entry.
 
 An environment overlay inherits omitted entries, replaces a supplied complete
-entry, and removes an inherited entry with `null`. An empty mapping adds
+entry, and removes an inherited entry with `{$remove: true}`. An empty mapping adds
 nothing and does not clear inherited exposure. The complete `http.expose`
 field cannot be null. A full replacement inherits no root exposure, and
 dependency exposure never becomes the consumer's public surface.
@@ -1664,7 +1671,7 @@ plystra capability expose catalog.item.get/v1 --env production
 
 The default command writes root `plystra.yaml`. The environment form writes
 only the sparse project-root `plystra.production.yaml` overlay, preserving its
-comments, unrelated values, and exact-entry null tombstones. For an
+comments, unrelated values, and exact-entry `{$remove: true}` tombstones. For an
 advanced complete replacement, use:
 
 ```powershell
@@ -2295,7 +2302,7 @@ selections retain the selected current-Project document, while an adopted-export
 choice retains every contributing export owner in deterministic module order.
 The intrinsic class uses
 `PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION`; set the selected
-current-Project entry to `null` to remove either a local or adopted-export effective
+current-Project entry to `{$remove: true}` to remove either a local or adopted-export effective
 selection because Kernel supplies that Interface intrinsically. No form exposes
 an absolute path or Module Cache location.
 An adopted-export configuration conflict emits every contributing export's
@@ -2580,7 +2587,7 @@ absolute paths, or Module Cache paths.
 ### Invalid public exposure configuration
 
 Correct `http.expose` in the selected document so every entry is an exact
-Interface ID with `transport: connect`, or an exact-entry `null` removal.
+Interface ID with `transport: connect`, or an exact-entry `{$remove: true}` removal.
 Remove obsolete lists, exposure set edits, global transport switches, and
 unsupported REST fields. Regenerate and check with the same selector.
 
