@@ -84,9 +84,14 @@ func run(ctx context.Context, arguments, environment []string) (result error) {
 func processArguments(arguments []string) (bool, []string, error) {
 	smoke := false
 	selectors := make([]string, 0, len(arguments))
-	for _, argument := range arguments {
+	for index := 0; index < len(arguments); index++ {
+		argument := arguments[index]
 		if argument != "--smoke" {
 			selectors = append(selectors, argument)
+			if index+1 < len(arguments) {
+				index++
+				selectors = append(selectors, arguments[index])
+			}
 			continue
 		}
 		if smoke {

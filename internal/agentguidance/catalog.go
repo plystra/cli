@@ -463,9 +463,11 @@ Use the same selector for mutation, generation, inspection, checking, and startu
     plystra generate --check --env production
     plystra inspect configuration --env production
     plystra check --env production
-    go run ./generated/go/application --env production
+    go run ./generated/go/application --configuration-root . --env production
 
 Do not combine ` + "`" + `--env` + "`" + ` and ` + "`" + `--config` + "`" + `. ` + "`" + `PLYSTRA_ENV` + "`" + ` and ` + "`" + `PLYSTRA_CONFIG` + "`" + ` supply the same selectors when explicit flags are absent.
+
+The generated binary requires an explicit --configuration-root directory. Relative replacement paths resolve from that root, never from the process working directory. Root, overlay, and replacement documents use bounded confined reads and reject symbolic components. This runtime flag does not apply to the Plystra CLI. Regenerate and rebuild older generated applications. Private runtime baselines and complete source-independent export composition remain incomplete.
 
 Configuration values belong under the exact constructor-owned ` + "`" + `config.<constructor-symbol>` + "`" + ` object. Keep Secret values out of YAML, generated source, diagnostics, SDKs, and tests. A Secret field contains only a valid ` + "`" + `env` + "`" + ` or absolute ` + "`" + `file` + "`" + ` reference, and generation validates the reference without resolving its value.
 

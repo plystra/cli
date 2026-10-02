@@ -1384,12 +1384,12 @@ replace github.com/plystra/kernel => %s
 	}{
 		{
 			name:        "explicit environment overrides ambient",
-			arguments:   []string{"run", "./generated/go/application", "--smoke", "--env", "production"},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "production"},
 			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "missing", "PLYSTRA_CONFIG": "missing.yaml"}),
 		},
 		{
 			name:        "ambient environment",
-			arguments:   []string{"run", "./generated/go/application", "--smoke"},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", "."},
 			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_ENV": "production"}),
 		},
 	} {
@@ -1405,7 +1405,7 @@ replace github.com/plystra/kernel => %s
 	changedOverlay := strings.Replace(overlayConfiguration, "add: [kernel.info/v1]", "add: [kernel.health/v1]", 1)
 	changedOverlay = strings.Replace(changedOverlay, "remove: [kernel.health/v1]", "remove: [kernel.info/v1]", 1)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), changedOverlay)
-	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "production")
 	process.Dir = root
 	process.Env = environment
 	output, runtimeErr := process.CombinedOutput()
@@ -1432,7 +1432,7 @@ replace github.com/plystra/kernel => %s
 	if after := commandTree(t, root); !reflect.DeepEqual(after, beforeCredentialedWildcardCheck) {
 		t.Fatal("credentialed wildcard check mutated the Project")
 	}
-	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "production")
 	process.Dir = root
 	process.Env = environment
 	output, runtimeErr = process.CombinedOutput()
@@ -1446,8 +1446,8 @@ replace github.com/plystra/kernel => %s
 		arguments []string
 		want      string
 	}{
-		{name: "missing environment", arguments: []string{"run", "./generated/go/application", "--smoke", "--env", "missing"}, want: "requires plystra.missing.yaml"},
-		{name: "unsafe environment", arguments: []string{"run", "./generated/go/application", "--smoke", "--env", "../production"}, want: "safe filename component"},
+		{name: "missing environment", arguments: []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "missing"}, want: "requires plystra.missing.yaml"},
+		{name: "unsafe environment", arguments: []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "../production"}, want: "safe filename component"},
 	} {
 		t.Run("generated binary "+runtime.name, func(t *testing.T) {
 			process := exec.CommandContext(t.Context(), "go", runtime.arguments...)
@@ -1601,24 +1601,24 @@ interfaces:
 	}{
 		{
 			name:        "explicit relative replacement overrides ambient selectors",
-			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml"},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--config", "deploy/customer.yaml"},
 			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "missing.yaml", "PLYSTRA_ENV": "missing"}),
 		},
 		{
 			name:        "explicit absolute replacement",
-			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", selectedPath},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--config", selectedPath},
 			environment: environment,
 		},
 		{
 			name:        "ambient replacement",
-			arguments:   []string{"run", "./generated/go/application", "--smoke"},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", "."},
 			environment: commandGoEnvironmentWith(map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"}),
 		},
 		{
 			name:        "outside-Project absolute replacement rejection",
-			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", runtimeOutsidePath},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--config", runtimeOutsidePath},
 			environment: environment,
-			wantError:   "selected configuration must identify a file within the runtime Project directory",
+			wantError:   "selected configuration must identify a file within the configuration root",
 		},
 	}
 	runtimeLinkPaths := make([]string, 0, 2)
@@ -1632,7 +1632,7 @@ interfaces:
 			wantError   string
 		}{
 			name:        "absolute replacement through Project root alias",
-			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", filepath.Join(aliasRoot, "deploy", "customer.yaml")},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--config", filepath.Join(aliasRoot, "deploy", "customer.yaml")},
 			environment: environment,
 		})
 	}
@@ -1646,9 +1646,9 @@ interfaces:
 			wantError   string
 		}{
 			name:        "Project-internal symbolic replacement rejection",
-			arguments:   []string{"run", "./generated/go/application", "--smoke", "--config", filepath.Join(runtimeLinkedDeploy, "customer.yaml")},
+			arguments:   []string{"run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--config", filepath.Join(runtimeLinkedDeploy, "customer.yaml")},
 			environment: environment,
-			wantError:   "must be an existing regular Project file without symbolic path components",
+			wantError:   "runtime configuration document is unavailable",
 		})
 	}
 	for _, runtime := range runtimeCases {
@@ -1675,7 +1675,7 @@ interfaces:
 		t.Fatal("test replacement did not contain the compiled exposure declaration")
 	}
 	writeCommandFile(t, selectedPath, string(changedSelected))
-	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml")
+	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--config", "deploy/customer.yaml")
 	process.Dir = applicationRoot
 	process.Env = environment
 	output, runtimeErr := process.CombinedOutput()
@@ -1822,7 +1822,7 @@ interfaces:
 	if !bytes.Contains(removedBootstrap, []byte(`\"interface_policies\":[]`)) || bytes.Contains(removedBootstrap, []byte(`\"timeout\":\"5s\"`)) {
 		t.Fatalf("environment policy removal was not projected exactly:\n%s", removedBootstrap)
 	}
-	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "production")
 	process.Dir = root
 	process.Env = environment
 	if output, runErr := process.CombinedOutput(); runErr != nil {
@@ -1854,14 +1854,14 @@ interfaces:
 	if !bytes.Equal(environmentBootstrap, defaultBootstrap) {
 		t.Fatal("dormant environment policy changed generated bootstrap")
 	}
-	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "production")
 	process.Dir = root
 	process.Env = environment
 	if output, runErr := process.CombinedOutput(); runErr != nil {
 		t.Fatalf("generated application rejected matching environment policy: %v\n%s", runErr, output)
 	}
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), strings.Replace(overlayConfiguration, "2s", "3s", 1))
-	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "production")
 	process.Dir = root
 	process.Env = environment
 	output, runErr := process.CombinedOutput()
@@ -1884,7 +1884,7 @@ interfaces:
 	if !bytes.Equal(readCommandFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"), defaultBootstrap) {
 		t.Fatal("dormant replacement policy changed generated bootstrap")
 	}
-	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--config", "deploy/customer.yaml")
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--config", "deploy/customer.yaml")
 	process.Dir = root
 	process.Env = environment
 	if output, runErr := process.CombinedOutput(); runErr != nil {
@@ -1898,7 +1898,7 @@ interfaces:
 `
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), invalidOverlay)
 	beforeInvalid := commandTree(t, root)
-	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--env", "production")
+	process = exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--env", "production")
 	process.Dir = root
 	process.Env = environment
 	output, runErr = process.CombinedOutput()

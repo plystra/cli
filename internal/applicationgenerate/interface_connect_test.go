@@ -410,7 +410,7 @@ import (
 )
 
 func TestInternalInterfaceCallWithoutConnect(t *testing.T) {
-	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}
@@ -551,7 +551,7 @@ func TestConnectAndInternalCallsUseTheSameGovernedInterface(t *testing.T) {
 	})
 
 	callsBefore := records.Calls()
-	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}

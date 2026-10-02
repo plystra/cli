@@ -18,7 +18,8 @@ func TestRunBuildsRunsAndCleansGeneratedApplication(t *testing.T) {
 import "os"
 
 func main() {
-	if len(os.Args) != 2 || os.Args[1] != "--smoke" {
+	root, err := os.Getwd()
+	if err != nil || len(os.Args) != 4 || os.Args[1] != "--smoke" || os.Args[2] != "--configuration-root" || os.Args[3] != root {
 		os.Exit(2)
 	}
 }

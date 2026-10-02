@@ -170,9 +170,10 @@ const (
 )
 
 type runtimeSelection struct {
-	mode        runtimeSelectionMode
-	path        string
-	environment string
+	mode              runtimeSelectionMode
+	path              string
+	environment       string
+	configurationRoot string
 }
 
 func validateRuntimeApplicationModel(document []byte) error {
@@ -425,7 +426,12 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, err := kernelconfiguration.LoadDocument(defaultRuntimeDocument)
+	directory, err := os.OpenRoot(selection.configurationRoot)
+	if err != nil {
+		return nil, fmt.Errorf("%w: --configuration-root must identify an accessible directory", ErrRuntimeSelector)
+	}
+	defer directory.Close()
+	root, err := loadRuntimeConfigurationFile(directory, defaultRuntimeDocument)
 	if err != nil {
 		return nil, fmt.Errorf("%w: load default %s: %w", ErrRuntimeSelector, defaultRuntimeDocument, err)
 	}
@@ -438,7 +444,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 		}
 		return document, nil
 	case runtimeSelectionEnvironment:
-		overlay, err := kernelconfiguration.LoadDocument(selection.path)
+		overlay, err := loadRuntimeConfigurationFile(directory, selection.path)
 		if err != nil {
 			return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, selection.environment, filepath.ToSlash(selection.path), err)
 		}
@@ -449,19 +455,11 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 		}
 		return document, nil
 	case runtimeSelectionExplicit:
-		before, err := inspectRuntimeConfigurationPath(selection.path)
-		if err != nil {
-			return nil, fmt.Errorf("%w: full-replacement configuration %s must be an existing regular Project file without symbolic path components", ErrRuntimeSelector, filepath.ToSlash(selection.path))
-		}
-		selected, err := kernelconfiguration.LoadDocument(selection.path)
+		selected, err := loadRuntimeConfigurationFile(directory, selection.path)
 		if err != nil {
 			return nil, fmt.Errorf("%w: load full-replacement configuration %s: %w", ErrRuntimeSelector, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(selected)
-		after, err := inspectRuntimeConfigurationPath(selection.path)
-		if err != nil || !sameRuntimeConfigurationPathStates(before, after) {
-			return nil, fmt.Errorf("%w: full-replacement configuration %s changed while it was loaded", ErrRuntimeSelector, filepath.ToSlash(selection.path))
-		}
 		document, err := normalizeRuntimeDocument(selected, filepath.ToSlash(selection.path))
 		if err != nil {
 			return nil, fmt.Errorf("%w: full-replacement configuration %s: %v", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
@@ -473,6 +471,42 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 }
 
 func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error) {
+	var root string
+	var selectors []string
+	for index := 0; index < len(options.Arguments); index += 2 {
+		if index+1 >= len(options.Arguments) {
+			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory> and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
+		}
+		flag, value := options.Arguments[index], options.Arguments[index+1]
+		switch flag {
+		case "--configuration-root":
+			if root != "" || strings.TrimSpace(value) == "" || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+				return runtimeSelection{}, fmt.Errorf("%w: --configuration-root requires one nonempty directory", ErrRuntimeSelector)
+			}
+			root = value
+		case "--env", "--config":
+			selectors = append(selectors, flag, value)
+		default:
+			return runtimeSelection{}, fmt.Errorf("%w: expected --configuration-root <directory> and optionally --env <environment> or --config <yaml-path>", ErrRuntimeSelector)
+		}
+	}
+	if root == "" {
+		return runtimeSelection{}, fmt.Errorf("%w: --configuration-root <directory> is required", ErrRuntimeSelector)
+	}
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return runtimeSelection{}, fmt.Errorf("%w: cannot resolve --configuration-root directory", ErrRuntimeSelector)
+	}
+	options.Arguments = selectors
+	selection, err := selectRuntimeConfigurationMode(options, root)
+	if err != nil {
+		return runtimeSelection{}, err
+	}
+	selection.configurationRoot = root
+	return selection, nil
+}
+
+func selectRuntimeConfigurationMode(options RuntimeOptions, root string) (runtimeSelection, error) {
 	arguments := options.Arguments
 	if len(arguments) != 0 {
 		hasEnvironment := false
@@ -494,7 +528,7 @@ func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error
 			}
 			return runtimeSelection{mode: runtimeSelectionEnvironment, path: "plystra." + arguments[1] + ".yaml", environment: arguments[1]}, nil
 		case "--config":
-			path, err := runtimeProjectRelativeConfigurationPath(arguments[1], "--config")
+			path, err := runtimeRootRelativeConfigurationPath(root, arguments[1], "--config")
 			if err != nil {
 				return runtimeSelection{}, err
 			}
@@ -515,7 +549,7 @@ func selectRuntimeConfiguration(options RuntimeOptions) (runtimeSelection, error
 		return runtimeSelection{}, fmt.Errorf("%w: %s and %s cannot be used together", ErrRuntimeSelector, runtimeConfigurationVariable, runtimeEnvironmentVariable)
 	}
 	if hasConfiguration {
-		path, err := runtimeProjectRelativeConfigurationPath(configurationPath, runtimeConfigurationVariable)
+		path, err := runtimeRootRelativeConfigurationPath(root, configurationPath, runtimeConfigurationVariable)
 		if err != nil {
 			return runtimeSelection{}, err
 		}
@@ -561,20 +595,16 @@ func validateRuntimeEnvironmentName(value, source string) error {
 	return nil
 }
 
-func runtimeProjectRelativeConfigurationPath(value, source string) (string, error) {
+func runtimeRootRelativeConfigurationPath(root, value, source string) (string, error) {
 	if strings.TrimSpace(value) == "" {
 		return "", fmt.Errorf("%w: %s selects an empty configuration path", ErrRuntimeSelector, source)
 	}
-	if strings.IndexByte(value, 0) >= 0 {
-		return "", fmt.Errorf("%w: %s configuration path contains a NUL byte", ErrRuntimeSelector, source)
-	}
-	root, err := filepath.Abs(".")
-	if err != nil {
-		return "", fmt.Errorf("%w: resolve runtime Project directory", ErrRuntimeSelector)
+	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("%w: %s configuration path contains a control character", ErrRuntimeSelector, source)
 	}
 	rootInfo, err := os.Stat(root)
 	if err != nil || rootInfo == nil || !rootInfo.IsDir() {
-		return "", fmt.Errorf("%w: inspect runtime Project directory", ErrRuntimeSelector)
+		return "", fmt.Errorf("%w: --configuration-root must identify an accessible directory", ErrRuntimeSelector)
 	}
 	candidate := value
 	if !filepath.IsAbs(candidate) {
@@ -586,11 +616,11 @@ func runtimeProjectRelativeConfigurationPath(value, source string) (string, erro
 	}
 	relative, ok := runtimeRelativePathFromRootIdentity(rootInfo, candidate)
 	if !ok {
-		return "", fmt.Errorf("%w: selected configuration must identify a file within the runtime Project directory", ErrRuntimeSelector)
+		return "", fmt.Errorf("%w: selected configuration must identify a file within the configuration root", ErrRuntimeSelector)
 	}
 	clean := filepath.Clean(relative)
 	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("%w: selected configuration must identify a file within the runtime Project directory", ErrRuntimeSelector)
+		return "", fmt.Errorf("%w: selected configuration must identify a file within the configuration root", ErrRuntimeSelector)
 	}
 	return clean, nil
 }
@@ -615,13 +645,13 @@ type runtimeConfigurationPathState struct {
 	info os.FileInfo
 }
 
-func inspectRuntimeConfigurationPath(path string) ([]runtimeConfigurationPathState, error) {
+func inspectRuntimeConfigurationPath(root *os.Root, path string) ([]runtimeConfigurationPathState, error) {
 	components := strings.Split(filepath.Clean(path), string(filepath.Separator))
 	states := make([]runtimeConfigurationPathState, 0, len(components))
 	current := ""
 	for index, component := range components {
 		current = filepath.Join(current, component)
-		info, err := os.Lstat(current)
+		info, err := root.Lstat(current)
 		if err != nil || info == nil || info.Mode()&os.ModeSymlink != 0 {
 			return nil, errors.New("configuration path is unavailable or symbolic")
 		}
@@ -651,6 +681,51 @@ func sameRuntimeConfigurationPathStates(left, right []runtimeConfigurationPathSt
 		}
 	}
 	return true
+}
+
+func loadRuntimeConfigurationFile(root *os.Root, path string) ([]byte, error) {
+	before, err := inspectRuntimeConfigurationPath(root, path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentUnavailable)
+	}
+	initial := before[len(before)-1].info
+	if initial.Size() > runtimeMaximumDocumentSize {
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentTooLarge)
+	}
+	// The directory handle confines the open even if a checked component is replaced.
+	file, err := root.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentUnavailable)
+	}
+	opened, err := file.Stat()
+	if err != nil || opened == nil || !opened.Mode().IsRegular() {
+		file.Close()
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentUnavailable)
+	}
+	openedState := append([]runtimeConfigurationPathState(nil), before...)
+	openedState[len(openedState)-1].info = opened
+	if !sameRuntimeConfigurationPathStates(before, openedState) {
+		file.Close()
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentChanged)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, runtimeMaximumDocumentSize+1))
+	final, statErr := file.Stat()
+	closeErr := file.Close()
+	if readErr != nil || statErr != nil || closeErr != nil {
+		clear(data)
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentUnavailable)
+	}
+	if len(data) > runtimeMaximumDocumentSize {
+		clear(data)
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentTooLarge)
+	}
+	openedState[len(openedState)-1].info = final
+	after, err := inspectRuntimeConfigurationPath(root, path)
+	if err != nil || !sameRuntimeConfigurationPathStates(before, openedState) || !sameRuntimeConfigurationPathStates(openedState, after) {
+		clear(data)
+		return nil, fmt.Errorf("%w: %w", kernelconfiguration.ErrLoadDocument, kernelconfiguration.ErrDocumentChanged)
+	}
+	return data, nil
 }
 
 func composeRuntimeDocuments(rootData, overlayData []byte) ([]byte, error) {

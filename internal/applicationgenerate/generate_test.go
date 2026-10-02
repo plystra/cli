@@ -143,7 +143,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 		[]byte(`runtimeConfigurationVariable = "PLYSTRA_CONFIG"`),
 		[]byte(`case "--env":`),
 		[]byte(`case "--config":`),
-		[]byte("runtimeProjectRelativeConfigurationPath"),
+		[]byte("runtimeRootRelativeConfigurationPath"),
 		[]byte("normalizeRuntimeDocument"),
 	} {
 		if !bytes.Contains(bootstrap, required) {
@@ -3119,7 +3119,7 @@ import (
 )
 
 func TestUnrequiredCapabilityIsNotRegistered(t *testing.T) {
-	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 	if err != nil || !application.Valid() {
 		t.Fatalf("bootstrap.New = %#v, %v", application, err)
 	}

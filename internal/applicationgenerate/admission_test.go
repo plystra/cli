@@ -112,7 +112,7 @@ func TestAdmission(t *testing.T) {
 				t.Run(name, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
 					work.Entered, work.Release = make(chan struct{}, 64), make(chan struct{})
 					work.Stops.Store(0)
-					app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+					app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 					if err != nil { t.Fatal(err) }
 					if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 					var release sync.Once
@@ -134,7 +134,7 @@ func TestAdmission(t *testing.T) {
 					if len(work.Entered) != 64 { t.Fatalf("entered = %d", len(work.Entered)) }
 					assertSaturated(t, app.Interfaces().WorkRunV1())
 					if _, err := app.Interfaces().WorkCheckV1().Check(context.Background(), checkv1.Request{}); err != nil { t.Fatalf("independent binding: %v", err) }
-					other, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+					other, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 					if err != nil { t.Fatal(err) }
 					if err := other.Start(context.Background()); err != nil { t.Fatal(err) }
 					if _, err := other.Interfaces().WorkRunV1().Run(context.Background(), runv1.Request{}); err != nil { t.Fatalf("independent dispatcher: %v", err) }

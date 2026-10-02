@@ -138,7 +138,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tErrApplicationStop = errors.New(\"generated application shutdown failed\")")
 	fmt.Fprintln(&source, ")")
 	fmt.Fprintln(&source)
-	fmt.Fprintln(&source, "// RuntimeOptions carries one immutable selector invocation into generated bootstrap.")
+	fmt.Fprintln(&source, "// RuntimeOptions carries the required --configuration-root and one immutable selector invocation into generated bootstrap.")
 	fmt.Fprintln(&source, "type RuntimeOptions struct {")
 	fmt.Fprintln(&source, "\tArguments   []string")
 	fmt.Fprintln(&source, "\tEnvironment []string")

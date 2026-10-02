@@ -110,7 +110,7 @@ import (
 	"github.com/plystra/kernel/invocation"
 )
 func TestSelectedRetry(t *testing.T) {
-	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: %#v})
+	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: append([]string{"--configuration-root", "."}, %#v...)})
 	if err != nil { t.Fatal(err) }
 	if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 	defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
@@ -248,7 +248,7 @@ func TestEligibilityAndFreshAttempts(t *testing.T) {
 	} {
 		t.Run(test.mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
 			work.Calls.Store(0)
-			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 			if err != nil { t.Fatal(err) }
 			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
@@ -272,7 +272,7 @@ func TestNestedOwnership(t *testing.T) {
 	for _, outerOwns := range []bool{true, false} {
 		synctest.Test(t, func(t *testing.T) {
 			work.Calls.Store(0); work.OuterCalls.Store(0)
-			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 			if err != nil { t.Fatal(err) }
 			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
@@ -296,7 +296,7 @@ func TestConnectUsesOnlyBindingRetries(t *testing.T) {
 	} {
 		t.Run(test.mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
 			work.Calls.Store(0)
-			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 			if err != nil { t.Fatal(err) }
 			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
@@ -314,7 +314,7 @@ func TestConnectUsesOnlyBindingRetries(t *testing.T) {
 }
 func TestRequestValidationPrecedesAttempts(t *testing.T) {
 	work.Calls.Store(0)
-	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+	app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 	if err != nil { t.Fatal(err) }
 	if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 	defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
@@ -343,7 +343,7 @@ func TestRuntimeRetryCompatibilityBeforeConstruction(t *testing.T) {
 			changed := strings.Replace(string(original), "{eligibility: replay_safe, max_attempts: 3, backoff: 2s}", retry, 1)
 			if err := os.WriteFile("plystra.yaml", []byte(changed), 0600); err != nil { t.Fatal(err) }
 			before := work.Constructions.Load()
-			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 			if err == nil { _ = app.Stop(context.Background()); t.Fatal("runtime retry change accepted") }
 			if work.Constructions.Load() != before { t.Fatal("invalid runtime policy reached construction") }
 		})
@@ -354,7 +354,7 @@ func TestRuntimeRetryCompatibilityBeforeConstruction(t *testing.T) {
 	} {
 		if err := os.WriteFile("plystra.yaml", []byte(changed), 0600); err != nil { t.Fatal(err) }
 		before := work.Constructions.Load()
-		app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+		app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 		if err == nil { _ = app.Stop(context.Background()); t.Fatal("removed policy field accepted") }
 		if work.Constructions.Load() != before { t.Fatal("removed field reached construction") }
 	}
@@ -363,7 +363,7 @@ func TestRuntimeRetryCompatibilityBeforeConstruction(t *testing.T) {
 		strings.Replace(string(original), "  policies:\n", "  policies:\n    dormant.run/v1: {timeout: 1s, retry: {eligibility: replay_safe}}\n", 1),
 	} {
 		if err := os.WriteFile("plystra.yaml", []byte(changed), 0600); err != nil { t.Fatal(err) }
-		app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+		app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 		if err != nil { t.Fatal("equivalent or dormant retry changed executable identity", err) }
 		if err := app.Stop(context.Background()); err != nil { t.Fatal(err) }
 	}
@@ -372,7 +372,7 @@ func TestTotalBudgetAndInterruptibleBackoff(t *testing.T) {
 	for _, mode := range []string{"budget", "caller-deadline", "cancel", "shutdown"} {
 		t.Run(mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
 			work.Calls.Store(0)
-			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 			if err != nil { t.Fatal(err) }
 			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			defer func() { if err := app.Stop(context.Background()); err != nil { t.Error(err) } }()
@@ -402,7 +402,7 @@ func TestLateTargetsNeverReplayAndKeepDependenciesAlive(t *testing.T) {
 		t.Run(mode, func(t *testing.T) { synctest.Test(t, func(t *testing.T) {
 			work.Calls.Store(0); work.Stops.Store(0)
 			work.Entered, work.Release = make(chan struct{}, 64), make(chan struct{})
-			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{})
+			app, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: []string{"--configuration-root", "."}})
 			if err != nil { t.Fatal(err) }
 			if err := app.Start(context.Background()); err != nil { t.Fatal(err) }
 			var release sync.Once

@@ -3,7 +3,7 @@
   "cli_version": "0.1.0",
   "kernel_version": "v0.0.0-20260930115756-0e0c0f957ef4",
   "specification_revision": "b959f277b7661c0725660f394b84f7175c8df54b",
-  "catalog_digest": "sha256:cb49c074fda878c0184f7d845b2000b82d32e2322fa6e3b6d3c953e545127444",
+  "catalog_digest": "sha256:1e1d1e8567abe19294a166c2b3b0304056d935c02e60e55f49c6445676fb5620",
   "files": [
     {
       "path": ".agents/skills/plystra/SKILL.md",
@@ -11,7 +11,7 @@
     },
     {
       "path": ".agents/skills/plystra/tasks/configuration-and-secrets.md",
-      "sha256": "sha256:7255cacf480262bfc7835452095d007cda86228b32eec1c17633ab1b23ab512b"
+      "sha256": "sha256:cb9826a60421a1207cf690b5011ce4322fda6c714a25b84092e1ff394887133c"
     },
     {
       "path": ".agents/skills/plystra/tasks/diagnostics-and-recovery.md",

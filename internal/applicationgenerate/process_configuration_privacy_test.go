@@ -121,7 +121,7 @@ func TestRuntimeTimeout(t *testing.T) {
 			for _, timeout := range []time.Duration{3 * time.Second, 5 * time.Second} {
 				data := "interfaces: {require: [app.check/v1]}\nhttp: {address: 'PRIVATE_RUNTIME:29080'}\ntimeouts: {startup: " + timeout.String() + "}\n"
 				if err := os.WriteFile(path, []byte(data), 0600); err != nil { t.Fatal(err) }
-				application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: selector, Environment: []string{}})
+				application, err := bootstrap.New(context.Background(), bootstrap.RuntimeOptions{Arguments: append([]string{"--configuration-root", "."}, selector...), Environment: []string{}})
 				if err != nil { t.Fatal(err) }
 				before := time.Now()
 				if err := application.Start(context.Background()); err != nil { t.Fatal(err) }

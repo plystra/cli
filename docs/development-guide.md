@@ -1803,14 +1803,21 @@ yet mount an HTTP server. It delegates default root `plystra.yaml` selection to
 template-qualification health smoke. Do not edit either generated boundary or
 add a competing application startup workaround.
 
-Start the generated application from the Project root with the same environment
-selection used for generation:
+For source-tree development, start the generated application with an explicit
+configuration root and the same selector used for generation:
 
 ```powershell
-go run ./generated/go/application
-go run ./generated/go/application --env production
-go run ./generated/go/application --config deploy/customer-a.yaml
+go run ./generated/go/application --configuration-root .
+go run ./generated/go/application --configuration-root . --env production
+go run ./generated/go/application --configuration-root . --config deploy/customer-a.yaml
 ```
+
+The configuration root is required for every invocation. Relative roots resolve
+once at startup; an absolute root lets a built binary run from another working
+directory. Selected paths resolve from that root, including `PLYSTRA_CONFIG`.
+All selected documents use confined, bounded reads and reject symbolic path
+components and observable changes during loading. The private runtime baseline
+and complete source-independent adopted-export composition are still incomplete.
 
 The first command loads only root `plystra.yaml`. The second requires
 `plystra.production.yaml` and applies it as one typed sparse overlay above the
@@ -1821,7 +1828,7 @@ without parsing or merging root configuration. `PLYSTRA_ENV=production` and
 explicit selector is present. An explicit selector overrides both variables;
 the environment and replacement modes cannot be combined. Relative and
 supported absolute replacement paths must identify an existing nonsymbolic
-regular file inside the runtime Project directory. Unsafe selectors, missing
+regular file inside the explicit configuration root. Unsafe selectors, missing
 files, unknown fields, invalid typed values, and YAML anchors or aliases fail
 before Provider construction; unselected overlays and replacement files are
 not read. Generate, check, and start with the same selector. Compiled selection
