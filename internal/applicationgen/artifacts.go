@@ -184,6 +184,7 @@ func artifactUsesGlobalEvidence(filePath string) bool {
 		filePath == aliasManifestPath ||
 		filePath == "generated/go/application/main_gen.go" ||
 		filePath == "generated/go/bootstrap/bootstrap_gen.go" ||
+		filePath == "generated/go/internal/constructorconfig/value_gen.go" ||
 		filePath == "generated/go/internal/connectschema/schema_gen.go" ||
 		filePath == protobufdescriptor.DescriptorSetPath ||
 		filePath == protobufwiremap.Path {
@@ -284,7 +285,7 @@ func classifyArtifact(filePath string) (artifactIdentity, error) {
 		return artifactIdentity{generator: invocationAssemblyGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
 	case "generated/go/assembly/interfaces_gen.go":
 		return artifactIdentity{generator: implementationAssemblyGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
-	case "generated/go/bootstrap/bootstrap_gen.go":
+	case "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go":
 		return artifactIdentity{generator: runtimeBootstrapGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
 	case "generated/go/application/main_gen.go":
 		return artifactIdentity{generator: applicationEntrypointGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil

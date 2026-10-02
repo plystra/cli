@@ -430,7 +430,7 @@ Exact entries in `interfaces.use`, `interfaces.policies`, and `http.expose`
 are removed only by `{$remove: true}`. Null, empty values, false or string-valued
 markers, and markers with sibling fields are invalid. Exclusions remain authored
 intent even when no lower entry exists and survive later dependency additions.
-Generated runtime compatibility version 7 applies the same rule before
+Generated runtime compatibility version 8 applies the same rule before
 construction; regenerate and rebuild older Projects. CORS retains transitional
 null handling pending its typed composition migration.
 
@@ -462,7 +462,8 @@ fixed structs and fixed-array elements still need their nested required fields;
 absent or nil pointers and empty slices/maps have no child values to validate.
 Failures use `PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` with a safe
 declared field path and the selected current document, without modifying files.
-Standalone typed runtime loading and default application remain unfinished.
+Current-project startup now applies these rules and compiled scalar defaults;
+adopted-export runtime reconstruction remains incomplete.
 
 During typed CLI composition, a supplied non-null pointer field replaces its
 complete lower value, including pointers to structs and multiple pointer layers.
@@ -471,7 +472,8 @@ with an empty object instead of inheriting its omitted fields. Only non-pointer
 fixed structs compose field by field. Different whole-pointer values from
 adopted exports conflict even when they name disjoint fields; identical values
 deduplicate. Inspection records one redacted atomic value with its contributing
-sources. Standalone typed runtime loading remains incomplete.
+sources. Current-project runtime loading applies the same pointer replacement
+rules; adopted-export runtime reconstruction remains incomplete.
 
 An `interfaces.require` sequence declares the complete explicit requirement set
 at that layer: `[email.send/v1]` replaces lower requirements and `[]` clears them.
@@ -482,7 +484,7 @@ This does not remove requirements from exposure, constructor parameters, or
 intrinsic Kernel entries. Inspection retains suppressed sources under the
 `interfaces.require` complete-set boundary. New Projects use `require: {}` so
 explicit template adoptions remain effective. Generated runtime compatibility
-version 7 uses the same set semantics for its selected current-Project documents;
+version 8 uses the same set semantics for its selected current-Project documents;
 source-independent adopted-export runtime baselines remain unfinished.
 
 A `composition.adopt` sequence likewise replaces the complete lower adoption
@@ -536,8 +538,9 @@ differences. Mixed atomic containers retain positions, map keys, order, and
 nullness needed to locate public descendants, but exclude private siblings.
 Declared field presence, sources, and tombstones remain provenance. Private
 equality still governs composition conflicts. Build-visible value edits cause
-public generation drift; frozen build-visible runtime enforcement, defaults,
-and standalone typed runtime loading remain incomplete.
+public generation drift. Generated startup also compares effective build-visible
+constructor values after defaults; runtime-only differences remain allowed.
+Adopted-export runtime reconstruction still requires the unfinished private baseline.
 
 The current-Project process settings `http.address` and `timeouts.startup`
 also exclude their values from public hashes. Valid edits leave generated
@@ -551,7 +554,9 @@ inside containers and generic arguments, so nested defaults cannot enter logs,
 diagnostics, or public value hashes. Compiled field names, policy, default
 presence, and private default access remain intact. These descriptions are not
 complete schema or Go assignment identities. Changing an authored Go default
-still requires rebuilding; default application remains unfinished.
+still requires rebuilding. Generated startup reads scalar defaults from the
+compiled Config type after current-project composition, without copying private
+default literals into generated source.
 
 The required top-level `interface_provenance` record in
 `generated/manifest.json` uses schema `plystra.interface-provenance/v3`. It
@@ -582,6 +587,20 @@ absolute paths.
 For every selected local plugin, generation derives its module-owned type and decoder under `generated/go/configuration/` from the validated `plugin.yaml` schema alone. Required fields and fields with defaults use direct Go values; omitted optional scalars use pointers, while optional objects and arrays preserve nil-versus-configured-empty behavior. The generated decoder calls Kernel `configuration.Decode` at runtime, constructs one typed object for the Plugin ID, and redacts formatting and serialization. Application values and Secret reference targets are never embedded in this source. Selected dependency plugins ship the same generated configuration boundary in their own Go Modules.
 
 The application-owned `generated/go/bootstrap` package is the runtime construction and configuration-selection boundary. Its `New` function requires `--configuration-root <directory>`, selects `plystra.yaml` within that root by default, loads it through a confined directory handle with bounded regular-file reads, and projects the normalized runtime document onto the build-affecting declarations compiled into the binary. The runtime schema accepts `interfaces.require`, `interfaces.use`, and `interfaces.policies`, validates canonical Interface IDs, fully qualified constructor symbols, and the closed timeout-and-retry policy shape, and rejects the superseded `capabilities` section. A projection mismatch fails with rebuild guidance before startup settings are read, Secrets are resolved, or an Implementation constructor runs. Runtime-only changes to `http.address`, `timeouts.startup`, configuration values, and Secret references remain outside this comparison; an Interface timeout or retry change does not. After compatibility succeeds, bootstrap constructs the frozen generated `InterfaceRuntime`, verifies that its immutable catalog is published, and returns it from the private redacted `Application` through `Application.Interfaces`. Passing `--env <environment>` to the generated binary, or setting `PLYSTRA_ENV` when no explicit selector is present, loads root plus exactly one required sparse `plystra.<environment>.yaml` through the same typed field rules used during generation. Passing `--config <yaml-path>`, or setting `PLYSTRA_CONFIG` when no explicit selector is present, instead loads and normalizes that one complete current-Project document without parsing or merging root configuration; a regular root `plystra.yaml` marker remains mandatory. An explicit selector overrides both ambient variables, the two modes cannot be combined, and a selected configuration must be an existing nonsymbolic regular file within the explicit configuration root. Unsafe names or paths, missing files, unknown fields, invalid types, prohibited YAML references, and incompatible build-affecting declarations fail before Implementation construction, while unselected overlays and replacement files remain unread. Generate and start the application with the same selector; after editing selected Implementations, Interface requirements, Interface timeout and retry policies, public exposure, transports, or CORS, regenerate and rebuild with that selector before starting the binary.
+
+Generated bootstrap delivers current-project constructor configuration through
+the exact typed `Config` fields in `ConstructorConfiguration`. Its generated
+internal validator supports the compiled scalar, struct, pointer, slice, array,
+map, and Secret types. Fixed structs compose by field; atomic values replace;
+nil, empty values, and tombstones remain distinct. Requiredness and scalar
+defaults apply after composition, including implicit fixed structs and arrays.
+All active objects and build-visible values are checked before any Secret is
+resolved or constructor runs. Binding invokes no custom YAML unmarshalling.
+Defaults come from the compiled Go type; private values, defaults, and reference
+targets stay out of generated source. Dormant objects create no runtime binding.
+Active configurable constructors with effective adoptions fail explicitly until
+private runtime-baseline reconstruction is available. Regenerate and rebuild
+for runtime compatibility version 8.
 
 Every generated-binary invocation requires `--configuration-root <directory>`.
 For source-tree development, use `go run ./generated/go/application --configuration-root .`.

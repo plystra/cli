@@ -711,26 +711,37 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("construct application manifest provenance: %w", err)
 	}
+	var constructorConfigurations []bootstrapgen.ConstructorConfigurationInput
+	for _, node := range resolved.InterfaceResolution().Graph().ConstructionOrder() {
+		if schema, exists := node.Implementation().Configuration(); exists {
+			input := bootstrapgen.ConstructorConfigurationInput{Symbol: node.Symbol().String(), Schema: schema}
+			if configured, exists := resolved.Manifest().Configuration(node.Symbol()); exists {
+				input.YAML = configured.YAML()
+			}
+			constructorConfigurations = append(constructorConfigurations, input)
+		}
+	}
 	output, err := applicationgen.Render(applicationgen.Options{
-		ModulePath:             resolved.Module().ModulePath(),
-		JavaScriptPackage:      javaScriptPackage,
-		KernelModuleVersion:    kernelVersion,
-		KernelBuildIdentity:    kernelBuildIdentity,
-		HTTPTransports:         httpTransports,
-		HTTPCORS:               httpCORS,
-		Composition:            resolved.Composition(),
-		ManifestProvenance:     provenance,
-		Configurations:         configurations,
-		Providers:              providers,
-		InterfaceProxies:       interfaceProxies,
-		ImplementationAdapters: implementationAdapters,
-		ImplementationAssembly: implementationAssembly,
-		InterfaceCompatibility: interfaceBaseline,
-		InterfaceMetadata:      metadataBaseline,
-		InterfaceTransport:     transportBaseline,
-		InterfaceJavaScript:    javaScriptBaseline,
-		InterfaceProtobufModel: interfaceProtobufModel,
-		ProtobufWireMap:        wireMap,
+		ModulePath:                resolved.Module().ModulePath(),
+		JavaScriptPackage:         javaScriptPackage,
+		KernelModuleVersion:       kernelVersion,
+		KernelBuildIdentity:       kernelBuildIdentity,
+		HTTPTransports:            httpTransports,
+		HTTPCORS:                  httpCORS,
+		Composition:               resolved.Composition(),
+		ManifestProvenance:        provenance,
+		Configurations:            configurations,
+		ConstructorConfigurations: constructorConfigurations,
+		Providers:                 providers,
+		InterfaceProxies:          interfaceProxies,
+		ImplementationAdapters:    implementationAdapters,
+		ImplementationAssembly:    implementationAssembly,
+		InterfaceCompatibility:    interfaceBaseline,
+		InterfaceMetadata:         metadataBaseline,
+		InterfaceTransport:        transportBaseline,
+		InterfaceJavaScript:       javaScriptBaseline,
+		InterfaceProtobufModel:    interfaceProtobufModel,
+		ProtobufWireMap:           wireMap,
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err

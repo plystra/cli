@@ -63,7 +63,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	if !checked.Checked() || checked.Module().Path() != canonicalFilesystemPath(t, root) || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -1042,7 +1042,7 @@ config:
 		t.Fatalf("dormant constructor configuration entered generated runtime delivery:\n%s", assembly)
 	}
 	for _, expected := range []string{
-		"applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)",
+		"applicationassembly.NewInterfaceRuntime(prepared.configuration, startupTimeout)",
 		"var runtimeConfigurationSchemas = map[string]map[string]runtimeConfigurationFieldKind{}",
 		"var runtimeExecutableConstructors = map[string]struct{}{}",
 	} {

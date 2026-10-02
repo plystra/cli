@@ -1,0 +1,599 @@
+// Package constructorconfig validates and binds compiled constructor configuration.
+package constructorconfig
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"net/url"
+	"reflect"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/plystra/kernel/configuration"
+	"go.yaml.in/yaml/v3"
+)
+
+// Schema contains only compiled Go shape metadata. Defaults are private inputs.
+type Schema struct {
+	Kind    string
+	Bits    int
+	Length  *int64
+	Element *Schema
+	Fields  []Field
+}
+
+type Field struct {
+	Name         string
+	GoName       string
+	Required     bool
+	BuildVisible bool
+	HasDefault   bool
+	Value        Schema
+	Default      json.RawMessage `json:"-"`
+}
+
+func (f Field) String() string   { return f.Name }
+func (f Field) GoString() string { return f.Name }
+
+var ErrValue = errors.New("invalid constructor configuration value")
+
+// ValueError exposes only a statically declared field path, never input values.
+type ValueError struct {
+	Path string
+	Rule string
+}
+
+func (e *ValueError) Error() string { return "constructor configuration " + e.Path + ": " + e.Rule }
+func (e *ValueError) Unwrap() error { return ErrValue }
+
+func invalid(path, rule string) error { return &ValueError{Path: path, Rule: rule} }
+func scalar(tag, value string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value}
+}
+func null(n *yaml.Node) bool { return n != nil && n.Kind == yaml.ScalarNode && n.Tag == "!!null" }
+func reserved(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.MappingNode && len(n.Content) == 2 && n.Content[0].Value == "$remove"
+}
+func removal(n *yaml.Node) bool {
+	return reserved(n) && n.Content[0].Tag == "!!str" && n.Content[1].Kind == yaml.ScalarNode && n.Content[1].Tag == "!!bool" && n.Content[1].Value == "true"
+}
+
+func mapping(n *yaml.Node, path string) (map[string]*yaml.Node, error) {
+	r := make(map[string]*yaml.Node)
+	if n == nil {
+		return r, nil
+	}
+	if n.Kind != yaml.MappingNode || len(n.Content)%2 != 0 {
+		return nil, invalid(path, "expected an object")
+	}
+	for i := 0; i < len(n.Content); i += 2 {
+		k := n.Content[i]
+		if k.Kind != yaml.ScalarNode || k.Tag != "!!str" || k.Alias != nil || k.Anchor != "" {
+			return nil, invalid(path, "expected unique string keys")
+		}
+		if _, ok := r[k.Value]; ok {
+			return nil, invalid(path, "expected unique string keys")
+		}
+		r[k.Value] = n.Content[i+1]
+	}
+	return r, nil
+}
+
+// Compose validates both partial layers before applying schema-defined removal
+// and replacement. Defaults and requiredness belong to Normalize, after merging.
+func Compose(s Schema, lower, upper *yaml.Node) (*yaml.Node, error) {
+	state := 0
+	lo, err := walk(s, lower, false, true, "config", &state, 0)
+	if err != nil {
+		return nil, err
+	}
+	hi, err := walk(s, upper, false, true, "config", &state, 0)
+	if err != nil {
+		return nil, err
+	}
+	return merge(s, lo, hi), nil
+}
+
+func merge(s Schema, lo, hi *yaml.Node) *yaml.Node {
+	if hi == nil {
+		hi, lo = lo, nil
+	}
+	if removal(hi) {
+		return nil
+	}
+	if s.Kind != "object" || hi == nil {
+		return hi
+	}
+	l, _ := mapping(lo, "")
+	h, _ := mapping(hi, "")
+	r := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for _, f := range s.Fields {
+		if n := merge(f.Value, l[f.Name], h[f.Name]); n != nil {
+			r.Content = append(r.Content, scalar("!!str", f.Name), n)
+		}
+	}
+	return r
+}
+
+// Normalize materializes defaults and Go zero values and checks requiredness.
+// It performs no user-defined unmarshalling and resolves no Secret.
+func Normalize(s Schema, n *yaml.Node) (*yaml.Node, error) {
+	state := 0
+	return walk(s, n, true, false, "config", &state, 0)
+}
+
+func walk(s Schema, n *yaml.Node, final, removals bool, path string, count *int, depth int) (*yaml.Node, error) {
+	(*count)++
+	if depth > 64 || *count > 65536 {
+		return nil, invalid(path, "configuration exceeds traversal bounds")
+	}
+	if n != nil && (n.Alias != nil || n.Anchor != "" || n.Kind == yaml.AliasNode) {
+		return nil, invalid(path, "references are forbidden")
+	}
+	if reserved(n) {
+		if removals && removal(n) {
+			return n, nil
+		}
+		return nil, invalid(path, "reserved removal mapping is invalid here")
+	}
+	if n == nil {
+		if !final {
+			return nil, nil
+		}
+		switch s.Kind {
+		case "object":
+			n = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		case "pointer", "map":
+			return scalar("!!null", "null"), nil
+		case "list":
+			if s.Length == nil {
+				return scalar("!!null", "null"), nil
+			}
+			if *s.Length < 0 || *s.Length > 65536 {
+				return nil, invalid(path, "configuration exceeds traversal bounds")
+			}
+			n = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Content: make([]*yaml.Node, int(*s.Length))}
+		case "secret":
+			return nil, nil
+		case "string", "url":
+			return scalar("!!str", ""), nil
+		case "duration":
+			return scalar("!!str", "0s"), nil
+		case "boolean":
+			return scalar("!!bool", "false"), nil
+		case "signed-integer", "unsigned-integer":
+			return scalar("!!int", "0"), nil
+		case "number":
+			return scalar("!!float", "0.0"), nil
+		default:
+			return nil, invalid(path, "invalid compiled schema")
+		}
+	}
+	if null(n) && (s.Kind == "pointer" || s.Kind == "map" || s.Kind == "list" && s.Length == nil) {
+		return scalar("!!null", "null"), nil
+	}
+	bad := func() (*yaml.Node, error) { return nil, invalid(path, "value does not match the compiled Go type") }
+	switch s.Kind {
+	case "object":
+		provided, err := mapping(n, path)
+		if err != nil {
+			return nil, err
+		}
+		known := make(map[string]bool, len(s.Fields))
+		for _, f := range s.Fields {
+			known[f.Name] = true
+		}
+		for name := range provided {
+			if !known[name] {
+				return nil, invalid(path, "unknown field")
+			}
+		}
+		r := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		for _, f := range s.Fields {
+			child := provided[f.Name]
+			if child == nil && final {
+				if f.Required {
+					return nil, invalid(path+"."+f.Name, "required field is absent")
+				}
+				if f.HasDefault {
+					child, err = defaultNode(f.Value, f.Default)
+					if err != nil {
+						return nil, invalid(path+"."+f.Name, "invalid compiled default")
+					}
+				}
+			}
+			value, err := walk(f.Value, child, final, removals, path+"."+f.Name, count, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			if value != nil {
+				r.Content = append(r.Content, scalar("!!str", f.Name), value)
+			}
+		}
+		return r, nil
+	case "pointer":
+		if s.Element == nil {
+			return bad()
+		}
+		return walk(*s.Element, n, final, false, path, count, depth+1)
+	case "list":
+		if n.Kind != yaml.SequenceNode || s.Element == nil || s.Length != nil && int64(len(n.Content)) != *s.Length {
+			return bad()
+		}
+		r := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		for _, child := range n.Content {
+			value, err := walk(*s.Element, child, final, false, path, count, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			r.Content = append(r.Content, value)
+		}
+		return r, nil
+	case "map":
+		if s.Element == nil {
+			return bad()
+		}
+		m, err := mapping(n, path)
+		if err != nil {
+			return nil, err
+		}
+		keys := make([]string, 0, len(m))
+		for key := range m {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		r := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		for _, key := range keys {
+			value, err := walk(*s.Element, m[key], final, false, path, count, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			r.Content = append(r.Content, scalar("!!str", key), value)
+		}
+		return r, nil
+	case "secret":
+		if _, err := reference(n); err != nil {
+			return bad()
+		}
+		return n, nil
+	}
+	if n.Kind != yaml.ScalarNode {
+		return bad()
+	}
+	switch s.Kind {
+	case "string":
+		if n.Tag == "!!str" {
+			return scalar("!!str", n.Value), nil
+		}
+	case "boolean":
+		if n.Tag == "!!bool" && (n.Value == "true" || n.Value == "false") {
+			return scalar("!!bool", n.Value), nil
+		}
+	case "signed-integer":
+		v, err := strconv.ParseInt(n.Value, 10, s.Bits)
+		if err == nil && n.Tag == "!!int" && strconv.FormatInt(v, 10) == n.Value {
+			return scalar("!!int", n.Value), nil
+		}
+	case "unsigned-integer":
+		v, err := strconv.ParseUint(n.Value, 10, s.Bits)
+		if err == nil && n.Tag == "!!int" && strconv.FormatUint(v, 10) == n.Value {
+			return scalar("!!int", n.Value), nil
+		}
+	case "number":
+		var v float64
+		if (n.Tag != "!!int" && n.Tag != "!!float") || json.Unmarshal([]byte(n.Value), &v) != nil {
+			return bad()
+		}
+		if s.Bits == 32 {
+			v = float64(float32(v))
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return bad()
+		}
+		value := strconv.FormatFloat(v, 'g', -1, s.Bits)
+		if !strings.ContainsAny(value, ".eE") {
+			value += ".0"
+		}
+		return scalar("!!float", value), nil
+	case "duration":
+		v, err := time.ParseDuration(n.Value)
+		if err == nil && n.Tag == "!!str" {
+			return scalar("!!str", v.String()), nil
+		}
+	case "url":
+		v, err := url.Parse(n.Value)
+		if err == nil && n.Tag == "!!str" {
+			return scalar("!!str", v.String()), nil
+		}
+	}
+	return bad()
+}
+
+func defaultNode(s Schema, data []byte) (*yaml.Node, error) {
+	switch s.Kind {
+	case "string", "duration", "url":
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return nil, ErrValue
+		}
+		return scalar("!!str", value), nil
+	case "boolean":
+		return scalar("!!bool", string(data)), nil
+	case "signed-integer", "unsigned-integer":
+		return scalar("!!int", string(data)), nil
+	case "number":
+		return scalar("!!float", string(data)), nil
+	default:
+		return nil, ErrValue
+	}
+}
+
+func reference(n *yaml.Node) (configuration.Reference, error) {
+	if n == nil || n.Kind != yaml.MappingNode || len(n.Content) != 2 || n.Content[0].Tag != "!!str" || n.Content[1].Kind != yaml.ScalarNode || n.Content[1].Tag != "!!str" {
+		return configuration.Reference{}, ErrValue
+	}
+	switch n.Content[0].Value {
+	case "env":
+		return configuration.NewEnvironmentReference(n.Content[1].Value)
+	case "file":
+		return configuration.NewFileReference(n.Content[1].Value)
+	default:
+		return configuration.Reference{}, ErrValue
+	}
+}
+
+// PublicJSON contains only effective build-visible values, including defaults.
+// Private atomic containers contribute no keys, cardinality, or nil state.
+func PublicJSON(s Schema, n *yaml.Node) ([]byte, error) {
+	return json.Marshal(project(s, n, false))
+}
+
+func visible(s Schema) bool {
+	for _, f := range s.Fields {
+		if f.BuildVisible || visible(f.Value) {
+			return true
+		}
+	}
+	return s.Element != nil && visible(*s.Element)
+}
+
+func project(s Schema, n *yaml.Node, all bool) any {
+	if !all && !visible(s) || n == nil || null(n) {
+		return nil
+	}
+	switch s.Kind {
+	case "object":
+		m, _ := mapping(n, "")
+		r := make(map[string]any)
+		for _, f := range s.Fields {
+			if all || f.BuildVisible || visible(f.Value) {
+				r[f.Name] = project(f.Value, m[f.Name], all || f.BuildVisible)
+			}
+		}
+		return r
+	case "pointer":
+		return project(*s.Element, n, all)
+	case "list":
+		r := make([]any, len(n.Content))
+		for i, child := range n.Content {
+			r[i] = project(*s.Element, child, all)
+		}
+		return r
+	case "map":
+		r := make(map[string]any)
+		for i := 0; i < len(n.Content); i += 2 {
+			r[n.Content[i].Value] = project(*s.Element, n.Content[i+1], all)
+		}
+		return r
+	default:
+		return n.Value
+	}
+}
+
+// BindDefaults reads defaults from the already compiled Config type. Generated
+// source contains no copied default literal or digest of private defaults.
+func BindDefaults(s *Schema, t reflect.Type) error {
+	if s == nil || t == nil {
+		return ErrValue
+	}
+	if !matchesType(*s, t) {
+		return ErrValue
+	}
+	if s.Element != nil {
+		if t.Kind() != reflect.Pointer && t.Kind() != reflect.Array && t.Kind() != reflect.Slice && t.Kind() != reflect.Map {
+			return ErrValue
+		}
+		return BindDefaults(s.Element, t.Elem())
+	}
+	for i := range s.Fields {
+		f := &s.Fields[i]
+		goField, ok := t.FieldByName(f.GoName)
+		if !ok || goField.PkgPath != "" {
+			return ErrValue
+		}
+		name := goField.Tag.Get("yaml")
+		if name == "" {
+			name = strings.ToLower(goField.Name)
+		}
+		policy := strings.Split(goField.Tag.Get("plystra"), ",")
+		required, public := false, false
+		for _, option := range policy {
+			switch option {
+			case "required":
+				required = true
+			case "build-visible":
+				public = true
+			case "":
+			default:
+				return ErrValue
+			}
+		}
+		_, hasDefault := goField.Tag.Lookup("plystra-default")
+		if goField.Anonymous || name != f.Name || required != f.Required || public != f.BuildVisible || hasDefault != f.HasDefault {
+			return ErrValue
+		}
+		if f.HasDefault {
+			value, exists := goField.Tag.Lookup("plystra-default")
+			if !exists {
+				return ErrValue
+			}
+			switch f.Value.Kind {
+			case "string", "duration", "url":
+				f.Default, _ = json.Marshal(value)
+			case "signed-integer":
+				v, err := strconv.ParseInt(value, 10, f.Value.Bits)
+				if err != nil {
+					return ErrValue
+				}
+				f.Default = []byte(strconv.FormatInt(v, 10))
+			case "unsigned-integer":
+				v, err := strconv.ParseUint(value, 10, f.Value.Bits)
+				if err != nil {
+					return ErrValue
+				}
+				f.Default = []byte(strconv.FormatUint(v, 10))
+			case "number":
+				v, err := strconv.ParseFloat(value, f.Value.Bits)
+				if err != nil || math.IsInf(v, 0) || math.IsNaN(v) {
+					return ErrValue
+				}
+				f.Default = []byte(strconv.FormatFloat(v, 'g', -1, f.Value.Bits))
+			default:
+				f.Default = []byte(value)
+			}
+		}
+		if err := BindDefaults(&f.Value, goField.Type); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func matchesType(s Schema, t reflect.Type) bool {
+	switch s.Kind {
+	case "string":
+		return t.Kind() == reflect.String
+	case "boolean":
+		return t.Kind() == reflect.Bool
+	case "signed-integer":
+		return t.Kind() >= reflect.Int && t.Kind() <= reflect.Int64 && (t.Kind() == reflect.Int && s.Bits == 32 || t.Bits() == s.Bits)
+	case "unsigned-integer":
+		return t.Kind() >= reflect.Uint && t.Kind() <= reflect.Uint64 && (t.Kind() == reflect.Uint && s.Bits == 32 || t.Bits() == s.Bits)
+	case "number":
+		return (t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64) && t.Bits() == s.Bits
+	case "duration":
+		return t == reflect.TypeFor[time.Duration]()
+	case "url":
+		return t == reflect.TypeFor[url.URL]()
+	case "secret":
+		return t == reflect.TypeFor[configuration.Secret]()
+	case "pointer":
+		return t.Kind() == reflect.Pointer && s.Element != nil
+	case "list":
+		return s.Element != nil && (s.Length == nil && t.Kind() == reflect.Slice || s.Length != nil && t.Kind() == reflect.Array && *s.Length == int64(t.Len()))
+	case "map":
+		return t.Kind() == reflect.Map && t.Key().Kind() == reflect.String && s.Element != nil
+	case "object":
+		if t.Kind() != reflect.Struct {
+			return false
+		}
+		count := 0
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if f.IsExported() && f.Tag.Get("yaml") != "-" {
+				count++
+			}
+		}
+		return count == len(s.Fields)
+	default:
+		return false
+	}
+}
+
+// Bind assigns a normalized value through exact generated Go fields. It never
+// invokes user-defined unmarshalling methods. All objects must be validated and
+// compatibility-checked before the first call, because this resolves Secrets.
+func Bind(ctx context.Context, resolver *configuration.Resolver, s Schema, n *yaml.Node, target any) error {
+	v := reflect.ValueOf(target)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return ErrValue
+	}
+	return bind(ctx, resolver, s, n, v.Elem())
+}
+
+func bind(ctx context.Context, resolver *configuration.Resolver, s Schema, n *yaml.Node, v reflect.Value) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if n == nil || null(n) {
+		return nil
+	}
+	switch s.Kind {
+	case "object":
+		m, _ := mapping(n, "")
+		for _, f := range s.Fields {
+			if err := bind(ctx, resolver, f.Value, m[f.Name], v.FieldByName(f.GoName)); err != nil {
+				return err
+			}
+		}
+	case "pointer":
+		v.Set(reflect.New(v.Type().Elem()))
+		return bind(ctx, resolver, *s.Element, n, v.Elem())
+	case "list":
+		if v.Kind() == reflect.Slice {
+			v.Set(reflect.MakeSlice(v.Type(), len(n.Content), len(n.Content)))
+		}
+		for i, child := range n.Content {
+			if err := bind(ctx, resolver, *s.Element, child, v.Index(i)); err != nil {
+				return err
+			}
+		}
+	case "map":
+		v.Set(reflect.MakeMapWithSize(v.Type(), len(n.Content)/2))
+		for i := 0; i < len(n.Content); i += 2 {
+			key, value := reflect.New(v.Type().Key()).Elem(), reflect.New(v.Type().Elem()).Elem()
+			key.SetString(n.Content[i].Value)
+			if err := bind(ctx, resolver, *s.Element, n.Content[i+1], value); err != nil {
+				return err
+			}
+			v.SetMapIndex(key, value)
+		}
+	case "string":
+		v.SetString(n.Value)
+	case "boolean":
+		v.SetBool(n.Value == "true")
+	case "signed-integer":
+		value, _ := strconv.ParseInt(n.Value, 10, s.Bits)
+		v.SetInt(value)
+	case "unsigned-integer":
+		value, _ := strconv.ParseUint(n.Value, 10, s.Bits)
+		v.SetUint(value)
+	case "number":
+		value, _ := strconv.ParseFloat(n.Value, s.Bits)
+		v.SetFloat(value)
+	case "duration":
+		value, _ := time.ParseDuration(n.Value)
+		v.SetInt(int64(value))
+	case "url":
+		value, _ := url.Parse(n.Value)
+		v.Set(reflect.ValueOf(*value))
+	case "secret":
+		ref, err := reference(n)
+		if err != nil {
+			return ErrValue
+		}
+		secret, err := resolver.Resolve(ctx, ref)
+		if err != nil {
+			return fmt.Errorf("resolve constructor Secret: %w", err)
+		}
+		v.Set(reflect.ValueOf(secret))
+	default:
+		return ErrValue
+	}
+	return nil
+}

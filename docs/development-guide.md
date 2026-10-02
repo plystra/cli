@@ -912,8 +912,9 @@ differences. Mixed containers retain positions, keys, order, and nullness needed
 to locate public descendants, excluding private siblings. Declared field
 presence, source ownership, and tombstones remain provenance; private equality
 still controls conflicts. Build-visible edits cause public generation drift.
-Frozen build-visible runtime enforcement, defaults, and standalone typed runtime
-loading remain incomplete.
+Generated startup compares effective build-visible constructor values after
+defaults while allowing private runtime differences. Adopted-export runtime
+reconstruction remains incomplete without the private baseline.
 
 Current-Project `http.address` and `timeouts.startup` values are runtime-only
 and absent from public hashes. Valid value edits preserve generated output,
@@ -927,7 +928,8 @@ containers and generic arguments. Nested defaults stay out of logs, diagnostics,
 and public value hashes; compiled field names, policy, default presence, and
 private default access remain intact. A public type description is not a complete
 schema or Go assignment identity. Authored Go default changes still require a
-rebuild, and default application remains unfinished.
+rebuild. Current-project runtime loading applies defaults from the compiled Go
+type after composition, without copying private literals into generated source.
 
 The selected current Project activates that exact module/export identity:
 
@@ -1124,7 +1126,7 @@ field, keyed objects merge by declared field path, set fields use their sparse
 Null, empty values, malformed markers, and markers with siblings are invalid in
 those entries. Exclusions remain current-Project intent even with no lower value,
 so later dependency additions cannot restore them. Generated runtime compatibility
-version 7 uses the same rules; regenerate and rebuild older Projects. CORS
+version 8 uses the same rules; regenerate and rebuild older Projects. CORS
 retains transitional null handling pending its typed composition migration.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
@@ -1158,7 +1160,8 @@ or nil pointers and empty slices/maps have no child values to validate. Failure
 uses `PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID`, a safe declared path,
 and the selected current document, before mutation. Supply the missing field in
 that document or an adopted export, or correct a tombstone that removed it.
-Standalone typed runtime loading and default application remain unfinished.
+Current-project startup now applies these rules and compiled scalar defaults;
+adopted-export runtime reconstruction remains incomplete.
 
 A supplied non-null pointer field replaces its complete lower value during typed
 CLI composition, including pointers to structs and multiple pointer layers.
@@ -1167,7 +1170,8 @@ without inheriting its omitted fields. Non-pointer fixed structs still compose
 field by field. Different whole-pointer values in adopted exports conflict even
 when their supplied fields are disjoint; identical normalized values deduplicate.
 Inspection and explanation retain one redacted atomic value and its sources.
-Standalone typed runtime loading remains incomplete.
+Current-project runtime loading applies the same pointer replacement rules;
+adopted-export runtime reconstruction remains incomplete.
 
 For `interfaces.require`, a sequence is a complete-set declaration, including
 `[]` to clear lower explicit requirements. The sparse `{add: [...], remove: [...]}`
@@ -1178,7 +1182,7 @@ that root excluded. Exposure, required constructor parameters, and intrinsic
 Kernel requirements remain independent. `inspect configuration` and `explain
 config` retain the complete-set boundary and suppressed sources. New
 Projects use `require: {}` to preserve explicit template adoptions. Generated
-runtime compatibility version 7 applies these set rules to selected current-Project
+runtime compatibility version 8 applies these set rules to selected current-Project
 documents; source-independent adopted-export runtime baselines remain unfinished.
 
 `http.expose` is keyed by exact Interface ID. Each entry requires the supported
@@ -1818,6 +1822,20 @@ directory. Selected paths resolve from that root, including `PLYSTRA_CONFIG`.
 All selected documents use confined, bounded reads and reject symbolic path
 components and observable changes during loading. The private runtime baseline
 and complete source-independent adopted-export composition are still incomplete.
+
+Bootstrap validates active current-project Config objects using generated typed
+bindings and shared support under `generated/go/internal/constructorconfig`.
+It composes fixed structs by field, replaces atomic pointers and collections,
+and distinguishes nil, empty values, and tombstones. Requiredness and scalar
+defaults apply after composition; omitted fixed structs and array elements also
+receive defaults. The loader checks every active object and its effective
+build-visible projection before resolving Secrets or entering constructors.
+Binding never invokes custom YAML unmarshalling. Runtime-only values may change
+without regenerating; build-visible drift requires regeneration and rebuild.
+Private defaults come from compiled Go tags and are absent from generated source.
+Dormant objects create no runtime binding. Effective adoptions with active
+configurable constructors fail explicitly until private-baseline reconstruction
+is implemented. This bounded current-project path does not complete Gate 9.
 
 The first command loads only root `plystra.yaml`. The second requires
 `plystra.production.yaml` and applies it as one typed sparse overlay above the

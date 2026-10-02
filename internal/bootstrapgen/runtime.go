@@ -218,7 +218,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 7,
+		"version": 8,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -1449,6 +1449,14 @@ func mergeRuntimeConfigurations(lowerNode, upperNode *yaml.Node) (*yaml.Node, bo
 	for pluginID := range pluginIDs {
 		lowerValue, upperValue := lower[pluginID], upper[pluginID]
 		path := "config[" + strconv.Quote(pluginID) + "]"
+		constructorSchema, typed, schemaErr := runtimeConstructorSchema(pluginID)
+		if schemaErr != nil { return nil, false, schemaErr }
+		if typed {
+			merged, err := constructorconfig.Compose(constructorSchema, lowerValue, upperValue)
+			if err != nil { return nil, false, fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, pluginID, err) }
+			if merged != nil { result[pluginID] = merged }
+			continue
+		}
 		for _, value := range []*yaml.Node{lowerValue, upperValue} {
 			if value == nil || runtimeRemovalMapping(value) {
 				continue

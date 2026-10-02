@@ -20,6 +20,7 @@ import (
 	"github.com/plystra/cli/internal/assemblygen"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/configurationgen"
+	"github.com/plystra/cli/internal/constructorconfig"
 	"github.com/plystra/cli/internal/implementationassemblygen"
 	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/transportprovenance"
@@ -230,6 +231,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "providers_gen_test.go"), generatedProvidersRuntimeTest)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
+	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "internal", "constructorconfig", "value_gen.go"), constructorconfig.Source)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "bootstrap_gen_test.go"), generatedBootstrapRuntimeTest)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "transition_test.go"), generatedBootstrapTransitionTest)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "root_test.go"), generatedBootstrapRootTest)
@@ -301,6 +303,7 @@ replace github.com/plystra/kernel => %s
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(interfaces.Path())), interfaces.Data())
 	writeBytes(t, filepath.Join(applicationRoot, "generated", "go", "assembly", "compatibility_gen.go"), compatibility)
 	writeBytes(t, filepath.Join(applicationRoot, filepath.FromSlash(bootstrapgen.Path)), bootstrap)
+	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "internal", "constructorconfig", "value_gen.go"), constructorconfig.Source)
 	writeFile(t, filepath.Join(applicationRoot, "generated", "go", "bootstrap", "bootstrap_gen_test.go"), emptyGeneratedBootstrapRuntimeTest)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

@@ -15,7 +15,7 @@ import (
 	"github.com/plystra/cli/internal/invocationpolicy"
 )
 
-const applicationModelCompatibilityVersion = 7
+const applicationModelCompatibilityVersion = 8
 
 // ErrInvalidApplicationModelCompatibility reports a compatibility projection
 // that cannot be tied to one complete generated application model.

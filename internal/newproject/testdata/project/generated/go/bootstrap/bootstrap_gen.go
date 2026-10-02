@@ -25,6 +25,7 @@ import (
 	"unicode"
 
 	applicationassembly "example.com/acme/my-app/generated/go/assembly"
+	constructorconfig "example.com/acme/my-app/generated/go/internal/constructorconfig"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
 	kernelplugin "github.com/plystra/kernel/plugin"
@@ -35,8 +36,8 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":7}"
-	compiledApplicationModelCompatibilityDigest = "sha256:366ccd65cc3c6affeed0790621f6c3baa39ba6adc234826042514af624f25d9b"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":8}"
+	compiledApplicationModelCompatibilityDigest = "sha256:c7fb1d66f981056a97aa3e9487b84a7e5f34ee5472a755d5ac0bde0a852d54da"
 	compiledApplicationModelDigest              = "sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4"
 )
 
@@ -98,17 +99,27 @@ func New(ctx context.Context, options RuntimeOptions) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBootstrap, err)
 	}
+
+	prepared, err := prepareRuntimeConstructorConfiguration(document)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrBootstrap, err)
+	}
+	defer clear(prepared.legacyDocument)
 	resolver, err := kernelconfiguration.NewResolver(kernelconfiguration.ResolverOptions{
 		MaximumValueBytes: kernelconfiguration.MaximumSecretValueBytes,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: initialize Secret resolver: %w", ErrBootstrap, err)
 	}
-	providers, invocations, manager, err := applicationassembly.NewRuntime(ctx, resolver, document, startupTimeout)
+
+	if err := prepared.resolve(ctx, resolver); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrBootstrap, err)
+	}
+	providers, invocations, manager, err := applicationassembly.NewRuntime(ctx, resolver, prepared.legacyDocument, startupTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("%w: construct application runtime: %w", ErrBootstrap, err)
 	}
-	interfaces, err := applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)
+	interfaces, err := applicationassembly.NewInterfaceRuntime(prepared.configuration, startupTimeout)
 	if err != nil {
 		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), startupTimeout)
 		defer cancel()
@@ -441,7 +452,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 7,
+		"version": 8,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -1672,6 +1683,20 @@ func mergeRuntimeConfigurations(lowerNode, upperNode *yaml.Node) (*yaml.Node, bo
 	for pluginID := range pluginIDs {
 		lowerValue, upperValue := lower[pluginID], upper[pluginID]
 		path := "config[" + strconv.Quote(pluginID) + "]"
+		constructorSchema, typed, schemaErr := runtimeConstructorSchema(pluginID)
+		if schemaErr != nil {
+			return nil, false, schemaErr
+		}
+		if typed {
+			merged, err := constructorconfig.Compose(constructorSchema, lowerValue, upperValue)
+			if err != nil {
+				return nil, false, fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, pluginID, err)
+			}
+			if merged != nil {
+				result[pluginID] = merged
+			}
+			continue
+		}
 		for _, value := range []*yaml.Node{lowerValue, upperValue} {
 			if value == nil || runtimeRemovalMapping(value) {
 				continue
@@ -2178,4 +2203,93 @@ func runtimeSequenceContains(node *yaml.Node, value string) bool {
 
 func runtimeConfigurationError(format string, arguments ...any) error {
 	return fmt.Errorf("%w: %s", ErrRuntimeConfiguration, fmt.Sprintf(format, arguments...))
+}
+
+type runtimeConstructorBinding struct {
+	symbol   string
+	schema   constructorconfig.Schema
+	expected string
+	target   any
+	node     *yaml.Node
+}
+
+func runtimeConstructorBindings(configuration *applicationassembly.ConstructorConfiguration) ([]runtimeConstructorBinding, error) {
+	bindings := []runtimeConstructorBinding{}
+
+	return bindings, nil
+}
+
+func runtimeConstructorSchema(symbol string) (constructorconfig.Schema, bool, error) {
+	var configuration applicationassembly.ConstructorConfiguration
+	bindings, err := runtimeConstructorBindings(&configuration)
+	if err != nil {
+		return constructorconfig.Schema{}, false, err
+	}
+	for _, binding := range bindings {
+		if binding.symbol == symbol {
+			return binding.schema, true, nil
+		}
+	}
+	return constructorconfig.Schema{}, false, nil
+}
+
+type runtimePreparedConfiguration struct {
+	configuration  applicationassembly.ConstructorConfiguration
+	bindings       []runtimeConstructorBinding
+	legacyDocument []byte
+}
+
+func prepareRuntimeConstructorConfiguration(document []byte) (*runtimePreparedConfiguration, error) {
+	prepared := &runtimePreparedConfiguration{}
+	bindings, err := runtimeConstructorBindings(&prepared.configuration)
+	if err != nil {
+		return nil, err
+	}
+	root, err := decodeRuntimeDocument(document, "effective configuration")
+	if err != nil {
+		return nil, err
+	}
+	fields, err := runtimeMapping(root, "configuration", nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(bindings) != 0 && fields["composition"] != nil {
+		return nil, fmt.Errorf("%w: adopted constructor configuration requires private runtime-baseline support", ErrRuntimeConfiguration)
+	}
+	objects, err := runtimeOptionalMapping(fields["config"], "config", nil)
+	if err != nil {
+		return nil, err
+	}
+	for i := range bindings {
+		binding := &bindings[i]
+		binding.node, err = constructorconfig.Normalize(binding.schema, objects[binding.symbol])
+		if err != nil {
+			return nil, fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, binding.symbol, err)
+		}
+		public, err := constructorconfig.PublicJSON(binding.schema, binding.node)
+		if err != nil {
+			return nil, ErrRuntimeConfiguration
+		}
+		publicDigest := sha256.Sum256(public)
+		if hex.EncodeToString(publicDigest[:]) != binding.expected {
+			return nil, fmt.Errorf("%w: build-visible constructor configuration changed for %s; rebuild with the same selector", ErrRuntimeCompatibility, binding.symbol)
+		}
+		delete(objects, binding.symbol)
+	}
+	fields["config"] = runtimeMappingNode(objects)
+	prepared.legacyDocument, err = encodeRuntimeDocument(runtimeMappingNode(fields))
+	if err != nil {
+		return nil, err
+	}
+	prepared.bindings = bindings
+	return prepared, nil
+}
+
+func (p *runtimePreparedConfiguration) resolve(ctx context.Context, resolver *kernelconfiguration.Resolver) error {
+	for _, binding := range p.bindings {
+		if err := constructorconfig.Bind(ctx, resolver, binding.schema, binding.node, binding.target); err != nil {
+			return fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, binding.symbol, err)
+		}
+	}
+	return nil
 }

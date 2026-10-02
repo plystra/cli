@@ -116,7 +116,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	configuration := byPath[Root+"/tasks/configuration-and-secrets.md"]
 	for _, phrase := range []string{
 		"Remove exact interfaces.use, interfaces.policies, and http.expose entries only with {$remove: true}",
-		"runtime compatibility version 7",
+		"runtime compatibility version 8",
 		"Remove a whole config.<constructor-symbol> entry only with {$remove: true}",
 		"{} remains configuration, not removal",
 		"remove a declared field inside a non-pointer fixed struct with {$remove: true}",
@@ -124,10 +124,11 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Reserved singleton $remove mappings are invalid inside atomic values",
 		"Required fields are checked after adopted exports and selected layers compose",
 		"Requiredness means presence: zero, empty, and schema-permitted nil values count",
-		"Standalone typed runtime loading and default application remain unfinished",
+		"Current-project startup now applies these rules and compiled scalar defaults",
 		"a supplied non-null pointer field replaces its complete lower value",
 		"Only non-pointer fixed structs compose field by field",
-		"Standalone typed runtime loading remains incomplete",
+		"Current-project runtime loading applies the same pointer replacement rules",
+		"Active configurable constructors with effective adoptions fail explicitly",
 		"An interfaces.require sequence replaces the complete lower explicit requirement set; [] clears it",
 		"Omission and {} inherit",
 		"A later sparse overlay preserves an earlier complete-set boundary",

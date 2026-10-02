@@ -268,7 +268,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:6103da1ceacf4b6d98c16862872d47988b6b18c287bd88201a88f5b62eb76563",
+      "sha256": "sha256:6e83200f9265f3b032f0000ab15beedeb1c63a503c3e5d7790f2083725d5f920",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -303,6 +303,32 @@
         "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
       ],
       "sources": [
+        "plystra.yaml"
+      ],
+      "cleanup_ownership": "cli-owned"
+    },
+    {
+      "path": "generated/go/internal/constructorconfig/value_gen.go",
+      "sha256": "sha256:1cadb3b0e51c995c89549c7b485cd785949bfbf3d9d103f4e02b4fb9a6ae56ae",
+      "generator": "plystra.runtime-bootstrap/v1",
+      "output_kind": "go-source",
+      "input_record_ids": [
+        "application-model:sha256:e356679f25dd8d12f7a20304a65a7c11a9295e933ba53aa2c37360d74446e1cc",
+        "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
+        "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
+        "interface:kernel.health/v1",
+        "interface:kernel.info/v1",
+        "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
+      ],
+      "sources": [
+        "built-in Plystra default Interface invocation policy",
+        "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
+        "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.yaml",
         "plystra.yaml"
       ],
       "cleanup_ownership": "cli-owned"

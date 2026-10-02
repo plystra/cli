@@ -314,6 +314,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		"generated/go/assembly/invocations_gen.go",
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
+		"generated/go/internal/constructorconfig/value_gen.go",
 		"generated/manifest.json",
 		"generated/proto/descriptor-set.pb",
 		"generated/proto/wire-map.json",

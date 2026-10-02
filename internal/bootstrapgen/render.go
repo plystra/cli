@@ -31,6 +31,8 @@ type Options struct {
 	ModulePath                    string
 	DefaultStartupTimeout         time.Duration
 	ConfigurationSchemas          []ConfigurationSchema
+	ConstructorConfigurations     []ConstructorConfigurationInput
+	ConstructorOrder              []string
 	ExecutableInterfaceChoices    []string
 	ExecutableConstructors        []string
 	ConfigurationProvenance       transportprovenance.Provenance
@@ -72,6 +74,10 @@ func Render(options Options) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
 	}
+	constructorSupport, err := renderConstructorConfiguration(options.ConstructorConfigurations, options.ConstructorOrder)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrRender, err)
+	}
 
 	assemblyPath := path.Join(options.ModulePath, "generated/go/assembly")
 	var source strings.Builder
@@ -94,6 +100,9 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\"net/url\"")
 	fmt.Fprintln(&source, "\t\"os\"")
 	fmt.Fprintln(&source, "\t\"path/filepath\"")
+	if len(options.ConstructorConfigurations) != 0 {
+		fmt.Fprintln(&source, "\t\"reflect\"")
+	}
 	fmt.Fprintln(&source, "\t\"sort\"")
 	fmt.Fprintln(&source, "\t\"strconv\"")
 	fmt.Fprintln(&source, "\t\"strings\"")
@@ -102,6 +111,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\"unicode\"")
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "\tapplicationassembly %s\n", strconv.Quote(assemblyPath))
+	fmt.Fprintf(&source, "\tconstructorconfig %s\n", strconv.Quote(path.Join(options.ModulePath, "generated/go/internal/constructorconfig")))
 	fmt.Fprintln(&source, "\tkernelconfiguration \"github.com/plystra/kernel/configuration\"")
 	fmt.Fprintln(&source, "\tkernellifecycle \"github.com/plystra/kernel/lifecycle\"")
 	fmt.Fprintln(&source, "\tkernelplugin \"github.com/plystra/kernel/plugin\"")
@@ -175,17 +185,25 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: %w\", ErrBootstrap, err)")
 	fmt.Fprintln(&source, "\t}")
+	source.WriteString(`
+	prepared, err := prepareRuntimeConstructorConfiguration(document)
+	if err != nil { return nil, fmt.Errorf("%w: %w", ErrBootstrap, err) }
+	defer clear(prepared.legacyDocument)
+`)
 	fmt.Fprintln(&source, "\tresolver, err := kernelconfiguration.NewResolver(kernelconfiguration.ResolverOptions{")
 	fmt.Fprintln(&source, "\t\tMaximumValueBytes: kernelconfiguration.MaximumSecretValueBytes,")
 	fmt.Fprintln(&source, "\t})")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: initialize Secret resolver: %w\", ErrBootstrap, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tproviders, invocations, manager, err := applicationassembly.NewRuntime(ctx, resolver, document, startupTimeout)")
+	source.WriteString(`
+	if err := prepared.resolve(ctx, resolver); err != nil { return nil, fmt.Errorf("%w: %w", ErrBootstrap, err) }
+`)
+	fmt.Fprintln(&source, "\tproviders, invocations, manager, err := applicationassembly.NewRuntime(ctx, resolver, prepared.legacyDocument, startupTimeout)")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	fmt.Fprintln(&source, "\t\treturn nil, fmt.Errorf(\"%w: construct application runtime: %w\", ErrBootstrap, err)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintln(&source, "\tinterfaces, err := applicationassembly.NewInterfaceRuntime(applicationassembly.ConstructorConfiguration{}, startupTimeout)")
+	fmt.Fprintln(&source, "\tinterfaces, err := applicationassembly.NewInterfaceRuntime(prepared.configuration, startupTimeout)")
 	fmt.Fprintln(&source, "\tif err != nil {")
 	source.WriteString(`		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), startupTimeout)
 		defer cancel()
@@ -412,6 +430,7 @@ func (failure *ApplicationAssemblyError) LogValue() slog.Value {
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
 	source.WriteString(runtimeSupport)
+	source.WriteString(constructorSupport)
 
 	formatted, err := format.Source([]byte(source.String()))
 	if err != nil {
