@@ -396,9 +396,6 @@ func configurationSources(input SourceContext, reference, field string) ([]Confi
 		if err != nil {
 			return nil, err
 		}
-		if dependencySource && source.ModulePath == input.CurrentModulePath {
-			return nil, fmt.Errorf("dependency source %q does not identify a discovered dependency Project", value)
-		}
 		values = append(values, source)
 	}
 	return values, nil

@@ -116,7 +116,11 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	configuration := byPath[Root+"/tasks/configuration-and-secrets.md"]
 	for _, phrase := range []string{
 		"Remove exact interfaces.use, interfaces.policies, and http.expose entries only with {$remove: true}",
-		"runtime compatibility version 5",
+		"runtime compatibility version 6",
+		"An interfaces.require sequence replaces the complete lower explicit requirement set; [] clears it",
+		"Omission and {} inherit",
+		"A later sparse overlay preserves an earlier complete-set boundary",
+		"New Projects use require: {} to preserve explicit template adoptions",
 		"cannot contain the reserved one-entry $remove mapping",
 		"nested configuration, collections, or an unadopted Resource fragment",
 		"adopted values still require compiled-type validation",

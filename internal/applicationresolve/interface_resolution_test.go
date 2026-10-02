@@ -127,7 +127,7 @@ composition:
       export: defaults
 http: {address: ":9090"}
 interfaces:
-  require: [app.run/v1]
+  require: {add: [app.run/v1]}
   use:
     audit.write/v1: example.com/interface-app/audittwo.New
   policies:
@@ -162,7 +162,7 @@ interfaces:
 		t.Fatalf("full-replacement HTTP address = %q, %t", address, exists)
 	}
 	requirements := resolved.Composition().Manifest().InterfaceRequirements()
-	if len(requirements) != 2 || requirements[0].ID().String() != "app.run/v1" || requirements[0].Source() != `deploy/customer.yaml interfaces.require["app.run/v1"]` || requirements[1].ID().String() != "cache.read/v1" || requirements[1].Source() != `example.com/interface-cache@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.require["cache.read/v1"]` {
+	if len(requirements) != 2 || requirements[0].ID().String() != "app.run/v1" || requirements[0].Source() != `deploy/customer.yaml interfaces.require.add["app.run/v1"]` || requirements[1].ID().String() != "cache.read/v1" || requirements[1].Source() != `example.com/interface-cache@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.require["cache.read/v1"]` {
 		t.Fatalf("full-replacement Interface requirements = %#v", requirements)
 	}
 	if maintenance := resolved.ConfigurationMaintenance(); maintenance.Changed() || resolved.ConfigurationMaintenancePath() != "deploy/customer.yaml" || !reflect.DeepEqual(maintenance.Data(), []byte(selectedConfiguration)) {
@@ -1745,7 +1745,7 @@ replace github.com/plystra/kernel => ../kernel
     audit.write/v1: {timeout: 5s}
 `)
 	writeFile(t, filepath.Join(root, "plystra.production.yaml"), `interfaces:
-  require: [cache.read/v1]
+  require: {add: [cache.read/v1]}
   use:
     audit.write/v1: example.com/interface-app/audittwo.New
   policies:

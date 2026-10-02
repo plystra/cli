@@ -1180,6 +1180,58 @@ func TestRuntimeRejectsEffectiveIntrinsicSelectionBeforeConstructors(t *testing.
 	}
 }
 
+func TestRuntimeInterfaceRequirementCompleteSets(t *testing.T) {
+	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
+	for _, test := range []struct {
+		name, root, overlay, want string
+	}{
+		{"subset", "[records.read/v1, records.write/v1]", "[records.read/v1]", "records.read/v1"},
+		{"empty", "[records.read/v1]", "[]", ""},
+		{"sparse empty", "[records.read/v1]", "{}", "records.read/v1"},
+		{"sparse addition", "[records.read/v1]", "{add: [records.write/v1]}", "records.read/v1,records.write/v1"},
+		{"sparse removal", "[records.read/v1]", "{remove: [records.read/v1]}", ""},
+		{"sparse over empty", "[]", "{add: [records.read/v1]}", "records.read/v1"},
+		{"complete over removal", "{remove: [records.read/v1]}", "[records.read/v1]", "records.read/v1"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writeRuntimeDocument(t, "interfaces: {require: "+test.root+"}\n"+validRuntimeDocument)
+			writeEnvironmentDocument(t, "requirements", "interfaces: {require: "+test.overlay+"}\n")
+			options := RuntimeOptions{Arguments: []string{"--env", "requirements"}}
+			document, err := loadRuntimeDocument(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer clear(document)
+			var effective struct { Interfaces struct { Require []string } }
+			if err := yaml.Unmarshal(document, &effective); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(effective.Interfaces.Require, ","); got != test.want {
+				t.Fatalf("requirements = %q, want %q", got, test.want)
+			}
+			localservice.Reset()
+			remotestore.Reset()
+			application, err := New(context.Background(), options)
+			if test.want != "" {
+				if application != nil || !errors.Is(err, ErrRuntimeCompatibility) {
+					t.Fatalf("changed requirements accepted: %#v, %v", application, err)
+				}
+				assertNoBootstrapConstructorCalls(t)
+				return
+			}
+			if err != nil || application == nil {
+				t.Fatalf("New after clearing lower requirements = %#v, %v", application, err)
+			}
+			if err := application.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := application.Stop(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestRuntimeInterfaceTombstonesAcrossSelections(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	removals := "interfaces:\n  use: {records.read/v1: {$remove: true}, kernel.info/v1: {$remove: true}}\n  policies: {records.read/v1: {$remove: true}}\nhttp: {expose: {kernel.health/v1: {$remove: true}}}\n"

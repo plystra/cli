@@ -217,7 +217,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 5,
+		"version": 6,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -1148,6 +1148,7 @@ func applyRuntimeInterfaceSet(values map[string]struct{}, node *yaml.Node, path 
 	var addNode, removeNode *yaml.Node
 	switch node.Kind {
 	case yaml.SequenceNode:
+		clear(values)
 		addNode = node
 	case yaml.MappingNode:
 		mapping, err := runtimeMapping(node, path, runtimeKeySet("add", "remove"))

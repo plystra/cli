@@ -132,7 +132,7 @@ func manifestDifferenceOutsideHTTPExposure(left, right Manifest) string {
 	if !slices.Equal(left.removedProviderChoices, right.removedProviderChoices) {
 		return "capabilities.use removals"
 	}
-	if !slices.Equal(left.InterfaceRequirements(), right.InterfaceRequirements()) {
+	if left.completeInterfaceRequirements != right.completeInterfaceRequirements || !slices.Equal(left.InterfaceRequirements(), right.InterfaceRequirements()) {
 		return "interfaces.require"
 	}
 	if !slices.Equal(left.removedInterfaceReqs, right.removedInterfaceReqs) {

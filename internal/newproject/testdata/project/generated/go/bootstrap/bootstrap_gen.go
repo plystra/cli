@@ -35,8 +35,8 @@ const (
 	defaultRuntimeDocument = "plystra.yaml"
 	defaultStartupTimeout  = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":5}"
-	compiledApplicationModelCompatibilityDigest = "sha256:f1ec67b07057a69d9c82fc2260daf407cf603a109cc015c84c84ff6408047cee"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"export_adoptions\":[],\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":6}"
+	compiledApplicationModelCompatibilityDigest = "sha256:101ee502d8c3e7c8458ca9eac124815623ce09a6a4e9404ba2bc8a04f97c4697"
 	compiledApplicationModelDigest              = "sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4"
 )
 
@@ -440,7 +440,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 5,
+		"version": 6,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
@@ -1371,6 +1371,7 @@ func applyRuntimeInterfaceSet(values map[string]struct{}, node *yaml.Node, path 
 	var addNode, removeNode *yaml.Node
 	switch node.Kind {
 	case yaml.SequenceNode:
+		clear(values)
 		addNode = node
 	case yaml.MappingNode:
 		mapping, err := runtimeMapping(node, path, runtimeKeySet("add", "remove"))

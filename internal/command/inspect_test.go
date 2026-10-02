@@ -912,7 +912,7 @@ config:
     endpoint: private-endpoint-marker
     password: {env: INTERFACE_GRAPH_PASSWORD}
 `)
-	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {require: [cache.read/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {require: {add: [cache.read/v1]}}\n")
 	writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), `http:
   address: private-http-address-marker
   expose:
@@ -1049,7 +1049,7 @@ config:
     password: {env: IMPLEMENTATION_GRAPH_CACHE_PASSWORD}
 `)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), `interfaces:
-  require: [cache.read/v1, reports.read/v1]
+  require: {add: [cache.read/v1, reports.read/v1]}
   use:
     cache.read/v1: {$remove: true}
 config:

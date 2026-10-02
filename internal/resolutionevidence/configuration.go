@@ -232,9 +232,21 @@ func selectConfigurationFields(groups map[string][]configurationCandidate) ([]Co
 			fields = append(fields, configurationFieldFromCandidates(path, values, -1, false))
 			continue
 		}
-		winner, err := configurationWinner(path, values)
+		minimumPrecedence := 0
+		if strings.HasPrefix(path, "interfaces.require[") {
+			for _, boundary := range groups["interfaces.require"] {
+				if boundary.summary == string(applicationmeta.ConfigurationSummaryCompleteSet) && boundary.precedence > minimumPrecedence {
+					minimumPrecedence = boundary.precedence
+				}
+			}
+		}
+		winner, err := configurationWinner(path, values, minimumPrecedence)
 		if err != nil {
 			return nil, err
+		}
+		if winner < 0 {
+			fields = append(fields, configurationFieldFromCandidates(path, values, -1, false))
+			continue
 		}
 		winners[path] = winner
 		values[winner].effective = true
@@ -244,7 +256,7 @@ func selectConfigurationFields(groups map[string][]configurationCandidate) ([]Co
 	return fields, nil
 }
 
-func configurationWinner(path string, values []configurationCandidate) (int, error) {
+func configurationWinner(path string, values []configurationCandidate, minimumPrecedence int) (int, error) {
 	if len(values) == 0 {
 		return -1, fmt.Errorf("configuration path %s has no candidates", path)
 	}
@@ -253,6 +265,9 @@ func configurationWinner(path string, values []configurationCandidate) (int, err
 		if value.precedence > max {
 			max = value.precedence
 		}
+	}
+	if max < minimumPrecedence {
+		return -1, nil
 	}
 	winner := -1
 	for index, value := range values {
@@ -454,7 +469,7 @@ func safeConfigurationDocumentPath(value string) bool {
 
 func validConfigurationFieldPath(value string) bool {
 	switch value {
-	case "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup":
+	case "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup", "interfaces.require":
 		return true
 	}
 	if keys, ok := configurationPathKeys(value, "composition.exports"); ok && len(keys) == 1 {
@@ -513,6 +528,7 @@ func validConfigurationSummary(value string) bool {
 		applicationmeta.ConfigurationSummaryBoolean,
 		applicationmeta.ConfigurationSummaryDuration,
 		applicationmeta.ConfigurationSummaryArray,
+		applicationmeta.ConfigurationSummaryCompleteSet,
 		applicationmeta.ConfigurationSummarySecret,
 		applicationmeta.ConfigurationSummaryValue:
 		return true

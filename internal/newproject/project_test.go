@@ -346,7 +346,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 			t.Fatalf("project scaffold contains obsolete configuration %q:\n%s", obsolete, directTree["plystra.yaml"])
 		}
 	}
-	for _, required := range [][]byte{[]byte("interfaces:"), []byte("  require: []"), []byte("  use: {}"), []byte("  policies: {}")} {
+	for _, required := range [][]byte{[]byte("interfaces:"), []byte("  require: {}"), []byte("  use: {}"), []byte("  policies: {}")} {
 		if !bytes.Contains(directTree["plystra.yaml"], required) {
 			t.Fatalf("project scaffold omits %q:\n%s", required, directTree["plystra.yaml"])
 		}
@@ -652,7 +652,10 @@ composition:
     resource-defaults:
       interfaces:
         require: [missing.unadopted/v1]
-      resources: [unsupported-resource-fragment]
+      resources:
+        instances:
+          primary:
+            use: example.com/acme/resource-platform/postgres.New
 `),
 	})
 	environment := isolatedGoEnvironment(t, proxy)
@@ -690,6 +693,32 @@ composition:
 	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
 		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
 	}
+}
+
+func TestCreateRejectsMalformedUnadoptedTemplateResourceExport(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/resource-platform"
+	const templateVersion = "v1.0.0"
+	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
+		"template.go":  []byte("package platform\n"),
+		"plystra.yaml": []byte("composition:\n  exports:\n    resource-defaults:\n      resources: [invalid-private-fragment]\n"),
+	})
+	parent := t.TempDir()
+	_, err := newproject.Create(t.Context(), newproject.Options{
+		Parent:      parent,
+		ProjectName: "my-app",
+		ModulePath:  "example.com/acme/my-app",
+		Template:    templatePath + "@" + templateVersion,
+		Environment: isolatedGoEnvironment(t, proxy),
+	})
+	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, applicationmeta.ErrInvalidManifest) ||
+		!strings.Contains(err.Error(), `composition.exports["resource-defaults"].resources`) || strings.Contains(err.Error(), "invalid-private-fragment") {
+		t.Fatalf("Create malformed unadopted export = %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after invalid Resource export: %v", err)
+	}
+	assertNoTransactionFiles(t, parent)
 }
 
 func TestCreateRejectsResourceBearingTemplateExportAndRollsBack(t *testing.T) {

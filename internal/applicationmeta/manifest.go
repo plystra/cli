@@ -236,35 +236,36 @@ func (ConstructorConfiguration) LogValue() slog.Value {
 // Manifest is the immutable normalized application metadata used by typed
 // Interface selection, adopted-export composition, exposure, and runtime input.
 type Manifest struct {
-	modulePath                   string
-	source                       string
-	exports                      []ConfigurationExport
-	exportAdoptions              []ExportAdoption
-	removedExportAdoptions       []ExportAdoption
-	adoptionMode                 adoptionSetMode
-	httpAddress                  string
-	hasHTTPAddress               bool
-	removeHTTPAddress            bool
-	httpCORS                     httpCORSLayer
-	httpExposures                []HTTPExposure
-	removedHTTPExposures         []interfaceRemoval
-	requirements                 []CapabilityRequirement
-	removedRequirements          []capabilityRemoval
-	providerChoices              []ProviderChoice
-	removedProviderChoices       []capabilityRemoval
-	interfaceRequirements        []InterfaceRequirement
-	removedInterfaceReqs         []interfaceRemoval
-	implementationChoices        []ImplementationChoice
-	removedImplementationChoices []interfaceRemoval
-	interfacePolicies            []InterfacePolicy
-	removedInterfacePolicies     []interfaceRemoval
-	aliases                      []Alias
-	removedAliases               []capabilityRemoval
-	configurations               []ConstructorConfiguration
-	removedConfigurations        []constructorConfigurationRemoval
-	startupTimeout               time.Duration
-	hasStartupTimeout            bool
-	removeStartupTimeout         bool
+	modulePath                    string
+	source                        string
+	exports                       []ConfigurationExport
+	exportAdoptions               []ExportAdoption
+	removedExportAdoptions        []ExportAdoption
+	adoptionMode                  adoptionSetMode
+	httpAddress                   string
+	hasHTTPAddress                bool
+	removeHTTPAddress             bool
+	httpCORS                      httpCORSLayer
+	httpExposures                 []HTTPExposure
+	removedHTTPExposures          []interfaceRemoval
+	requirements                  []CapabilityRequirement
+	removedRequirements           []capabilityRemoval
+	providerChoices               []ProviderChoice
+	removedProviderChoices        []capabilityRemoval
+	interfaceRequirements         []InterfaceRequirement
+	completeInterfaceRequirements bool
+	removedInterfaceReqs          []interfaceRemoval
+	implementationChoices         []ImplementationChoice
+	removedImplementationChoices  []interfaceRemoval
+	interfacePolicies             []InterfacePolicy
+	removedInterfacePolicies      []interfaceRemoval
+	aliases                       []Alias
+	removedAliases                []capabilityRemoval
+	configurations                []ConstructorConfiguration
+	removedConfigurations         []constructorConfigurationRemoval
+	startupTimeout                time.Duration
+	hasStartupTimeout             bool
+	removeStartupTimeout          bool
 }
 
 // WithProjectModule returns a copy associated with the owning Project module
@@ -460,7 +461,7 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	if err != nil {
 		return Manifest{}, err
 	}
-	interfaceRequirements, removedInterfaceRequirements, implementationChoices, removedImplementationChoices, interfacePolicies, removedInterfacePolicies, err := parseInterfaces(values["interfaces"])
+	interfaceRequirements, removedInterfaceRequirements, implementationChoices, removedImplementationChoices, interfacePolicies, removedInterfacePolicies, completeInterfaceRequirements, err := parseInterfaces(values["interfaces"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -469,34 +470,35 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 		return Manifest{}, err
 	}
 	manifest := Manifest{
-		source:                       source,
-		exports:                      exports,
-		exportAdoptions:              exportAdoptions,
-		removedExportAdoptions:       removedExportAdoptions,
-		adoptionMode:                 adoptionMode,
-		httpAddress:                  address,
-		hasHTTPAddress:               hasAddress,
-		removeHTTPAddress:            removeAddress,
-		httpCORS:                     cors,
-		httpExposures:                exposures,
-		removedHTTPExposures:         removedExposures,
-		requirements:                 requirements,
-		removedRequirements:          removedRequirements,
-		providerChoices:              choices,
-		removedProviderChoices:       removedChoices,
-		interfaceRequirements:        interfaceRequirements,
-		removedInterfaceReqs:         removedInterfaceRequirements,
-		implementationChoices:        implementationChoices,
-		removedImplementationChoices: removedImplementationChoices,
-		interfacePolicies:            interfacePolicies,
-		removedInterfacePolicies:     removedInterfacePolicies,
-		aliases:                      aliases,
-		removedAliases:               removedAliases,
-		configurations:               configurations,
-		removedConfigurations:        removedConfigurations,
-		startupTimeout:               startupTimeout,
-		hasStartupTimeout:            hasStartupTimeout,
-		removeStartupTimeout:         removeStartupTimeout,
+		source:                        source,
+		exports:                       exports,
+		exportAdoptions:               exportAdoptions,
+		removedExportAdoptions:        removedExportAdoptions,
+		adoptionMode:                  adoptionMode,
+		httpAddress:                   address,
+		hasHTTPAddress:                hasAddress,
+		removeHTTPAddress:             removeAddress,
+		httpCORS:                      cors,
+		httpExposures:                 exposures,
+		removedHTTPExposures:          removedExposures,
+		requirements:                  requirements,
+		removedRequirements:           removedRequirements,
+		providerChoices:               choices,
+		removedProviderChoices:        removedChoices,
+		interfaceRequirements:         interfaceRequirements,
+		completeInterfaceRequirements: completeInterfaceRequirements,
+		removedInterfaceReqs:          removedInterfaceRequirements,
+		implementationChoices:         implementationChoices,
+		removedImplementationChoices:  removedImplementationChoices,
+		interfacePolicies:             interfacePolicies,
+		removedInterfacePolicies:      removedInterfacePolicies,
+		aliases:                       aliases,
+		removedAliases:                removedAliases,
+		configurations:                configurations,
+		removedConfigurations:         removedConfigurations,
+		startupTimeout:                startupTimeout,
+		hasStartupTimeout:             hasStartupTimeout,
+		removeStartupTimeout:          removeStartupTimeout,
 	}
 	rewriteManifestSource(&manifest, source)
 	return manifest, nil

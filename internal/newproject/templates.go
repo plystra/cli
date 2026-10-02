@@ -18,7 +18,7 @@ timeouts:
   startup: 2m
 
 interfaces:
-  require: []
+  require: {}
   use: {}
   policies: {}
 
@@ -89,7 +89,9 @@ A well-formed ` + "`capability expose`" + ` target absent from the selected visi
 
 A template's top-level requirements and Provider choices are consumer-inert. Only explicitly adopted exports enter the staged application model; ordinary resolution rejects any ambiguity introduced by those selected exports and leaves no target Project to repair.
 
-Remove exact interfaces.use, interfaces.policies, and http.expose entries only with {$remove: true}. Null, empty values, false or string-valued markers, and sibling fields are invalid. Keep the authored tombstone even if no lower entry exists; it prevents later dependency additions from restoring the entry. Regenerate and rebuild for runtime compatibility version 5. Constructor configuration and CORS retain transitional null handling; this is not full typed-removal support.
+Remove exact interfaces.use, interfaces.policies, and http.expose entries only with {$remove: true}. Null, empty values, false or string-valued markers, and sibling fields are invalid. Keep the authored tombstone even if no lower entry exists; it prevents later dependency additions from restoring the entry. Regenerate and rebuild for runtime compatibility version 6. Constructor configuration and CORS retain transitional null handling; this is not full typed-removal support.
+
+An interfaces.require sequence replaces the complete lower explicit requirement set; [] clears it. Omission and {} inherit, while {add: [...], remove: [...]} changes only named members. Adopted exports form one unordered lower layer, including self-adopted exports. A later sparse overlay preserves an earlier complete-set boundary. Exposure, constructor dependencies, and intrinsic Kernel requirements remain independent. Inspection and explanation retain suppressed sources. New Projects use require: {} to preserve explicit template adoptions. Generated runtime compatibility version 6 uses these set rules for selected current-Project documents; source-independent adopted-export runtime baselines remain unfinished.
 
 Reusable exports have no lower layer and cannot contain the reserved one-entry $remove mapping, even inside nested configuration, collections, or an unadopted Resource fragment. Ordinary null, empty, and zero values are not removals; adopted values still require compiled-type validation. Correct the export in the owning Project marker reported by PLYSTRA_PROJECT_MANIFEST_INVALID, then rerun the same generation or check command.
 

@@ -283,6 +283,7 @@ func TestConfigurationSourcesPreserveTypedCurrentAndDependencyLocations(t *testi
 		DependencyProvenance: []applicationinput.DependencyProvenance{{
 			Path: field,
 			Sources: []string{
+				`example.com/app@workspace/plystra.yaml composition.exports["defaults"].interfaces.require["app.run/v1"]`,
 				`example.com/a@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.require["app.run/v1"]`,
 				`example.com/b@workspace/plystra.yaml composition.exports["defaults"].interfaces.require["app.run/v1"]`,
 			},
@@ -295,6 +296,7 @@ func TestConfigurationSourcesPreserveTypedCurrentAndDependencyLocations(t *testi
 	}
 	want := []applicationinput.ConfigurationSource{
 		{Reference: `plystra.production.yaml interfaces.require.add["app.run/v1"]`, ModulePath: "example.com/app", Path: "plystra.production.yaml", Line: 1, Column: 1},
+		{Reference: `example.com/app@workspace/plystra.yaml composition.exports["defaults"].interfaces.require["app.run/v1"]`, ModulePath: "example.com/app", Path: "plystra.yaml", Line: 1, Column: 1},
 		{Reference: `example.com/a@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.require["app.run/v1"]`, ModulePath: "example.com/a", Path: "plystra.yaml", Line: 1, Column: 1},
 		{Reference: `example.com/b@workspace/plystra.yaml composition.exports["defaults"].interfaces.require["app.run/v1"]`, ModulePath: "example.com/b", Path: "plystra.yaml", Line: 1, Column: 1},
 	}

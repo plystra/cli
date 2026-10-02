@@ -15,7 +15,7 @@ type interfaceSetCandidate struct {
 	declarations   configurationDeclarationSources
 }
 
-func composeInterfaceRequirementSet(dependencies []Dependency, current []InterfaceRequirement, currentRemovals []interfaceRemoval, records map[string]*provenanceRecord) ([]InterfaceRequirement, error) {
+func composeInterfaceRequirementSet(dependencies []Dependency, current []InterfaceRequirement, currentRemovals []interfaceRemoval, complete bool, records map[string]*provenanceRecord) ([]InterfaceRequirement, error) {
 	inherited := make(map[interfaceid.Identifier]*interfaceSetCandidate)
 	for _, dependency := range dependencies {
 		for _, requirement := range dependency.Manifest.InterfaceRequirements() {
@@ -34,6 +34,9 @@ func composeInterfaceRequirementSet(dependencies []Dependency, current []Interfa
 			candidate.removalSources[source] = struct{}{}
 			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
 		}
+	}
+	if complete {
+		return append([]InterfaceRequirement(nil), current...), nil
 	}
 	values := make(map[interfaceid.Identifier]InterfaceRequirement)
 	for _, requirement := range current {

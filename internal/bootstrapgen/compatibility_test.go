@@ -70,7 +70,7 @@ http:
 	canonical := string(left.CanonicalJSON())
 	for _, required := range []string{
 		`"application_model_digest":"` + digest + `"`,
-		`"version":5`,
+		`"version":6`,
 		`"export_adoptions":[{"export":"runtime","module":"example.com/alpha"},{"export":"defaults","module":"example.com/zeta"}]`,
 		`"http_exposures":[{"interface":"records.read/v1","transport":"connect"}]`,
 		`"interface_requirements":["records.read/v1"]`,

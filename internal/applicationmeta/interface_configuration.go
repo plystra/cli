@@ -86,34 +86,35 @@ type interfaceRemoval struct {
 	source string
 }
 
-func parseInterfaces(node *yaml.Node) ([]InterfaceRequirement, []interfaceRemoval, []ImplementationChoice, []interfaceRemoval, []InterfacePolicy, []interfaceRemoval, error) {
+func parseInterfaces(node *yaml.Node) ([]InterfaceRequirement, []interfaceRemoval, []ImplementationChoice, []interfaceRemoval, []InterfacePolicy, []interfaceRemoval, bool, error) {
 	if node == nil {
-		return nil, nil, nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil, false, nil
 	}
 	values, err := mapping(node, "interfaces")
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, false, err
 	}
 	for _, key := range sortedNodeKeys(values) {
 		switch key {
 		case "require", "use", "policies":
 		default:
-			return nil, nil, nil, nil, nil, nil, invalid("interfaces contains unknown key %q", key)
+			return nil, nil, nil, nil, nil, nil, false, invalid("interfaces contains unknown key %q", key)
 		}
 	}
 	requirements, removedRequirements, err := parseInterfaceRequirements(values["require"])
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, false, err
 	}
 	choices, removedChoices, err := parseImplementationChoices(values["use"])
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, false, err
 	}
 	policies, removedPolicies, err := parseInterfacePolicies(values["policies"])
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, false, err
 	}
-	return requirements, removedRequirements, choices, removedChoices, policies, removedPolicies, nil
+	complete := values["require"] != nil && values["require"].Kind == yaml.SequenceNode
+	return requirements, removedRequirements, choices, removedChoices, policies, removedPolicies, complete, nil
 }
 
 func parseInterfaceRequirements(node *yaml.Node) ([]InterfaceRequirement, []interfaceRemoval, error) {

@@ -1086,11 +1086,23 @@ field, keyed objects merge by declared field path, set fields use their sparse
 Null, empty values, malformed markers, and markers with siblings are invalid in
 those entries. Exclusions remain current-Project intent even with no lower value,
 so later dependency additions cannot restore them. Generated runtime compatibility
-version 5 uses the same rules; regenerate and rebuild older Projects. Constructor
+version 6 uses the same rules; regenerate and rebuild older Projects. Constructor
 configuration and CORS still have transitional null handling pending their typed
 composition migration.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
+
+For `interfaces.require`, a sequence is a complete-set declaration, including
+`[]` to clear lower explicit requirements. The sparse `{add: [...], remove: [...]}`
+form changes only named members; omission and `{}` inherit. Adopted exports
+compose as one unordered lower layer, including self-adopted exports. A sparse
+environment overlay above a complete root set does not restore adopted members
+that root excluded. Exposure, required constructor parameters, and intrinsic
+Kernel requirements remain independent. `inspect configuration` and `explain
+config` retain the complete-set boundary and suppressed sources. New
+Projects use `require: {}` to preserve explicit template adoptions. Generated
+runtime compatibility version 6 applies these set rules to selected current-Project
+documents; source-independent adopted-export runtime baselines remain unfinished.
 
 `http.expose` is keyed by exact Interface ID. Each entry requires the supported
 transport explicitly:

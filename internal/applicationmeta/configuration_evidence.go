@@ -28,6 +28,7 @@ const (
 	ConfigurationSummaryBoolean        ConfigurationDecisionSummary = "boolean"
 	ConfigurationSummaryDuration       ConfigurationDecisionSummary = "duration"
 	ConfigurationSummaryArray          ConfigurationDecisionSummary = "array"
+	ConfigurationSummaryCompleteSet    ConfigurationDecisionSummary = "complete-set"
 	ConfigurationSummarySecret         ConfigurationDecisionSummary = "secret-reference"
 	ConfigurationSummaryValue          ConfigurationDecisionSummary = "value"
 )
@@ -79,6 +80,14 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 	source := manifest.source
 	if source == "" {
 		source = "plystra.yaml"
+	}
+	if manifest.completeInterfaceRequirements {
+		result = append(result, ConfigurationDecision{
+			path:    "interfaces.require",
+			digest:  digestStrings("interfaces.require", "complete-set"),
+			summary: ConfigurationSummaryCompleteSet,
+			source:  source,
+		})
 	}
 	for _, decision := range maintenance {
 		summary := ConfigurationSummaryRemoval

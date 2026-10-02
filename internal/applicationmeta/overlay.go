@@ -69,35 +69,36 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 	exportAdoptions, removedExportAdoptions := overlayExportAdoptions(base, overlay)
 
 	return Manifest{
-		modulePath:                   projectModule,
-		source:                       base.source,
-		exports:                      append([]ConfigurationExport(nil), base.exports...),
-		exportAdoptions:              exportAdoptions,
-		removedExportAdoptions:       removedExportAdoptions,
-		adoptionMode:                 adoptionSetComplete,
-		httpAddress:                  httpAddress,
-		hasHTTPAddress:               hasHTTPAddress,
-		removeHTTPAddress:            removeHTTPAddress,
-		httpCORS:                     httpCORS,
-		httpExposures:                exposures,
-		removedHTTPExposures:         removedExposures,
-		requirements:                 requirements,
-		removedRequirements:          removedRequirements,
-		providerChoices:              choices,
-		removedProviderChoices:       removedChoices,
-		interfaceRequirements:        interfaceRequirements,
-		removedInterfaceReqs:         removedInterfaceRequirements,
-		implementationChoices:        implementationChoices,
-		removedImplementationChoices: removedImplementationChoices,
-		interfacePolicies:            interfacePolicies,
-		removedInterfacePolicies:     removedInterfacePolicies,
-		aliases:                      aliases,
-		removedAliases:               removedAliases,
-		configurations:               configurations,
-		removedConfigurations:        removedConfigurations,
-		startupTimeout:               startupTimeout,
-		hasStartupTimeout:            hasStartupTimeout,
-		removeStartupTimeout:         removeStartupTimeout,
+		modulePath:                    projectModule,
+		source:                        base.source,
+		exports:                       append([]ConfigurationExport(nil), base.exports...),
+		exportAdoptions:               exportAdoptions,
+		removedExportAdoptions:        removedExportAdoptions,
+		adoptionMode:                  adoptionSetComplete,
+		httpAddress:                   httpAddress,
+		hasHTTPAddress:                hasHTTPAddress,
+		removeHTTPAddress:             removeHTTPAddress,
+		httpCORS:                      httpCORS,
+		httpExposures:                 exposures,
+		removedHTTPExposures:          removedExposures,
+		requirements:                  requirements,
+		removedRequirements:           removedRequirements,
+		providerChoices:               choices,
+		removedProviderChoices:        removedChoices,
+		interfaceRequirements:         interfaceRequirements,
+		completeInterfaceRequirements: base.completeInterfaceRequirements || overlay.completeInterfaceRequirements,
+		removedInterfaceReqs:          removedInterfaceRequirements,
+		implementationChoices:         implementationChoices,
+		removedImplementationChoices:  removedImplementationChoices,
+		interfacePolicies:             interfacePolicies,
+		removedInterfacePolicies:      removedInterfacePolicies,
+		aliases:                       aliases,
+		removedAliases:                removedAliases,
+		configurations:                configurations,
+		removedConfigurations:         removedConfigurations,
+		startupTimeout:                startupTimeout,
+		hasStartupTimeout:             hasStartupTimeout,
+		removeStartupTimeout:          removeStartupTimeout,
 	}, nil
 }
 
@@ -250,6 +251,9 @@ func overlayProviderChoices(base, overlay Manifest) ([]ProviderChoice, []capabil
 }
 
 func overlayInterfaceRequirementSet(base, overlay Manifest) ([]InterfaceRequirement, []interfaceRemoval) {
+	if overlay.completeInterfaceRequirements {
+		return overlay.InterfaceRequirements(), nil
+	}
 	values := make(map[interfaceid.Identifier]InterfaceRequirement)
 	removals := make(map[interfaceid.Identifier]interfaceRemoval)
 	for _, value := range base.interfaceRequirements {

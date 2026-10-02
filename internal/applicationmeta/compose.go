@@ -194,7 +194,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	interfaceRequirements, err := composeInterfaceRequirementSet(ordered, current.InterfaceRequirements(), current.removedInterfaceReqs, records)
+	interfaceRequirements, err := composeInterfaceRequirementSet(ordered, current.InterfaceRequirements(), current.removedInterfaceReqs, current.completeInterfaceRequirements, records)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
@@ -227,27 +227,28 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		return Composition{}, fmt.Errorf("%w: encode dependency provenance: %v", ErrCompose, err)
 	}
 	manifest := Manifest{
-		modulePath:             current.modulePath,
-		source:                 current.source,
-		exports:                append([]ConfigurationExport(nil), current.exports...),
-		exportAdoptions:        append([]ExportAdoption(nil), current.exportAdoptions...),
-		removedExportAdoptions: append([]ExportAdoption(nil), current.removedExportAdoptions...),
-		adoptionMode:           current.adoptionMode,
-		httpAddress:            current.httpAddress,
-		hasHTTPAddress:         current.hasHTTPAddress,
-		removeHTTPAddress:      current.removeHTTPAddress,
-		httpCORS:               cloneHTTPCORSLayer(current.httpCORS),
-		httpExposures:          exposures,
-		requirements:           requirements,
-		providerChoices:        choices,
-		interfaceRequirements:  interfaceRequirements,
-		implementationChoices:  implementationChoices,
-		interfacePolicies:      interfacePolicies,
-		aliases:                aliases,
-		configurations:         configurations,
-		startupTimeout:         current.startupTimeout,
-		hasStartupTimeout:      current.hasStartupTimeout,
-		removeStartupTimeout:   current.removeStartupTimeout,
+		modulePath:                    current.modulePath,
+		source:                        current.source,
+		exports:                       append([]ConfigurationExport(nil), current.exports...),
+		exportAdoptions:               append([]ExportAdoption(nil), current.exportAdoptions...),
+		removedExportAdoptions:        append([]ExportAdoption(nil), current.removedExportAdoptions...),
+		adoptionMode:                  current.adoptionMode,
+		httpAddress:                   current.httpAddress,
+		hasHTTPAddress:                current.hasHTTPAddress,
+		removeHTTPAddress:             current.removeHTTPAddress,
+		httpCORS:                      cloneHTTPCORSLayer(current.httpCORS),
+		httpExposures:                 exposures,
+		requirements:                  requirements,
+		providerChoices:               choices,
+		interfaceRequirements:         interfaceRequirements,
+		completeInterfaceRequirements: current.completeInterfaceRequirements,
+		implementationChoices:         implementationChoices,
+		interfacePolicies:             interfacePolicies,
+		aliases:                       aliases,
+		configurations:                configurations,
+		startupTimeout:                current.startupTimeout,
+		hasStartupTimeout:             current.hasStartupTimeout,
+		removeStartupTimeout:          current.removeStartupTimeout,
 	}
 	return Composition{
 		current:           current,
@@ -307,6 +308,9 @@ func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Pr
 	}
 	result := make([]Provenance, 0, len(effective)+len(effectiveConfigurationRoots))
 	for _, record := range provenance {
+		if manifest.completeInterfaceRequirements && strings.HasPrefix(record.path, "interfaces.require[") {
+			continue
+		}
 		if record.removed {
 			continue
 		}
