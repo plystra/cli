@@ -1416,6 +1416,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticConfigurationOwnershipAmbiguous, "Make the inherited field intent explicit in "+context.configurationTarget()+" by restoring it or writing its typed removal.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.")
+	case errors.Is(err, applicationmeta.ErrConfigurationRequired):
+		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Supply the missing required field in "+context.configurationTarget()+" or an adopted export, or correct the tombstone that removed it, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationValues):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.")
 	case errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration):

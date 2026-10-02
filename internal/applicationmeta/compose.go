@@ -32,6 +32,8 @@ var (
 	// ErrConfigurationInvalidValue reports a value that does not match its
 	// compiled Go type. The value and Secret reference target remain redacted.
 	ErrConfigurationInvalidValue = errors.New("invalid constructor configuration field value")
+	// ErrConfigurationRequired reports a required field absent after composition.
+	ErrConfigurationRequired = errors.New("required constructor configuration field is missing")
 )
 
 // Dependency is one dependency Project's parsed root configuration and stable

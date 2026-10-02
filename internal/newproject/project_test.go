@@ -470,6 +470,12 @@ composition:
         require: [email.send/v1]
         policies:
           email.send/v1: {timeout: 7s}
+      config:
+        example.com/acme/platform/mailer.New:
+          sender: timed-template
+    incomplete:
+      interfaces:
+        require: [email.send/v1]
 `),
 		"plystra.production.yaml": []byte("interfaces:\n  require:\n    - missing.overlay/v1\n"),
 		"interfaces/email/send/v1/interface.go": []byte(`package sendv1
@@ -629,6 +635,15 @@ var _ sendv1.Interface = (*Service)(nil)
 	timed, err := applicationgen.DecodeManifestProvenance(timedData)
 	if err != nil || len(timed.InterfaceProvenance().Bindings()) != 1 || timed.InterfaceProvenance().Bindings()[0].Policy().Timeout() != "7s" {
 		t.Fatalf("timed template provenance = %v, %v", timed, err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	beforeIncomplete := snapshotTree(t, parent)
+	if code := command.RunIn([]string{"new", "incomplete-config", "--module", "example.com/acme/incomplete-config", "--template", templateQuery, "--adopt-export", "incomplete"}, &stdout, &stderr, parent, environment); code == 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "required constructor configuration field is missing") {
+		t.Fatalf("incomplete template configuration = %d, %q, %q", code, stdout.String(), stderr.String())
+	}
+	if !reflect.DeepEqual(beforeIncomplete, snapshotTree(t, parent)) {
+		t.Fatal("incomplete required template configuration did not roll back creation")
 	}
 	assertNoTransactionFiles(t, parent)
 	if cacheAfter := snapshotTree(t, cacheRoot); !reflect.DeepEqual(cacheAfter, cacheBefore) {

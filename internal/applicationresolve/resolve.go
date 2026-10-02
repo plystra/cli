@@ -393,6 +393,13 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err := validateConstructorConfigurationOwners(manifest, interfaceResolution, sourceContext); err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
+	var activeConstructors []constructorsymbol.Symbol
+	for _, node := range interfaceResolution.Graph().ConstructionOrder() {
+		activeConstructors = append(activeConstructors, node.Symbol())
+	}
+	if err := composition.ValidateRequiredConfiguration(schemaLookup, activeConstructors, selector.path); err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
 	rootLayerManifest := rootManifest
 	if maintenanceSnapshot.path == applicationManifestName {
 		rootLayerManifest = maintainedManifest

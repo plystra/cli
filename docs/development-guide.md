@@ -1108,8 +1108,19 @@ remains distinct from removal and an empty collection. Other compiled types
 reject null. Reserved singleton `$remove` mappings are invalid inside atomic
 values, including pointed-to struct members, list elements, and dynamic-map
 entries. A dynamic map with `$remove` and other keys is an ordinary typed map.
-Standalone typed runtime loading and complete requiredness/default application
-remain unfinished.
+
+Required fields are checked only after adopted exports and selected layers compose,
+so partial fragments may supply them together. Every effective authored object,
+including dormant configuration, is checked; active configurable constructors are
+also checked when the whole object is absent or removed. A dormant constructor
+without an effective object needs no required values yet. Requiredness is presence,
+not nonzero: zero, empty, and schema-permitted nil values count. Omitted fixed
+structs and fixed-array elements still need their nested required fields. Absent
+or nil pointers and empty slices/maps have no child values to validate. Failure
+uses `PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID`, a safe declared path,
+and the selected current document, before mutation. Supply the missing field in
+that document or an adopted export, or correct a tombstone that removed it.
+Standalone typed runtime loading and default application remain unfinished.
 
 A supplied non-null pointer field replaces its complete lower value during typed
 CLI composition, including pointers to structs and multiple pointer layers.

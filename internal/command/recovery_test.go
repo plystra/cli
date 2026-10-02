@@ -145,6 +145,13 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code:    diagnosticConstructorConfigurationValuesInvalid,
 		},
 		{
+			name:    "missing required constructor configuration",
+			err:     fmt.Errorf("validate configuration: %w: %w", applicationmeta.ErrConfigurationValues, applicationmeta.ErrConfigurationRequired),
+			context: commandRecoveryContext("deploy/customer.yaml", "", nil),
+			want:    "Supply the missing required field in deploy/customer.yaml or an adopted export, or correct the tombstone that removed it, then rerun the command.",
+			code:    diagnosticConstructorConfigurationValuesInvalid,
+		},
+		{
 			name:    "unselected constructor configuration",
 			err:     fmt.Errorf("resolve configuration owner: %w", applicationresolve.ErrUnownedConstructorConfiguration),
 			context: commandRecoveryContext("", "test", nil),
