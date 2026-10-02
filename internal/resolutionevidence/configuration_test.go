@@ -191,7 +191,7 @@ config:
 config:
   example.com/acme/smtp.New:
     host: production.private.example
-    settings: null
+    settings: {$remove: true}
 `))
 	if err != nil {
 		t.Fatalf("ParseOverlaySource: %v", err)

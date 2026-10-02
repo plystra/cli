@@ -891,6 +891,15 @@ values still require validation against their compiled types. Public generation
 and check commands report the owning Project marker without exposing nested
 configuration keys or values, and leave the rejected Project unchanged.
 
+When an inert export's constructor schema is unavailable or its object cannot
+be typed, public document identity retains only the constructor and an opaque
+object marker, not hashes of fields, values, or Secret-reference targets.
+Editing only that private content does not make generated output stale.
+Adoption still validates the exact schema and values before mutation. Private
+root-document fingerprints remain transaction-local so concurrent edits are
+detected and preserved. Identity separation for validated constructor values
+and standalone typed runtime loading remains incomplete.
+
 The selected current Project activates that exact module/export identity:
 
 ```yaml

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -147,10 +146,11 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 // configuration document after current-layer validation. YAML presentation,
 // declaration order for schema-defined sets, equivalent typed scalar
 // spellings, and the source filename do not enter the digest. Explicit
-// removals and ordered values do. Constructor configuration without a
-// discoverable valid schema is structurally normalized only so explicit-config
-// mode can record its mandatory but excluded root document without granting
-// that document current-project authority.
+// removals and ordered typed values do. Unvalidated constructor objects in
+// inert exports or excluded documents contribute only their constructor and an
+// opaque object marker. Without typed validation no field, value, or reference
+// target is known to be safe for public identity. This fallback grants no
+// current-project authority and does not replace selected-model validation.
 func ConfigurationLayerDigest(manifest Manifest, schemas SchemaLookup) (string, error) {
 	decisions, err := ConfigurationDecisions(manifest, schemas)
 	if err != nil {
@@ -192,13 +192,13 @@ func configurationLayerDigestDecisions(manifest Manifest, schemas SchemaLookup) 
 			}
 			continue
 		}
-		digest, digestErr := untypedConstructorConfigurationDigest(configured)
-		if digestErr != nil {
-			return nil, digestErr
+		root, err := decodeNormalizedConfigNode(configured.yaml)
+		if err != nil || validateUntypedConfigurationNode(root, &constructorConfigNormalizeState{}, 0) != nil {
+			return nil, fmt.Errorf("normalize excluded constructor configuration %q: %w", configured.constructor, ErrConfigurationInvalidValue)
 		}
 		result = append(result, ConfigurationDecision{
 			path:                 constructorConfigPath(configured.constructor, nil),
-			digest:               digest,
+			digest:               digestStrings("plystra.unvalidated-constructor-configuration/v2", configured.constructor.String()),
 			summary:              ConfigurationSummaryObject,
 			source:               configured.source,
 			dependencyComposable: true,
@@ -239,95 +239,33 @@ func constructorConfigurationDecision(decision constructorConfigDecision) Config
 	}
 }
 
-func untypedConstructorConfigurationDigest(configured ConstructorConfiguration) (string, error) {
-	root, err := decodeNormalizedConfigNode(configured.yaml)
-	if err != nil {
-		return "", fmt.Errorf("normalize excluded constructor configuration %q: %w", configured.constructor, err)
-	}
-	values, err := appendUntypedConfigurationTokens(
-		[]string{"plystra.untyped-constructor-configuration/v1", configured.constructor.String()},
-		root,
-		&constructorConfigNormalizeState{},
-		0,
-	)
-	if err != nil {
-		return "", fmt.Errorf("normalize excluded constructor configuration %q: %w", configured.constructor, err)
-	}
-	return digestStrings(values...), nil
-}
-
-func appendUntypedConfigurationTokens(values []string, node *yaml.Node, state *constructorConfigNormalizeState, depth int) ([]string, error) {
+func validateUntypedConfigurationNode(node *yaml.Node, state *constructorConfigNormalizeState, depth int) error {
 	if err := enterConstructorConfigNode(node, state, depth); err != nil || node.Alias != nil || node.Anchor != "" {
-		return nil, ErrConfigurationInvalidValue
+		return ErrConfigurationInvalidValue
 	}
+	start, step := 0, 1
 	switch node.Kind {
 	case yaml.MappingNode:
-		mapping, err := safeConstructorConfigMapping(node)
-		if err != nil {
-			return nil, err
+		if _, err := safeConstructorConfigMapping(node); err != nil {
+			return ErrConfigurationInvalidValue
 		}
-		keys := sortedNodeKeys(mapping)
-		values = append(values, "mapping", strconv.Itoa(len(keys)))
-		for _, key := range keys {
-			values = append(values, "key", key)
-			values, err = appendUntypedConfigurationTokens(values, mapping[key], state, depth+1)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return values, nil
+		start, step = 1, 2
 	case yaml.SequenceNode:
-		values = append(values, "sequence", strconv.Itoa(len(node.Content)))
-		var err error
-		for _, child := range node.Content {
-			values, err = appendUntypedConfigurationTokens(values, child, state, depth+1)
-			if err != nil {
-				return nil, err
-			}
-		}
-		return values, nil
 	case yaml.ScalarNode:
-		normalized, err := normalizedUntypedConfigurationScalar(node)
-		if err != nil {
-			return nil, err
-		}
-		return append(values, "scalar", node.Tag, normalized), nil
-	default:
-		return nil, ErrConfigurationInvalidValue
-	}
-}
-
-func normalizedUntypedConfigurationScalar(node *yaml.Node) (string, error) {
-	switch node.Tag {
-	case "!!null":
-		return "null", nil
-	case "!!bool":
-		var value bool
-		if err := node.Decode(&value); err != nil {
-			return "", ErrConfigurationInvalidValue
-		}
-		return strconv.FormatBool(value), nil
-	case "!!int":
 		var value any
 		if err := node.Decode(&value); err != nil {
-			return "", ErrConfigurationInvalidValue
+			return ErrConfigurationInvalidValue
 		}
-		return fmt.Sprint(value), nil
-	case "!!float":
-		var value float64
-		if err := node.Decode(&value); err != nil {
-			return "", ErrConfigurationInvalidValue
-		}
-		return strconv.FormatFloat(value, 'g', -1, 64), nil
-	case "!!timestamp":
-		var value time.Time
-		if err := node.Decode(&value); err != nil {
-			return "", ErrConfigurationInvalidValue
-		}
-		return value.UTC().Format(time.RFC3339Nano), nil
+		return nil
 	default:
-		return node.Value, nil
+		return ErrConfigurationInvalidValue
 	}
+	for index := start; index < len(node.Content); index += step {
+		if err := validateUntypedConfigurationNode(node.Content[index], state, depth+1); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func configurationDecisionSummary(decision constructorConfigDecision) ConfigurationDecisionSummary {

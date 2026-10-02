@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,52 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationresolve"
 )
+
+func TestGenerateDetectsConcurrentUnvalidatedExportChange(t *testing.T) {
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			const modulePath = "example.com/acme/private-inert-export"
+			root := t.TempDir()
+			writeApplicationModule(t, root, modulePath)
+			manifestPath := filepath.Join(root, "plystra.yaml")
+			first := "composition: {exports: {inert: {config: {example.com/unavailable/service.New: {password: {env: PRIVATE_FIRST}}}}}}\n"
+			second := strings.ReplaceAll(first, "PRIVATE_FIRST", "PRIVATE_SECOND")
+			writeFile(t, manifestPath, first)
+			options := applicationgenerate.Options{Start: root, Environment: goEnvironment(nil)}
+			switch mode {
+			case "environment":
+				options.EnvironmentName = "production"
+				writeFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+			case "replacement":
+				options.ConfigurationPath = "deploy/customer.yaml"
+				writeFile(t, filepath.Join(root, "deploy/customer.yaml"), "{}\n")
+			}
+			if _, err := applicationgenerate.Generate(t.Context(), options); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotGenerated(t, root)
+			options.Validate = func(context.Context, string) error {
+				writeFile(t, manifestPath, second)
+				return nil
+			}
+			if _, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
+				t.Fatalf("concurrent unvalidated export edit = %v", err)
+			} else {
+				assertConcurrentGenerationSource(t, err, modulePath, "plystra.yaml", "configuration-declaration")
+				if strings.Contains(err.Error(), "PRIVATE_") {
+					t.Fatal("concurrent edit diagnostic exposed private data")
+				}
+			}
+			if got := string(readAbsoluteFile(t, manifestPath)); got != second {
+				t.Fatal("concurrent edit was not preserved")
+			}
+			if !reflect.DeepEqual(snapshotGenerated(t, root), before) {
+				t.Fatal("concurrent edit changed generated output")
+			}
+			assertNoTransactions(t, root)
+		})
+	}
+}
 
 func TestResolvedSecretEnvironmentValueDoesNotAffectAnyDigest(t *testing.T) {
 	t.Parallel()

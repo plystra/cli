@@ -515,6 +515,17 @@ Private values and Secret reference targets do not enter generation-extension co
 
 The required top-level `transport_toolchain` record contains the exact embedded `go/format` runtime, built-in Protobuf-model, descriptor, wire-map, Connect, JavaScript, and API-documentation generator versions, pinned generated Go and npm dependency versions, and a canonical digest. Generation never consults an implicit global `protoc`, another generator executable, or a hosted generation service; changing this embedded identity changes the manifest and is detected by `plystra generate --check`. `generated/go/bootstrap/bootstrap_gen.go` records only the bounded executable compatibility projection: selected public Interface exposure entries with their transports, CORS policy, explicit Interface requirements, exact executable Interface-to-Implementation constructor choices, normalized Interface timeout and retry policies, and the complete application-model digest. Dormant choices and dormant constructor-configuration records remain only in manifest configuration/composition provenance until activation, so a dormant-only edit changes manifest provenance without changing bootstrap source or artifact provenance. The projection digest keeps the runtime check cryptographically associated with the exact generated assembly. Process address, `timeouts.startup`, runtime configuration, Secret references, resolved Secrets, source paths, selector-only document identity, and machine-specific absolute paths are excluded. Changing selected CORS origins, credential handling, an adoption, or an Interface timeout or retry policy creates deterministic generation drift when it changes the normalized selected model; equivalent normalized values retain one static model identity. Adopted-export records contain deterministic path, digest, removal, module/export, and source provenance, while current-project ownership remains separate. A separate private digest covers validated runtime configuration only for concurrent-input detection during the generation transaction.
 
+Unvalidated constructor objects in inert exports contribute only constructor
+identity and an opaque object marker to public document digests. Unknown field
+names, container shapes, values, and Secret-reference targets are not safe to
+publish, even as hashes. Private-only edits to those objects leave generated
+output current; changing their constructor, export name, or adoption still
+changes provenance. Adoption must pass the ordinary typed validation first.
+The generation transaction separately fingerprints root-document bytes in
+memory to reject concurrent edits without publishing that private fingerprint.
+This does not yet complete public/private identity separation for validated
+constructor configuration or standalone typed runtime loading.
+
 The required top-level `interface_provenance` record in
 `generated/manifest.json` uses schema `plystra.interface-provenance/v3`. It
 identifies every visible authored Interface, every reachable ordinary binding,

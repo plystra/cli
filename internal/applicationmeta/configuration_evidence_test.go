@@ -1,6 +1,7 @@
 package applicationmeta_test
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -283,7 +284,7 @@ interfaces:
 	}
 }
 
-func TestConfigurationLayerDigestStructurallyHashesExcludedUnresolvedConfiguration(t *testing.T) {
+func TestConfigurationLayerDigestRedactsExcludedUnresolvedConfiguration(t *testing.T) {
 	t.Parallel()
 
 	lookup := composeSchemaLookup(nil)
@@ -331,7 +332,114 @@ config:
 	if err != nil {
 		t.Fatalf("ConfigurationLayerDigest(changed): %v", err)
 	}
-	if changedDigest == leftDigest {
-		t.Fatal("changed ordered value did not alter the excluded layer digest")
+	if changedDigest != leftDigest {
+		t.Fatal("private unvalidated values altered the public excluded layer digest")
 	}
+}
+
+func TestConfigurationLayerDigestUnvalidatedValuesNeverEnterPublicIdentity(t *testing.T) {
+	t.Parallel()
+	schema := composeSchema(t, "\n\tEnabled bool\n")
+	for _, test := range []struct {
+		name   string
+		lookup applicationmeta.SchemaLookup
+	}{
+		{"unknown schema", composeSchemaLookup(nil)},
+		{"invalid known schema", composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/excluded/root.New": schema})},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var first string
+			for _, values := range []string{
+				"{password: {env: PRIVATE_FIRST}, settings: {PRIVATE_KEY: PRIVATE_VALUE}}",
+				"{password: {file: PRIVATE_SECOND}, other: [null, false, 0, 1.5, 2026-10-02]}",
+				"{enabled: [PRIVATE_THIRD]}",
+			} {
+				manifest, err := applicationmeta.ParseSource("plystra.yaml", []byte("config: {example.com/excluded/root.New: "+values+"}\n"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := applicationmeta.ConfigurationDecisions(manifest, test.lookup); err == nil {
+					t.Fatal("unvalidated configuration was accepted as typed evidence")
+				}
+				digest, err := applicationmeta.ConfigurationLayerDigest(manifest, test.lookup)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if first == "" {
+					first = digest
+				} else if digest != first {
+					t.Fatal("unvalidated field names, values, or Secret targets entered public identity")
+				}
+			}
+			for _, data := range []string{"{}", "config: {example.com/other/root.New: {password: PRIVATE_FIRST}}", "config: {example.com/excluded/root.New: {$remove: true}}"} {
+				manifest, err := applicationmeta.Parse([]byte(data))
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest, err := applicationmeta.ConfigurationLayerDigest(manifest, test.lookup)
+				if err != nil || digest == first {
+					t.Fatalf("constructor identity, absence, or removal was lost: %s, %v", data, err)
+				}
+			}
+		})
+	}
+}
+
+func TestConfigurationLayerDigestRetainsUnvalidatedStructuralChecks(t *testing.T) {
+	t.Parallel()
+	for _, values := range []string{
+		"{settings: {PRIVATE_KEY: first, PRIVATE_KEY: second}}",
+		"{settings: {1: PRIVATE_VALUE}}",
+		"{value: !!int PRIVATE_VALUE}",
+		"{value: !!bool PRIVATE_VALUE}",
+		"{value: !!float PRIVATE_VALUE}",
+		"{value: !!timestamp PRIVATE_VALUE}",
+		"{value: " + strings.Repeat("[", 64) + "PRIVATE_VALUE" + strings.Repeat("]", 64) + "}",
+		"{value: [" + strings.Repeat("0,", 65_536) + "0]}",
+	} {
+		manifest, err := applicationmeta.Parse([]byte("config: {example.com/unavailable/service.New: " + values + "}\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = applicationmeta.ConfigurationLayerDigest(manifest, composeSchemaLookup(nil))
+		if !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "PRIVATE_") {
+			t.Fatalf("malformed unvalidated object did not fail with a value-redacted error: %v", err)
+		}
+	}
+}
+
+func FuzzConfigurationLayerDigestUnvalidatedPrivateValues(f *testing.F) {
+	f.Add("private-key", "private-value")
+	f.Add("$remove", "true")
+	f.Add("", "\x00\n\"\\")
+	f.Add("", "\x7f")
+	lookup := composeSchemaLookup(nil)
+	digest := func(t testing.TB, key, value string) string {
+		t.Helper()
+		data, err := json.Marshal(map[string]any{"config": map[string]any{"example.com/unavailable/service.New": map[string]any{
+			"payload":  map[string]string{key: value},
+			"password": map[string]string{"env": value},
+		}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := applicationmeta.Parse(data)
+		if err != nil {
+			t.Skip("input is outside the accepted YAML grammar")
+		}
+		result, err := applicationmeta.ConfigurationLayerDigest(manifest, lookup)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	want := digest(f, "baseline-key", "baseline-value")
+	f.Fuzz(func(t *testing.T, key, value string) {
+		if len(key)+len(value) > 4096 {
+			t.Skip()
+		}
+		if digest(t, key, value) != want {
+			t.Fatal("unvalidated private content changed public identity")
+		}
+	})
 }

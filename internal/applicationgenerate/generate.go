@@ -393,7 +393,8 @@ func concurrentSourcesForPaths(resolved applicationresolve.Result, paths []strin
 func generationFingerprintChangeSources(prepared, confirmed preparedGeneration) []ConcurrentChangeSource {
 	modulePath := prepared.resolved.Module().ModulePath()
 	sources := make([]ConcurrentChangeSource, 0)
-	if prepared.resolved.RootConfigurationDigest() != confirmed.resolved.RootConfigurationDigest() {
+	if prepared.resolved.RootConfigurationDigest() != confirmed.resolved.RootConfigurationDigest() ||
+		!bytes.Equal(prepared.resolved.RootConfigurationData(), confirmed.resolved.RootConfigurationData()) {
 		sources = append(sources, concurrentChangeSource(modulePath, "plystra.yaml", "configuration-declaration"))
 	}
 	preparedSelection := prepared.resolved.ConfigurationSelection()
@@ -1684,6 +1685,7 @@ type fingerprintDocument struct {
 	ConfigurationPath           string                 `json:"configuration_path"`
 	SelectedConfigurationDigest string                 `json:"selected_configuration_digest"`
 	PrivateConfigurationDigest  string                 `json:"private_configuration_digest"`
+	PrivateRootDocumentDigest   [sha256.Size]byte      `json:"private_root_document_digest"`
 	ContextDigest               string                 `json:"context_digest"`
 	AliasDigest                 string                 `json:"alias_digest"`
 	Passes                      int                    `json:"passes"`
@@ -1719,6 +1721,7 @@ func generationFingerprint(resolved applicationresolve.Result, output generatedf
 		ConfigurationPath:           resolved.ConfigurationSelection().Path(),
 		SelectedConfigurationDigest: resolved.ConfigurationSelection().Digest(),
 		PrivateConfigurationDigest:  resolved.Configurations().Digest(),
+		PrivateRootDocumentDigest:   sha256.Sum256(resolved.RootConfigurationData()),
 		ContextDigest:               resolution.Context().Digest(),
 		AliasDigest:                 resolution.AliasResolution().Digest(),
 		Passes:                      resolution.Passes(),
