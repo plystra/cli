@@ -401,6 +401,9 @@ selections and reasons, and required or optional constructor dependencies.
 The implementations view retains every visible constructor candidate, active
 and dormant selections, declared and resolved dependencies, constructor-owned
 configuration provenance, and reachable assembly membership.
+Dependency edges retain exact parameter_name and one-based parameter_position;
+other edges omit these fields. Repeated parameters remain distinct, and human
+output includes each dependency name and position.
 The configuration view retains the selected current-Project layer, explicitly
 adopted exports, redacted field summaries, ownership and precedence, effective
 and overridden contributions, explicit removals, and ancestor suppression.

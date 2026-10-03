@@ -620,6 +620,8 @@ func TestDiscoverApplicationRejectsInvalidRequiredInterfaceParameters(t *testing
 		fake      bool
 	}{
 		{name: "primitive", parameter: "value string", want: "parameter 1 must be a canonical Interface type"},
+		{name: "unnamed dependency", prelude: canonicalImport, parameter: "operationv1.Interface", want: "parameter 1 must have an explicit nonblank Go identifier"},
+		{name: "blank dependency", prelude: canonicalImport, parameter: "_ operationv1.Interface", want: "parameter 1 must have an explicit nonblank Go identifier"},
 		{name: "pointer", prelude: canonicalImport, parameter: "dependency *operationv1.Interface", want: "parameter 1 must be a canonical Interface type"},
 		{name: "request struct", prelude: canonicalImport, parameter: "request operationv1.Request", want: "parameter 1 must be a canonical Interface type"},
 		{name: "unnamed interface", parameter: "dependency interface{}", want: "parameter 1 must be a canonical Interface type"},
@@ -665,7 +667,7 @@ func New(%s) (*Service, error) {
 	}
 }
 
-func TestDiscoverApplicationNormalizesUnnamedRequiredInterfaceWithoutConfig(t *testing.T) {
+func TestDiscoverApplicationNormalizesNamedRequiredInterfaceWithoutConfig(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -685,7 +687,7 @@ func (*Service) Call(context.Context, operationv1.Request) (operationv1.Response
 }
 
 //plystra:implements service.operation.call/v1
-func New(operationv1.Interface) (*Service, error) {
+func New(Dependency operationv1.Interface) (*Service, error) {
 	return &Service{}, nil
 }
 `)
@@ -699,7 +701,7 @@ func New(operationv1.Interface) (*Service, error) {
 		t.Fatalf("Configuration = %#v, %t", configuration, configured)
 	}
 	required := implementations[0].RequiredInterfaces()
-	if len(required) != 1 || required[0].ID().String() != "service.operation.call/v1" || required[0].PackagePath() != "example.com/required/interfaces/operation/v1" || required[0].ParameterName() != "" || required[0].ParameterPosition() != 1 {
+	if len(required) != 1 || required[0].ID().String() != "service.operation.call/v1" || required[0].PackagePath() != "example.com/required/interfaces/operation/v1" || required[0].ParameterName() != "Dependency" || required[0].ParameterPosition() != 1 {
 		t.Fatalf("RequiredInterfaces = %#v", required)
 	}
 	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
@@ -818,6 +820,8 @@ func TestDiscoverApplicationRejectsInvalidOptionalInterfaceParameters(t *testing
 			},
 		},
 		{name: "pointer wrapper", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency *plystra.Optional[operationv1.Interface]", want: "plystra.Optional[T] must be passed as a value"},
+		{name: "unnamed dependency", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "plystra.Optional[operationv1.Interface]", want: "parameter 1 must have an explicit nonblank Go identifier"},
+		{name: "blank dependency", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "_ plystra.Optional[operationv1.Interface]", want: "parameter 1 must have an explicit nonblank Go identifier"},
 		{name: "slice wrapper", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency []plystra.Optional[operationv1.Interface]", want: "plystra.Optional[T] must be passed as a value"},
 		{name: "array wrapper", kernelSource: kernelOptional, prelude: canonicalImport + "\n" + kernelImport, parameter: "dependency [1]plystra.Optional[operationv1.Interface]", want: "plystra.Optional[T] must be passed as a value"},
 		{name: "missing type argument", kernelSource: "package plystra\n\ntype Optional struct{}\n", prelude: kernelImport, parameter: "dependency plystra.Optional", want: "github.com/plystra/kernel.Optional must have exactly one type argument"},

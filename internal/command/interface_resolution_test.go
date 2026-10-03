@@ -1618,7 +1618,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			identity: "example.com/command-invalid-implementation/service.New",
 			problem:  "parameter 1 must be a canonical Interface type",
 			sources:  []string{"example.com/command-invalid-implementation:service/service.go:12:6 (implementation-constructor)"},
-			recovery: "Replace the reported required constructor parameter with one visible canonical Interface type, then rerun the command.",
+			recovery: "Use one visible canonical Interface type and an explicit nonblank Go identifier for the reported required constructor parameter, then rerun the command.",
 			code:     diagnosticcode.ImplementationRequiredInvalid,
 		},
 		{
@@ -1627,7 +1627,7 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 			identity: "example.com/command-invalid-implementation/service.New",
 			problem:  "Optional must be github.com/plystra/kernel.Optional[T]",
 			sources:  []string{"example.com/command-invalid-implementation:service/service.go:13:6 (implementation-constructor)"},
-			recovery: "Replace the reported optional constructor parameter with the exact plystra.Optional[T] value type around one visible canonical Interface, then rerun the command.",
+			recovery: "Use the exact plystra.Optional[T] value type around one visible canonical Interface and an explicit nonblank Go identifier for the reported optional constructor parameter, then rerun the command.",
 			code:     diagnosticcode.ImplementationOptionalInvalid,
 		},
 		{
@@ -1681,6 +1681,78 @@ func TestPublicResolvingCommandsClassifyInvalidImplementationAuthoringWithoutMut
 				})
 			}
 		})
+	}
+}
+
+func TestPublicCommandsRejectUnnamedConstructorDependencies(t *testing.T) {
+	t.Parallel()
+	const module = "example.com/command-invalid-implementation"
+	for _, optional := range []bool{false, true} {
+		for _, dependencyProject := range []bool{false, true} {
+			for _, hasConfig := range []bool{false, true} {
+				for _, name := range []string{"", "_"} {
+					t.Run(fmt.Sprintf("optional=%t/dependency=%t/config=%t/name=%q", optional, dependencyProject, hasConfig, name), func(t *testing.T) {
+						t.Parallel()
+						parameter, extraImport := "sendv1.Interface", ""
+						code := diagnosticcode.ImplementationRequiredInvalid
+						if optional {
+							parameter = "plystra.Optional[sendv1.Interface]"
+							extraImport = "plystra \"github.com/plystra/kernel\""
+							code = diagnosticcode.ImplementationOptionalInvalid
+						}
+						if name != "" {
+							parameter = name + " " + parameter
+						}
+						position := 1
+						if hasConfig {
+							parameter = strings.TrimSpace(name+" Config") + ", " + parameter
+							position = 2
+						}
+						source := fmt.Sprintf(`package service
+import (
+ "context"
+ sendv1 %q
+ %s
+)
+type Config struct{}
+type Service struct{}
+//plystra:implements email.send/v1
+func New(%s) (*Service, error) { return &Service{}, nil }
+func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) { return sendv1.Response{}, nil }
+`, module+"/interfaces/email/send/v1", extraImport, parameter)
+						owner := writeCommandInvalidImplementationProject(t, source)
+						kernel := filepath.ToSlash(testkernel.Root(t))
+						writeCommandFile(t, filepath.Join(owner, "go.mod"), "module "+module+"\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\nreplace github.com/plystra/kernel => "+kernel+"\n")
+						root := owner
+						if dependencyProject {
+							root = t.TempDir()
+							writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/consumer\n\ngo 1.26\n\nrequire (\n"+module+" v0.0.0\ngithub.com/plystra/kernel v0.0.0\n)\nreplace "+module+" => "+filepath.ToSlash(owner)+"\nreplace github.com/plystra/kernel => "+kernel+"\n")
+							writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+						}
+						beforeOwner, beforeRoot := commandTree(t, owner), commandTree(t, root)
+						for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+							exit, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+							if exit != 1 || stdout != "" || !strings.HasSuffix(stderr, "Diagnostic: "+code+"\n") || !commandContainsAll(stderr,
+								fmt.Sprintf("parameter %d must have an explicit nonblank Go identifier", position),
+								"Source: "+module+":service/service.go:10:6 (implementation-constructor)",
+								"Recovery:\nUse ", "explicit nonblank Go identifier for the reported") || strings.Count(stderr, "Source: ") != 1 {
+								t.Fatalf("%v = %d, %q, %q", arguments, exit, stdout, stderr)
+							}
+							for _, private := range []string{owner, root, filepath.ToSlash(owner), filepath.ToSlash(root), kernel} {
+								if strings.Contains(stderr, private) {
+									t.Fatalf("diagnostic exposed private path: %s", stderr)
+								}
+							}
+							if !reflect.DeepEqual(beforeOwner, commandTree(t, owner)) || !reflect.DeepEqual(beforeRoot, commandTree(t, root)) {
+								t.Fatal("rejected constructor mutated a Project")
+							}
+							assertNoCommandTransactions(t, owner)
+							assertNoCommandTransactions(t, root)
+						}
+					})
+				}
+			}
+		}
 	}
 }
 

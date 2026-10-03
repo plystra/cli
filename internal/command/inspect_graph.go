@@ -155,3 +155,17 @@ func (e inspectGraphEdges) values() []diagnosticschema.GraphEdge {
 	}
 	return result
 }
+
+func (e inspectGraphEdges) addDependency(kind diagnosticschema.GraphEdgeKind, from, to, reason, name string, position int, source diagnosticjson.Source) {
+	key := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%d", kind, from, to, reason, name, position)
+	edge := e[key]
+	if edge.ID == "" {
+		edge = diagnosticschema.GraphEdge{
+			ID:   diagnosticschema.GraphRelationshipID(kind, fmt.Sprintf("%s->%s#%s#%d:%s", from, to, reason, position, name)),
+			Kind: kind, From: from, To: to, Reason: reason,
+			ParameterName: name, ParameterPosition: position,
+		}
+	}
+	edge.Sources = append(edge.Sources, source)
+	e[key] = edge
+}

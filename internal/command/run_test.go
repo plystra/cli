@@ -15,6 +15,8 @@ var (
 		"  plystra inspect capabilities [--format human|json]\n  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
 	).Replace(wantUsage)
 	wantCurrentInspectUsage = strings.NewReplacer(
+		"configuration provenance, and reachable assembly membership.\n",
+		"configuration provenance, and reachable assembly membership.\nDependency edges retain exact parameter_name and one-based parameter_position;\nother edges omit these fields. Repeated parameters remain distinct, and human\noutput includes each dependency name and position.\n",
 		"Usage:\n",
 		"Usage:\n  plystra inspect capabilities [--format human|json]\n",
 		"\n\nViews:\n",

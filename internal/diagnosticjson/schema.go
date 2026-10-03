@@ -12,8 +12,8 @@ import (
 var ErrInvalidSchema = errors.New("invalid diagnostic JSON schema")
 
 // Schema is one immutable command-owned JSON schema identity and version. It
-// deliberately has no shared global version: changing one command's result
-// contract requires constructing a new version only for that schema.
+// deliberately has no shared global version: version evolution belongs only
+// to the affected command-result schema.
 type Schema struct {
 	name     string
 	version  uint32

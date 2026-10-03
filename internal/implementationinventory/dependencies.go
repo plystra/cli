@@ -2,6 +2,7 @@ package implementationinventory
 
 import (
 	"fmt"
+	"go/token"
 	"go/types"
 
 	"github.com/plystra/cli/internal/interfaceid"
@@ -43,8 +44,7 @@ func (r RequiredInterface) ID() interfaceid.Identifier { return r.id }
 // PackagePath returns the canonical Interface package import path.
 func (r RequiredInterface) PackagePath() string { return r.packagePath }
 
-// ParameterName returns the authored Go parameter name, or an empty string for
-// an unnamed parameter.
+// ParameterName returns the exact nonblank authored Go dependency identifier.
 func (r RequiredInterface) ParameterName() string { return r.parameterName }
 
 // ParameterPosition returns the one-based constructor parameter position.
@@ -65,8 +65,7 @@ func (o OptionalInterface) ID() interfaceid.Identifier { return o.id }
 // PackagePath returns the canonical Interface package import path used as T.
 func (o OptionalInterface) PackagePath() string { return o.packagePath }
 
-// ParameterName returns the authored Go parameter name, or an empty string for
-// an unnamed parameter.
+// ParameterName returns the exact nonblank authored Go dependency identifier.
 func (o OptionalInterface) ParameterName() string { return o.parameterName }
 
 // ParameterPosition returns the one-based constructor parameter position.
@@ -128,6 +127,9 @@ func validateRequiredInterfaces(function *types.Func, hasConfig bool, optionalPo
 		if err != nil {
 			return nil, fmt.Errorf("parameter %d must be a canonical Interface type or plystra.Optional[T]: %v", index+1, err)
 		}
+		if parameter.Name() == "_" || !token.IsIdentifier(parameter.Name()) {
+			return nil, fmt.Errorf("parameter %d must have an explicit nonblank Go identifier", index+1)
+		}
 		required = append(required, RequiredInterface{
 			id:                identifier,
 			packagePath:       packagePath,
@@ -173,6 +175,9 @@ func validateOptionalInterfaces(function *types.Func, hasConfig bool, interfaces
 		identifier, packagePath, err := canonicalInterface(arguments.At(0), interfaces)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parameter %d plystra.Optional type argument must be a canonical Interface: %v", index+1, err)
+		}
+		if parameter.Name() == "_" || !token.IsIdentifier(parameter.Name()) {
+			return nil, nil, fmt.Errorf("parameter %d must have an explicit nonblank Go identifier", index+1)
 		}
 		optional = append(optional, OptionalInterface{
 			id:                identifier,

@@ -1341,9 +1341,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, implementationinventory.ErrInvalidConfiguration):
 		return recoveryDiagnostic(diagnosticImplementationConfigInvalid, "Correct the reported constructor's first Config parameter and exported Config fields to use the supported typed configuration schema, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidRequiredInterface):
-		return recoveryDiagnostic(diagnosticImplementationRequiredInvalid, "Replace the reported required constructor parameter with one visible canonical Interface type, then rerun the command.")
+		return recoveryDiagnostic(diagnosticImplementationRequiredInvalid, "Use one visible canonical Interface type and an explicit nonblank Go identifier for the reported required constructor parameter, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidOptionalInterface):
-		return recoveryDiagnostic(diagnosticImplementationOptionalInvalid, "Replace the reported optional constructor parameter with the exact plystra.Optional[T] value type around one visible canonical Interface, then rerun the command.")
+		return recoveryDiagnostic(diagnosticImplementationOptionalInvalid, "Use the exact plystra.Optional[T] value type around one visible canonical Interface and an explicit nonblank Go identifier for the reported optional constructor parameter, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidResult):
 		return recoveryDiagnostic(diagnosticImplementationResultInvalid, "Change the reported constructor to return exactly one concrete value plus error, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidConformance):

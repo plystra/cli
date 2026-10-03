@@ -166,7 +166,7 @@ func inspectInterfacesGraph(resolved applicationresolve.Result) (diagnosticschem
 				return diagnosticschema.GraphResult{}, fmt.Errorf("constructor %s dependency Interface %s is absent from the visible graph", constructor.Symbol(), dependency.InterfaceID())
 			}
 			reason := interfaceDependencyGraphReason(dependency.Optional(), dependency.Available())
-			edges.add("depends-on-interface", constructorNode, target, reason, []diagnosticjson.Source{source})
+			edges.addDependency("depends-on-interface", constructorNode, target, reason, dependency.ParameterName(), dependency.ParameterPosition(), source)
 		}
 	}
 
@@ -356,6 +356,9 @@ func writeHumanInterfaceRelationships(content *strings.Builder, heading string, 
 		from := interfaceGraphRelationshipIdentity(edge.From)
 		to := interfaceGraphRelationshipIdentity(edge.To)
 		fmt.Fprintf(content, "  %s -> %s (%s)\n", from, to, edge.Reason)
+		if edge.ParameterName != "" {
+			fmt.Fprintf(content, "    Dependency: parameter %d %s\n", edge.ParameterPosition, edge.ParameterName)
+		}
 		for _, source := range edge.Sources {
 			fmt.Fprintf(content, "    Source: %s\n", explainSourceSummary(source))
 		}

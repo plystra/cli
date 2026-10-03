@@ -4,16 +4,118 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 )
+
+func TestGeneratePreservesDependencyIdentifiersInModelIdentity(t *testing.T) {
+	t.Parallel()
+	const modulePath = "example.com/dependency-identifiers"
+	root := t.TempDir()
+	writeApplicationModule(t, root, modulePath)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+	for _, contract := range []struct{ path, pkg, id, method string }{
+		{"app/run/v1", "runv1", "app.run/v1", "Run"},
+		{"audit/write/v1", "writev1", "audit.write/v1", "Write"},
+	} {
+		writeAssemblyInterface(t, root, contract.path, contract.pkg, contract.id, contract.method, "type Request struct{}\ntype Response struct{}\n")
+	}
+	writeFile(t, filepath.Join(root, "audit", "service.go"), `package audit
+import (
+ "context"
+ writev1 "example.com/dependency-identifiers/interfaces/audit/write/v1"
+)
+type Service struct{}
+//plystra:implements audit.write/v1
+func New() (*Service, error) { return &Service{}, nil }
+func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error) { return writev1.Response{}, nil }
+`)
+	seen := make(map[string]bool)
+	var baseline []interfaceprovenance.Interface
+	for _, variant := range []struct {
+		name    string
+		reverse bool
+	}{
+		{name: "audit"}, {name: "Audit"}, {name: "_audit"}, {name: "\u03b4"}, {name: "audit", reverse: true},
+	} {
+		required := variant.name + " writev1.Interface"
+		optional := "optional plystra.Optional[writev1.Interface]"
+		parameters := required + ", " + optional
+		if variant.reverse {
+			parameters = optional + ", " + required
+		}
+		writeFile(t, filepath.Join(root, "app", "service.go"), fmt.Sprintf(`package app
+import (
+ "context"
+ plystra "github.com/plystra/kernel"
+ runv1 "example.com/dependency-identifiers/interfaces/app/run/v1"
+ writev1 "example.com/dependency-identifiers/interfaces/audit/write/v1"
+)
+type Service struct{}
+//plystra:implements app.run/v1
+func New(%s) (*Service, error) { return &Service{}, nil }
+func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) { return runv1.Response{}, nil }
+`, parameters))
+		var stdout, stderr bytes.Buffer
+		if len(seen) != 0 {
+			before := snapshotTree(t, root)
+			if exit := command.RunIn([]string{"generate", "--check"}, &stdout, &stderr, root, goEnvironment(nil)); exit == 0 {
+				t.Fatal("dependency schema change did not require regeneration")
+			}
+			if !reflect.DeepEqual(before, snapshotTree(t, root)) {
+				t.Fatal("dependency schema check mutated the Project")
+			}
+			stdout.Reset()
+			stderr.Reset()
+		}
+		if exit := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); exit != 0 {
+			t.Fatalf("generate %s = %d: %s\n%s", parameters, exit, &stdout, &stderr)
+		}
+		manifest, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
+		if err != nil || seen[manifest.ApplicationModelDigest()] {
+			t.Fatalf("dependency schema %s did not produce a distinct valid model: %v", parameters, err)
+		}
+		seen[manifest.ApplicationModelDigest()] = true
+		provenance := manifest.InterfaceProvenance()
+		if baseline == nil {
+			baseline = provenance.Interfaces()
+		} else if !reflect.DeepEqual(baseline, provenance.Interfaces()) {
+			t.Fatal("constructor dependency change altered canonical Interface contracts")
+		}
+		constructors := provenance.Constructors()
+		if len(constructors) != 2 || constructors[1].Symbol() != modulePath+"/app.New" {
+			t.Fatalf("constructors = %#v", constructors)
+		}
+		dependencies := constructors[1].Dependencies()
+		names := []string{variant.name, "optional"}
+		if variant.reverse {
+			slices.Reverse(names)
+		}
+		if len(dependencies) != len(names) {
+			t.Fatalf("dependencies = %#v", dependencies)
+		}
+		for index, dependency := range dependencies {
+			if dependency.ParameterName() != names[index] || dependency.ParameterPosition() != index+1 || dependency.Optional() != (names[index] == "optional") || !dependency.Available() {
+				t.Fatalf("lost dependency identity for %s: %#v", parameters, dependencies)
+			}
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if exit := command.RunIn([]string{"generate", "--check"}, &stdout, &stderr, root, goEnvironment(nil)); exit != 0 {
+			t.Fatalf("regenerated dependency schema is not a fixed point: %d, %s\n%s", exit, &stdout, &stderr)
+		}
+	}
+}
 
 func TestGenerateRecordsCompleteInterfaceAndConstructorProvenance(t *testing.T) {
 	const modulePath = "example.com/interface-provenance"

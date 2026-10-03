@@ -921,8 +921,8 @@ func validateDependency(value wireDependency) error {
 	if err := module.CheckImportPath(value.PackagePath); err != nil {
 		return fmt.Errorf("package path %q is invalid", value.PackagePath)
 	}
-	if value.ParameterName != "" && !token.IsIdentifier(value.ParameterName) {
-		return fmt.Errorf("parameter name %q is not a Go identifier", value.ParameterName)
+	if value.ParameterName == "_" || !token.IsIdentifier(value.ParameterName) {
+		return errors.New("parameter name must be an explicit nonblank Go identifier")
 	}
 	if value.ParameterPosition <= 0 || value.ParameterPosition > 65535 {
 		return errors.New("parameter position is invalid")

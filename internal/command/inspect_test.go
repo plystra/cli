@@ -72,12 +72,14 @@ type inspectGraphNode struct {
 }
 
 type inspectGraphEdge struct {
-	ID      string               `json:"id"`
-	Kind    string               `json:"kind"`
-	From    string               `json:"from"`
-	To      string               `json:"to"`
-	Reason  string               `json:"reason"`
-	Sources []inspectGraphSource `json:"sources"`
+	ID                string               `json:"id"`
+	Kind              string               `json:"kind"`
+	From              string               `json:"from"`
+	To                string               `json:"to"`
+	Reason            string               `json:"reason"`
+	Sources           []inspectGraphSource `json:"sources"`
+	ParameterName     string               `json:"parameter_name"`
+	ParameterPosition int                  `json:"parameter_position"`
 }
 
 type inspectGraphSource struct {
@@ -297,6 +299,71 @@ func TestInspectModulesIncludesDeterministicDependencyEdges(t *testing.T) {
 	}
 	if strings.Contains(stdout, root) || strings.Contains(stdout, "resolved-secret-marker") {
 		t.Fatalf("module graph dependency output leaked a path or secret: %s", stdout)
+	}
+}
+
+func TestInspectPreservesRepeatedDependencyParameterIdentity(t *testing.T) {
+	t.Parallel()
+	root, nested := createInspectImplementationGraphProject(t)
+	for _, pkg := range []string{"app", "cleanup"} {
+		path := filepath.Join(root, pkg, "service.go")
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated := strings.Replace(string(source), "audit writev1.Interface, cache plystra.Optional[readv1.Interface]", "audit writev1.Interface, Audit writev1.Interface, cache plystra.Optional[readv1.Interface], \u03b4 plystra.Optional[readv1.Interface], _cache plystra.Optional[readv1.Interface]", 1)
+		if updated == string(source) {
+			t.Fatal("fixture dependency signature not found")
+		}
+		writeCommandFile(t, path, updated)
+	}
+	before := snapshotInspectProject(t, root)
+	for _, view := range []string{"interfaces", "implementations"} {
+		args := []string{"inspect", view}
+		exit, human, stderr := runCommand(t, args, nested, inspectInterfaceGraphEnvironment())
+		if exit != 0 || stderr != "" {
+			t.Fatalf("human %s = %d, %q, %q", view, exit, human, stderr)
+		}
+		args = append(args, "--format", "json")
+		exit, output, stderr := runCommand(t, args, nested, inspectInterfaceGraphEnvironment())
+		if exit != 0 || stderr != inspectProgress {
+			t.Fatalf("JSON %s = %d, %q, %q", view, exit, output, stderr)
+		}
+		secondExit, second, secondErr := runCommand(t, args, root, inspectInterfaceGraphEnvironment())
+		if secondExit != exit || second != output || secondErr != stderr {
+			t.Fatal("dependency inspection is nondeterministic")
+		}
+		document := decodeInspectGraphCommandEnvelope(t, output)
+		for _, target := range []struct{ pkg, kind string }{{"app", "depends-on-interface"}, {"app", "declares-dependency"}, {"cleanup", "declares-dependency"}} {
+			if view == "interfaces" && target.kind == "declares-dependency" {
+				continue
+			}
+			names := make(map[string]int)
+			ids := make(map[string]bool)
+			for _, edge := range document.Result.Edges {
+				if edge.Kind != target.kind || edge.From != "constructor:example.com/acme/interface-inspect/"+target.pkg+".New" {
+					continue
+				}
+				if ids[edge.ID] || names[edge.ParameterName] != 0 {
+					t.Fatalf("duplicate dependency: %#v", edge)
+				}
+				ids[edge.ID] = true
+				names[edge.ParameterName] = edge.ParameterPosition
+			}
+			want := map[string]int{"audit": 2, "Audit": 3, "cache": 4, "\u03b4": 5, "_cache": 6}
+			if !reflect.DeepEqual(names, want) {
+				t.Fatalf("%s %s %s dependencies = %#v, want %#v", view, target.pkg, target.kind, names, want)
+			}
+			for name, position := range want {
+				if !strings.Contains(human, fmt.Sprintf("parameter %d %s", position, name)) {
+					t.Fatalf("human output lost %s at %d: %s", name, position, human)
+				}
+			}
+		}
+		assertInspectInterfaceGraphRedacted(t, root, human, output)
+	}
+	if !reflect.DeepEqual(before, snapshotInspectProject(t, root)) {
+		t.Fatal("dependency inspection mutated the Project")
 	}
 }
 
@@ -1116,7 +1183,7 @@ type Config struct {
 type Service struct{}
 
 //plystra:implements cleanup.run/v1
-func New(_ Config, _ writev1.Interface, _ plystra.Optional[readv1.Interface]) (*Service, error) {
+func New(_ Config, audit writev1.Interface, cache plystra.Optional[readv1.Interface]) (*Service, error) {
 	return &Service{}, nil
 }
 

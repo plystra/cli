@@ -1038,6 +1038,17 @@ authored configuration only and creates no runtime delivery, generated assembly
 or bootstrap membership, Secret lookup, or Kernel state. Configuration for any
 other constructor fails without exposing its values.
 
+Give every required Interface or exact `plystra.Optional[T]` dependency an
+explicit nonblank Go parameter identifier other than `_`. The optional first
+`Config` parameter is exempt. Names retain exact case and authored position
+through discovery, inspection, assembly, and provenance. Renaming or reordering
+a reachable dependency requires regeneration and changes application-model
+identity, not the canonical Interface contract. Unnamed or blank dependencies
+fail even on unselected visible candidates, with the owning constructor source
+and `PLYSTRA_IMPLEMENTATION_REQUIRED_INVALID` or
+`PLYSTRA_IMPLEMENTATION_OPTIONAL_INVALID`. Name the reported parameter and rerun
+the command; rejection leaves the Project unchanged.
+
 Constructors are side-effect-free assembly functions returning a concrete
 pointer and error. Acquire resources and start background work in lifecycle
 `Start`, not in the constructor. Generated assembly rejects nil success values,
@@ -2310,6 +2321,11 @@ effective and overridden contributions, explicit removals, and ancestor
 suppression. All four are deterministic `plystra.graph` v1 views whose source
 references stay project-relative and whose structured results omit resolved
 Secrets and unrestricted configuration values.
+
+Both Interface and Implementation inspection preserve each constructor
+dependency as a distinct edge with exact `parameter_name` and one-based
+`parameter_position`; other edges omit these fields. Human output includes the
+same name and position even when several parameters use the same Interface.
 
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the

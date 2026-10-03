@@ -2,6 +2,7 @@ package diagnosticschema
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -71,6 +72,65 @@ func TestGraphV1BuildsExactTypedResult(t *testing.T) {
 	}
 	if bytes.Contains(result.Envelope().CanonicalJSON(), []byte("resolved-secret-marker")) || containsWindowsDrivePath(result.Envelope().CanonicalJSON()) {
 		t.Fatal("graph envelope contains unrestricted configuration or an absolute path")
+	}
+}
+
+func TestGraphV1PreservesDependencyParameterIdentity(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []GraphEdgeKind{"declares-dependency", "depends-on-interface"} {
+		input := GraphInput{
+			Evidence: resolvedInspectEvidence(t), Type: GraphTypeImplementations,
+			Nodes: []GraphNode{
+				{ID: "constructor:example.com/app.New", Kind: "constructor", Label: "example.com/app.New"},
+				{ID: "interface:audit.write/v1", Kind: "interface", Label: "audit.write/v1"},
+			},
+		}
+		for index, name := range []string{"audit", "Audit", "_audit", "\u03b4", strings.Repeat("a", maximumGraphIdentityLength+1)} {
+			input.Edges = append(input.Edges, GraphEdge{
+				ID: GraphRelationshipID(kind, fmt.Sprintf("dependency-%d", index)), Kind: kind,
+				From: input.Nodes[0].ID, To: input.Nodes[1].ID, Reason: "required",
+				ParameterName: name, ParameterPosition: index + 2,
+			})
+		}
+		result, err := NewGraph(input)
+		if err != nil || !result.Valid() || result.EdgeCount() != len(input.Edges) {
+			t.Fatalf("NewGraph = %#v, %v", result, err)
+		}
+		var document graphDocument
+		if err := json.Unmarshal(result.Envelope().ResultJSON(), &document); err != nil {
+			t.Fatal(err)
+		}
+		for index, edge := range result.Edges() {
+			if edge.ParameterName != input.Edges[index].ParameterName || edge.ParameterPosition != index+2 || document.Edges[index].ParameterName != edge.ParameterName || document.Edges[index].ParameterPosition != edge.ParameterPosition {
+				t.Fatalf("lost dependency identity: %#v, %#v", edge, document.Edges[index])
+			}
+		}
+		slices.Reverse(input.Edges)
+		reordered, err := NewGraph(input)
+		if err != nil || !bytes.Equal(result.Envelope().CanonicalJSON(), reordered.Envelope().CanonicalJSON()) {
+			t.Fatalf("dependency graph reordered: %v", err)
+		}
+		for _, mutate := range []func(*GraphEdge){
+			func(edge *GraphEdge) { edge.ParameterName = "" },
+			func(edge *GraphEdge) { edge.ParameterName = "_" },
+			func(edge *GraphEdge) { edge.ParameterName = "bad-name" },
+			func(edge *GraphEdge) { edge.ParameterName = "for" },
+			func(edge *GraphEdge) { edge.ParameterPosition = 0 },
+			func(edge *GraphEdge) { edge.ParameterPosition = -1 },
+			func(edge *GraphEdge) { edge.ParameterPosition = 65536 },
+		} {
+			invalid := cloneGraphInput(input)
+			mutate(&invalid.Edges[0])
+			if _, err := NewGraph(invalid); !errors.Is(err, ErrGraph) {
+				t.Fatalf("invalid dependency accepted: %v", err)
+			}
+		}
+		duplicate := input.Edges[0]
+		duplicate.ID = GraphRelationshipID(kind, "duplicate")
+		input.Edges = append(input.Edges, duplicate)
+		if _, err := NewGraph(input); !errors.Is(err, ErrGraph) || !strings.Contains(err.Error(), "typed relationship") {
+			t.Fatalf("duplicate dependency accepted: %v", err)
+		}
 	}
 }
 
@@ -218,6 +278,8 @@ func TestGraphV1RejectsIncompleteAndUnsafeInput(t *testing.T) {
 		{name: "edge to", mutate: func(input *GraphInput) { input.Edges[0].To = "capability:missing/v1" }, want: "does not identify"},
 		{name: "self edge", mutate: func(input *GraphInput) { input.Edges[0].To = input.Edges[0].From }, want: "self edge"},
 		{name: "edge reason", mutate: func(input *GraphInput) { input.Edges[0].Reason = "Bad Reason" }, want: "reason"},
+		{name: "nondependency parameter name", mutate: func(input *GraphInput) { input.Edges[0].ParameterName = "audit" }, want: "not a constructor dependency"},
+		{name: "nondependency parameter position", mutate: func(input *GraphInput) { input.Edges[0].ParameterPosition = 1 }, want: "not a constructor dependency"},
 		{name: "duplicate edge id", mutate: func(input *GraphInput) { input.Edges = append(input.Edges, input.Edges[0]) }, want: "duplicated"},
 		{name: "duplicate relationship", mutate: func(input *GraphInput) {
 			duplicate := input.Edges[0]

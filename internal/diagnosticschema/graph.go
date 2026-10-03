@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/token"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -62,13 +64,16 @@ type GraphNode struct {
 
 // GraphEdge is one directed typed relationship between existing node IDs.
 // Reason is an optional stable lower-kebab decision code.
+// Dependency edges retain the exact authored identifier and one-based position.
 type GraphEdge struct {
-	ID      string
-	Kind    GraphEdgeKind
-	From    string
-	To      string
-	Reason  string
-	Sources []diagnosticjson.Source
+	ID                string
+	Kind              GraphEdgeKind
+	From              string
+	To                string
+	Reason            string
+	Sources           []diagnosticjson.Source
+	ParameterName     string
+	ParameterPosition int
 }
 
 // GraphInput is the construction-only input for one plystra.graph v1 result.
@@ -108,12 +113,14 @@ type graphNode struct {
 }
 
 type graphEdge struct {
-	ID      string        `json:"id"`
-	Kind    GraphEdgeKind `json:"kind"`
-	From    string        `json:"from"`
-	To      string        `json:"to"`
-	Reason  string        `json:"reason"`
-	Sources []graphSource `json:"sources"`
+	ID                string        `json:"id"`
+	Kind              GraphEdgeKind `json:"kind"`
+	From              string        `json:"from"`
+	To                string        `json:"to"`
+	Reason            string        `json:"reason"`
+	Sources           []graphSource `json:"sources"`
+	ParameterName     string        `json:"parameter_name,omitempty"`
+	ParameterPosition int           `json:"parameter_position,omitempty"`
 }
 
 type graphSource struct {
@@ -361,11 +368,19 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 		if input.Reason != "" && !validExplanationCode(input.Reason) {
 			return nil, nil, fmt.Errorf("edges[%d].reason %q is not canonical lower kebab case", index, input.Reason)
 		}
+		if input.Kind == "declares-dependency" || input.Kind == "depends-on-interface" {
+			if input.ParameterName == "_" || !token.IsIdentifier(input.ParameterName) || input.ParameterPosition <= 0 || input.ParameterPosition > 65535 {
+				return nil, nil, fmt.Errorf("edges[%d] requires an explicit nonblank dependency identifier and valid parameter position", index)
+			}
+		} else if input.ParameterName != "" || input.ParameterPosition != 0 {
+			return nil, nil, fmt.Errorf("edges[%d] is not a constructor dependency", index)
+		}
 		sources, err := normalizeGraphSources(mode, digest, input.Sources)
 		if err != nil {
 			return nil, nil, fmt.Errorf("edges[%d].sources: %v", index, err)
 		}
-		normalized := GraphEdge{ID: input.ID, Kind: input.Kind, From: input.From, To: input.To, Reason: input.Reason, Sources: sources}
+		normalized := input
+		normalized.Sources = sources
 		semanticKey := graphEdgeSemanticKey(normalized)
 		if _, duplicate := semanticEdges[semanticKey]; duplicate {
 			return nil, nil, fmt.Errorf("edges[%d] duplicates an existing typed relationship", index)
@@ -412,6 +427,10 @@ func graphEdgeSemanticKey(edge GraphEdge) string {
 	builder.WriteString(edge.To)
 	builder.WriteByte(0)
 	builder.WriteString(edge.Reason)
+	builder.WriteByte(0)
+	builder.WriteString(edge.ParameterName)
+	builder.WriteByte(0)
+	builder.WriteString(strconv.Itoa(edge.ParameterPosition))
 	return builder.String()
 }
 
@@ -426,7 +445,7 @@ func graphNodes(values []GraphNode) []graphNode {
 func graphEdges(values []GraphEdge) []graphEdge {
 	result := make([]graphEdge, len(values))
 	for index, edge := range values {
-		result[index] = graphEdge{ID: edge.ID, Kind: edge.Kind, From: edge.From, To: edge.To, Reason: edge.Reason, Sources: graphSources(edge.Sources)}
+		result[index] = graphEdge{ID: edge.ID, Kind: edge.Kind, From: edge.From, To: edge.To, Reason: edge.Reason, Sources: graphSources(edge.Sources), ParameterName: edge.ParameterName, ParameterPosition: edge.ParameterPosition}
 	}
 	return result
 }
@@ -474,7 +493,7 @@ func equalGraphEdges(left, right []GraphEdge) bool {
 		return false
 	}
 	for index := range left {
-		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].From != right[index].From || left[index].To != right[index].To || left[index].Reason != right[index].Reason || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
+		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].From != right[index].From || left[index].To != right[index].To || left[index].Reason != right[index].Reason || left[index].ParameterName != right[index].ParameterName || left[index].ParameterPosition != right[index].ParameterPosition || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
 			return false
 		}
 	}

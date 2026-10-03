@@ -2,6 +2,7 @@ package interfaceprovenance_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -199,6 +200,49 @@ func TestProvenanceRejectsIncompleteAndTamperedRecords(t *testing.T) {
 	oversized := bytes.Repeat([]byte("x"), int(interfaceprovenance.MaximumBytes)+1)
 	if _, err := interfaceprovenance.Decode(oversized); !errors.Is(err, interfaceprovenance.ErrRecord) {
 		t.Fatalf("Decode(oversized) error = %v", err)
+	}
+}
+
+func TestProvenanceRequiresAndPreservesDependencyIdentifiers(t *testing.T) {
+	t.Parallel()
+	valid, err := interfaceprovenance.New(completeInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for index := range 2 {
+		for _, name := range []string{"", "_", "bad-name", "audit", "Audit", "_audit", "\u03b4"} {
+			input := completeInput()
+			input.Constructors[1].Dependencies[index].ParameterName = name
+			value, err := interfaceprovenance.New(input)
+			if name == "" || name == "_" || name == "bad-name" {
+				if !errors.Is(err, interfaceprovenance.ErrInvalid) {
+					t.Fatalf("New dependency named %q = %v", name, err)
+				}
+				var record map[string]any
+				if err := json.Unmarshal(valid.RecordJSON(), &record); err != nil {
+					t.Fatal(err)
+				}
+				constructor := record["constructors"].([]any)[1].(map[string]any)
+				constructor["dependencies"].([]any)[index].(map[string]any)["parameter_name"] = name
+				data, err := json.Marshal(record)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := interfaceprovenance.Decode(data); !errors.Is(err, interfaceprovenance.ErrRecord) || !strings.Contains(err.Error(), "explicit nonblank Go identifier") {
+					t.Fatalf("Decode dependency named %q = %v", name, err)
+				}
+				continue
+			}
+			if err != nil || seen[value.Digest()] {
+				t.Fatalf("dependency name %q did not produce distinct valid provenance: %v", name, err)
+			}
+			seen[value.Digest()] = true
+			decoded, err := interfaceprovenance.Decode(value.RecordJSON())
+			if err != nil || decoded.Constructors()[1].Dependencies()[index].ParameterName() != name {
+				t.Fatalf("round-trip lost name %q: %v", name, err)
+			}
+		}
 	}
 }
 

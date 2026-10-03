@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
@@ -12,6 +13,24 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/invocationpolicy"
 )
+
+func TestRenderRequiresNamedConstructorDependencies(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"", "_", "bad-name", "audit", "Audit", "_audit", "\u03b4"} {
+		for index := range 2 {
+			options := validOptions(t)
+			options.Constructors[1].Dependencies[index].ParameterName = name
+			file, err := implementationassemblygen.Render(options)
+			if name == "" || name == "_" || name == "bad-name" {
+				if !errors.Is(err, implementationassemblygen.ErrConstructorGraph) {
+					t.Fatalf("Render dependency %d named %q = %v", index, name, err)
+				}
+			} else if err != nil || file.Constructors()[1].Dependencies[index].ParameterName != name {
+				t.Fatalf("Render lost dependency %d name %q: %v", index, name, err)
+			}
+		}
+	}
+}
 
 func TestRenderBuildsDependencyFirstGovernedInterfaceRuntime(t *testing.T) {
 	t.Parallel()
@@ -201,6 +220,7 @@ func TestRenderRejectsContradictoryOrCyclicGraph(t *testing.T) {
 					InterfaceID:       mustInterfaceID(t, "app.run/v1"),
 					PackagePath:       "example.com/application/interfaces/app/run/v1",
 					ParameterPosition: 1,
+					ParameterName:     "app",
 					Available:         true,
 				}}
 			},
@@ -237,6 +257,9 @@ func TestRenderRejectsContradictoryOrCyclicGraph(t *testing.T) {
 			file, err := implementationassemblygen.Render(options)
 			if !errors.Is(err, implementationassemblygen.ErrRender) || !errors.Is(err, test.want) || len(file.Data()) != 0 {
 				t.Fatalf("Render = %#v, %v", file, err)
+			}
+			if test.name == "cycle" && !strings.Contains(err.Error(), "constructor cycle") {
+				t.Fatalf("cycle fixture did not reach cycle detection: %v", err)
 			}
 		})
 	}

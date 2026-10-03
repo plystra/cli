@@ -266,6 +266,9 @@ func planAssembly(options Options) (plan, error) {
 			if identifier == "" || module.CheckImportPath(dependency.PackagePath) != nil || dependency.ParameterPosition != expectedPosition+dependencyIndex {
 				return plan{}, fmt.Errorf("%w: constructor %s dependency %d is incomplete or out of parameter order", ErrConstructorGraph, symbol, dependencyIndex)
 			}
+			if dependency.ParameterName == "_" || !token.IsIdentifier(dependency.ParameterName) {
+				return plan{}, fmt.Errorf("%w: constructor %s parameter %d must have an explicit nonblank Go identifier", ErrConstructorGraph, symbol, dependency.ParameterPosition)
+			}
 			if !dependency.Available && !dependency.Optional {
 				return plan{}, fmt.Errorf("%w: constructor %s required Interface %s is unavailable", ErrConstructorGraph, symbol, identifier)
 			}

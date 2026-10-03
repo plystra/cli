@@ -102,14 +102,14 @@ func inspectImplementationsGraph(resolved applicationresolve.Result) (diagnostic
 			if !exists {
 				return diagnosticschema.GraphResult{}, fmt.Errorf("constructor %s requires absent Interface %s", symbol, dependency.ID())
 			}
-			edges.add("declares-dependency", constructorNode, interfaceNode, "required", []diagnosticjson.Source{constructorSource})
+			edges.addDependency("declares-dependency", constructorNode, interfaceNode, "required", dependency.ParameterName(), dependency.ParameterPosition(), constructorSource)
 		}
 		for _, dependency := range implementation.OptionalInterfaces() {
 			interfaceNode, exists := interfaceNodes[dependency.ID().String()]
 			if !exists {
 				return diagnosticschema.GraphResult{}, fmt.Errorf("constructor %s optionally requires absent Interface %s", symbol, dependency.ID())
 			}
-			edges.add("declares-dependency", constructorNode, interfaceNode, "optional", []diagnosticjson.Source{constructorSource})
+			edges.addDependency("declares-dependency", constructorNode, interfaceNode, "optional", dependency.ParameterName(), dependency.ParameterPosition(), constructorSource)
 		}
 		if configuration, present := implementation.Configuration(); present {
 			configurationNode := inspectGraphNodeID("configuration", symbol)
@@ -175,7 +175,7 @@ func inspectImplementationsGraph(resolved applicationresolve.Result) (diagnostic
 			if !exists {
 				return diagnosticschema.GraphResult{}, fmt.Errorf("constructor %s dependency Interface %s is absent from the visible graph", constructor.Symbol(), dependency.InterfaceID())
 			}
-			edges.add("depends-on-interface", constructorNode, interfaceNode, interfaceDependencyGraphReason(dependency.Optional(), dependency.Available()), []diagnosticjson.Source{constructorSource})
+			edges.addDependency("depends-on-interface", constructorNode, interfaceNode, interfaceDependencyGraphReason(dependency.Optional(), dependency.Available()), dependency.ParameterName(), dependency.ParameterPosition(), constructorSource)
 		}
 	}
 

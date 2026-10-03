@@ -294,6 +294,17 @@ Capability inspection strictly parses the optional `extensions` mapping within t
 
 ## Resolution and generation fixed point
 
+Every required Interface or exact `plystra.Optional[T]` constructor dependency
+needs an explicit nonblank Go parameter identifier other than `_`, even when
+the constructor is only a visible candidate. The optional first `Config`
+parameter is exempt. Discovery, static assembly, inspection, and provenance
+preserve dependency names with exact case and authored position. Renaming or
+reordering a reachable dependency changes application-model identity and
+requires regeneration, without changing its canonical Interface contract.
+Invalid required and optional names use `PLYSTRA_IMPLEMENTATION_REQUIRED_INVALID`
+and `PLYSTRA_IMPLEMENTATION_OPTIONAL_INVALID`, respectively, with the owning
+constructor source and a recovery action before any Project mutation.
+
 The Interface-resolution path derives one static constructor graph from explicit `interfaces.require` entries, selected current-Project external exposure, and transitive required constructor parameters. Every discovered `//plystra:implements` declaration is only a compatible candidate, whether it belongs to the current Project or a dependency Project; discovery alone never creates an application root, binding, constructor membership, or generated output. An exact compatible `interfaces.use` choice is validated even before its Interface is required, but remains dormant and creates no root, binding, reachable constructor, lifecycle membership, or generated Interface runtime until that Interface enters the requirement closure. Invalid dormant choices fail before generation. Unreachable Implementation candidates and optional-only dependencies remain outside assembly.
 
 An effective `config.<constructor-symbol>` object is valid only when that exact constructor is named by an effective explicit `interfaces.use` choice or is already selected into the reachable constructor graph. The CLI immediately validates the object against the constructor's exported same-package `Config` schema, including Secret-reference syntax, without reading an environment variable or Secret file. While the owning choice remains dormant, the object remains authored configuration only: it creates no runtime delivery, generated assembly or bootstrap membership, Secret lookup, or Kernel state. Configuration for any other constructor fails without exposing its values under `PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED`.
@@ -1268,6 +1279,11 @@ ancestor suppression. All four graph views use the versioned
 `plystra.graph` v1 schema with project-relative source references and omit
 resolved Secrets and unrestricted configuration values. The command accepts the same `--env`, `--config`,
 `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as generation and check.
+
+Constructor dependency edges in both Interface and Implementation inspection
+retain `parameter_name` and one-based `parameter_position`. These fields are
+absent on other edges. Repeated dependencies on one Interface remain distinct;
+human output names each parameter alongside its position.
 
 `plystra explain capability <capability-name>/vN` is the corresponding causal
 read-only view. For a required Capability it reports the selected ordinary
