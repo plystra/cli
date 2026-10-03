@@ -439,6 +439,8 @@ A composition.adopt sequence replaces the complete lower adoption set; [] clears
 
 Self-adoption uses the exact current go.mod module identity, including a short local name such as my-app from plystra new my-app. The same identity applies in root, environment, and replacement adoptions. Short names do not alias dependency modules, and dependency inventories still require standard Go Module paths. Local Interface and constructor provenance preserve the exact name.
 
+Startup uses the same Project module-path validator before adoption set composition, including sparse removals and lower complete sets suppressed by an overlay. Malformed paths fail before Secret lookup or constructor entry; valid absent removals remain exclusions. Regenerate and rebuild to include the guard. Generation maintains a direct golang.org/x/mod requirement at v0.38.0 or newer; generate --check reports missing, indirect, or outdated requirements without mutation.
+
 Rejected export resolution names the authored adoption document and exact field alongside the module/export identity. Inherited root adoptions retain their root source; sparse overlay additions and replacement adoptions retain their selected-document source. Configuration values remain excluded.
 
 Reusable exports have no lower layer and cannot contain the reserved one-entry $remove mapping, even inside nested configuration, collections, or an unadopted Resource fragment. This does not turn ordinary null, empty, or zero values into removals; adopted values still require compiled-type validation. Correct the export in the owning Project marker reported by PLYSTRA_PROJECT_MANIFEST_INVALID, then rerun the same generation or check command.

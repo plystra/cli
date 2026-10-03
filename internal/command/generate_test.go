@@ -21,6 +21,7 @@ import (
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/version"
@@ -72,7 +73,7 @@ go 1.26
 require (
 	github.com/plystra/kernel v0.0.0
 	go.yaml.in/yaml/v3 v3.0.5
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.38.0
 	golang.org/x/sys v0.47.0
 )
 
@@ -110,6 +111,7 @@ replace github.com/plystra/kernel => %s
 		"  missing generated/go/assembly/providers_gen.go\n" +
 		"  missing generated/go/bootstrap/bootstrap_gen.go\n" +
 		"  missing generated/go/internal/constructorconfig/value_gen.go\n" +
+		"  missing generated/go/internal/modulepath/path_gen.go\n" +
 		"  missing generated/go/internal/privatefile/file.go\n" +
 		"  missing generated/go/internal/privatefile/file_darwin.go\n" +
 		"  missing generated/go/internal/privatefile/file_linux.go\n" +
@@ -133,6 +135,7 @@ replace github.com/plystra/kernel => %s
 		"Source: example.com/acme/app:generated/go/assembly/providers_gen.go (generated-artifact)\n" +
 		"Source: example.com/acme/app:generated/go/bootstrap/bootstrap_gen.go (generated-artifact)\n" +
 		"Source: example.com/acme/app:generated/go/internal/constructorconfig/value_gen.go (generated-artifact)\n" +
+		"Source: example.com/acme/app:generated/go/internal/modulepath/path_gen.go (generated-artifact)\n" +
 		"Source: example.com/acme/app:generated/go/internal/privatefile/file.go (generated-artifact)\n" +
 		"Source: example.com/acme/app:generated/go/internal/privatefile/file_darwin.go (generated-artifact)\n" +
 		"Source: example.com/acme/app:generated/go/internal/privatefile/file_linux.go (generated-artifact)\n" +
@@ -940,6 +943,7 @@ replace github.com/plystra/kernel => %s
 		{path: connectgen.ConnectModulePath, version: connectgen.ConnectModuleVersion},
 		{path: connectgen.ProtobufModulePath, version: connectgen.ProtobufModuleVersion},
 		{path: bootstrapgen.YAMLModulePath, version: bootstrapgen.YAMLModuleVersion},
+		{path: modulepath.RuntimeModulePath, version: modulepath.RuntimeModuleVersion},
 	} {
 		requirement, exists := requirements[expected.path]
 		if !exists {

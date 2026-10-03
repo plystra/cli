@@ -49,6 +49,7 @@ import (
 	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 const maximumGoEnvironmentValueBytes = 64 << 10
@@ -780,7 +781,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, agen
 		data []byte
 	}
 	files := []projectFile{
-		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, version.KernelVersion, bootstrapgen.YAMLModuleVersion, runtimebaseline.PermissionsVersion)},
+		{path: "go.mod", data: fmt.Appendf(nil, goModuleTemplate, modulePath, version.KernelVersion, bootstrapgen.YAMLModuleVersion, modulepath.RuntimeModuleVersion, runtimebaseline.PermissionsVersion)},
 		{path: "README.md", data: []byte(readme)},
 		{path: ".gitignore", data: []byte(gitignoreTemplate)},
 		{path: ".gitattributes", data: []byte(gitattributesTemplate)},
@@ -929,6 +930,7 @@ func verifyModule(root, modulePath string) error {
 	}
 	foundKernel := false
 	foundYAML := false
+	foundModulePaths := false
 	for _, requirement := range parsed.Require {
 		if requirement.Mod.Path == "github.com/plystra/kernel" && requirement.Mod.Version == version.KernelVersion && !requirement.Indirect {
 			foundKernel = true
@@ -936,12 +938,18 @@ func verifyModule(root, modulePath string) error {
 		if requirement.Mod.Path == bootstrapgen.YAMLModulePath && requirement.Mod.Version == bootstrapgen.YAMLModuleVersion && !requirement.Indirect {
 			foundYAML = true
 		}
+		if requirement.Mod.Path == modulepath.RuntimeModulePath && semver.Compare(requirement.Mod.Version, modulepath.RuntimeModuleVersion) >= 0 && !requirement.Indirect {
+			foundModulePaths = true
+		}
 	}
 	if !foundKernel {
 		return fmt.Errorf("generated go.mod does not require github.com/plystra/kernel %s", version.KernelVersion)
 	}
 	if !foundYAML {
 		return fmt.Errorf("generated go.mod does not require %s %s", bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion)
+	}
+	if !foundModulePaths {
+		return fmt.Errorf("generated go.mod does not directly require %s at %s or newer", modulepath.RuntimeModulePath, modulepath.RuntimeModuleVersion)
 	}
 	info, err := os.Stat(filepath.Join(root, "go.sum"))
 	if err != nil {

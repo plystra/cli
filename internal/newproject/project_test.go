@@ -32,6 +32,7 @@ import (
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/newproject"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/projectcheck"
@@ -317,6 +318,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		"generated/go/assembly/providers_gen.go",
 		"generated/go/bootstrap/bootstrap_gen.go",
 		"generated/go/internal/constructorconfig/value_gen.go",
+		"generated/go/internal/modulepath/path_gen.go",
 		"generated/go/internal/privatefile/file.go",
 		"generated/go/internal/privatefile/file_darwin.go",
 		"generated/go/internal/privatefile/file_linux.go",
@@ -2585,7 +2587,7 @@ func assertModuleState(t *testing.T, root, modulePath string) {
 		"github.com/plystra/kernel":       {version: version.KernelVersion},
 		bootstrapgen.YAMLModulePath:       {version: bootstrapgen.YAMLModuleVersion},
 		"golang.org/x/sys":                {version: "v0.47.0"},
-		"golang.org/x/mod":                {version: "v0.38.0", indirect: true},
+		modulepath.RuntimeModulePath:      {version: modulepath.RuntimeModuleVersion},
 		"github.com/cespare/xxhash/v2":    {version: "v2.3.0", indirect: true},
 		"github.com/go-logr/logr":         {version: "v1.4.4", indirect: true},
 		"github.com/go-logr/stdr":         {version: "v1.2.2", indirect: true},

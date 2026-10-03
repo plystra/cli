@@ -120,6 +120,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source)
 	fmt.Fprintf(&source, "\tapplicationassembly %s\n", strconv.Quote(assemblyPath))
 	fmt.Fprintf(&source, "\tconstructorconfig %s\n", strconv.Quote(path.Join(options.ModulePath, "generated/go/internal/constructorconfig")))
+	fmt.Fprintf(&source, "\tmodulepath %s\n", strconv.Quote(path.Join(options.ModulePath, "generated/go/internal/modulepath")))
 	fmt.Fprintf(&source, "\truntimebaseline %s\n", strconv.Quote(path.Join(options.ModulePath, "generated/go/internal/runtimebaseline")))
 	fmt.Fprintln(&source, "\tkernelconfiguration \"github.com/plystra/kernel/configuration\"")
 	fmt.Fprintln(&source, "\tkernellifecycle \"github.com/plystra/kernel/lifecycle\"")

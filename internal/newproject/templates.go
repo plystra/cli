@@ -7,6 +7,7 @@ go 1.26
 require (
 	github.com/plystra/kernel %s
 	go.yaml.in/yaml/v3 %s
+	golang.org/x/mod %s
 	golang.org/x/sys %s
 )
 `

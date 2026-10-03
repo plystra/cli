@@ -268,7 +268,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:abb5f4a09e42169fc2e05205e6eae1396197c3d3465bbae670d13556ce0a1718",
+      "sha256": "sha256:d0eedd706fe9f008efc1f7714c40c211a9c73a195b5dc8d42e10cae483b94a2e",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -310,6 +310,32 @@
     {
       "path": "generated/go/internal/constructorconfig/value_gen.go",
       "sha256": "sha256:f270f811ab9b78b2f6ba0ff34e97aa415891ac09aaaf2c49583f32ef3751c79f",
+      "generator": "plystra.runtime-bootstrap/v1",
+      "output_kind": "go-source",
+      "input_record_ids": [
+        "application-model:sha256:e356679f25dd8d12f7a20304a65a7c11a9295e933ba53aa2c37360d74446e1cc",
+        "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
+        "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
+        "interface-provenance:sha256:d5bcc33d0918708781edb46b5d0cafca7e5b27510d20948d0c6eb67397b3c763",
+        "interface:kernel.health/v1",
+        "interface:kernel.info/v1",
+        "transport-toolchain:sha256:8df621ec95193e166bc083d5990ca1835bf20abbe8efeb5ab52be3c9db472d31"
+      ],
+      "sources": [
+        "built-in Plystra default Interface invocation policy",
+        "github.com/plystra/kernel/interfaces/kernel/health/v1 //plystra:interface kernel.health/v1",
+        "github.com/plystra/kernel/interfaces/kernel/info/v1 //plystra:interface kernel.info/v1",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/health/v1/interface.yaml",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.go:11:1",
+        "github.com/plystra/kernel@v0.0.0/interfaces/kernel/info/v1/interface.yaml",
+        "plystra.yaml"
+      ],
+      "cleanup_ownership": "cli-owned"
+    },
+    {
+      "path": "generated/go/internal/modulepath/path_gen.go",
+      "sha256": "sha256:359a8f15b79da2a55bc3d82b2a1fc5dfb7b9611305bfe421f8d603f76f08c611",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [

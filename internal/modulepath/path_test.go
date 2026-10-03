@@ -1,6 +1,7 @@
 package modulepath_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/modulepath"
@@ -9,7 +10,7 @@ import (
 func TestCheckProjectAcceptsStandardAndInitialLocalModulePaths(t *testing.T) {
 	t.Parallel()
 
-	for _, value := range []string{"github.com/acme/my-app", "github.com/acme/my-app/v2", "my-app"} {
+	for _, value := range []string{"github.com/acme/my-app", "github.com/acme/my-app/v2", "my-app", "example.com/" + strings.Repeat("segment/", 160) + "module"} {
 		value := value
 		t.Run(value, func(t *testing.T) {
 			t.Parallel()

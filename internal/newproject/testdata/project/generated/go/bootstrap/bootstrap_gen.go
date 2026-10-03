@@ -26,6 +26,7 @@ import (
 
 	applicationassembly "example.com/acme/my-app/generated/go/assembly"
 	constructorconfig "example.com/acme/my-app/generated/go/internal/constructorconfig"
+	modulepath "example.com/acme/my-app/generated/go/internal/modulepath"
 	runtimebaseline "example.com/acme/my-app/generated/go/internal/runtimebaseline"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
@@ -1186,7 +1187,7 @@ func runtimeExportAdoptionSequence(node *yaml.Node, path string) (map[string]run
 		}
 		modulePath, moduleErr := runtimeString(fields["module"])
 		exportName, exportErr := runtimeString(fields["export"])
-		if moduleErr != nil || modulePath == "" || len(modulePath) > 1024 || strings.TrimSpace(modulePath) != modulePath || strings.IndexFunc(modulePath, unicode.IsControl) >= 0 {
+		if moduleErr != nil || modulepath.CheckProject(modulePath) != nil {
 			return nil, runtimeConfigurationError("%s.module must be a valid Go Module path", itemPath)
 		}
 		if exportErr != nil || !validRuntimeExportName(exportName) {

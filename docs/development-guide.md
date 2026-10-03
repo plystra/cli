@@ -946,6 +946,16 @@ same identity in root, environment, or replacement adoptions. Short names do not
 alias dependency modules; dependency inventories retain standard Go Module path
 validation. Local Interface and constructor provenance preserve the exact name.
 
+Startup validates adoption module paths with the same Project validator used by
+the CLI before set composition. This includes sparse removals and lower complete
+sets suppressed by an overlay; invalid syntax cannot disappear during
+composition or reach Secret lookup or constructor entry. Valid absent removals
+remain exclusion intent, including short local names and versioned module paths.
+Regenerate and rebuild to include the shared generated validator. Generation
+transactionally maintains a direct `golang.org/x/mod` requirement at `v0.38.0`
+or newer; `generate --check` reports missing, indirect, or outdated requirements
+without changing the Project.
+
 Missing modules, missing exports, and unsupported Resource exports report the
 authored adoption document and exact field alongside the module/export identity.
 Inherited adoptions point to the root document; overlay additions and replacement

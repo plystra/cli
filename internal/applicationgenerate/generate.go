@@ -41,6 +41,7 @@ import (
 	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/javascriptgen"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
@@ -1013,6 +1014,7 @@ func generatedRuntimeRequirements(model protobufmodel.Model, interfaces protobuf
 		)
 	}
 	inputs = append(inputs, [2]string{bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion})
+	inputs = append(inputs, [2]string{modulepath.RuntimeModulePath, modulepath.RuntimeModuleVersion})
 	inputs = append(inputs, [2]string{runtimebaseline.PermissionsModule, runtimebaseline.PermissionsVersion})
 	result := make([]ModuleRequirement, len(inputs))
 	for index, input := range inputs {

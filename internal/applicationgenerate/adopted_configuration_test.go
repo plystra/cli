@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -286,6 +287,29 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 		{name: "replacement root resource removal rejected", root: "composition: {exports: {unused: {resources: {instances: {database: {config: {private: {$remove: true}}}}}}}}\n", selected: adopt, rule: "invalid declarations"},
 		{name: "required field removed", overlay: config("{first: {$remove: true}}"), rule: "required field is absent"},
 		{name: "object removed", overlay: config("{$remove: true}"), rule: "required field is absent"},
+	}
+	for _, modulePath := range []string{
+		"../private-platform", "/private-platform", "local/private-platform",
+		"example.com//private-platform", "example.com/../private-platform",
+		"example.com/private-platform@v1.0.0", "example.com/private-platform/v1",
+		"example.com/private-platform/v02", "example.com/private-platform/",
+		"NUL", "example.com/private-platform?query", "https://example.com/private-platform",
+	} {
+		entry := "{module: " + strconv.Quote(modulePath) + ", export: unused}"
+		removal := "composition: {adopt: {remove: [" + entry + "]}}\n"
+		combined := "composition: {adopt: {add: [{module: " + dependency + ", export: first}, {module: " + dependency + ", export: second}], remove: [" + entry + "]}}\n"
+		cases = append(cases,
+			runtimeCase{name: "invalid adoption module/root removal/" + modulePath, root: combined, rule: ".module must be a valid Go Module path"},
+			runtimeCase{name: "invalid adoption module/environment removal/" + modulePath, overlay: removal, rule: ".module must be a valid Go Module path"},
+			runtimeCase{name: "invalid adoption module/replacement removal/" + modulePath, selected: combined, rule: ".module must be a valid Go Module path"},
+			runtimeCase{name: "invalid adoption module/suppressed lower set/" + modulePath, root: "composition: {adopt: [" + entry + "]}\n", overlay: adopt, rule: ".module must be a valid Go Module path"},
+		)
+	}
+	for _, modulePath := range []string{"my-app", "example.com/absent", "example.com/platform/v2", "gopkg.in/yaml.v3", "example.com/" + strings.Repeat("segment/", 160) + "module"} {
+		cases = append(cases, runtimeCase{
+			name:    "valid adoption module/removal/" + modulePath,
+			overlay: "composition: {adopt: {remove: [{module: " + strconv.Quote(modulePath) + ", export: unused}]}}\n",
+		})
 	}
 	for _, resource := range []string{
 		`null`, `{private-key: private-value}`, `{instances: null}`, `{instances: []}`,

@@ -33,6 +33,8 @@ import (
 	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/modulemutation"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginmeta"
 	"github.com/plystra/cli/internal/projectsmoke"
 	"github.com/plystra/cli/internal/protobufidentity"
@@ -42,6 +44,7 @@ import (
 	"github.com/plystra/cli/internal/testkernel"
 	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/transporttoolchain"
+	"golang.org/x/mod/modfile"
 )
 
 func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *testing.T) {
@@ -64,7 +67,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	if !checked.Checked() || checked.Module().Path() != canonicalFilesystemPath(t, root) || checked.Module().ModulePath() != "example.com/Acme/empty" {
 		t.Fatalf("checked result = %#v", checked)
 	}
-	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/go/internal/privatefile/file.go", "generated/go/internal/privatefile/file_darwin.go", "generated/go/internal/privatefile/file_linux.go", "generated/go/internal/privatefile/file_other.go", "generated/go/internal/privatefile/file_unix.go", "generated/go/internal/privatefile/file_windows.go", "generated/go/internal/runtimebaseline/baseline_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
+	if got, want := checked.Report().Missing(), []string{generatedfiles.ManifestPath, "generated/compatibility/interface-documentation.json", "generated/compatibility/interface-javascript.json", "generated/compatibility/interface-metadata.json", "generated/compatibility/interface-transport.json", "generated/compatibility/interfaces.json", "generated/go/application/main_gen.go", "generated/go/assembly/compatibility_gen.go", "generated/go/assembly/interfaces_gen.go", "generated/go/assembly/invocations_gen.go", "generated/go/assembly/providers_gen.go", "generated/go/bootstrap/bootstrap_gen.go", "generated/go/internal/constructorconfig/value_gen.go", "generated/go/internal/modulepath/path_gen.go", "generated/go/internal/privatefile/file.go", "generated/go/internal/privatefile/file_darwin.go", "generated/go/internal/privatefile/file_linux.go", "generated/go/internal/privatefile/file_other.go", "generated/go/internal/privatefile/file_unix.go", "generated/go/internal/privatefile/file_windows.go", "generated/go/internal/runtimebaseline/baseline_gen.go", "generated/manifest.json", "generated/proto/descriptor-set.pb", "generated/proto/wire-map.json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("missing files = %v, want %v", got, want)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
@@ -1428,6 +1431,98 @@ func TestGenerateCheckReportsMissingConnectRuntimeRequirementsWithoutMutation(t 
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("Generate check mutated missing-runtime Project:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestGenerateRepairsModulePathRuntimeRequirementTransactionally(t *testing.T) {
+	t.Parallel()
+
+	for _, state := range []string{"missing", "indirect"} {
+		t.Run(state, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeApplicationModule(t, root, "example.com/acme/module-path-runtime")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			moduleFile := filepath.Join(root, "go.mod")
+			parsed, err := modfile.Parse(moduleFile, readFile(t, root, "go.mod"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch state {
+			case "missing":
+				if err := parsed.DropRequire(modulepath.RuntimeModulePath); err != nil {
+					t.Fatal(err)
+				}
+			case "indirect":
+				for _, requirement := range parsed.Require {
+					if requirement.Mod.Path == modulepath.RuntimeModulePath {
+						requirement.Indirect = true
+					}
+				}
+				parsed.SetRequire(parsed.Require)
+			}
+			parsed.Cleanup()
+			data, err := parsed.Format()
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, moduleFile, string(data))
+			before := snapshotTree(t, root)
+			options := applicationgenerate.Options{Start: root, Check: true, Environment: goEnvironment(nil)}
+			if _, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, applicationgenerate.ErrRuntimeDependency) || !strings.Contains(err.Error(), modulepath.RuntimeModulePath) {
+				t.Fatalf("check %s runtime dependency = %v", state, err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("dependency check mutated the Project")
+			}
+
+			options.Check = false
+			generate := func() (applicationgenerate.Result, error) {
+				var result applicationgenerate.Result
+				err := modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+					options.MutateModule = mutate
+					var err error
+					result, err = applicationgenerate.Generate(t.Context(), options)
+					return err
+				})
+				return result, err
+			}
+			validationFailure := errors.New("test validation failure")
+			options.Validate = func(context.Context, string) error { return validationFailure }
+			if _, err := generate(); !errors.Is(err, validationFailure) {
+				t.Fatalf("failed generation = %v", err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("failed generation did not restore the Project")
+			}
+
+			options.Validate = nil
+			if generated, err := generate(); err != nil || !generated.Report().Clean() {
+				t.Fatalf("repair generation = %#v, %v", generated.Report().Changes(), err)
+			}
+			parsed, err = modfile.Parse(moduleFile, readFile(t, root, "go.mod"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, requirement := range parsed.Require {
+				if requirement.Mod.Path == modulepath.RuntimeModulePath {
+					found = !requirement.Indirect && requirement.Mod.Version == modulepath.RuntimeModuleVersion
+				}
+			}
+			if !found {
+				t.Fatal("generation did not install the direct module-path runtime requirement")
+			}
+			before = snapshotTree(t, root)
+			options.Check = true
+			options.MutateModule = nil
+			if checked, err := applicationgenerate.Generate(t.Context(), options); err != nil || !checked.Report().Clean() {
+				t.Fatalf("repaired check = %#v, %v", checked.Report().Changes(), err)
+			}
+			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("repaired check mutated the Project")
+			}
+		})
 	}
 }
 
@@ -3428,7 +3523,7 @@ require (
 	github.com/plystra/kernel v0.0.0
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/sys v0.47.0
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.38.0
 )
 
 replace github.com/plystra/cli => %s
@@ -3879,7 +3974,7 @@ func writeApplicationModuleDefinition(t testing.TB, root, modulePath string) {
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.38.0
 )
 
 replace github.com/plystra/kernel => %s

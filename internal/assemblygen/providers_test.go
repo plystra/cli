@@ -22,6 +22,7 @@ import (
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/constructorconfig"
 	"github.com/plystra/cli/internal/implementationassemblygen"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/privatefile"
 	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/testkernel"
@@ -406,6 +407,7 @@ func writeBytes(t testing.TB, name string, data []byte) {
 
 func renderBootstrapFixture(t testing.TB, root string, options bootstrapgen.Options) ([]byte, error) {
 	t.Helper()
+	writeFile(t, filepath.Join(root, "generated/go/internal/modulepath/path_gen.go"), modulepath.Source)
 	for _, name := range []string{"file.go", "file_windows.go", "file_unix.go", "file_linux.go", "file_darwin.go", "file_other.go"} {
 		data, err := privatefile.Source.ReadFile(name)
 		if err != nil {
