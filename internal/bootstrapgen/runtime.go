@@ -918,39 +918,33 @@ func normalizeRuntimeExposure(node *yaml.Node, path string) (*yaml.Node, error) 
 }
 
 func mergeRuntimeCORS(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
-	if upperNode != nil && runtimeNull(upperNode) {
-		return nil, false, nil
-	}
-	if lowerNode != nil && runtimeNull(lowerNode) {
-		lowerNode = nil
-	}
-	if lowerNode == nil && upperNode == nil {
-		return nil, false, nil
-	}
-	allowed := runtimeKeySet("allowed_origins", "allow_credentials")
-	lower, err := runtimeOptionalMapping(lowerNode, "http.cors", allowed)
-	if err != nil {
-		return nil, false, err
-	}
-	upper, err := runtimeOptionalMapping(upperNode, "http.cors", allowed)
-	if err != nil {
-		return nil, false, err
-	}
-	origins, hasOrigins, err := selectRuntimeValue(lower["allowed_origins"], upper["allowed_origins"], "http.cors.allowed_origins", validateRuntimeOrigins)
-	if err != nil {
-		return nil, false, err
-	}
-	credentials, hasCredentials, err := selectRuntimeValue(lower["allow_credentials"], upper["allow_credentials"], "http.cors.allow_credentials", validateRuntimeBoolean)
-	if err != nil {
-		return nil, false, err
-	}
 	result := make(map[string]*yaml.Node)
-	if hasOrigins {
-		result["allowed_origins"] = origins
+	present := false
+	for _, layer := range []*yaml.Node{lowerNode, upperNode} {
+		if layer == nil { continue }
+		if runtimeRemovalMapping(layer) {
+			clear(result)
+			present = false
+			continue
+		}
+		fields, err := runtimeMapping(layer, "http.cors", runtimeKeySet("allowed_origins", "allow_credentials"))
+		if err != nil { return nil, false, err }
+		present = true
+		for _, field := range []string{"allowed_origins", "allow_credentials"} {
+			value := fields[field]
+			if value == nil { continue }
+			if runtimeRemovalMapping(value) {
+				delete(result, field)
+				continue
+			}
+			validate := validateRuntimeBoolean
+			if field == "allowed_origins" { validate = validateRuntimeOrigins }
+			normalized, err := validate(value, "http.cors."+field)
+			if err != nil { return nil, false, err }
+			result[field] = normalized
+		}
 	}
-	if hasCredentials {
-		result["allow_credentials"] = credentials
-	}
+	if !present { return nil, false, nil }
 	return runtimeMappingNode(result), true, nil
 }
 

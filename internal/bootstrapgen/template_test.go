@@ -339,6 +339,80 @@ func TestReplacementRootValidatesRawYAMLBeforeExclusion(t *testing.T) {
  }
 }
 
+func TestCORSTombstonesAcrossSelectors(t *testing.T) {
+ for _, mode := range []string{"default","environment","replacement"} {
+  for name, delta := range map[string]string{
+   "whole": "{$remove: true}",
+   "credentials": "{allow_credentials: {$remove: true}}",
+   "empty object inherits": "{}",
+  } {
+   t.Run(mode+"/"+name,func(t *testing.T) {
+    d := fixture(t)
+    d.Templates[0].YAML += "http: {cors: {allowed_origins: [https://app.example], allow_credentials: true}}\n"
+    root, selected, overlay := rootRelationship,"",""
+    layer := "http: {cors: "+delta+"}\n"
+    switch mode {
+    case "default": root += layer
+    case "environment": overlay = layer
+    case "replacement": root += "http: {cors: null}\n"; selected = layer
+    }
+    document := compose(t,d,root,selected,overlay)
+    tree, err := decodeRuntimeDocument(document,"test result"); if err != nil { t.Fatal(err) }
+    fields, err := runtimeMapping(tree,"document",nil); if err != nil { t.Fatal(err) }
+    http, err := runtimeOptionalMapping(fields["http"],"http",nil); if err != nil { t.Fatal(err) }
+    if bytes.Contains(document,[]byte("$remove")) { t.Fatal("CORS marker entered effective configuration") }
+    if name == "whole" {
+     if http["cors"] != nil { t.Fatal("whole CORS removal failed") }
+     if err := validateRuntimeApplicationModel(document); err != nil { t.Fatal(err) }
+     return
+    }
+    cors, err := runtimeMapping(http["cors"],"cors",nil); if err != nil { t.Fatal(err) }
+    if !runtimeSequenceContains(cors["allowed_origins"],"https://app.example") { t.Fatal("origins lost") }
+    if name == "credentials" && cors["allow_credentials"] != nil { t.Fatal("credentials removal failed") }
+    if name == "empty object inherits" && (cors["allow_credentials"] == nil || cors["allow_credentials"].Value != "true") { t.Fatal("empty CORS object removed inherited fields") }
+   })
+  }
+ }
+}
+
+func TestCORSValidationFollowsFinalLayer(t *testing.T) {
+ for _, test := range []struct { name, oldest, nearest, current string; absent, credentials bool }{
+  {"restore removed origins", "{allowed_origins: [https://old.example], allow_credentials: true}", "{allowed_origins: {$remove: true}}", "{allowed_origins: [https://app.example]}",false,true},
+  {"restore whole object", "{allowed_origins: [https://old.example], allow_credentials: true}", "{$remove: true}", "{allowed_origins: [https://app.example]}",false,false},
+  {"remove wildcard credentials", "{allowed_origins: ['*'], allow_credentials: true}", "{allow_credentials: {$remove: true}}", "{}",false,false},
+  {"replace wildcard", "{allowed_origins: ['*']}", "{allow_credentials: true}", "{allowed_origins: [https://app.example]}",false,true},
+  {"remove incomplete object", "{allowed_origins: [https://app.example]}", "{allowed_origins: {$remove: true}}", "{$remove: true}",true,false},
+ } {
+  t.Run(test.name,func(t *testing.T) {
+   d := fixture(t)
+   d.Templates[0].YAML += "http: {cors: "+test.oldest+"}\n"
+   d.Templates[1].YAML += "http: {cors: "+test.nearest+"}\n"
+   document := compose(t,d,rootRelationship+"http: {cors: "+test.current+"}\n","","")
+   tree, err := decodeRuntimeDocument(document,"test result"); if err != nil { t.Fatal(err) }
+   fields, err := runtimeMapping(tree,"document",nil); if err != nil { t.Fatal(err) }
+   http, err := runtimeMapping(fields["http"],"http",nil); if err != nil { t.Fatal(err) }
+   if test.absent { if http["cors"] != nil { t.Fatal("incomplete CORS object survived removal") }; return }
+   cors, err := runtimeMapping(http["cors"],"cors",nil); if err != nil { t.Fatal(err) }
+   gotCredentials := cors["allow_credentials"] != nil && cors["allow_credentials"].Value == "true"
+   if gotCredentials != test.credentials { t.Fatal("removed credentials reappeared") }
+  })
+ }
+ for _, invalid := range []string{
+  "null", "{$remove: false}", "{$remove: 'true'}", "{$remove: true, allowed_origins: [https://app.example]}",
+  "{allowed_origins: null}", "{allow_credentials: null}", "{allowed_origins: {$remove: true}}",
+  "{allowed_origins: {$remove: false}}", "{allow_credentials: {$remove: false}}", "{allowed_origins: ['*']}",
+ } {
+  for _, mode := range []string{"default","environment","replacement"} {
+   d := fixture(t)
+   d.Templates[0].YAML += "http: {cors: {allowed_origins: [https://app.example], allow_credentials: true}}\n"
+   root, selected, overlay := []byte(rootRelationship),[]byte(nil),[]byte(nil)
+   layer := []byte("http: {cors: "+invalid+"}\n")
+   switch mode { case "default": root = append(root,layer...); case "environment": overlay = layer; case "replacement": selected = layer }
+   if _, err := composeRuntimeTemplateDocument(d,root,selected,overlay); !errors.Is(err,ErrRuntimeConfiguration) { t.Fatal("accepted invalid CORS",mode,invalid,err) }
+  }
+ }
+}
+
 func TestReplacementRootExcludesValidApplicationTypeErrors(t *testing.T) {
  for _, excluded := range []string{
   "interfaces: PRIVATE_SENTINEL\n",
