@@ -994,7 +994,7 @@ func TestResolveReportsMalformedSelectedConfigurationSource(t *testing.T) {
 			root := t.TempDir()
 			writeModule(t, root, "example.com/application")
 			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-			writeFile(t, filepath.Join(root, filepath.FromSlash(test.path)), "unknown: true\n")
+			writeFile(t, filepath.Join(root, filepath.FromSlash(test.path)), "private_unknown_root_field: true\n")
 			before := snapshotTree(t, root)
 			options := applicationresolve.Options{
 				Start:       root,
@@ -1003,14 +1003,14 @@ func TestResolveReportsMalformedSelectedConfigurationSource(t *testing.T) {
 			test.configure(&options)
 			_, err := applicationresolve.Resolve(t.Context(), options)
 			var source *applicationresolve.ManifestSourceError
-			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), "unknown root field") {
 				t.Fatalf("Resolve malformed selected configuration = %v", err)
 			}
 			if source.ModulePath() != "example.com/application" || source.SourcePath() != test.path || source.SourceKind() != "configuration-declaration" || source.Line() != 1 || source.Column() != 1 {
 				t.Fatalf("selected configuration source = %#v", source)
 			}
-			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
-				t.Fatalf("selected configuration error exposed Project root %q: %v", root, err)
+			if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("selected configuration error exposed a private key or root: %v", err)
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("malformed selected configuration mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
@@ -1928,17 +1928,17 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 
 		root := t.TempDir()
 		writeModule(t, root, "example.com/malformed")
-		writeFile(t, filepath.Join(root, "plystra.yaml"), "unknown: true\n")
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "private_unknown_root_field: true\n")
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
-		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "unknown root field") {
 			t.Fatalf("Resolve error = %v", err)
 		}
 		var source *applicationresolve.ManifestSourceError
 		if !errors.As(err, &source) || source.ModulePath() != "example.com/malformed" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
 			t.Fatalf("Resolve malformed root source = %#v, %v", source, err)
 		}
-		if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
-			t.Fatalf("Resolve malformed root exposed Project root %q: %v", root, err)
+		if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+			t.Fatalf("Resolve malformed root exposed a private key or root: %v", err)
 		}
 	})
 
