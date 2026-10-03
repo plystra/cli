@@ -109,7 +109,8 @@ func TestResolveUsesCompleteReplacementForInterfaceConfiguration(t *testing.T) {
 
 	root := writeResolvedInterfaceProject(t)
 	parent := filepath.Dir(root)
-	rootConfiguration := `http: {address: ":8080"}
+	rootConfiguration := `template: example.com/interface-cache
+http: {address: ":8080"}
 interfaces:
   require: [missing.read/v1]
   use:
@@ -121,10 +122,6 @@ config:
   example.com/excluded/root.New: {ignored: root-only}
 `
 	selectedConfiguration := `# Complete customer configuration.
-composition:
-  adopt:
-    - module: example.com/interface-cache
-      export: defaults
 http: {address: ":9090"}
 interfaces:
   require: {add: [app.run/v1]}
@@ -134,10 +131,7 @@ interfaces:
     audit.write/v1: {timeout: 2s}
 `
 	writeFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
-	writeFile(t, filepath.Join(parent, "cache", "plystra.yaml"), `composition:
-  exports:
-    defaults:
-      interfaces: {require: [cache.read/v1]}
+	writeFile(t, filepath.Join(parent, "cache", "plystra.yaml"), `interfaces: {require: [cache.read/v1]}
 `)
 	writeFile(t, filepath.Join(root, "deploy", "customer.yaml"), selectedConfiguration)
 	before := snapshotTree(t, parent)
@@ -162,7 +156,7 @@ interfaces:
 		t.Fatalf("full-replacement HTTP address = %q, %t", address, exists)
 	}
 	requirements := resolved.Composition().Manifest().InterfaceRequirements()
-	if len(requirements) != 2 || requirements[0].ID().String() != "app.run/v1" || requirements[0].Source() != `deploy/customer.yaml interfaces.require.add["app.run/v1"]` || requirements[1].ID().String() != "cache.read/v1" || requirements[1].Source() != `example.com/interface-cache@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.require["cache.read/v1"]` {
+	if len(requirements) != 2 || requirements[0].ID().String() != "app.run/v1" || requirements[0].Source() != `deploy/customer.yaml interfaces.require.add["app.run/v1"]` || requirements[1].ID().String() != "cache.read/v1" || requirements[1].Source() != `example.com/interface-cache@v1.0.0/plystra.yaml interfaces.require["cache.read/v1"]` {
 		t.Fatalf("full-replacement Interface requirements = %#v", requirements)
 	}
 	if maintenance := resolved.ConfigurationMaintenance(); maintenance.Changed() || resolved.ConfigurationMaintenancePath() != "deploy/customer.yaml" || !reflect.DeepEqual(maintenance.Data(), []byte(selectedConfiguration)) {
@@ -442,7 +436,7 @@ func TestResolveValidatesDormantExplicitSelectionWithoutActivation(t *testing.T)
 	}
 }
 
-func TestResolvePreservesEveryInheritedInvalidImplementationChoiceSource(t *testing.T) {
+func TestResolvePreservesEffectiveTemplateInvalidImplementationChoiceSource(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -477,8 +471,9 @@ func TestResolvePreservesEveryInheritedInvalidImplementationChoiceSource(t *test
 				{root: alphaRoot, modulePath: "example.com/alpha"},
 			} {
 				writeModule(t, dependency.root, dependency.modulePath)
-				writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {use: {email.send/v1: "+test.constructor+"}}}}}\n")
+				writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+test.constructor+"}}\n")
 			}
+			writeFile(t, filepath.Join(zetaRoot, "plystra.yaml"), "template: example.com/alpha\ninterfaces: {use: {email.send/v1: "+test.constructor+"}}\n")
 
 			writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/interface-app
 
@@ -494,11 +489,7 @@ replace example.com/alpha => ../alpha
 replace example.com/contracts => ../contracts
 replace example.com/zeta => ../zeta
 `)
-			writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
-  adopt:
-    - {module: example.com/alpha, export: defaults}
-    - {module: example.com/zeta, export: defaults}
-`)
+			writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/zeta\n")
 			writeResolvedSimpleImplementationForInterfaceModule(t, applicationRoot, "example.com/contracts", "reports", "reports.read/v1", "reports/read/v1", "Read")
 
 			before := snapshotTree(t, parent)
@@ -520,8 +511,12 @@ replace example.com/zeta => ../zeta
 				t.Fatalf("inherited invalid selection omitted typed choice provenance: %v", err)
 			}
 			sources := located.ChoiceSources()
-			if len(sources) != 2 || sources[0].ModulePath != "example.com/alpha" || sources[0].Path != "plystra.yaml" || sources[1].ModulePath != "example.com/zeta" || sources[1].Path != "plystra.yaml" {
+			if len(sources) != 1 || sources[0].ModulePath != "example.com/zeta" || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
 				t.Fatalf("inherited invalid selection sources = %#v", sources)
+			}
+			sources[0] = interfaceresolution.ChoiceSource{}
+			if repeated := located.ChoiceSources(); len(repeated) != 1 || repeated[0].ModulePath != "example.com/zeta" {
+				t.Fatal("inherited invalid selection exposed mutable source storage")
 			}
 			if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
 				t.Fatalf("Resolve inherited invalid selection mutated files:\nbefore: %#v\nafter:  %#v", before, after)
@@ -563,7 +558,7 @@ func TestResolvePreservesInheritedReplacementAndRemovalForDormantSelections(t *t
 			writeModule(t, dependencyRoot, "example.com/dormant-platform")
 			writeResolvedInterface(t, dependencyRoot, "email/send/v1", "sendv1", interfaceID, "Send")
 			writeResolvedSimpleImplementationForModule(t, dependencyRoot, "example.com/dormant-platform", "smtp", interfaceID, "email/send/v1", "Send")
-			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {use: {email.send/v1: "+inheritedConstructor+"}}}}}\n")
+			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+inheritedConstructor+"}}\n")
 
 			applicationRoot := filepath.Join(parent, "application")
 			writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/dormant-consumer
@@ -575,7 +570,7 @@ require example.com/dormant-platform v1.2.3
 replace example.com/dormant-platform => ../platform
 `)
 			writeResolvedSimpleImplementationForInterfaceModule(t, applicationRoot, "example.com/dormant-platform", "local", interfaceID, "email/send/v1", "Send")
-			writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: {adopt: [{module: example.com/dormant-platform, export: defaults}]}\n"+test.configuration)
+			writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/dormant-platform\n"+test.configuration)
 			before := snapshotTree(t, parent)
 
 			resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -604,7 +599,7 @@ replace example.com/dormant-platform => ../platform
 			}
 			const selectionPath = `interfaces.use["email.send/v1"]`
 			baseline := compositionProvenance(resolved.Composition().Provenance(), selectionPath)
-			if len(baseline) != 1 || baseline[0].Removed() || len(baseline[0].Sources()) != 1 || !strings.Contains(baseline[0].Sources()[0], "example.com/dormant-platform@v1.2.3/plystra.yaml") {
+			if len(baseline) != 1 || baseline[0].Removed() || !reflect.DeepEqual(baseline[0].Sources(), []string{`example.com/dormant-platform@v1.2.3/plystra.yaml interfaces.use["email.send/v1"]`}) {
 				t.Fatalf("inherited dormant baseline = %#v", baseline)
 			}
 			if effective := compositionProvenance(resolved.Composition().ResolutionSources(), selectionPath); len(effective) != 0 {
@@ -974,7 +969,7 @@ func TestResolveRejectsIntrinsicImplementationSelectionsWithTypedProvenance(t *t
 		}
 	})
 
-	t.Run("inherited dependencies", func(t *testing.T) {
+	t.Run("effective template owner", func(t *testing.T) {
 		parent := t.TempDir()
 		alphaRoot := filepath.Join(parent, "alpha")
 		zetaRoot := filepath.Join(parent, "zeta")
@@ -987,8 +982,9 @@ func TestResolveRejectsIntrinsicImplementationSelectionsWithTypedProvenance(t *t
 			{root: alphaRoot, modulePath: "example.com/alpha"},
 		} {
 			writeModule(t, dependency.root, dependency.modulePath)
-			writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {use: {kernel.health/v1: "+constructor+"}}}}}\n")
+			writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
 		}
+		writeFile(t, filepath.Join(zetaRoot, "plystra.yaml"), "template: example.com/alpha\ninterfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
 		writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/intrinsic-consumer
 
 go 1.26
@@ -1001,11 +997,7 @@ require (
 replace example.com/alpha => ../alpha
 replace example.com/zeta => ../zeta
 `)
-		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
-  adopt:
-    - {module: example.com/alpha, export: defaults}
-    - {module: example.com/zeta, export: defaults}
-`)
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/zeta\n")
 		before := snapshotTree(t, parent)
 
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -1016,12 +1008,16 @@ replace example.com/zeta => ../zeta
 			t.Fatalf("Resolve inherited intrinsic choice = %v", err)
 		}
 		var invalid *interfaceresolution.IntrinsicChoiceError
-		if !errors.As(err, &invalid) {
+		if !errors.As(err, &invalid) || invalid.InterfaceID().String() != "kernel.health/v1" || invalid.Constructor().String() != constructor {
 			t.Fatalf("inherited intrinsic choice omitted typed provenance: %v", err)
 		}
 		sources := invalid.ChoiceSources()
-		if len(sources) != 2 || sources[0].ModulePath != "example.com/alpha" || sources[0].Path != "plystra.yaml" || sources[1].ModulePath != "example.com/zeta" || sources[1].Path != "plystra.yaml" {
+		if len(sources) != 1 || sources[0].ModulePath != "example.com/zeta" || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
 			t.Fatalf("inherited intrinsic choice sources = %#v", sources)
+		}
+		sources[0] = interfaceresolution.ChoiceSource{}
+		if repeated := invalid.ChoiceSources(); len(repeated) != 1 || repeated[0].ModulePath != "example.com/zeta" {
+			t.Fatal("IntrinsicChoiceError exposed mutable inherited source storage")
 		}
 		if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
 			t.Fatalf("inherited intrinsic choice resolution mutated Projects:\nbefore: %#v\nafter:  %#v", before, after)
@@ -1033,7 +1029,7 @@ replace example.com/zeta => ../zeta
 		dependencyRoot := filepath.Join(parent, "platform")
 		applicationRoot := filepath.Join(parent, "application")
 		writeModule(t, dependencyRoot, "example.com/platform")
-		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {use: {kernel.health/v1: "+constructor+"}}}}}\n")
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
 		writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/intrinsic-removal
 
 go 1.26
@@ -1042,7 +1038,7 @@ require example.com/platform v1.0.0
 
 replace example.com/platform => ../platform
 `)
-		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: {adopt: [{module: example.com/platform, export: defaults}]}\ninterfaces: {use: {kernel.health/v1: {$remove: true}}}\n")
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/platform\ninterfaces: {use: {kernel.health/v1: {$remove: true}}}\n")
 		before := snapshotTree(t, parent)
 
 		resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -1185,7 +1181,7 @@ replace example.com/reserved-platform => ../platform
 	}
 }
 
-func TestResolvePreservesEveryInheritedUnknownInterfaceSource(t *testing.T) {
+func TestResolvePreservesEffectiveTemplateUnknownInterfaceSource(t *testing.T) {
 	t.Parallel()
 
 	parent := t.TempDir()
@@ -1200,8 +1196,9 @@ func TestResolvePreservesEveryInheritedUnknownInterfaceSource(t *testing.T) {
 		{root: alphaRoot, modulePath: "example.com/alpha"},
 	} {
 		writeModule(t, dependency.root, dependency.modulePath)
-		writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {require: [records.missing/v1]}}}}\n")
+		writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {require: [records.missing/v1]}\n")
 	}
+	writeFile(t, filepath.Join(zetaRoot, "plystra.yaml"), "template: example.com/alpha\ninterfaces: {require: [records.missing/v1]}\n")
 	writeFile(t, filepath.Join(applicationRoot, "go.mod"), `module example.com/unknown-interface-consumer
 
 go 1.26
@@ -1214,11 +1211,7 @@ require (
 replace example.com/alpha => ../alpha
 replace example.com/zeta => ../zeta
 `)
-	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `composition:
-  adopt:
-    - {module: example.com/alpha, export: defaults}
-    - {module: example.com/zeta, export: defaults}
-`)
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/zeta\n")
 	before := snapshotTree(t, parent)
 
 	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -1237,11 +1230,11 @@ replace example.com/zeta => ../zeta
 		t.Fatalf("UnknownInterfaceError = %#v", unknown)
 	}
 	sources := unknown.RequirementSources()
-	if len(sources) != 2 || sources[0].Kind != interfaceresolution.RequirementDeclaration || sources[0].ModulePath != "example.com/alpha" || sources[0].Path != "plystra.yaml" || sources[1].Kind != interfaceresolution.RequirementDeclaration || sources[1].ModulePath != "example.com/zeta" || sources[1].Path != "plystra.yaml" {
+	if len(sources) != 1 || sources[0].Kind != interfaceresolution.RequirementDeclaration || sources[0].ModulePath != "example.com/zeta" || sources[0].Path != "plystra.yaml" || sources[0].Line != 1 || sources[0].Column != 1 {
 		t.Fatalf("inherited unknown Interface sources = %#v", sources)
 	}
 	sources[0] = interfaceresolution.RequirementSource{}
-	if repeated := unknown.RequirementSources(); len(repeated) != 2 || repeated[0].ModulePath != "example.com/alpha" {
+	if repeated := unknown.RequirementSources(); len(repeated) != 1 || repeated[0].ModulePath != "example.com/zeta" {
 		t.Fatal("UnknownInterfaceError exposed mutable inherited source storage")
 	}
 	if after := snapshotTree(t, parent); !reflect.DeepEqual(after, before) {
@@ -1323,7 +1316,7 @@ replace example.com/interface-platform => ../platform
 	}
 }
 
-func TestResolveComposesExplicitlyAdoptedDirectAndTransitiveExports(t *testing.T) {
+func TestResolveComposesDirectAndTransitiveRootTemplates(t *testing.T) {
 	t.Parallel()
 
 	parent := t.TempDir()
@@ -1357,18 +1350,19 @@ func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error
 `)
 	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), `http:
   address: ":7101"
-composition:
-  exports:
-    application:
-      interfaces:
-        require: [audit.write/v1]
-        use:
-          audit.write/v1: example.com/transitive/audit.New
-      config:
-        example.com/transitive/audit.New:
-          endpoint: audit.internal
+timeouts: {startup: 1s}
+interfaces:
+  require: [audit.write/v1]
+  use:
+    audit.write/v1: example.com/transitive/audit.New
+  policies:
+    app.run/v1: {timeout: 9s}
+config:
+  example.com/transitive/audit.New:
+    endpoint: audit.internal
 `)
 	writeFile(t, filepath.Join(transitiveRoot, "plystra.production.yaml"), "this: [dependency overlay is deliberately invalid\n")
+	writeFile(t, filepath.Join(transitiveRoot, "deploy", "customer.yaml"), "this: [dependency replacement is deliberately invalid\n")
 
 	writeFile(t, filepath.Join(directRoot, "go.mod"), `module example.com/direct
 
@@ -1398,22 +1392,22 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 	return runv1.Response{}, nil
 }
 `)
-	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `http:
+	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `template: example.com/transitive
+http:
   address: ":7102"
   expose: {app.run/v1: {transport: connect}}
-composition:
-  exports:
-    application:
-      interfaces:
-        use:
-          app.run/v1: example.com/direct/app.New
-        policies:
-          app.run/v1: {timeout: 5s}
-      config:
-        example.com/direct/app.New:
-          message: direct-root
+timeouts: {startup: 2s}
+interfaces:
+  use:
+    app.run/v1: example.com/direct/app.New
+  policies:
+    app.run/v1: {timeout: 5s}
+config:
+  example.com/direct/app.New:
+    message: direct-root
 `)
 	writeFile(t, filepath.Join(directRoot, "plystra.production.yaml"), "this: [dependency overlay is deliberately invalid\n")
+	writeFile(t, filepath.Join(directRoot, "deploy", "customer.yaml"), "this: [dependency replacement is deliberately invalid\n")
 
 	writeModule(t, ordinaryRoot, "example.com/ordinary")
 	writeFile(t, filepath.Join(ordinaryRoot, "plystra.production.yaml"), "this: [ordinary module overlay is deliberately invalid\n")
@@ -1432,15 +1426,12 @@ replace example.com/direct => ../direct
 replace example.com/transitive => ../transitive
 replace example.com/ordinary => ../ordinary
 `)
-	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `http:
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `template: example.com/direct
+http:
   address: ":9090"
   expose: {app.run/v1: {transport: connect}}
 timeouts:
   startup: 7s
-composition:
-  adopt:
-    - {module: example.com/direct, export: application}
-    - {module: example.com/transitive, export: application}
 `)
 
 	applicationBefore := snapshotTree(t, applicationRoot)
@@ -1479,11 +1470,11 @@ composition:
 		t.Fatalf("dependency selections = %v", got)
 	}
 	roots := first.InterfaceResolution().Graph().Roots()
-	if len(roots) != 2 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{`plystra.yaml http.expose["app.run/v1"]`}) || roots[1].InterfaceID().String() != "audit.write/v1" || !reflect.DeepEqual(roots[1].Sources(), []string{`example.com/transitive@v1.4.0/plystra.yaml composition.exports["application"].interfaces.require["audit.write/v1"]`}) {
+	if len(roots) != 2 || roots[0].InterfaceID().String() != "app.run/v1" || !reflect.DeepEqual(roots[0].Sources(), []string{`plystra.yaml http.expose["app.run/v1"]`}) || roots[1].InterfaceID().String() != "audit.write/v1" || !reflect.DeepEqual(roots[1].Sources(), []string{`example.com/transitive@v1.4.0/plystra.yaml interfaces.require["audit.write/v1"]`}) {
 		t.Fatalf("current and inherited Interface roots = %#v", roots)
 	}
 	policies := first.Manifest().InterfacePolicies()
-	if len(policies) != 1 || policies[0].InterfaceID().String() != "app.run/v1" || policies[0].Timeout().String() != "5s" {
+	if len(policies) != 1 || policies[0].InterfaceID().String() != "app.run/v1" || policies[0].Timeout().String() != "5s" || policies[0].Source() != `example.com/direct@v1.2.0/plystra.yaml interfaces.policies["app.run/v1"]` {
 		t.Fatalf("dependency policies = %#v", policies)
 	}
 	for _, selection := range first.InterfaceResolution().Selections() {
@@ -1510,12 +1501,20 @@ composition:
 		`config["example.com/transitive/audit.New"]["endpoint"]`: "example.com/transitive@v1.4.0",
 	} {
 		records := compositionProvenance(first.Composition().Provenance(), path)
-		if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], module+`/plystra.yaml composition.exports["application"].`) {
+		if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.HasPrefix(records[0].Sources()[0], module+"/plystra.yaml ") {
 			t.Fatalf("dependency provenance for %s = %#v", path, records)
 		}
 	}
-	if records := compositionProvenance(first.Composition().Provenance(), `http.expose["app.run/v1"]`); len(records) != 0 {
-		t.Fatalf("dependency-owned exposure entered composition provenance: %#v", records)
+	if records := compositionProvenance(first.Composition().Provenance(), `http.expose["app.run/v1"]`); len(records) != 1 || !reflect.DeepEqual(records[0].Sources(), []string{`example.com/direct@v1.2.0/plystra.yaml http.expose["app.run/v1"]`}) {
+		t.Fatalf("template exposure baseline provenance = %#v", records)
+	}
+	if records := compositionProvenance(first.Composition().ResolutionSources(), `http.expose["app.run/v1"]`); len(records) != 0 {
+		t.Fatalf("replaced template exposure retained resolution authority: %#v", records)
+	}
+	for _, path := range []string{"http.address", "timeouts.startup"} {
+		if records := compositionProvenance(first.Composition().Provenance(), path); len(records) != 0 {
+			t.Fatalf("template process setting %s entered composition provenance: %#v", path, records)
+		}
 	}
 	if first.Composition().DependencyDigest() == "" || first.Composition().DependencyDigest() != second.Composition().DependencyDigest() || !reflect.DeepEqual(first.Composition().Provenance(), second.Composition().Provenance()) {
 		t.Fatalf("dependency composition is not deterministic: first %#v second %#v", first.Composition().Provenance(), second.Composition().Provenance())
@@ -1894,7 +1893,7 @@ replace example.com/template-origin => ../template
 
 replace github.com/plystra/official-implementation => ../official
 `)
-	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
+	writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/template-origin\ninterfaces: {require: [app.run/v1]}\n")
 	return parent, applicationRoot
 }
 
