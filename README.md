@@ -1808,6 +1808,11 @@ content-addressed build cache. CI package timeouts are 40 minutes on Windows
 and 20 minutes on Linux, macOS, and the Linux race job; these are cumulative
 package limits, not per-test limits.
 
+Lifecycle smoke tests compare the configuration root with the child working
+directory by filesystem identity, including symbolic directory paths and a
+stale inherited `PWD`. Equivalent macOS temporary-directory spellings do not
+indicate a wrong root; all smoke and baseline arguments remain checked.
+
 The checked-in JavaScript golden package is validated with:
 
 ```powershell

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -13,21 +14,53 @@ import (
 )
 
 func TestRunBuildsRunsAndCleansGeneratedApplication(t *testing.T) {
-	root := writeSmokeProject(t, `package main
+	const source = `package main
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+)
 
 func main() {
 	root, err := os.Getwd()
-	if err != nil || len(os.Args) != 6 || os.Args[1] != "--smoke" || os.Args[2] != "--configuration-root" || os.Args[3] != root || os.Args[4] != "--runtime-baseline" || os.Args[5] != "dist/runtime-baseline.json" {
+	if err != nil || len(os.Args) != 6 || os.Args[1] != "--smoke" || os.Args[2] != "--configuration-root" || !filepath.IsAbs(os.Args[3]) || os.Args[4] != "--runtime-baseline" || os.Args[5] != "dist/runtime-baseline.json" {
 		os.Exit(2)
 	}
-}
-`)
-	if err := projectsmoke.Run(t.Context(), projectsmoke.Options{Root: root}); err != nil {
-		t.Fatalf("Run: %v", err)
+	working, workingErr := os.Stat(root)
+	configured, configuredErr := os.Stat(os.Args[3])
+	if workingErr != nil || configuredErr != nil || !os.SameFile(working, configured) {
+		os.Exit(3)
 	}
-	assertSmokeOutputRemoved(t, root)
+}
+`
+	for _, mode := range []string{"direct", "symlink"} {
+		t.Run(mode, func(t *testing.T) {
+			root := writeSmokeProject(t, source)
+			selected := root
+			if mode == "symlink" {
+				selected = filepath.Join(t.TempDir(), "project")
+				if err := os.Symlink(root, selected); err != nil {
+					if runtime.GOOS == "windows" {
+						t.Skipf("directory symlink unavailable: %v", err)
+					}
+					t.Fatal(err)
+				}
+			}
+			var environment []string
+			for _, entry := range os.Environ() {
+				key, _, _ := strings.Cut(entry, "=")
+				if !strings.EqualFold(key, "PWD") {
+					environment = append(environment, entry)
+				}
+			}
+			// Force Getwd to use the filesystem instead of an inherited logical path.
+			environment = append(environment, "PWD="+t.TempDir())
+			if err := projectsmoke.Run(t.Context(), projectsmoke.Options{Root: selected, Environment: environment}); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			assertSmokeOutputRemoved(t, root)
+		})
+	}
 }
 
 func TestRunCleansAfterBuildFailure(t *testing.T) {
