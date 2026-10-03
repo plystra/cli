@@ -17,6 +17,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/resolutionevidence"
 	"golang.org/x/mod/module"
 )
@@ -327,7 +328,7 @@ func validateDormantSelectionContribution(value DormantSelectionContribution) er
 }
 
 func validateDormantSelectionSource(value DormantSelectionSource, removed bool) error {
-	if err := module.CheckPath(value.module); err != nil || !safeDormantSelectionSourcePath(value.path) || value.line != 1 || value.column != 1 {
+	if err := modulepath.CheckProject(value.module); err != nil || !safeDormantSelectionSourcePath(value.path) || value.line != 1 || value.column != 1 {
 		return errors.New("module or stable Project-relative location is invalid")
 	}
 	wantKind := "configuration-value"
@@ -473,7 +474,7 @@ func validateDormantConstructorIdentity(constructor, modulePath, moduleVersion, 
 	if err != nil || symbol.String() != constructor {
 		return fmt.Errorf("constructor %q is not canonical", constructor)
 	}
-	if err := module.CheckPath(modulePath); err != nil ||
+	if err := modulepath.CheckProject(modulePath); err != nil ||
 		symbol.PackagePath() != modulePath && !strings.HasPrefix(symbol.PackagePath(), modulePath+"/") {
 		return errors.New("constructor package is outside its owning module")
 	}

@@ -326,16 +326,42 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response,error) {retu
 }
 
 func TestGeneratedBootstrapLoadsSelfAdoptedTypedConfiguration(t *testing.T) {
+	for _, module := range []string{"example.com/adopted-runtime-config", "my-app"} {
+		for _, state := range []string{"active", "dormant"} {
+			t.Run(module+"/"+state, func(t *testing.T) { testGeneratedSelfAdoptedConfiguration(t, module, state == "dormant") })
+		}
+	}
+}
+
+func testGeneratedSelfAdoptedConfiguration(t *testing.T, module string, dormant bool) {
+	t.Helper()
 	root := t.TempDir()
-	const module = "example.com/adopted-runtime-config"
 	writeApplicationModule(t, root, module)
 	owner := writeConstructorConfigurationOwner(t, root, module, false)
 	implementation := filepath.Join(root, "configowner/implementation.go")
 	writeFile(t, implementation, strings.Replace(string(readAbsoluteFile(t, implementation)), "//plystra:implements configuration.owner/v1\nfunc New(Config) (*Service, error) { return &Service{}, nil }", "var Last Config\n//plystra:implements configuration.owner/v1\nfunc New(c Config) (*Service, error) { Last = c; return &Service{}, nil }", 1))
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [configuration.owner/v1]}\ncomposition:\n  exports:\n    common:\n      config:\n        "+owner+": {label: private-adopted-value}\n  adopt: [{module: "+module+", export: common}]\n")
-	var stdout, stderr bytes.Buffer
-	if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
-		t.Fatalf("generate = %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
+	interfaces := "interfaces: {require: [configuration.owner/v1]}"
+	if dormant {
+		interfaces = "interfaces: {use: {configuration.owner/v1: " + owner + "}}"
+	}
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "composition:\n  exports:\n    common:\n      "+interfaces+"\n      config:\n        "+owner+": {label: private-adopted-value}\n  adopt: [{module: "+module+", export: common}]\n")
+	selected := "composition: {adopt: [{module: " + module + ", export: common}]}\n"
+	writeFile(t, filepath.Join(root, "plystra.test.yaml"), selected)
+	writeFile(t, filepath.Join(root, "selected.yaml"), selected)
+	for _, selector := range [][]string{nil, {"--env", "test"}, {"--config", "selected.yaml"}} {
+		var stdout, stderr bytes.Buffer
+		if code := command.RunIn(append([]string{"generate"}, selector...), &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
+			t.Fatalf("generate %v = %d: %s\n%s", selector, code, stdout.Bytes(), stderr.Bytes())
+		}
+		before := snapshotTree(t, root)
+		stdout.Reset()
+		stderr.Reset()
+		if code := command.RunIn(append([]string{"generate", "--check"}, selector...), &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
+			t.Fatalf("generate --check %v = %d: %s\n%s", selector, code, stdout.Bytes(), stderr.Bytes())
+		}
+		if !reflect.DeepEqual(before, snapshotTree(t, root)) {
+			t.Fatal("self-adoption check changed project inputs")
+		}
 	}
 	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 	process.Dir, process.Env = root, goEnvironment(nil)
@@ -346,7 +372,7 @@ func TestGeneratedBootstrapLoadsSelfAdoptedTypedConfiguration(t *testing.T) {
 	if bytes.Contains(output, []byte("private-adopted-value")) {
 		t.Fatal("error leaked adopted value")
 	}
-	writeFile(t, filepath.Join(root, "adoption_test.go"), `package application_test
+	runtimeTest := strings.ReplaceAll(`package application_test
 import (
  "context"
  "os"
@@ -381,7 +407,12 @@ func TestSelfAdoption(t *testing.T) {
   })
  }
 }
-`)
+`, "example.com/adopted-runtime-config", module)
+	if dormant {
+		runtimeTest = strings.ReplaceAll(runtimeTest, "interfaces: {require: [configuration.owner/v1]}", interfaces)
+		runtimeTest = strings.ReplaceAll(runtimeTest, `configowner.Last.Label!="private-live-root-export"`, `configowner.Last.Label!=""`)
+	}
+	writeFile(t, filepath.Join(root, "adoption_test.go"), runtimeTest)
 	process = exec.CommandContext(t.Context(), "go", "test", "-race", "-mod=readonly", ".")
 	process.Dir, process.Env = root, goEnvironment(nil)
 	if output, err := process.CombinedOutput(); err != nil {

@@ -147,6 +147,38 @@ func TestEmptyDormantImplementationSelectionRecordIsCanonical(t *testing.T) {
 	}
 }
 
+func TestDormantProvenancePreservesShortProjectIdentity(t *testing.T) {
+	t.Parallel()
+	selection := testDormantImplementationSelection("alpha.read/v1", "alpha")
+	selection.constructor = "my-app/alpha.New"
+	selection.constructorModulePath = "my-app"
+	selection.constructorSource = "my-app@local/alpha/implementation.go:7:1"
+	selection.selectionDigest = dormantImplementationChoiceDigest(selection.interfaceID, selection.constructor)
+	selection.contributions[0].digest = selection.selectionDigest
+	selection.contributions[0].sources[0].module = "my-app"
+	if err := validateDormantImplementationSelection(selection); err != nil {
+		t.Fatal(err)
+	}
+	restored := restoreDormantImplementationSelections(dormantImplementationSelectionWires([]DormantImplementationSelection{selection}))
+	if !reflect.DeepEqual(restored, []DormantImplementationSelection{selection}) {
+		t.Fatal("dormant selection round trip changed the short identity")
+	}
+	configuration := testDormantConstructorConfiguration(selection)
+	for i := range configuration.fields {
+		configuration.fields[i].contributions[0].sources[0].module = "my-app"
+	}
+	if err := validateDormantConstructorConfiguration(configuration); err != nil {
+		t.Fatal(err)
+	}
+	if got := restoreDormantConstructorConfigurations(dormantConstructorConfigurationWires([]DormantConstructorConfiguration{configuration})); !reflect.DeepEqual(got, []DormantConstructorConfiguration{configuration}) {
+		t.Fatal("dormant configuration round trip changed the short identity")
+	}
+	selection.constructorModuleVersion = "v1.0.0"
+	if err := validateDormantImplementationSelection(selection); err == nil || !strings.Contains(err.Error(), "module version") {
+		t.Fatalf("versioned short module = %v", err)
+	}
+}
+
 func testDormantImplementationSelection(interfaceID, packageName string) DormantImplementationSelection {
 	constructor := "example.com/app/" + packageName + ".New"
 	digest := dormantImplementationChoiceDigest(interfaceID, constructor)

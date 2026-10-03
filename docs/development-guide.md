@@ -940,6 +940,12 @@ composition:
       export: application
 ```
 
+A Project can adopt its own root exports with its exact `go.mod` module identity,
+including a short local name such as `my-app` from `plystra new my-app`. Use that
+same identity in root, environment, or replacement adoptions. Short names do not
+alias dependency modules; dependency inventories retain standard Go Module path
+validation. Local Interface and constructor provenance preserve the exact name.
+
 For Project creation, the repeatable
 `--template <query> --adopt-export <name>` form writes those exact identities
 after validating that every named export exists in the resolved template.

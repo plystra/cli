@@ -202,6 +202,55 @@ func TestProvenanceRejectsIncompleteAndTamperedRecords(t *testing.T) {
 	}
 }
 
+func TestProvenancePreservesLocalProjectModuleIdentity(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		module, version string
+		invalid         bool
+	}{
+		{module: "my-app", version: "local"},
+		{module: "example.com/app", version: "local"},
+		{module: "example.com/app", version: "v1.2.3"},
+		{module: "my-app", version: "v1.2.3", invalid: true},
+		{module: "local/app", version: "local", invalid: true},
+		{module: "../my-app", version: "local", invalid: true},
+	} {
+		t.Run(tc.module+"@"+tc.version, func(t *testing.T) {
+			fixture := completeInput()
+			definition, constructor, binding := fixture.Interfaces[1], fixture.Constructors[0], fixture.Bindings[1]
+			definition.ModulePath, definition.ModuleVersion = tc.module, tc.version
+			definition.PackagePath = tc.module + "/interfaces/audit/v1"
+			constructor.ModulePath, constructor.ModuleVersion = tc.module, tc.version
+			constructor.Symbol = tc.module + "/audit.New"
+			constructor.ConcreteType = "*" + tc.module + "/audit.Service"
+			binding.Selection.ModulePath, binding.Selection.ModuleVersion = tc.module, tc.version
+			binding.Selection.Constructor, binding.Selection.ConcreteType = constructor.Symbol, constructor.ConcreteType
+			binding.RootSources, binding.RequiringConstructors = []string{"plystra.yaml interfaces.require"}, nil
+			input := interfaceprovenance.Input{
+				Interfaces: []interfaceprovenance.InterfaceInput{definition}, Constructors: []interfaceprovenance.ConstructorInput{constructor}, Bindings: []interfaceprovenance.BindingInput{binding},
+			}
+			value, err := interfaceprovenance.New(input)
+			if tc.invalid {
+				if !errors.Is(err, interfaceprovenance.ErrInvalid) {
+					t.Fatalf("New invalid identity = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := interfaceprovenance.Decode(value.RecordJSON())
+			if err != nil || !bytes.Equal(decoded.RecordJSON(), value.RecordJSON()) || decoded.Interfaces()[0].ModulePath() != tc.module || decoded.Constructors()[0].ModulePath() != tc.module {
+				t.Fatalf("Decode project provenance = %v", err)
+			}
+			input.Bindings[0].Selection.Constructor = "another-app/audit.New"
+			if _, err := interfaceprovenance.New(input); !errors.Is(err, interfaceprovenance.ErrInvalid) || !strings.Contains(err.Error(), "outside its owning module") {
+				t.Fatalf("out-of-module constructor = %v", err)
+			}
+		})
+	}
+}
+
 func TestProvenanceBindsAndBoundsAdmissionLimits(t *testing.T) {
 	base, err := interfaceprovenance.New(completeInput())
 	if err != nil {

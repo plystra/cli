@@ -140,6 +140,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"A composition.adopt sequence replaces the complete lower adoption set; [] clears it",
 		"Complete and sparse declarations have distinct layer identities",
 		"A replacement document never inherits root adoptions",
+		"Self-adoption uses the exact current go.mod module identity",
 		"Constructor objects reject a $remove key at their root even with siblings",
 		"Exact adoption identities remain provenance rather than runtime compatibility inputs",
 		"cannot contain the reserved one-entry $remove mapping",

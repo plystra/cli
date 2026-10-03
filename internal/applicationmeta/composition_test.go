@@ -3,6 +3,7 @@ package applicationmeta_test
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -502,6 +503,25 @@ func TestResolveAdoptedExportsReportsMissingExactIdentity(t *testing.T) {
 	}
 }
 
+func TestResolveAdoptedExportsKeepsShortProjectIdentityLocal(t *testing.T) {
+	t.Parallel()
+	root := mustParseManifest(t, "composition: {exports: {local: {interfaces: {require: [local.health/v1]}}}, adopt: [{module: my-app, export: local}]}\n")
+	adopted, err := applicationmeta.ResolveAdoptedExports("my-app", root, root, nil)
+	if err != nil || len(adopted) != 1 || adopted[0].ModulePath != "my-app" || adopted[0].ExportName != "local" {
+		t.Fatalf("self-adoption = %#v, %v", adopted, err)
+	}
+	for _, module := range []string{"other-app", "example.com/my-app"} {
+		_, err := applicationmeta.ResolveAdoptedExports(module, root, root, nil)
+		if !errors.Is(err, applicationmeta.ErrExportNotFound) {
+			t.Fatalf("unavailable short adoption in %q = %v", module, err)
+		}
+		_, err = applicationmeta.ResolveAdoptedExports(module, root, root, []applicationmeta.Dependency{{ModulePath: "my-app", Manifest: root}})
+		if !errors.Is(err, applicationmeta.ErrResolveAdoptedExports) || !strings.Contains(err.Error(), "dependency module path") {
+			t.Fatalf("short dependency inventory in %q = %v", module, err)
+		}
+	}
+}
+
 func TestApplyOverlayComposesExportAdoptionsAsCompleteOrSparseSets(t *testing.T) {
 	t.Parallel()
 
@@ -561,6 +581,40 @@ func TestSetExportAdoptionsWritesDeterministicExactSet(t *testing.T) {
 	}
 	if !strings.Contains(string(updated), "module: example.com/acme/platform\n      export: alpha") || !strings.Contains(string(updated), "module: example.com/acme/platform\n      export: zeta") {
 		t.Fatalf("updated YAML =\n%s", updated)
+	}
+}
+
+func TestExportAdoptionsAcceptProjectModuleIdentities(t *testing.T) {
+	t.Parallel()
+	for _, module := range []string{"my-app", "example.com/acme/app", "example.com/acme/app/v2", "gopkg.in/yaml.v3"} {
+		t.Run(module, func(t *testing.T) {
+			updated, err := applicationmeta.SetExportAdoptions([]byte("# retained\n{}\n"), module, []string{"local"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest := mustParseManifest(t, string(updated))
+			if !strings.Contains(string(updated), "# retained") || len(manifest.ExportAdoptions()) != 1 || manifest.ExportAdoptions()[0].ModulePath() != module {
+				t.Fatalf("adoption identity or comment lost: %s", updated)
+			}
+			for _, set := range []string{"[{module: " + module + ", export: local}]", "{add: [{module: " + module + ", export: local}]}", "{remove: [{module: " + module + ", export: local}]}"} {
+				if _, err := applicationmeta.ParseOverlaySource("plystra.test.yaml", []byte("composition: {adopt: "+set+"}\n")); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+	for _, module := range []string{"", ".", "..", "local/app", "example.com/acme/app/v1", "../app", "not a module", "example.com/app@v1.0.0", "NUL"} {
+		t.Run("invalid/"+module, func(t *testing.T) {
+			if _, err := applicationmeta.SetExportAdoptions([]byte("{}\n"), module, []string{"local"}); !errors.Is(err, applicationmeta.ErrSetExportAdoptions) {
+				t.Fatalf("SetExportAdoptions(%q) = %v", module, err)
+			}
+			entry := "{module: " + strconv.Quote(module) + ", export: local}"
+			for _, set := range []string{"[" + entry + "]", "{add: [" + entry + "]}", "{remove: [" + entry + "]}"} {
+				if _, err := applicationmeta.Parse([]byte("composition: {adopt: " + set + "}\n")); !errors.Is(err, applicationmeta.ErrInvalidManifest) {
+					t.Fatalf("Parse invalid adoption %q = %v", set, err)
+				}
+			}
+		})
 	}
 }
 

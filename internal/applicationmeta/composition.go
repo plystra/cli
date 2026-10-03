@@ -380,7 +380,7 @@ func parseExportAdoptionSequence(node *yaml.Node, source, path string) ([]Export
 		}
 		modulePath, moduleErr := strictString(fields["module"])
 		exportName, exportErr := strictString(fields["export"])
-		if moduleErr != nil || module.CheckPath(modulePath) != nil {
+		if moduleErr != nil || modulepath.CheckProject(modulePath) != nil {
 			return nil, invalid("%s[%d].module must be a valid Go Module path", path, index)
 		}
 		if exportErr != nil || CheckExportName(exportName) != nil {
@@ -475,7 +475,7 @@ func ResolveAdoptedExports(currentProjectModule string, root, selected Manifest,
 // SetExportAdoptions writes one deterministic complete adoption set while
 // preserving unrelated root-document content and comments.
 func SetExportAdoptions(data []byte, modulePath string, exportNames []string) ([]byte, error) {
-	if module.CheckPath(modulePath) != nil {
+	if modulepath.CheckProject(modulePath) != nil {
 		return nil, fmt.Errorf("%w: module %q is not a valid Go Module path", ErrSetExportAdoptions, modulePath)
 	}
 	names := append([]string(nil), exportNames...)

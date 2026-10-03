@@ -395,7 +395,12 @@ Dependency environment overlays are never inspected, and a markerless Go
 dependency remains unscanned.
 
 Only exact `{module, export}` identities in the selected current Project's
-`composition.adopt` set activate reusable configuration. This installed CLI
+`composition.adopt` set activate reusable configuration. Self-adoption uses the
+exact current module identity from `go.mod`, including the short `my-app` name
+created by `plystra new my-app` without `--module`. Short names never alias a
+dependency module, and dependency inventories still require standard Go Module
+paths. Local Interface and constructor provenance preserve the short identity.
+This installed CLI
 inventories a syntactically valid Resource-bearing export and its currently
 supported `interfaces` and `config` fragment without activating it while it
 remains unadopted. Exact adoption fails before any portion contributes,

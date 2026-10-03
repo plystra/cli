@@ -34,13 +34,13 @@ import (
 )
 
 const (
-	compiledRuntimeContract = "sha256:4118bef26f35392f01ab7b439e13a9e43a9d81840956e8a36a95ddb514fb0fde"
+	compiledRuntimeContract = "sha256:2cfff1ce0a4077615aac1f52330ceeaa2cce0a384bc41f38a732263ab3dc5ea4"
 	defaultRuntimeDocument  = "plystra.yaml"
 	defaultStartupTimeout   = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
-	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":10}"
-	compiledApplicationModelCompatibilityDigest = "sha256:679bb8b341bdadd3f2252a383495d8328ed96258c6bbadffd185e6fc7385bb66"
-	compiledApplicationModelDigest              = "sha256:1cdf66a3fd2905cdbd9a56c73873e7e72525e8db9dbda8aed7a34a7fe5ad16e4"
+	compiledApplicationModelCompatibilityJSON   = "{\"application_model_digest\":\"sha256:041d9d31cfee5f6d6b048cf5fa933a5edbf483332fec2d3fa68e38c212f48149\",\"projection\":{\"http_cors\":null,\"http_exposures\":[],\"implementation_choices\":[],\"interface_policies\":[],\"interface_requirements\":[]},\"version\":10}"
+	compiledApplicationModelCompatibilityDigest = "sha256:26c2abe43bb6da789a8cc622ab719feb1bb2a472a3c024eda4b0a5e0d9197c12"
+	compiledApplicationModelDigest              = "sha256:041d9d31cfee5f6d6b048cf5fa933a5edbf483332fec2d3fa68e38c212f48149"
 )
 
 var (

@@ -21,6 +21,7 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/invocationpolicy"
+	"github.com/plystra/cli/internal/modulepath"
 	"golang.org/x/mod/module"
 )
 
@@ -783,7 +784,7 @@ func validateInterface(value wireInterface, intrinsic bool) error {
 	if err := module.CheckImportPath(value.PackagePath); err != nil {
 		return fmt.Errorf("package path %q is invalid", value.PackagePath)
 	}
-	if err := module.CheckPath(value.ModulePath); err != nil {
+	if err := modulepath.CheckProject(value.ModulePath); err != nil {
 		return fmt.Errorf("module path %q is invalid", value.ModulePath)
 	}
 	if !validModuleVersion(value.ModulePath, value.ModuleVersion) {
@@ -842,7 +843,7 @@ func validateSelection(value wireSelection) error {
 	if err != nil || symbol.String() != value.Constructor {
 		return fmt.Errorf("selected constructor %q is not canonical", value.Constructor)
 	}
-	if err := module.CheckPath(value.ModulePath); err != nil || symbol.PackagePath() != value.ModulePath && !strings.HasPrefix(symbol.PackagePath(), value.ModulePath+"/") {
+	if err := modulepath.CheckProject(value.ModulePath); err != nil || symbol.PackagePath() != value.ModulePath && !strings.HasPrefix(symbol.PackagePath(), value.ModulePath+"/") {
 		return errors.New("selected constructor package is outside its owning module")
 	}
 	if !validModuleVersion(value.ModulePath, value.ModuleVersion) {
