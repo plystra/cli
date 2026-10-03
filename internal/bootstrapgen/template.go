@@ -6,7 +6,7 @@ const runtimeTemplateSupport = `
 func composeRuntimeTemplateDocument(baseline runtimebaseline.Document, rootData, selectedData, overlayData []byte) ([]byte, error) {
 	root, err := decodeRuntimeDocument(rootData, defaultRuntimeDocument)
 	if err != nil { return nil, err }
-	rootFields, err := runtimeMapping(root, "root configuration", runtimeKeySet("template", "http", "timeouts", "interfaces", "config", "resources", "data"))
+	rootFields, err := runtimeMapping(root, "root configuration", runtimeKeySet("template", "http", "timeouts", "capabilities", "interfaces", "config", "resources", "data"))
 	if err != nil { return nil, err }
 	relationship := ""
 	if node := rootFields["template"]; node != nil {
@@ -90,20 +90,6 @@ func runtimeApplicationLayer(document *yaml.Node, inherited bool) (map[string]*y
 		http, err := runtimeOptionalMapping(fields["http"], "template http", runtimeKeySet("cors", "expose"))
 		if err != nil { return nil, err }
 		if fields["http"] != nil { fields["http"] = runtimeMappingNode(http) }
-	}
-	// Validate even values subsequently replaced or removed. Decoder diagnostics
-	// can contain private scalars, so report only the configuration class.
-	stack := []*yaml.Node{document}
-	for len(stack) > 0 {
-		node := stack[len(stack)-1]; stack = stack[:len(stack)-1]
-		if node.Kind == yaml.MappingNode {
-			if _, err := runtimeMapping(node, "configuration mapping", nil); err != nil { return nil, runtimeConfigurationError("configuration mappings require unique string keys") }
-		}
-		if node.Kind == yaml.ScalarNode {
-			var value any
-			if err := node.Decode(&value); err != nil { return nil, runtimeConfigurationError("configuration contains an invalid scalar") }
-		}
-		stack = append(stack, node.Content...)
 	}
 	return fields, nil
 }

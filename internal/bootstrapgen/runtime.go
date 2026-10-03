@@ -750,25 +750,43 @@ func decodeRuntimeDocument(data []byte, source string) (*yaml.Node, error) {
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
 		return nil, runtimeConfigurationError("%s root must be a mapping", source)
 	}
-	if err := rejectRuntimeYAMLReferences(&document); err != nil {
+	nodes := 0
+	if err := validateRuntimeRawNode(document.Content[0], &nodes, 0); err != nil {
 		return nil, err
 	}
 	return document.Content[0], nil
 }
 
-func rejectRuntimeYAMLReferences(root *yaml.Node) error {
-	stack := []*yaml.Node{root}
-	for len(stack) > 0 {
-		last := len(stack) - 1
-		node := stack[last]
-		stack = stack[:last]
-		if node == nil {
-			continue
+// Raw syntax remains mandatory even when a selector excludes application values.
+// Never expose decoder diagnostics or duplicate keys, which may be private.
+func validateRuntimeRawNode(node *yaml.Node, nodes *int, depth int) error {
+	if node == nil || depth > 64 || *nodes >= 65536 { return runtimeConfigurationError("configuration exceeds YAML traversal bounds") }
+	(*nodes)++
+	if node.Kind == yaml.AliasNode || node.Alias != nil || node.Anchor != "" {
+		return runtimeConfigurationError("YAML anchors and aliases are not allowed")
+	}
+	start, step := 0, 1
+	switch node.Kind {
+	case yaml.MappingNode:
+		if len(node.Content)%2 != 0 { return runtimeConfigurationError("configuration contains an invalid mapping") }
+		if _, err := runtimeMapping(node, "configuration mapping", nil); err != nil { return runtimeConfigurationError("configuration mappings require unique string keys") }
+		for index := 0; index < len(node.Content); index += 2 {
+			key := node.Content[index]
+			if key.Alias != nil || key.Anchor != "" { return runtimeConfigurationError("YAML anchors and aliases are not allowed") }
 		}
-		if node.Kind == yaml.AliasNode || node.Alias != nil || node.Anchor != "" {
-			return runtimeConfigurationError("YAML anchors and aliases are not allowed")
+		start, step = 1, 2
+	case yaml.SequenceNode:
+	case yaml.ScalarNode:
+		var value any
+		if err := node.Decode(&value); err != nil { return runtimeConfigurationError("configuration contains an invalid scalar") }
+		return nil
+	default:
+		return runtimeConfigurationError("configuration contains an invalid YAML node")
+	}
+	for index := start; index < len(node.Content); index += step {
+		if err := validateRuntimeRawNode(node.Content[index], nodes, depth+1); err != nil {
+			return err
 		}
-		stack = append(stack, node.Content...)
 	}
 	return nil
 }
@@ -900,39 +918,33 @@ func normalizeRuntimeExposure(node *yaml.Node, path string) (*yaml.Node, error) 
 }
 
 func mergeRuntimeCORS(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
-	if upperNode != nil && runtimeNull(upperNode) {
-		return nil, false, nil
-	}
-	if lowerNode != nil && runtimeNull(lowerNode) {
-		lowerNode = nil
-	}
-	if lowerNode == nil && upperNode == nil {
-		return nil, false, nil
-	}
-	allowed := runtimeKeySet("allowed_origins", "allow_credentials")
-	lower, err := runtimeOptionalMapping(lowerNode, "http.cors", allowed)
-	if err != nil {
-		return nil, false, err
-	}
-	upper, err := runtimeOptionalMapping(upperNode, "http.cors", allowed)
-	if err != nil {
-		return nil, false, err
-	}
-	origins, hasOrigins, err := selectRuntimeValue(lower["allowed_origins"], upper["allowed_origins"], "http.cors.allowed_origins", validateRuntimeOrigins)
-	if err != nil {
-		return nil, false, err
-	}
-	credentials, hasCredentials, err := selectRuntimeValue(lower["allow_credentials"], upper["allow_credentials"], "http.cors.allow_credentials", validateRuntimeBoolean)
-	if err != nil {
-		return nil, false, err
-	}
 	result := make(map[string]*yaml.Node)
-	if hasOrigins {
-		result["allowed_origins"] = origins
+	present := false
+	for _, layer := range []*yaml.Node{lowerNode, upperNode} {
+		if layer == nil { continue }
+		if runtimeRemovalMapping(layer) {
+			clear(result)
+			present = false
+			continue
+		}
+		fields, err := runtimeMapping(layer, "http.cors", runtimeKeySet("allowed_origins", "allow_credentials"))
+		if err != nil { return nil, false, err }
+		present = true
+		for _, field := range []string{"allowed_origins", "allow_credentials"} {
+			value := fields[field]
+			if value == nil { continue }
+			if runtimeRemovalMapping(value) {
+				delete(result, field)
+				continue
+			}
+			validate := validateRuntimeBoolean
+			if field == "allowed_origins" { validate = validateRuntimeOrigins }
+			normalized, err := validate(value, "http.cors."+field)
+			if err != nil { return nil, false, err }
+			result[field] = normalized
+		}
 	}
-	if hasCredentials {
-		result["allow_credentials"] = credentials
-	}
+	if !present { return nil, false, nil }
 	return runtimeMappingNode(result), true, nil
 }
 
