@@ -378,6 +378,7 @@ func canonicalInterfaceArtifactClass(path string) string {
 	case strings.HasPrefix(path, "generated/go/application/"),
 		strings.HasPrefix(path, "generated/go/bootstrap/"),
 		strings.HasPrefix(path, "generated/go/internal/constructorconfig/"),
+		path == "generated/go/internal/modulepath/path_gen.go",
 		strings.HasPrefix(path, "generated/go/internal/privatefile/"),
 		strings.HasPrefix(path, "generated/go/internal/runtimebaseline/"),
 		strings.HasPrefix(path, "generated/go/configuration/"):
