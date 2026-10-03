@@ -2515,6 +2515,23 @@ func setEnvironmentValue(environment []string, wanted, value string) []string {
 	return append(result, wanted+"="+value)
 }
 
+func TestIsolatedGoEnvironmentRetainsBuildCache(t *testing.T) {
+	buildCache := filepath.Join(t.TempDir(), "shared-build-cache")
+	t.Setenv("GOCACHE", buildCache)
+	proxyRoot := t.TempDir()
+	first := isolatedGoEnvironment(t, proxyRoot)
+	second := isolatedGoEnvironment(t, proxyRoot)
+	if environmentValue(t, first, "GOCACHE") != buildCache || environmentValue(t, second, "GOCACHE") != buildCache {
+		t.Fatal("fixture replaced the shared content-addressed build cache")
+	}
+	if environmentValue(t, first, "GOMODCACHE") == environmentValue(t, second, "GOMODCACHE") {
+		t.Fatal("fixtures share a module cache")
+	}
+	if proxy := environmentValue(t, first, "GOPROXY"); !strings.HasPrefix(proxy, "file:") || strings.Contains(proxy, ",") || strings.Contains(proxy, "|") {
+		t.Fatalf("fixture proxy permits external fallback: %q", proxy)
+	}
+}
+
 func isolatedGoEnvironment(t *testing.T, proxyRoot string) []string {
 	t.Helper()
 	proxyPath := filepath.ToSlash(proxyRoot)
@@ -2523,7 +2540,6 @@ func isolatedGoEnvironment(t *testing.T, proxyRoot string) []string {
 	}
 	proxyURL := (&url.URL{Scheme: "file", Path: proxyPath}).String()
 	overrides := map[string]string{
-		"GOCACHE":     filepath.Join(t.TempDir(), "build-cache"),
 		"GOENV":       "off",
 		"GOFLAGS":     "-modcacherw",
 		"GOMODCACHE":  filepath.Join(t.TempDir(), "module-cache"),

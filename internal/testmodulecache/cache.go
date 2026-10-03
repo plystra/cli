@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -13,8 +14,10 @@ import (
 
 var downloads sync.Map
 
-// Ensure downloads each exact module query once before a test fixture disables
-// module lookup or copies the module into an isolated file proxy.
+// Ensure downloads each module query once before a test fixture disables module
+// lookup or copies the module into an isolated file proxy. "all" prepares the
+// calling test module's complete selected dependency graph using temporary module
+// files so dependency-only checksums do not modify the checkout.
 func Ensure(t testing.TB, queries ...string) {
 	t.Helper()
 	for _, query := range queries {
@@ -30,6 +33,26 @@ func ensure(t testing.TB, query string) {
 	download := sync.OnceValue(func() error {
 		command := exec.Command("go", "mod", "download", query)
 		command.Env = goEnvironment()
+		if query == "all" {
+			locate := exec.Command("go", "env", "GOMOD")
+			locate.Env = command.Env
+			output, err := locate.Output()
+			if err != nil {
+				return fmt.Errorf("locate test module: %w", err)
+			}
+			source := strings.TrimSpace(string(output))
+			target := filepath.Join(t.TempDir(), "go.mod")
+			for _, extension := range []string{".mod", ".sum"} {
+				data, err := os.ReadFile(strings.TrimSuffix(source, ".mod") + extension)
+				if err != nil {
+					return fmt.Errorf("read test module %s: %w", extension, err)
+				}
+				if err := os.WriteFile(strings.TrimSuffix(target, ".mod")+extension, data, 0o600); err != nil {
+					return fmt.Errorf("prepare test module %s: %w", extension, err)
+				}
+			}
+			command.Args = []string{"go", "mod", "download", "-modfile=" + target, query}
+		}
 		if err := command.Run(); err != nil {
 			return fmt.Errorf("go mod download %s: %w", query, err)
 		}

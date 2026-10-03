@@ -7,9 +7,11 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/command"
+	"github.com/plystra/cli/internal/testmodulecache"
 )
 
 func TestGeneratedInvocationLifetimeTelemetry(t *testing.T) {
+	testmodulecache.Ensure(t, "go.opentelemetry.io/otel/metric/x@v0.68.0")
 	root := generateRetryProject(t)
 	dependency := exec.CommandContext(t.Context(), "go", "get", "go.opentelemetry.io/otel/sdk/metric@v1.46.0")
 	dependency.Dir, dependency.Env = root, goEnvironment(map[string]string{"GOWORK": "off"})

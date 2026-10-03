@@ -40,6 +40,7 @@ import (
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/resolutionevidence"
 	"github.com/plystra/cli/internal/testkernel"
+	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/transporttoolchain"
 )
 
@@ -3906,6 +3907,7 @@ replace github.com/golang/protobuf => %s
 
 func downloadModuleDependencies(t testing.TB, root string) {
 	t.Helper()
+	testmodulecache.Ensure(t, "all", "github.com/go-logr/logr@v1.2.2")
 	command := exec.CommandContext(t.Context(), "go", "mod", "download", "all")
 	command.Dir = root
 	command.Env = mergedEnvironment(map[string]string{

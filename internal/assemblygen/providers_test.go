@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/privatefile"
 	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/testkernel"
+	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/transportprovenance"
 	"github.com/plystra/kernel/plugin/manifest"
 )
@@ -322,6 +323,7 @@ replace github.com/plystra/kernel => %s
 
 func tidyGeneratedModule(t *testing.T, ctx context.Context, root string) {
 	t.Helper()
+	testmodulecache.Ensure(t, "all", "github.com/go-logr/logr@v1.2.2")
 	command := exec.CommandContext(ctx, "go", "mod", "tidy")
 	command.Dir, command.Env = root, isolatedGoEnvironment(os.Environ())
 	if output, err := command.CombinedOutput(); err != nil {

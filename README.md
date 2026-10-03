@@ -1779,14 +1779,25 @@ end-of-Gate-9 command surface, generated ownership rules, operational examples,
 troubleshooting, and intentionally deferred roadmap work.
 
 ```powershell
-go test ./...
-go test -race ./...
+$env:GOWORK = "off"
+go mod download all
+go mod download github.com/go-logr/logr@v1.2.2 go.opentelemetry.io/otel/metric/x@v0.68.0
+go test -timeout=40m ./...
+go test -race -timeout=40m ./...
 go vet ./...
 go run ./cmd/plystra --help
 go test ./internal/generationresolution -run '^$' -bench '^BenchmarkGenerationFixedPoint$' -benchmem
 go test ./internal/clientgen -run '^$' -bench 'BenchmarkGenerated(CanonicalInvocation|AliasForwarding)$' -benchmem
 go test ./internal/httpgen -run '^$' -bench '^BenchmarkGeneratedHTTPInvocation$' -benchmem
 ```
+
+CI prepares dependencies before offline generated-Project tests, including the
+older `logr` graph metadata and the telemetry SDK's test-only metric module.
+These fixtures also prepare their dependencies when run independently. Scaffold
+tests retain isolated module caches and file proxies while reusing Go's
+content-addressed build cache. CI package timeouts are 40 minutes on Windows
+and 20 minutes on Linux, macOS, and the Linux race job; these are cumulative
+package limits, not per-test limits.
 
 The checked-in JavaScript golden package is validated with:
 
