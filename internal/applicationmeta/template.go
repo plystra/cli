@@ -62,7 +62,7 @@ func validateRootEnvelope(root *yaml.Node, values map[string]*yaml.Node) error {
 		switch key {
 		case "template", "http", "timeouts", "capabilities", "interfaces", "config", "resources", "data":
 		default:
-			return invalid("unknown key %q", key)
+			return invalid("unknown root field")
 		}
 	}
 	return nil

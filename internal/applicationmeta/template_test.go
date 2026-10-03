@@ -89,6 +89,36 @@ func TestReplacementRootMetadataExcludesApplicationValues(t *testing.T) {
 	}
 }
 
+func TestRootEnvelopeErrorsRedactUnknownFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, source string
+		parse        func(string, []byte) (applicationmeta.Manifest, error)
+	}{
+		{"current root", "plystra.yaml", applicationmeta.ParseSource},
+		{"current replacement", "deploy/customer.yaml", applicationmeta.ParseSource},
+		{"replacement root metadata", "plystra.yaml", applicationmeta.ParseRootMetadataSource},
+		{"template root", "plystra.yaml", applicationmeta.ParseTemplateSource},
+		{"environment overlay", "plystra.production.yaml", applicationmeta.ParseOverlaySource},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range []string{"private_unknown_root_field", "another_private_root_field", "composition"} {
+				input := []byte("http: {}\n" + key + ": PRIVATE_ROOT_VALUE\n")
+				before := append([]byte(nil), input...)
+				_, err := tc.parse(tc.source, input)
+				if !errors.Is(err, applicationmeta.ErrInvalidManifest) || err.Error() != applicationmeta.ErrInvalidManifest.Error()+": unknown root field" {
+					t.Fatalf("unknown root field was not rejected with a redacted diagnostic: %v", err)
+				}
+				if !bytes.Equal(input, before) {
+					t.Fatal("rejected document was modified")
+				}
+			}
+			if _, err := tc.parse(tc.source, []byte("http: {}\n")); err != nil {
+				t.Fatalf("recognized root field rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestPrivateTemplateIncludesReusableValuesButNoProcessInputs(t *testing.T) {
 	input := []byte("# do not deploy this comment\ntemplate: example.com/oldest\nhttp:\n  address: {invalid: process-shape}\n  cors: {allowed_origins: [https://app.example]}\n  expose: {local.health/v1: {transport: connect}}\ntimeouts: {startup: [invalid, process-shape]}\ninterfaces: {require: {remove: [old.health/v1]}, use: {local.health/v1: example.com/base/local.New}}\nconfig: {example.com/base/local.New: {password: {env: PRIVATE_TARGET}, field: {$remove: true}}}\n")
 	before := append([]byte(nil), input...)
