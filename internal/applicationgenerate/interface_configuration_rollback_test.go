@@ -54,15 +54,15 @@ require example.com/platform v1.0.0
 replace example.com/platform => %s
 `, filepath.ToSlash(dependencyRoot))
 			writeFile(t, goModPath, goMod)
-			adoption := "composition: {adopt: [{module: example.com/platform, export: defaults}]}\n"
-			writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n{}\n")
+			relationship := "template: example.com/platform\n"
+			writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n"+relationship)
 			switch {
 			case test.environmentName != "":
-				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Sparse production configuration.\n"+adoption)
+				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Sparse production configuration.\n{}\n")
 			case test.configuration != "":
-				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Complete customer configuration.\n"+adoption)
+				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Complete customer configuration.\n{}\n")
 			default:
-				writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n"+adoption)
+				writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n"+relationship)
 			}
 
 			environment := goEnvironment(map[string]string{
@@ -138,12 +138,9 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 }
 
 func interfaceRollbackConfiguration(selectedConstructor string) string {
-	return fmt.Sprintf(`composition:
-  exports:
-    defaults:
-      interfaces:
-        require: [email.send/v1]
-        use:
-          email.send/v1: %s
+	return fmt.Sprintf(`interfaces:
+  require: [email.send/v1]
+  use:
+    email.send/v1: %s
 `, selectedConstructor)
 }

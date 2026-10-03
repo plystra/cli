@@ -25,7 +25,7 @@ func TestGenerateDetectsConcurrentRuntimeOnlyChanges(t *testing.T) {
 
 func testGenerateDetectsConcurrentPrivateValueChanges(t *testing.T, value string) {
 	t.Helper()
-	for _, mode := range []string{"default", "environment", "replacement", "dependency", "inert-dependency"} {
+	for _, mode := range []string{"default", "environment", "replacement", "template", "ordinary-dependency"} {
 		t.Run(mode, func(t *testing.T) {
 			const modulePath = "example.com/acme/private-secret-reference"
 			root := t.TempDir()
@@ -47,20 +47,20 @@ func testGenerateDetectsConcurrentPrivateValueChanges(t *testing.T, value string
 				sourcePath = options.ConfigurationPath
 				manifestPath = filepath.Join(root, filepath.FromSlash(sourcePath))
 				writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-			case "dependency", "inert-dependency":
-				sourceModule = "example.com/acme/private-secret-export"
+			case "template", "ordinary-dependency":
+				sourceModule = "example.com/acme/private-secret-template"
 				dependency := t.TempDir()
 				writeFile(t, filepath.Join(dependency, "go.mod"), "module "+sourceModule+"\n\ngo 1.26\n")
-				writeFile(t, filepath.Join(dependency, "export.go"), "package exports\n")
+				writeFile(t, filepath.Join(dependency, "template.go"), "package template\n")
 				writeFile(t, filepath.Join(root, "dependency.go"), "package app\nimport _ \""+sourceModule+"\"\n")
 				writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+sourceModule+" v0.0.0\nreplace "+sourceModule+" => "+filepath.ToSlash(dependency)+"\n")
 				selected := "interfaces: {use: {configuration.owner/v1: " + owner + "}}\n"
-				if mode == "dependency" {
-					selected += "composition: {adopt: [{module: " + sourceModule + ", export: shared}]}\n"
+				if mode == "template" {
+					selected += "template: " + sourceModule + "\n"
 				}
 				writeFile(t, filepath.Join(root, "plystra.yaml"), selected)
 				manifestPath = filepath.Join(dependency, "plystra.yaml")
-				first = "composition:\n  exports:\n    shared:\n      " + configured
+				first = configured
 			}
 			second := strings.ReplaceAll(first, "PRIVATE_FIRST", "PRIVATE_SECOND")
 			writeFile(t, manifestPath, first)
@@ -73,11 +73,17 @@ func testGenerateDetectsConcurrentPrivateValueChanges(t *testing.T, value string
 				return nil
 			}
 			_, err := applicationgenerate.Generate(t.Context(), options)
-			if !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
-				t.Fatalf("concurrent private value edit = %v", err)
+			if mode == "ordinary-dependency" {
+				if err != nil {
+					t.Fatalf("inactive dependency edit interrupted generation: %v", err)
+				}
+			} else {
+				if !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
+					t.Fatalf("concurrent private value edit = %v", err)
+				}
+				assertConcurrentGenerationSource(t, err, sourceModule, sourcePath, "configuration-declaration")
 			}
-			assertConcurrentGenerationSource(t, err, sourceModule, sourcePath, "configuration-declaration")
-			if strings.Contains(err.Error(), "PRIVATE_") || string(readAbsoluteFile(t, manifestPath)) != second {
+			if err != nil && strings.Contains(err.Error(), "PRIVATE_") || string(readAbsoluteFile(t, manifestPath)) != second {
 				t.Fatal("concurrent reference was exposed or overwritten")
 			}
 			if !reflect.DeepEqual(snapshotGenerated(t, root), before) {
@@ -94,14 +100,21 @@ func testGenerateDetectsConcurrentPrivateValueChanges(t *testing.T, value string
 	}
 }
 
-func TestGenerateDetectsConcurrentUnvalidatedExportChange(t *testing.T) {
+func TestGeneratePreservesConcurrentInactiveDependencyConfigurationChange(t *testing.T) {
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
-			const modulePath = "example.com/acme/private-inert-export"
+			const modulePath = "example.com/acme/private-inert-dependency"
+			const dependencyModule = "example.com/acme/inactive-configuration"
 			root := t.TempDir()
 			writeApplicationModule(t, root, modulePath)
-			manifestPath := filepath.Join(root, "plystra.yaml")
-			first := "composition: {exports: {inert: {config: {example.com/unavailable/service.New: {password: {env: PRIVATE_FIRST}}}}}}\n"
+			dependency := t.TempDir()
+			writeModule(t, dependency, dependencyModule, "")
+			writeFile(t, filepath.Join(dependency, "dependency.go"), "package dependency\n")
+			writeFile(t, filepath.Join(root, "dependency.go"), "package app\nimport _ \""+dependencyModule+"\"\n")
+			writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+dependencyModule+" v1.0.0\nreplace "+dependencyModule+" => "+filepath.ToSlash(dependency)+"\n")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			manifestPath := filepath.Join(dependency, "plystra.yaml")
+			first := "config: {example.com/unavailable/service.New: {password: {env: PRIVATE_FIRST}}}\n"
 			second := strings.ReplaceAll(first, "PRIVATE_FIRST", "PRIVATE_SECOND")
 			writeFile(t, manifestPath, first)
 			options := applicationgenerate.Options{Start: root, Environment: goEnvironment(nil)}
@@ -121,13 +134,8 @@ func TestGenerateDetectsConcurrentUnvalidatedExportChange(t *testing.T) {
 				writeFile(t, manifestPath, second)
 				return nil
 			}
-			if _, err := applicationgenerate.Generate(t.Context(), options); !errors.Is(err, applicationgenerate.ErrConcurrentChange) {
-				t.Fatalf("concurrent unvalidated export edit = %v", err)
-			} else {
-				assertConcurrentGenerationSource(t, err, modulePath, "plystra.yaml", "configuration-declaration")
-				if strings.Contains(err.Error(), "PRIVATE_") {
-					t.Fatal("concurrent edit diagnostic exposed private data")
-				}
+			if _, err := applicationgenerate.Generate(t.Context(), options); err != nil {
+				t.Fatalf("concurrent inactive dependency edit = %v", err)
 			}
 			if got := string(readAbsoluteFile(t, manifestPath)); got != second {
 				t.Fatal("concurrent edit was not preserved")

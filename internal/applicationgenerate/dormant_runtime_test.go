@@ -13,14 +13,27 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/runtimebaseline"
-	"go.yaml.in/yaml/v3"
 )
 
 func TestGeneratedBinaryValidatesDormantConfiguration(t *testing.T) {
 	const module = "example.com/dormant-runtime"
 	const symbol = module + "/configowner.New"
-	root := filepath.Join(t.TempDir(), "source")
+	const oldest = "example.com/dormant-oldest"
+	const nearest = "example.com/dormant-nearest"
+	const relationship = "template: " + nearest + "\n"
+	sources := filepath.Join(t.TempDir(), "sources")
+	root := filepath.Join(sources, "application")
 	writeApplicationModule(t, root, module)
+	for _, name := range []string{oldest, nearest} {
+		templateRoot := filepath.Join(sources, filepath.Base(name))
+		writeModule(t, templateRoot, name, "")
+		document := "{}\n"
+		if name == nearest {
+			document = "template: " + oldest + "\n"
+		}
+		writeFile(t, filepath.Join(templateRoot, "plystra.yaml"), document)
+		writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+name+" v1.0.0\nreplace "+name+" => "+filepath.ToSlash(templateRoot)+"\n")
+	}
 	writeConstructorConfigurationOwner(t, root, module, true)
 	implementation := filepath.Join(root, "configowner/implementation.go")
 	source := string(readAbsoluteFile(t, implementation))
@@ -34,7 +47,7 @@ func TestGeneratedBinaryValidatesDormantConfiguration(t *testing.T) {
 	writeFile(t, alternative, strings.Replace(string(readAbsoluteFile(t, alternative)), "New(Config)", "New()", 1))
 	choice := "interfaces: {use: {configuration.owner/v1: " + symbol + "}}\n"
 	config := func(value string) string { return "config: {" + symbol + ": " + value + "}\n" }
-	writeFile(t, filepath.Join(root, "plystra.yaml"), choice+config("{endpoint: private-endpoint, password: {env: PRIVATE_DORMANT_SECRET}}"))
+	writeFile(t, filepath.Join(root, "plystra.yaml"), relationship+choice+config("{endpoint: private-endpoint, password: {env: PRIVATE_DORMANT_SECRET}}"))
 	var stdout, stderr bytes.Buffer
 	if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
 		t.Fatalf("generate = %d: %s\n%s", code, stdout.Bytes(), stderr.Bytes())
@@ -64,14 +77,11 @@ func TestGeneratedBinaryValidatesDormantConfiguration(t *testing.T) {
 	baseline := filepath.Join(deployment, "baseline.json")
 	copyPrivateBaseline(t, filepath.Join(root, "dist/runtime-baseline.json"), baseline)
 	baselineBytes := readAbsoluteFile(t, baseline)
-	if err := os.Rename(root, root+"-unavailable"); err != nil {
+	if err := os.Rename(sources, sources+"-unavailable"); err != nil {
 		t.Fatal(err)
 	}
-	adopted := func(first, second string) string {
-		return "composition: {exports: {first: {interfaces: {use: {configuration.owner/v1: " + symbol + "}}, config: {" + symbol + ": " + first + "}}, second: {config: {" + symbol + ": " + second + "}}}, adopt: [{module: " + module + ", export: first}, {module: " + module + ", export: second}]}\n"
-	}
 	for _, mode := range []string{"default", "environment", "replacement"} {
-		type runtimeCase struct{ name, document, rule, overlay string }
+		type runtimeCase struct{ name, document, rule, overlay, first, second string }
 		cases := []runtimeCase{
 			{name: "absent object", document: choice},
 			{name: "valid private reference", document: choice + config("{endpoint: private-endpoint, password: {env: PRIVATE_DORMANT_SECRET}}")},
@@ -87,12 +97,14 @@ func TestGeneratedBinaryValidatesDormantConfiguration(t *testing.T) {
 			{name: "incompatible owner", document: "interfaces: {use: {other.owner/v1: " + symbol + "}}\n", rule: "constructor inventory"},
 			{name: "no configuration parameter", document: "interfaces: {use: {configuration.owner/v1: " + withoutConfig + "}}\nconfig: {" + withoutConfig + ": {}}\n", rule: "constructor inventory"},
 			{name: "whole removal", document: config("{$remove: true}")},
-			{name: "adopted required", document: "composition: {exports: {first: {interfaces: {use: {configuration.owner/v1: " + symbol + "}}, config: {" + symbol + ": {}}}}, adopt: [{module: " + module + ", export: first}]}\n", rule: "required field is absent"},
-			{name: "adopted partials", document: adopted("{endpoint: private-endpoint}", "{password: {env: PRIVATE_DORMANT_SECRET}}")},
-			{name: "adopted conflict", document: adopted("{endpoint: private-first}", "{endpoint: private-second}"), rule: "conflict"},
-			{name: "adopted replacement", document: adopted("{endpoint: private-first}", "{endpoint: private-second}") + config("{endpoint: private-local}")},
-			{name: "adopted removal", document: adopted("{endpoint: private-first}", "{endpoint: private-second}") + config("{$remove: true}")},
-			{name: "adopted invalid suppressed", document: adopted("{endpoint: private-first, count: 128}", "{}") + config("{count: 1}"), rule: "compiled Go type"},
+			{name: "template required", first: "{}", rule: "required field is absent"},
+			{name: "template partials", first: "{endpoint: private-endpoint}", second: "{password: {env: PRIVATE_DORMANT_SECRET}}"},
+			{name: "nearest template replaces older value", first: "{endpoint: private-first}", second: "{endpoint: private-second}"},
+			{name: "current replaces templates", first: "{endpoint: private-first}", second: "{endpoint: private-second}", document: config("{endpoint: private-local}")},
+			{name: "current removes inherited object", first: "{endpoint: private-first}", second: "{endpoint: private-second}", document: config("{$remove: true}")},
+			{name: "invalid template value suppressed", first: "{endpoint: private-first, count: 128}", second: "{}", document: config("{count: 1}"), rule: "compiled Go type"},
+			{name: "template atomic pointer replacement", first: "{endpoint: private-first, pointer: {value: private-value}}", second: "{pointer: {}}", rule: "required field is absent"},
+			{name: "template required field removal", first: "{endpoint: private-first}", second: "{endpoint: {$remove: true}}", rule: "required field is absent"},
 		}
 		if mode == "environment" {
 			cases = append(cases,
@@ -107,6 +119,35 @@ func TestGeneratedBinaryValidatesDormantConfiguration(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				private, err := runtimebaseline.Decode(baselineBytes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(private.Templates) != 2 {
+					t.Fatal("dormant fixture lost linear ancestry")
+				}
+				for index := range private.Templates {
+					entry := &private.Templates[index]
+					switch entry.Module {
+					case oldest:
+						if tc.first != "" {
+							entry.YAML = choice + config(tc.first)
+						}
+					case nearest:
+						if tc.second != "" {
+							entry.YAML = config(tc.second)
+						}
+					default:
+						t.Fatal("unexpected template module")
+					}
+				}
+				data, err := runtimebaseline.Encode(private)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(baseline, data, 0600); err != nil {
+					t.Fatal(err)
+				}
 				configurationRoot := t.TempDir()
 				args := []string{"--smoke", "--configuration-root", configurationRoot, "--runtime-baseline", baseline}
 				document := tc.document
@@ -119,28 +160,14 @@ func TestGeneratedBinaryValidatesDormantConfiguration(t *testing.T) {
 					writeFile(t, filepath.Join(configurationRoot, "plystra.test.yaml"), overlay)
 					args = append(args, "--env", "test")
 				case "replacement":
-					var selected map[string]any
-					if err := yaml.Unmarshal([]byte(document), &selected); err != nil {
-						t.Fatal(err)
+					if document == "" {
+						document = "{}\n"
 					}
-					rootFields := map[string]any{"config": map[string]any{"private-invalid-root": 123}}
-					if composition, ok := selected["composition"].(map[string]any); ok {
-						rootFields["composition"] = map[string]any{"exports": composition["exports"]}
-						delete(composition, "exports")
-					}
-					selectedData, err := yaml.Marshal(selected)
-					if err != nil {
-						t.Fatal(err)
-					}
-					writeFile(t, filepath.Join(configurationRoot, "selected.yaml"), string(selectedData))
-					rootData, err := yaml.Marshal(rootFields)
-					if err != nil {
-						t.Fatal(err)
-					}
-					document = string(rootData)
+					writeFile(t, filepath.Join(configurationRoot, "selected.yaml"), document)
+					document = "config: {private-invalid-root: 123}\n"
 					args = append(args, "--config", "selected.yaml")
 				}
-				writeFile(t, filepath.Join(configurationRoot, "plystra.yaml"), document)
+				writeFile(t, filepath.Join(configurationRoot, "plystra.yaml"), relationship+document)
 				before := snapshotTree(t, configurationRoot)
 				process := exec.CommandContext(t.Context(), binary, args...)
 				process.Dir = deployment
@@ -184,7 +211,7 @@ func TestGeneratedBinaryValidatesDormantConfiguration(t *testing.T) {
 				t.Run(mode, func(t *testing.T) {
 					configurationRoot := t.TempDir()
 					selected := choice + config("{endpoint: private-endpoint}")
-					writeFile(t, filepath.Join(configurationRoot, "plystra.yaml"), selected)
+					writeFile(t, filepath.Join(configurationRoot, "plystra.yaml"), relationship+selected)
 					args := []string{"--smoke", "--configuration-root", configurationRoot, "--runtime-baseline", baseline}
 					switch mode {
 					case "environment":
