@@ -126,7 +126,11 @@ func TestPublicInvalidTypedConfigurationDoesNotMutate(t *testing.T) {
 			case "replacement":
 				selected, selector = "deploy/customer.yaml", []string{"--config", "deploy/customer.yaml"}
 			}
-			for _, value := range []string{"{settings: null}", "{settings: {keep: null}}", "{labels: {$remove: private_value}}", "{labels: {private_key: {$remove: true}}}", "{pointer: {$remove: true, private_key: private_value}}"} {
+			for _, value := range []string{
+				"{settings: null}", "{settings: {keep: null}}", "{labels: {$remove: private_value}}",
+				"{labels: {private_key: {$remove: true}}}", "{pointer: {$remove: true, private_key: private_value}}",
+				"{pointer: !!null private_value}", "{items: !!null private_value}", "{labels: !!null private_value}",
+			} {
 				writeCommandFile(t, filepath.Join(root, selected), "interfaces: {use: {email.send/v1: "+constructor+"}}\nconfig: {"+constructor+": "+value+"}\n")
 				before := commandTree(t, root)
 				for _, invocation := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {

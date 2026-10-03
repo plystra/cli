@@ -79,6 +79,31 @@ func TestLayerValidationCannotBeHiddenByRemoval(t *testing.T) {
 	}
 }
 
+func TestMalformedTaggedNullCannotBypassNullableNormalization(t *testing.T) {
+	leaf := constructorconfig.Schema{Kind: "string"}
+	for _, kind := range []string{"pointer", "list", "map"} {
+		t.Run(kind, func(t *testing.T) {
+			schema := object(constructorconfig.Field{Name: "value", Value: constructorconfig.Schema{Kind: kind, Element: &leaf}})
+			for _, text := range []string{"value: !!null PRIVATE_VALUE", "value: null"} {
+				node := decode(t, text)
+				_, normalizeErr := constructorconfig.Normalize(schema, node)
+				_, lowerErr := constructorconfig.Compose(schema, node, decode(t, "{$remove: true}"))
+				_, upperErr := constructorconfig.Compose(schema, nil, node)
+				_, exportErr := constructorconfig.ComposeAdopted(schema, []*yaml.Node{node})
+				for _, err := range []error{normalizeErr, lowerErr, upperErr, exportErr} {
+					if text == "value: null" {
+						if err != nil {
+							t.Fatalf("valid null: %v", err)
+						}
+					} else if !errors.Is(err, constructorconfig.ErrValue) || strings.Contains(err.Error(), "PRIVATE_") {
+						t.Fatalf("malformed null was not rejected safely: %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestDefaultsArePrivateAndDoNotAllocateAbsentPointers(t *testing.T) {
 	type Nested struct {
 		Value string `plystra-default:"private-default"`

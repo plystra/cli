@@ -436,6 +436,17 @@ including nested configuration values, collections, and unadopted Resource
 fragments. This does not reinterpret ordinary null, empty, or zero values as
 removal; their typed validation still applies when the export is adopted.
 
+Inert constructor objects still require valid YAML scalar contents, even when
+their Config schema is unavailable. Startup rejects malformed explicitly tagged
+integers, booleans, floats, timestamps, nulls, and binary values in private inventories
+and live root exports before Secret lookup or constructor entry, including nested
+containers and replacement mode. Diagnostics omit decoder text and private values.
+Regenerate and rebuild to install this validation; it does not activate the export.
+CLI typed normalization also rejects malformed scalar payloads before nullable
+fields can discard them. The shared runtime configuration loader does the same
+for selected root, environment, and replacement values; genuine null remains
+valid for nullable Go types.
+
 Resource export syntax is validated even without adoption. The closed shape is
 `resources.instances.<name>.{use,config}` and
 `resources.bind.{implementations,instances}.<consumer>.<parameter>`. Instance

@@ -121,13 +121,17 @@ func validateRuntimeExport(fields map[string]*yaml.Node) error {
 	}
 	// Exports have no lower layer. Reserved removals remain invalid inside
 	// dormant or suppressed objects as well as active typed values.
-	for _, node := range fields {
+	for field, node := range fields {
 		stack := []*yaml.Node{node}
 		for len(stack) > 0 {
 			value := stack[len(stack)-1]; stack = stack[:len(stack)-1]
 			if value.Kind == yaml.MappingNode {
 				if len(value.Content) == 2 && value.Content[0].Value == "$remove" { return runtimeConfigurationError("adopted exports cannot contain reserved removal mappings") }
 				if _, err := runtimeMapping(value, "export mapping", nil); err != nil { return runtimeConfigurationError("export mappings require unique string keys") }
+			}
+			if field == "config" && value.Kind == yaml.ScalarNode {
+				var decoded any
+				if err := value.Decode(&decoded); err != nil { return runtimeConfigurationError("export configuration contains an invalid scalar") }
 			}
 			stack = append(stack, value.Content...)
 		}

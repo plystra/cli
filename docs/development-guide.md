@@ -961,6 +961,18 @@ authored adoption document and exact field alongside the module/export identity.
 Inherited adoptions point to the root document; overlay additions and replacement
 adoptions point to their own selected document, without configuration values.
 
+Inert constructor export objects require syntactically valid YAML scalar contents
+even without an available Config schema. Startup checks tagged integers,
+booleans, floats, timestamps, nulls, and binary values inside nested containers in
+private dependency inventories and live root exports under every selector.
+Malformed scalars fail before Secrets or constructors without exposing decoder
+messages or private values. Regenerate and rebuild to install this guard; valid
+unadopted objects remain inert, and this check does not establish typed acceptance.
+Typed CLI normalization checks scalar syntax before replacing a nullable value
+with canonical null, so known schemas cannot hide malformed null payloads.
+The shared runtime loader applies that same check to selected current-project
+layers before replacements or removals can hide malformed lower values.
+
 For Project creation, the repeatable
 `--template <query> --adopt-export <name>` form writes those exact identities
 after validating that every named export exists in the resolved template.

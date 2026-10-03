@@ -249,6 +249,12 @@ func walk(s Schema, n *yaml.Node, final, removals bool, path string, count *int,
 			return nil, invalid(path, "invalid compiled schema")
 		}
 	}
+	if n.Kind == yaml.ScalarNode {
+		var value any
+		if err := n.Decode(&value); err != nil {
+			return nil, invalid(path, "invalid YAML scalar")
+		}
+	}
 	if null(n) && (s.Kind == "pointer" || s.Kind == "map" || s.Kind == "list" && s.Length == nil) {
 		return scalar("!!null", "null"), nil
 	}

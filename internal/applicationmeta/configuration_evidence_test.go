@@ -394,6 +394,10 @@ func TestConfigurationLayerDigestRetainsUnvalidatedStructuralChecks(t *testing.T
 		"{value: !!bool PRIVATE_VALUE}",
 		"{value: !!float PRIVATE_VALUE}",
 		"{value: !!timestamp PRIVATE_VALUE}",
+		"{value: !!binary PRIVATE_VALUE}",
+		"{value: !!null PRIVATE_VALUE}",
+		"{value: [!!int PRIVATE_VALUE]}",
+		"{value: {PRIVATE_KEY: !!bool PRIVATE_VALUE}}",
 		"{value: " + strings.Repeat("[", 64) + "PRIVATE_VALUE" + strings.Repeat("]", 64) + "}",
 		"{value: [" + strings.Repeat("0,", 65_536) + "0]}",
 	} {
@@ -404,6 +408,31 @@ func TestConfigurationLayerDigestRetainsUnvalidatedStructuralChecks(t *testing.T
 		_, err = applicationmeta.ConfigurationLayerDigest(manifest, composeSchemaLookup(nil))
 		if !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "PRIVATE_") {
 			t.Fatalf("malformed unvalidated object did not fail with a value-redacted error: %v", err)
+		}
+	}
+}
+
+func TestConfigurationLayerDigestRejectsMalformedTaggedNullWithKnownSchema(t *testing.T) {
+	t.Parallel()
+	schema := composeSchema(t, "\n\tPointer *string\n\tSlice []string\n\tMapping map[string]string\n")
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/service.New": schema})
+	for _, field := range []string{"pointer", "slice", "mapping"} {
+		for _, value := range []string{"!!null PRIVATE_VALUE", "null"} {
+			manifest, err := applicationmeta.Parse([]byte("config: {example.com/service.New: {" + field + ": " + value + "}}\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, typedErr := applicationmeta.ConfigurationDecisions(manifest, lookup)
+			_, digestErr := applicationmeta.ConfigurationLayerDigest(manifest, lookup)
+			for _, err := range []error{typedErr, digestErr} {
+				if value == "null" {
+					if err != nil {
+						t.Fatalf("valid %s null: %v", field, err)
+					}
+				} else if !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "PRIVATE_") {
+					t.Fatalf("malformed %s null was not rejected safely: %v", field, err)
+				}
+			}
 		}
 	}
 }

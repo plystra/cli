@@ -284,6 +284,12 @@ func normalizeConstructorConfigNode(schema implementationinventory.Configuration
 		return nil, ErrConfigurationInvalidValue
 	}
 	invalid := func() (*yaml.Node, error) { return nil, ErrConfigurationInvalidValue }
+	if node.Kind == yaml.ScalarNode {
+		var value any
+		if err := node.Decode(&value); err != nil {
+			return invalid()
+		}
+	}
 	scalar := func(tag, value string) (*yaml.Node, error) {
 		return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value}, nil
 	}

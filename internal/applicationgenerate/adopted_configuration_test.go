@@ -2,7 +2,9 @@ package applicationgenerate_test
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -376,6 +378,91 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 			}
 		}
 		cases = append(cases, tc)
+	}
+	for _, tag := range []string{"int", "bool", "float", "timestamp", "binary", "null"} {
+		for _, shape := range []string{"!!%s PRIVATE_VALUE", "[!!%s PRIVATE_VALUE]", "{PRIVATE_KEY: !!%s PRIVATE_VALUE}"} {
+			value := fmt.Sprintf(shape, tag)
+			fragment := "{config: {example.com/unavailable/service.New: {value: " + value + "}}}"
+			for _, mode := range []string{"dependency", "root", "environment", "replacement"} {
+				tc := runtimeCase{name: "invalid inert constructor scalar/" + mode + "/" + value, rule: "invalid declarations"}
+				if mode == "dependency" {
+					tc.rule = "baseline"
+					tc.edit = func(d *runtimebaseline.Document) { change(d, fragment, "unused") }
+				} else {
+					tc.root = "composition: {exports: {unused: " + fragment + "}, adopt: [{module: " + dependency + ", export: first}, {module: " + dependency + ", export: second}]}\n"
+					if mode == "environment" {
+						tc.overlay = "{}\n"
+					} else if mode == "replacement" {
+						tc.selected = adopt
+					}
+				}
+				cases = append(cases, tc)
+			}
+		}
+	}
+	for _, mode := range []string{"dependency", "root", "environment", "replacement"} {
+		fragment := "{config: {example.com/unavailable/service.New: {integer: !!int 7, boolean: !!bool true, float: !!float 1.5, timestamp: !!timestamp 2026-10-04, binary: !!binary " + base64.StdEncoding.EncodeToString([]byte("private-binary")) + ", string: !!str PRIVATE_VALUE, nested: [null, {value: false}]}}}"
+		tc := runtimeCase{name: "valid inert constructor scalars/" + mode}
+		if mode == "dependency" {
+			tc.edit = func(d *runtimebaseline.Document) { change(d, fragment, "unused") }
+		} else {
+			tc.root = "composition: {exports: {unused: " + fragment + "}, adopt: [{module: " + dependency + ", export: first}, {module: " + dependency + ", export: second}]}\n"
+			if mode == "environment" {
+				tc.overlay = "{}\n"
+			} else if mode == "replacement" {
+				tc.selected = adopt
+			}
+		}
+		cases = append(cases, tc)
+	}
+	for _, value := range []string{"!!null PRIVATE_VALUE", "null"} {
+		for _, mode := range []string{"dependency", "root", "environment", "replacement"} {
+			fragment := "{config: {" + symbol + ": {pointer: " + value + "}}}"
+			tc := runtimeCase{name: "inert known constructor scalar/" + mode + "/" + value}
+			if value != "null" {
+				tc.rule = "invalid declarations"
+			}
+			if mode == "dependency" {
+				if tc.rule != "" {
+					tc.rule = "baseline"
+				}
+				tc.edit = func(d *runtimebaseline.Document) { change(d, fragment, "unused") }
+			} else {
+				tc.root = "composition: {exports: {unused: " + fragment + "}, adopt: [{module: " + dependency + ", export: first}, {module: " + dependency + ", export: second}]}\n"
+				if mode == "environment" {
+					tc.overlay = "{}\n"
+				} else if mode == "replacement" {
+					tc.selected = adopt
+				}
+			}
+			cases = append(cases, tc)
+		}
+	}
+	for _, field := range []string{"pointer", "mapping"} {
+		for _, value := range []string{"!!null PRIVATE_VALUE", "null"} {
+			for _, mode := range []string{"root", "environment", "replacement"} {
+				tc := runtimeCase{name: "selected nullable scalar/" + mode + "/" + field + "/" + value}
+				if value != "null" {
+					tc.rule = "invalid YAML scalar"
+				} else {
+					tc.check = func(t *testing.T, got map[string]any) {
+						if value, exists := got[field]; !exists || value != nil {
+							t.Fatal("genuine null was not delivered")
+						}
+					}
+				}
+				current := config("{" + field + ": " + value + "}")
+				switch mode {
+				case "root":
+					tc.root = adopt + current
+				case "environment":
+					tc.overlay = current
+				case "replacement":
+					tc.selected = adopt + current
+				}
+				cases = append(cases, tc)
+			}
+		}
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
