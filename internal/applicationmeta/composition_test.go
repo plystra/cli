@@ -522,6 +522,40 @@ func TestResolveAdoptedExportsKeepsShortProjectIdentityLocal(t *testing.T) {
 	}
 }
 
+func TestResolveAdoptedExportsRetainsAdoptionSource(t *testing.T) {
+	t.Parallel()
+	root := mustParseManifest(t, "{}\n")
+	dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/platform", Manifest: mustParseManifest(t, "composition: {exports: {defaults: {resources: {instances: {primary: {use: example.com/platform/postgres.New, config: {private: PRIVATE_ADOPTION_VALUE}}}}}}}\n")}}
+	for _, source := range []string{"plystra.yaml", "plystra.production.yaml", "deploy/customer.yaml"} {
+		for _, failure := range []struct {
+			module, export string
+			missing        bool
+		}{
+			{"example.com/absent", "defaults", true},
+			{"example.com/platform", "missing", true},
+			{"my-app", "missing", true},
+			{"example.com/platform", "defaults", false},
+		} {
+			t.Run(source+"/"+failure.module+"/"+failure.export, func(t *testing.T) {
+				selected, err := applicationmeta.ParseSource(source, []byte("composition: {adopt: {add: [{module: "+failure.module+", export: "+failure.export+"}]}}\n"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = applicationmeta.ResolveAdoptedExports("my-app", root, selected, dependencies)
+				if !errors.Is(err, applicationmeta.ErrResolveAdoptedExports) || errors.Is(err, applicationmeta.ErrExportNotFound) != failure.missing {
+					t.Fatalf("resolution error categories = %v", err)
+				}
+				if !strings.Contains(err.Error(), selected.ExportAdoptions()[0].Source()) {
+					t.Fatalf("resolution error lost authored adoption source: %v", err)
+				}
+				if strings.Contains(err.Error(), "PRIVATE_ADOPTION_VALUE") {
+					t.Fatal("resolution error exposed configuration values")
+				}
+			})
+		}
+	}
+}
+
 func TestApplyOverlayComposesExportAdoptionsAsCompleteOrSparseSets(t *testing.T) {
 	t.Parallel()
 

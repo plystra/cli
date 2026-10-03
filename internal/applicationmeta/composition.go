@@ -448,19 +448,19 @@ func ResolveAdoptedExports(currentProjectModule string, root, selected Manifest,
 			var exists bool
 			owner, exists = byModule[adoption.modulePath]
 			if !exists {
-				return nil, fmt.Errorf("%w: %w: %s is outside the effective Go Module graph", ErrResolveAdoptedExports, ErrExportNotFound, renderExportAdoption(adoption))
+				return nil, fmt.Errorf("%w: %w: %s at %s is outside the effective Go Module graph", ErrResolveAdoptedExports, ErrExportNotFound, renderExportAdoption(adoption), adoption.Source())
 			}
 		}
 		export, exists := findConfigurationExport(owner.Manifest, adoption.exportName)
 		if !exists {
-			return nil, fmt.Errorf("%w: %w: %s", ErrResolveAdoptedExports, ErrExportNotFound, renderExportAdoption(adoption))
+			return nil, fmt.Errorf("%w: %w: %s at %s", ErrResolveAdoptedExports, ErrExportNotFound, renderExportAdoption(adoption), adoption.Source())
 		}
 		if export.unsupportedResources {
-			return nil, fmt.Errorf("%w: %s: composition.exports[%q] resources are not supported by this installed CLI", ErrResolveAdoptedExports, renderExportAdoption(adoption), adoption.exportName)
+			return nil, fmt.Errorf("%w: %s at %s: composition.exports[%q] resources are not supported by this installed CLI", ErrResolveAdoptedExports, renderExportAdoption(adoption), adoption.Source(), adoption.exportName)
 		}
 		fragment, err := WithProjectModule(export.Manifest(), adoption.modulePath)
 		if err != nil {
-			return nil, fmt.Errorf("%w: bind %s: %v", ErrResolveAdoptedExports, renderExportAdoption(adoption), err)
+			return nil, fmt.Errorf("%w: bind %s at %s: %v", ErrResolveAdoptedExports, renderExportAdoption(adoption), adoption.Source(), err)
 		}
 		result = append(result, Dependency{
 			ModulePath:    adoption.modulePath,

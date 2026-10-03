@@ -400,6 +400,9 @@ exact current module identity from `go.mod`, including the short `my-app` name
 created by `plystra new my-app` without `--module`. Short names never alias a
 dependency module, and dependency inventories still require standard Go Module
 paths. Local Interface and constructor provenance preserve the short identity.
+Rejected export resolution names the authored adoption document and exact field,
+including inherited root adoptions and sparse environment additions, alongside
+the module/export identity. It does not include constructor configuration values.
 This installed CLI
 inventories a syntactically valid Resource-bearing export and its currently
 supported `interfaces` and `config` fragment without activating it while it

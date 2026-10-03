@@ -946,6 +946,11 @@ same identity in root, environment, or replacement adoptions. Short names do not
 alias dependency modules; dependency inventories retain standard Go Module path
 validation. Local Interface and constructor provenance preserve the exact name.
 
+Missing modules, missing exports, and unsupported Resource exports report the
+authored adoption document and exact field alongside the module/export identity.
+Inherited adoptions point to the root document; overlay additions and replacement
+adoptions point to their own selected document, without configuration values.
+
 For Project creation, the repeatable
 `--template <query> --adopt-export <name>` form writes those exact identities
 after validating that every named export exists in the resolved template.

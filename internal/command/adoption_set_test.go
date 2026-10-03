@@ -3,10 +3,61 @@ package command_test
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgen"
 )
+
+func TestPublicAdoptionErrorsRetainAuthoredSource(t *testing.T) {
+	for _, mode := range []string{"default", "environment", "inherited", "replacement"} {
+		for _, module := range []string{"example.com/acme/policy", "example.com/absent"} {
+			t.Run(mode+"/"+module, func(t *testing.T) {
+				root := writeCommandPolicyProject(t)
+				rootData := "{}\n"
+				selectedPath := "plystra.yaml"
+				field := "composition.adopt"
+				adoption := "composition: {adopt: [{module: " + module + ", export: missing}]}\n"
+				var selector []string
+				switch mode {
+				case "default":
+					rootData = adoption
+				case "environment":
+					selectedPath = "plystra.production.yaml"
+					field += ".add"
+					adoption = "composition: {adopt: {add: [{module: " + module + ", export: missing}]}}\n"
+					selector = []string{"--env", "production"}
+				case "inherited":
+					rootData = adoption
+					selector = []string{"--env", "production"}
+					writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+				case "replacement":
+					selectedPath = "deploy/customer.yaml"
+					selector = []string{"--config", selectedPath}
+				}
+				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
+				writeCommandFile(t, filepath.Join(root, selectedPath), adoption)
+				before := commandTree(t, root)
+				for _, invocation := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}, {"inspect", "configuration"}} {
+					args := append(append([]string(nil), invocation...), selector...)
+					code, stdout, stderr := runCommand(t, args, root, commandGoEnvironment())
+					wantSource := selectedPath + " " + field + `["` + module + `#missing"]`
+					wantOutput := ""
+					if invocation[0] == "inspect" {
+						wantOutput = "Resolving selected application model...\n"
+					}
+					if code != 1 || stdout != wantOutput || !strings.Contains(stderr, wantSource) || !strings.Contains(stderr, `export "missing" from module "`+module+`"`) {
+						t.Fatalf("%v = %d, %q, %q; want source %q", args, code, stdout, stderr, wantSource)
+					}
+					if !reflect.DeepEqual(commandTree(t, root), before) {
+						t.Fatalf("%v changed a rejected Project", args)
+					}
+				}
+				assertNoCommandTransactions(t, root)
+			})
+		}
+	}
+}
 
 func TestPublicAdoptionSetReplacementRetainsSuppressionEvidence(t *testing.T) {
 	for _, test := range []struct {
