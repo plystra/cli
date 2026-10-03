@@ -868,7 +868,12 @@ marker plus an inert `composition.exports` inventory. Dependency top-level
 requirements, choices, policies, constructor configuration, Resource instances
 and bindings, Data members, exposure, process settings, and adoptions have no
 consumer effect. It ignores `plystra.production.yaml`, `plystra.test.yaml`, and
-every other dependency environment sibling. A markerless Go module remains an
+every other dependency environment sibling, as well as dependency replacement
+documents. An adoption in a dependency never activates another dependency's
+export in the consumer, even through a transitive chain or cycle. Only the
+selected consumer document can adopt that exact module/export pair. Editing
+ignored dependency declarations leaves generated output and private export
+inventories unchanged. A markerless Go module remains an
 ordinary dependency even when it contains a file named `plugin.yaml` below its
 root.
 

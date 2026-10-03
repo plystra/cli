@@ -1776,6 +1776,9 @@ dependencies, dependency top-level application configuration remains inert,
 and dependency environment overlays are ignored. It renders the complete
 Project-owned Go, HTTP, JavaScript, documentation, assembly-compatibility,
 configuration-provenance manifest, invocation, and runtime-bootstrap surfaces.
+Dependency adoptions are never followed transitively: the consumer must name
+each desired module/export pair itself. Dependency replacement documents are
+also ignored, even when their names match the consumer's selected document.
 A Go Module without root `plystra.yaml` is an ordinary dependency and is
 rejected as a generation target.
 
