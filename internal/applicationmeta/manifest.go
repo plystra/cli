@@ -139,6 +139,7 @@ func NormalizeHTTPCORS(cors HTTPCORS) (HTTPCORS, error) {
 type httpCORSLayer struct {
 	allowedOrigins         []string
 	hasAllowedOrigins      bool
+	removeAllowedOrigins   bool
 	allowCredentials       bool
 	hasAllowCredentials    bool
 	removeAllowCredentials bool
@@ -234,14 +235,13 @@ func (ConstructorConfiguration) LogValue() slog.Value {
 }
 
 // Manifest is the immutable normalized application metadata used by typed
-// Interface selection, adopted-export composition, exposure, and runtime input.
+// Interface selection, template composition, exposure, and runtime input.
 type Manifest struct {
 	modulePath                    string
 	source                        string
-	exports                       []ConfigurationExport
-	exportAdoptions               []ExportAdoption
-	removedExportAdoptions        []ExportAdoption
-	adoptionMode                  adoptionSetMode
+	template                      string
+	templateSource                ConfigurationDeclarationSource
+	layers                        []Manifest
 	httpAddress                   string
 	hasHTTPAddress                bool
 	removeHTTPAddress             bool
@@ -275,16 +275,17 @@ func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error
 		return Manifest{}, fmt.Errorf("%w: Project module %q is invalid: %v", ErrInvalidManifest, projectModule, err)
 	}
 	manifest.modulePath = projectModule
-	manifest.exports = append([]ConfigurationExport(nil), manifest.exports...)
-	for index := range manifest.exports {
-		fragment, err := WithProjectModule(manifest.exports[index].manifest, projectModule)
+	if manifest.template != "" {
+		manifest.templateSource.modulePath = projectModule
+	}
+	manifest.layers = append([]Manifest(nil), manifest.layers...)
+	for index := range manifest.layers {
+		layer, err := WithProjectModule(manifest.layers[index], projectModule)
 		if err != nil {
 			return Manifest{}, err
 		}
-		manifest.exports[index].manifest = fragment
+		manifest.layers[index] = layer
 	}
-	manifest.exportAdoptions = append([]ExportAdoption(nil), manifest.exportAdoptions...)
-	manifest.removedExportAdoptions = append([]ExportAdoption(nil), manifest.removedExportAdoptions...)
 	manifest.httpExposures = append([]HTTPExposure(nil), manifest.httpExposures...)
 	for index := range manifest.httpExposures {
 		manifest.httpExposures[index].declarationSource.modulePath = projectModule
@@ -434,22 +435,27 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	if err != nil {
 		return Manifest{}, err
 	}
-	values, err := mapping(root, "document")
+	values, err := rootMapping(source, root)
 	if err != nil {
 		return Manifest{}, err
 	}
-	for _, key := range sortedNodeKeys(values) {
-		switch key {
-		case "composition", "http", "timeouts", "capabilities", "interfaces", "config":
-		default:
-			return Manifest{}, invalid("unknown key %q", key)
+	return parseManifestNode(source, root, values, sparseOverlay)
+}
+
+func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.Node, sparseOverlay bool) (Manifest, error) {
+	if err := validateRootEnvelope(root, values); err != nil {
+		return Manifest{}, err
+	}
+	template, templateSource, err := parseTemplateRelationship(source, root, values["template"], !sparseOverlay && source == "plystra.yaml")
+	if err != nil {
+		return Manifest{}, err
+	}
+	for _, key := range []string{"resources", "data"} {
+		if values[key] != nil {
+			return Manifest{}, invalid("%s configuration is not supported by this installed CLI", key)
 		}
 	}
-	exports, exportAdoptions, removedExportAdoptions, adoptionMode, err := parseComposition(values["composition"], source, sparseOverlay, source == "plystra.yaml")
-	if err != nil {
-		return Manifest{}, err
-	}
-	address, hasAddress, removeAddress, cors, exposures, removedExposures, err := parseHTTP(values["http"], sparseOverlay)
+	address, hasAddress, removeAddress, cors, exposures, removedExposures, err := parseHTTP(values["http"])
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -471,10 +477,8 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	}
 	manifest := Manifest{
 		source:                        source,
-		exports:                       exports,
-		exportAdoptions:               exportAdoptions,
-		removedExportAdoptions:        removedExportAdoptions,
-		adoptionMode:                  adoptionMode,
+		template:                      template,
+		templateSource:                templateSource,
 		httpAddress:                   address,
 		hasHTTPAddress:                hasAddress,
 		removeHTTPAddress:             removeAddress,
@@ -543,18 +547,7 @@ func validateConfigurationSource(source string) error {
 }
 
 func rewriteManifestSource(manifest *Manifest, source string) {
-	rewriteManifestSourcePrefix(manifest, source, "")
-}
-
-func rewriteManifestSourcePrefix(manifest *Manifest, source, fieldPrefix string) {
 	rewrite := func(value string) string {
-		if fieldPrefix != "" {
-			suffix := strings.TrimPrefix(value, "plystra.yaml")
-			if suffix == "" {
-				return source + " " + strings.TrimSuffix(fieldPrefix, ".")
-			}
-			return source + " " + fieldPrefix + strings.TrimPrefix(suffix, " ")
-		}
 		if value == "plystra.yaml" {
 			return source
 		}
@@ -651,7 +644,7 @@ func parseConfigurations(node *yaml.Node) ([]ConstructorConfiguration, []constru
 	return configurations, removals, nil
 }
 
-func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpCORSLayer, []HTTPExposure, []interfaceRemoval, error) {
+func parseHTTP(node *yaml.Node) (string, bool, bool, httpCORSLayer, []HTTPExposure, []interfaceRemoval, error) {
 	if node == nil {
 		return "", false, false, httpCORSLayer{}, nil, nil, nil
 	}
@@ -680,7 +673,7 @@ func parseHTTP(node *yaml.Node, sparseOverlay bool) (string, bool, bool, httpCOR
 			hasAddress = true
 		}
 	}
-	cors, err := parseHTTPCORS(values["cors"], sparseOverlay)
+	cors, err := parseHTTPCORS(values["cors"])
 	if err != nil {
 		return "", false, false, httpCORSLayer{}, nil, nil, err
 	}
@@ -734,11 +727,11 @@ func parseHTTPExposures(node *yaml.Node) ([]HTTPExposure, []interfaceRemoval, er
 	return exposures, removals, nil
 }
 
-func parseHTTPCORS(node *yaml.Node, sparseOverlay bool) (httpCORSLayer, error) {
+func parseHTTPCORS(node *yaml.Node) (httpCORSLayer, error) {
 	if node == nil {
 		return httpCORSLayer{}, nil
 	}
-	if isNull(node) {
+	if isRemovalMapping(node) {
 		return httpCORSLayer{remove: true}, nil
 	}
 	values, err := mapping(node, "http.cors")
@@ -753,38 +746,30 @@ func parseHTTPCORS(node *yaml.Node, sparseOverlay bool) (httpCORSLayer, error) {
 		}
 	}
 	originsNode, exists := values["allowed_origins"]
-	if !exists && !sparseOverlay {
-		return httpCORSLayer{}, invalid("http.cors.allowed_origins is required when http.cors is present")
-	}
 	var origins []string
-	if exists {
+	removeOrigins := isRemovalMapping(originsNode)
+	if exists && !removeOrigins {
 		origins, err = parseCORSOrigins(originsNode)
 		if err != nil {
 			return httpCORSLayer{}, err
 		}
 	}
 	result := httpCORSLayer{
-		allowedOrigins:    origins,
-		hasAllowedOrigins: exists,
-		present:           true,
+		allowedOrigins:       origins,
+		hasAllowedOrigins:    exists && !removeOrigins,
+		removeAllowedOrigins: removeOrigins,
+		present:              true,
 	}
 	if credentialsNode, exists := values["allow_credentials"]; exists {
-		if isNull(credentialsNode) {
+		if isRemovalMapping(credentialsNode) {
 			result.removeAllowCredentials = true
 		} else {
 			result.allowCredentials, err = strictBool(credentialsNode)
 			if err != nil {
-				return httpCORSLayer{}, invalid("http.cors.allow_credentials must be true, false, or null")
+				return httpCORSLayer{}, invalid("http.cors.allow_credentials must be true, false, or {$remove: true}")
 			}
 			result.hasAllowCredentials = true
 		}
-	}
-	if result.hasAllowedOrigins {
-		if err := validateHTTPCORSLayer(result); err != nil {
-			return httpCORSLayer{}, err
-		}
-	} else if !sparseOverlay {
-		return httpCORSLayer{}, invalid("http.cors.allowed_origins is required when http.cors is present")
 	}
 	return result, nil
 }
@@ -892,6 +877,7 @@ func cloneHTTPCORSLayer(cors httpCORSLayer) httpCORSLayer {
 
 func equalHTTPCORSLayers(left, right httpCORSLayer) bool {
 	return left.hasAllowedOrigins == right.hasAllowedOrigins &&
+		left.removeAllowedOrigins == right.removeAllowedOrigins &&
 		left.allowCredentials == right.allowCredentials &&
 		left.hasAllowCredentials == right.hasAllowCredentials &&
 		left.removeAllowCredentials == right.removeAllowCredentials &&
@@ -1272,14 +1258,14 @@ func decodeDocument(data []byte) (*yaml.Node, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	var document yaml.Node
 	if err := decoder.Decode(&document); err != nil {
-		return nil, invalid("decode YAML: %v", err)
+		return nil, invalid("invalid YAML syntax")
 	}
 	var trailing yaml.Node
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
 			return nil, invalid("multiple YAML documents are not allowed")
 		}
-		return nil, invalid("decode trailing YAML: %v", err)
+		return nil, invalid("invalid trailing YAML syntax")
 	}
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 {
 		return nil, invalid("expected one YAML document")

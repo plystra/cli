@@ -87,7 +87,7 @@ func TestConstructorConfigurationSeparatesNestedRemovalFromLiteralNil(t *testing
 	if bytes.Count(selectedConfig.YAML(), []byte("$remove: true")) != 3 {
 		t.Fatalf("overlay did not preserve nested tombstones: %s", selectedConfig.YAML())
 	}
-	composed, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/platform", ExportName: "defaults", Manifest: lower}}, selected, lookup)
+	composed, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/platform", Manifest: lower}}, selected, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,68 +175,10 @@ func TestNestedConstructorTombstonesRemainAuthoredAcrossDependencyChanges(t *tes
 		t.Fatal(err)
 	}
 	for _, value := range []string{"first", "changed"} {
-		dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/platform", ExportName: "defaults", Manifest: composeManifest(t, fmt.Sprintf("config: {%s: {settings: {removed: %s}, optional: %s}}\n", constructorConfigurationSymbol, value, value))}}
+		dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/platform", Manifest: composeManifest(t, fmt.Sprintf("config: {%s: {settings: {removed: %s}, optional: %s}}\n", constructorConfigurationSymbol, value, value))}}
 		maintained, err := applicationmeta.MaintainDependencyConfiguration(data, before.DependencyBaseline(), nil, dependencies, lookup)
 		if err != nil || maintained.Changed() || !bytes.Equal(maintained.Data(), data) {
 			t.Fatalf("maintenance changed nested exclusion or nil: %v\n%s", err, maintained.Data())
 		}
-	}
-}
-
-func TestConstructorNullableExportsDeduplicateAndConflictWithEmptyValues(t *testing.T) {
-	t.Parallel()
-	for _, test := range []struct{ typeName, empty string }{
-		{"*struct { Value string }", "{}"}, {"[]string", "[]"}, {"map[string]string", "{}"},
-	} {
-		t.Run(test.typeName, func(t *testing.T) {
-			lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-				constructorConfigurationSymbol: composeSchema(t, "Field "+test.typeName),
-			})
-			exported := func(value string) applicationmeta.Manifest {
-				return composeManifest(t, "composition: {exports: {defaults: {config: {"+constructorConfigurationSymbol+": {field: "+value+"}}}}}\n").Exports()[0].Manifest()
-			}
-			dependencies := []applicationmeta.Dependency{
-				{ModulePath: "example.com/alpha", ExportName: "defaults", Manifest: exported("")},
-				{ModulePath: "example.com/beta", ExportName: "defaults", Manifest: exported("~")},
-			}
-			composed, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), lookup)
-			if err != nil {
-				t.Fatal(err)
-			}
-			records := findProvenance(t, composed.Provenance(), `config["`+constructorConfigurationSymbol+`"]["field"]`)
-			if len(records) != 1 || records[0].Removed() || len(records[0].Sources()) != 2 {
-				t.Fatalf("equivalent nil exports did not deduplicate: %#v", provenanceStrings(records))
-			}
-			dependencies[1].Manifest = exported(test.empty)
-			var conflict string
-			for _, ordered := range [][]applicationmeta.Dependency{dependencies, {dependencies[1], dependencies[0]}} {
-				_, err := applicationmeta.Compose(ordered, composeManifest(t, "{}\n"), lookup)
-				if !errors.Is(err, applicationmeta.ErrInheritedConflict) || conflict != "" && err.Error() != conflict {
-					t.Fatalf("nil/empty conflict was lost or depended on order: %v", err)
-				}
-				conflict = err.Error()
-				for _, value := range []string{"null", test.empty, "{$remove: true}"} {
-					current := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {field: "+value+"}}\n")
-					if _, err := applicationmeta.Compose(ordered, current, lookup); err != nil {
-						t.Fatalf("current %s did not resolve conflict: %v", value, err)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestNestedConstructorMaintenanceWritesCanonicalTombstone(t *testing.T) {
-	t.Parallel()
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-		constructorConfigurationSymbol: composeSchema(t, "Settings struct { Removed string }; Optional *string"),
-	})
-	dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/legacy", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {removed: {$remove: true}}, optional: null}}\n")}}
-	maintained, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, nil, dependencies, lookup)
-	if err != nil || !bytes.Contains(maintained.Data(), []byte("removed: {$remove: true}")) || !bytes.Contains(maintained.Data(), []byte("optional: null")) {
-		t.Fatalf("maintained removal/nil = %v\n%s", err, maintained.Data())
-	}
-	if _, err := applicationmeta.ConfigurationDecisions(composeManifest(t, string(maintained.Data())), lookup); err != nil {
-		t.Fatal(err)
 	}
 }

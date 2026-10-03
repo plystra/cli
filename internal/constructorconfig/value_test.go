@@ -89,8 +89,8 @@ func TestMalformedTaggedNullCannotBypassNullableNormalization(t *testing.T) {
 				_, normalizeErr := constructorconfig.Normalize(schema, node)
 				_, lowerErr := constructorconfig.Compose(schema, node, decode(t, "{$remove: true}"))
 				_, upperErr := constructorconfig.Compose(schema, nil, node)
-				_, exportErr := constructorconfig.ComposeAdopted(schema, []*yaml.Node{node})
-				for _, err := range []error{normalizeErr, lowerErr, upperErr, exportErr} {
+				_, layerErr := constructorconfig.ComposeLayers(schema, node)
+				for _, err := range []error{normalizeErr, lowerErr, upperErr, layerErr} {
 					if text == "value: null" {
 						if err != nil {
 							t.Fatalf("valid null: %v", err)

@@ -173,8 +173,8 @@ capabilities:
 	if err != nil || len(manifest.HTTPExposures()) != 1 || manifest.HTTPExposures()[0].ID().String() != "kernel.health/v1" {
 		t.Fatalf("ParseOverlaySource(updated) exposures = %#v, %v", manifest.HTTPExposures(), err)
 	}
-	if _, err := applicationmeta.ParseSource("plystra.production.yaml", input); err == nil {
-		t.Fatal("strict current-project parser accepted partial overlay CORS")
+	if _, err := applicationmeta.ParseSource("plystra.production.yaml", input); err != nil {
+		t.Fatalf("partial reusable CORS must parse before composition: %v", err)
 	}
 }
 

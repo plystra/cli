@@ -10,9 +10,9 @@ import (
 )
 
 // ValidateRequiredConfiguration checks the final composed objects and implicit
-// empty configuration of active constructors. Partial layers and exports must
+// empty configuration of active constructors. Partial template layers must
 // remain composable without this check. Missing values belong to the selected
-// current document, not to any one contributing export.
+// current document, not to any one contributing template.
 func (c Composition) ValidateRequiredConfiguration(schemas SchemaLookup, active []constructorsymbol.Symbol, selectedPath string) error {
 	if !c.Valid() || schemas == nil || selectedPath == "" {
 		return fmt.Errorf("%w: required configuration validation needs a composition, schemas, and selected document", ErrCompose)

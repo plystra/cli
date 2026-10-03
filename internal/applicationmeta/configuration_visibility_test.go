@@ -2,7 +2,6 @@ package applicationmeta_test
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -44,7 +43,7 @@ func TestConstructorValuePublicVisibility(t *testing.T) {
 			manifest := func(value string) applicationmeta.Manifest {
 				return composeManifest(t, "config: {example.com/acme/smtp.New: {value: "+value+"}}")
 			}
-			for _, wrapper := range []string{"%s", "composition:\n  exports:\n    shared:\n      %s"} {
+			for _, wrapper := range []string{"%s"} {
 				var first string
 				for _, value := range append(append([]string{}, test.private...), test.public...) {
 					input := manifest(value)
@@ -80,8 +79,8 @@ func TestConstructorValuePublicVisibility(t *testing.T) {
 				t.Fatal(err)
 			}
 			dependencies[1].Manifest = manifest(test.private[1])
-			if _, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}"), lookup); !errors.Is(err, applicationmeta.ErrInheritedConflict) {
-				t.Fatalf("private conflict = %v", err)
+			if _, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}"), lookup); err != nil {
+				t.Fatalf("ordered private replacement = %v", err)
 			}
 			for _, local := range []string{test.private[0], "{$remove: true}"} {
 				resolved, err := applicationmeta.Compose(dependencies, manifest(local), lookup)

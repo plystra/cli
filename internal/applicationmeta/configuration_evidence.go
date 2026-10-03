@@ -61,7 +61,7 @@ func (d ConfigurationDecision) Removed() bool { return d.removed }
 func (d ConfigurationDecision) Source() string { return d.source }
 
 // DependencyComposable reports whether this field participates in dependency
-// composition. Current-Project-owned process and public-surface settings
+// composition. Current-Project-owned process settings
 // deliberately return false.
 func (d ConfigurationDecision) DependencyComposable() bool { return d.dependencyComposable }
 
@@ -76,17 +76,18 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ConfigurationDecision, 0, len(maintenance)+len(manifest.exports)+len(manifest.exportAdoptions)+len(manifest.removedExportAdoptions)+8)
+	result := make([]ConfigurationDecision, 0, len(maintenance)+9)
 	source := manifest.source
 	if source == "" {
 		source = "plystra.yaml"
 	}
 	if manifest.completeInterfaceRequirements {
 		result = append(result, ConfigurationDecision{
-			path:    "interfaces.require",
-			digest:  digestStrings("interfaces.require", "complete-set"),
-			summary: ConfigurationSummaryCompleteSet,
-			source:  source,
+			path:                 "interfaces.require",
+			digest:               digestStrings("interfaces.require", "complete-set"),
+			summary:              ConfigurationSummaryCompleteSet,
+			source:               source,
+			dependencyComposable: true,
 		})
 	}
 	for _, decision := range maintenance {
@@ -119,14 +120,12 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 			summary:              summary,
 			removed:              decision.removed,
 			source:               source,
-			dependencyComposable: decision.field != maintenanceHTTPExposure,
+			dependencyComposable: true,
 		})
 	}
-	composition, err := compositionConfigurationDecisions(manifest, schemas)
-	if err != nil {
-		return nil, err
+	if manifest.template != "" {
+		result = append(result, ConfigurationDecision{path: "template", digest: digestStrings("template", manifest.template), summary: ConfigurationSummaryString, source: manifest.templateSource.Path()})
 	}
-	result = append(result, composition...)
 	result = append(result, processConfigurationDecisions(manifest)...)
 	// maintenanceDecisions and the process decision builder are both typed and
 	// deterministic, but sort again at this public boundary so future fields do
@@ -152,7 +151,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 // declaration order for schema-defined sets, equivalent typed scalar
 // spellings, and the source filename do not enter the digest. Explicit
 // removals and build-visible typed projections do. Unvalidated constructor
-// objects in inert exports or excluded documents contribute only their constructor and an
+// objects in excluded documents contribute only their constructor and an
 // opaque object marker. Without typed validation no field, value, or reference
 // target is known to be safe for public identity. This fallback grants no
 // current-project authority and does not replace selected-model validation.
@@ -317,7 +316,7 @@ func processConfigurationDecisions(manifest Manifest) []ConfigurationDecision {
 			summary:              summary,
 			removed:              removed,
 			source:               source,
-			dependencyComposable: false,
+			dependencyComposable: strings.HasPrefix(path, "http.cors"),
 		})
 	}
 	if manifest.hasHTTPAddress || manifest.removeHTTPAddress {
@@ -335,6 +334,9 @@ func processConfigurationDecisions(manifest Manifest) []ConfigurationDecision {
 			if manifest.httpCORS.hasAllowedOrigins {
 				origins := append([]string(nil), manifest.httpCORS.allowedOrigins...)
 				add("http.cors.allowed_origins", digestStrings("http.cors.allowed_origins", strings.Join(origins, "\x00")), ConfigurationSummaryArray, false)
+			}
+			if manifest.httpCORS.removeAllowedOrigins {
+				add("http.cors.allowed_origins", digestStrings("http.cors.allowed_origins", "removed"), ConfigurationSummaryRemoval, true)
 			}
 			if manifest.httpCORS.hasAllowCredentials || manifest.httpCORS.removeAllowCredentials {
 				digest := digestStrings("http.cors.allow_credentials", "removed")
