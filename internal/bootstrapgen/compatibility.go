@@ -15,7 +15,7 @@ import (
 	"github.com/plystra/cli/internal/invocationpolicy"
 )
 
-const applicationModelCompatibilityVersion = 10
+const applicationModelCompatibilityVersion = 11
 
 // ErrInvalidApplicationModelCompatibility reports a compatibility projection
 // that cannot be tied to one complete generated application model.
@@ -69,8 +69,8 @@ type applicationModelCompatibilityPolicy struct {
 
 // NewApplicationModelCompatibility projects one final typed application
 // manifest without process settings, ordinary Plugin configuration, Secret
-// references, adoption identities, source paths, or resolved Secret values.
-// Adopted exports must already be composed into the supplied manifest.
+// references, template identities, source paths, or resolved Secret values.
+// Template ancestry must already be composed into the supplied manifest.
 func NewApplicationModelCompatibility(applicationModelDigest string, manifest applicationmeta.Manifest) (ApplicationModelCompatibility, error) {
 	return newApplicationModelCompatibility(applicationModelDigest, manifest, nil, false)
 }

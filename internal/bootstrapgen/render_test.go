@@ -69,7 +69,7 @@ token: {type: secret}
 		"os.OpenRoot(selection.configurationRoot)",
 		"inspectRuntimeConfigurationPath",
 		"sameRuntimeConfigurationPathStates",
-		"composeRuntimeAdoptedDocument",
+		"composeRuntimeTemplateDocument",
 		`"acme.audit": {`,
 		`"acme.records": {`,
 		`"headers":    runtimeConfigurationObject`,
@@ -130,6 +130,14 @@ token: {type: secret}
 	}
 	if bytes.Count(generated, []byte("!a.transition.TryLock()")) != 2 || bytes.Count(generated, []byte("defer a.transition.Unlock()")) != 2 {
 		t.Fatal("both application lifecycle operations must hold the shared transition guard")
+	}
+	previousGuard := -1
+	for _, guard := range []string{"document, err := loadRuntimeDocument(options)", "validateRuntimeApplicationModel(document)", "prepared, err := prepareRuntimeConstructorConfiguration(document)", "kernelconfiguration.NewResolver"} {
+		position := bytes.Index(generated, []byte(guard))
+		if position < 0 || position <= previousGuard {
+			t.Fatal("runtime baseline, ancestry, model and typed guards must precede Secret resolution")
+		}
+		previousGuard = position
 	}
 	repeatedOptions := options
 	repeatedOptions.ConfigurationSchemas = []bootstrapgen.ConfigurationSchema{

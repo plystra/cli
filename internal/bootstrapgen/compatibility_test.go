@@ -14,10 +14,6 @@ func TestApplicationModelCompatibilityIsDeterministicAndSecretFree(t *testing.T)
 	t.Parallel()
 
 	first := compatibilityManifest(t, `
-composition:
-  adopt:
-    - {module: example.com/zeta, export: defaults}
-    - {module: example.com/alpha, export: runtime}
 http:
   address: ":8080"
   cors:
@@ -35,10 +31,6 @@ config:
     token: {env: PRIVATE_TOKEN_ONE}
 `)
 	second := compatibilityManifest(t, `
-composition:
-  adopt:
-    - {export: runtime, module: example.com/alpha}
-    - {export: defaults, module: example.com/zeta}
 config:
   example.com/acme/records.New:
     token: {env: PRIVATE_TOKEN_TWO}
@@ -70,7 +62,7 @@ http:
 	canonical := string(left.CanonicalJSON())
 	for _, required := range []string{
 		`"application_model_digest":"` + digest + `"`,
-		`"version":10`,
+		`"version":11`,
 		`"http_exposures":[{"interface":"records.read/v1","transport":"connect"}]`,
 		`"interface_requirements":["records.read/v1"]`,
 		`"interface":"records.read/v1"`,
@@ -94,7 +86,7 @@ http:
 		`"config"`,
 		`"secret"`,
 		`"http_transports"`,
-		`"export_adoptions"`,
+		`"template_ancestry"`,
 		"example.com/alpha",
 		"example.com/zeta",
 	} {
@@ -177,18 +169,18 @@ func TestApplicationModelCompatibilityRejectsInvalidCompiledDigest(t *testing.T)
 	}
 }
 
-func TestExecutableCompatibilityExcludesEquivalentAdoptionIdentity(t *testing.T) {
+func TestExecutableCompatibilityNormalizesEquivalentDeclarations(t *testing.T) {
 	const effective = "interfaces: {require: [records.read/v1], use: {records.read/v1: example.com/acme/records.New}, policies: {records.read/v1: {timeout: 5s}}}\n"
 	var expected []byte
-	for _, adoption := range []string{"", "composition: {adopt: [{module: example.com/first, export: defaults}]}\n", "composition: {adopt: [{module: example.com/second, export: equivalent}]}\n"} {
-		projection, err := bootstrapgen.NewExecutableApplicationModelCompatibility(bootstrapDigest("e"), compatibilityManifest(t, adoption+effective), []string{"records.read/v1"})
+	for _, source := range []string{effective, strings.Replace(effective, "5s", "5000ms", 1), "# source provenance is not executable identity\n" + effective} {
+		projection, err := bootstrapgen.NewExecutableApplicationModelCompatibility(bootstrapDigest("e"), compatibilityManifest(t, source), []string{"records.read/v1"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if expected == nil {
 			expected = projection.CanonicalJSON()
 		} else if !bytes.Equal(expected, projection.CanonicalJSON()) {
-			t.Fatal("equivalent effective declarations changed compatibility through adoption identity")
+			t.Fatal("equivalent effective declarations changed compatibility")
 		}
 	}
 }
