@@ -651,6 +651,10 @@ checks public generated output without creating or refreshing private output.
 Dependency exports are reconstructed solely from the private baseline, whose
 module/version inventory is bound to the public runtime contract. Self-adoption
 reads the configuration root's export inventory, including in replacement mode.
+Every export is syntax-checked before Secret lookup, even when unadopted.
+Constructor objects cannot contain a `$remove` key at their root, including
+alongside other fields; nested ordinary maps with that key and siblings remain
+inert values. Regenerate and rebuild to include this startup validation.
 No dependency source tree or Module Cache is read at startup. Resource configuration
 and complete frozen-model compatibility remain separate unfinished work.
 

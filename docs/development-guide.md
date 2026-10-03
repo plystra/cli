@@ -1849,6 +1849,11 @@ from the private dependency-export inventory. Its exact module/version membershi
 is part of the public runtime contract; private values and hashes are excluded.
 Self-adoption uses root exports even with a replacement selector. Equal peer
 exports deduplicate; unresolved conflicts fail before Secrets or constructors.
+Startup syntax-checks every export, including unadopted private and live root
+entries. A `$remove` key directly in a constructor object is invalid even with
+siblings. Nested ordinary maps containing that key and siblings remain inert
+values; the reserved singleton removal mapping remains forbidden at every
+depth in exports. Regenerate and rebuild to refresh startup validation.
 Current layers retain exact-path replacement, removals, and complete-set authority.
 Deploy only the binary, baseline, selected configuration documents, and external
 Secret inputs. Resource configuration and complete frozen-model compatibility

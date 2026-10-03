@@ -2426,7 +2426,8 @@ func validateRuntimeExport(fields map[string]*yaml.Node) error {
 		if !validRuntimeConstructorSymbol(symbol) {
 			return runtimeConfigurationError("adopted config contains an invalid constructor symbol")
 		}
-		if _, err := runtimeMapping(node, "adopted config", nil); err != nil {
+		object, err := runtimeMapping(node, "adopted config", nil)
+		if err != nil || object["$remove"] != nil {
 			return runtimeConfigurationError("adopted config contains an invalid object")
 		}
 	}

@@ -206,11 +206,41 @@ func TestParseExportsRejectsReservedRemovalMappingsAtEveryDepth(t *testing.T) {
 
 func TestParseExportsPreservesOrdinaryConfigurationValues(t *testing.T) {
 	t.Parallel()
-	for _, value := range []string{`null`, `{}`, `[]`, `false`, `"$remove"`, `{$remove-label: true}`} {
+	for _, value := range []string{`null`, `{}`, `[]`, `false`, `"$remove"`, `{$remove-label: true}`, `{$remove: true, ordinary: 1}`} {
 		data := []byte("composition: {exports: {defaults: {config: {example.com/acme/service.New: {settings: " + value + "}}}}}\n")
 		manifest, err := applicationmeta.Parse(data)
 		if err != nil || len(manifest.Exports()) != 1 || len(manifest.Exports()[0].Manifest().Configurations()) != 1 {
 			t.Fatalf("Parse export with %s = %#v, %v", value, manifest, err)
+		}
+	}
+}
+
+func TestParseExportsRejectsConstructorRemovalWithSiblings(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{
+		`{$remove: true, private-key: private-value}`, `{$remove: false, private-key: private-value}`,
+		`{$remove: null, private-key: private-value}`, `{$remove: "private-value", private-key: private-value}`,
+		`{$remove: {private-key: private-value}, private-key: private-value}`, `{private-key: private-value, $remove: null}`,
+	} {
+		data := []byte("composition: {exports: {unused: {config: {example.com/acme/service.New: " + value + "}}}}\n")
+		for _, parse := range []struct {
+			name string
+			run  func([]byte) (applicationmeta.Manifest, error)
+		}{
+			{name: "current", run: applicationmeta.Parse},
+			{name: "dependency", run: func(data []byte) (applicationmeta.Manifest, error) {
+				return applicationmeta.ParseExportInventorySource("dependency/plystra.yaml", data)
+			}},
+		} {
+			t.Run(parse.name+"/"+value, func(t *testing.T) {
+				manifest, err := parse.run(data)
+				if !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "must be a mapping or {$remove: true}") {
+					t.Fatalf("Parse export = %#v, %v", manifest, err)
+				}
+				if len(manifest.Exports()) != 0 || strings.Contains(err.Error(), "private-key") || strings.Contains(err.Error(), "private-value") {
+					t.Fatalf("failed export retained declarations or exposed private data: %v", err)
+				}
+			})
 		}
 	}
 }

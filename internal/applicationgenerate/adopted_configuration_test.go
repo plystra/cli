@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -315,6 +316,43 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 		}}, runtimeCase{name: "valid live resource/" + resource,
 			root: "composition: {exports: {unused: {resources: " + resource + "}}}\n", selected: adopt})
 	}
+	for _, value := range []string{
+		`{$remove: true, private-key: private-value}`, `{$remove: false, private-key: private-value}`,
+		`{$remove: null, private-key: private-value}`, `{$remove: "private-value", private-key: private-value}`,
+		`{$remove: {private-key: private-value}, private-key: private-value}`, `{private-key: private-value, $remove: null}`,
+	} {
+		fragment := "{config: {" + symbol + ": " + value + "}}"
+		for _, mode := range []string{"dependency", "root", "environment", "replacement"} {
+			tc := runtimeCase{name: "invalid inert constructor removal/" + mode + "/" + value, rule: "invalid declarations"}
+			if mode == "dependency" {
+				tc.rule = "baseline"
+				tc.edit = func(d *runtimebaseline.Document) { change(d, fragment, "unused") }
+			} else {
+				tc.root = "composition: {exports: {unused: " + fragment + "}, adopt: [{module: " + dependency + ", export: first}, {module: " + dependency + ", export: second}]}\n"
+				if mode == "environment" {
+					tc.overlay = "{}\n"
+				} else if mode == "replacement" {
+					tc.selected = adopt
+				}
+			}
+			cases = append(cases, tc)
+		}
+	}
+	for _, mode := range []string{"dependency", "root", "environment", "replacement"} {
+		fragment := "{config: {" + symbol + ": {mapping: {$remove: true, ordinary: 1}}}}"
+		tc := runtimeCase{name: "valid inert nested removal key/" + mode}
+		if mode == "dependency" {
+			tc.edit = func(d *runtimebaseline.Document) { change(d, fragment, "unused") }
+		} else {
+			tc.root = "composition: {exports: {unused: " + fragment + "}, adopt: [{module: " + dependency + ", export: first}, {module: " + dependency + ", export: second}]}\n"
+			if mode == "environment" {
+				tc.overlay = "{}\n"
+			} else if mode == "replacement" {
+				tc.selected = adopt
+			}
+		}
+		cases = append(cases, tc)
+	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			document, err := runtimebaseline.Decode(baselineBytes)
@@ -347,6 +385,7 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 				args = append(args, "--config", "selected.yaml")
 			}
 			marker := filepath.Join(configurationRoot, "constructor.json")
+			before := snapshotTree(t, configurationRoot)
 			process := exec.CommandContext(t.Context(), binary, args...)
 			process.Dir = deployment
 			for _, entry := range goEnvironment(map[string]string{"PLYSTRA_ADOPTED_MARKER": marker, "PRIVATE_ADOPTED_SECRET": "private-resolved"}) {
@@ -357,6 +396,9 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 				process.Env = append(process.Env, entry)
 			}
 			output, err := process.CombinedOutput()
+			if tc.rule != "" && !reflect.DeepEqual(before, snapshotTree(t, configurationRoot)) {
+				t.Fatal("rejected startup changed configuration inputs")
+			}
 			if tc.rule != "" {
 				if err == nil || !bytes.Contains(output, []byte(tc.rule)) {
 					t.Fatalf("startup = %v; expected %q\n%s", err, tc.rule, output)
