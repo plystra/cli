@@ -86,6 +86,65 @@ func TestParseFileIgnoresOrdinaryGoSource(t *testing.T) {
 	}
 }
 
+func TestParseFileIgnoresResourceProviderDirectiveFamily(t *testing.T) {
+	t.Parallel()
+	for _, directive := range []string{
+		"//plystra:implements-resource data.database/v1",
+		"//plystra:implements-resource",
+		"//plystra:implements-resource\tdata.database/v1",
+		"//plystra:implements-resource data.database/v1 extra",
+		"//plystra:implements-resource invalid-private-marker",
+		"//plystra:implements-resources data.database/v1",
+		"/*plystra:implements-resource data.database/v1*/",
+	} {
+		provider := directive + "\nfunc NewDatabase() {}\n"
+		for _, ordinary := range []string{"", "//plystra:implements order.create/v1\nfunc NewOrders() {}\n"} {
+			source := []byte("package service\n" + provider + "\n" + ordinary)
+			declarations, err := implementationdecl.ParseFile("service.go", source)
+			want := 0
+			if ordinary != "" {
+				want = 1
+			}
+			if err != nil || len(declarations) != want {
+				t.Fatalf("%s: %#v, %v", directive, declarations, err)
+			}
+			if want == 1 && (declarations[0].FunctionName() != "NewOrders" || declarations[0].ImplementedInterfaces()[0].ID().String() != "order.create/v1") {
+				t.Fatalf("Resource provider changed ordinary declaration: %#v", declarations)
+			}
+		}
+	}
+}
+
+func TestParseFileStillRejectsMalformedOrdinaryDirectivesWithResourceProviders(t *testing.T) {
+	t.Parallel()
+	for _, directive := range []string{
+		"//plystra:implements",
+		"//plystra:implements\torder.create/v1",
+		"//plystra:implements  order.create/v1",
+		"//plystra:implements order.create/v1 ",
+		"//plystra:implements order.create/v1 extra",
+		"//plystra:implements invalid-private-marker",
+		"//plystra:implements-other order.create/v1",
+		"//plystra:implements-resourc data.database/v1",
+		"//plystra:implementsresource data.database/v1",
+		"/*plystra:implements order.create/v1*/",
+	} {
+		provider := "//plystra:implements-resource data.database/v1\nfunc NewDatabase() {}\n"
+		ordinary := directive + "\nfunc NewOrders() {}\n"
+		for _, providerFirst := range []bool{false, true} {
+			body, line := ordinary+"\n"+provider, 2
+			if providerFirst {
+				body, line = provider+"\n"+ordinary, 5
+			}
+			declarations, err := implementationdecl.ParseFile("service.go", []byte("package service\n"+body))
+			var invalid *implementationdecl.InvalidError
+			if len(declarations) != 0 || !errors.Is(err, implementationdecl.ErrInvalid) || !errors.As(err, &invalid) || invalid.Position() != (implementationdecl.Position{Path: "service.go", Line: line, Column: 1}) {
+				t.Fatalf("%s: %#v, %v", directive, declarations, err)
+			}
+		}
+	}
+}
+
 func TestParseFileRejectsInvalidDirectives(t *testing.T) {
 	t.Parallel()
 
@@ -209,6 +268,8 @@ func FuzzParseFile(f *testing.F) {
 		"package test\n//plystra:implements order.create/v1\nfunc New() (*Service, error) { return nil, nil }\n",
 		"package test\nfunc New() *Service { return nil }\n",
 		"package test\n//plystra:implements order/v1\nfunc New() (*Service, error) { return nil, nil }\n",
+		"package test\n//plystra:implements-resource data.database/v1\nfunc NewDatabase() {}\n//plystra:implements order.create/v1\nfunc NewOrders() {}\n",
+		"package test\n/*plystra:implements-resource data.database/v1*/\nfunc NewDatabase() {}\n",
 		"not go source",
 	} {
 		f.Add(seed)
