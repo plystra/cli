@@ -58,6 +58,8 @@ import (
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resourcecontract"
 	"github.com/plystra/cli/internal/resourcedecl"
+	"github.com/plystra/cli/internal/resourceproviderdecl"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
 func TestPrimaryActionableDiagnosticScopesCancellationToNew(t *testing.T) {
@@ -1061,6 +1063,8 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Interface declaration", err: interfacedecl.ErrInvalid, code: diagnosticcode.InterfaceDeclarationInvalid},
 		{name: "invalid Resource declaration", err: resourcedecl.ErrInvalid, code: diagnosticcode.ResourceDeclarationInvalid},
 		{name: "invalid Resource contract", err: resourcecontract.ErrInvalid, code: diagnosticcode.ResourceContractInvalid},
+		{name: "invalid Resource provider declaration", err: resourceproviderdecl.ErrInvalid, code: diagnosticcode.ResourceProviderDeclarationInvalid},
+		{name: "invalid Resource provider", err: resourceproviderinventory.ErrInvalid, code: diagnosticcode.ResourceProviderInvalid},
 		{name: "duplicate Resource ID", err: interfaceinventory.ErrDuplicateResourceID, code: diagnosticcode.ResourceIDDuplicate},
 		{name: "invalid Interface contract", err: interfacecontract.ErrInvalid, code: diagnosticcode.InterfaceContractInvalid},
 		{name: "invalid Interface metadata", err: interfacemeta.ErrInvalid, code: diagnosticcode.InterfaceMetadataInvalid},

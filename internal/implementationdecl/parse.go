@@ -168,6 +168,9 @@ func collectDirectives(files *token.FileSet, file *ast.File) ([]parsedDirective,
 	var directives []parsedDirective
 	for _, group := range file.Comments {
 		for _, comment := range group.List {
+			if strings.HasPrefix(comment.Text, "//plystra:implements-resource") || strings.HasPrefix(comment.Text, "/*plystra:implements-resource") {
+				continue
+			}
 			if !strings.HasPrefix(comment.Text, directivePrefix) && !strings.HasPrefix(comment.Text, "/*plystra:implements") {
 				continue
 			}

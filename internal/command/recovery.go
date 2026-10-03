@@ -58,6 +58,8 @@ import (
 	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/resourcecontract"
 	"github.com/plystra/cli/internal/resourcedecl"
+	"github.com/plystra/cli/internal/resourceproviderdecl"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
 type recoveryContext struct {
@@ -1043,6 +1045,7 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			})
 		}
 	case diagnosticImplementationDeclarationInvalid,
+		diagnosticcode.ResourceProviderDeclarationInvalid,
 		diagnosticcode.ResourceDeclarationInvalid,
 		diagnosticcode.ResourceContractInvalid,
 		diagnosticInterfaceDeclarationInvalid,
@@ -1050,13 +1053,14 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 		diagnosticInterfaceMetadataInvalid,
 		diagnosticAuthoredPackageInvalid:
 		expectedKind := map[string]string{
-			diagnosticcode.ResourceDeclarationInvalid:  "resource-declaration",
-			diagnosticcode.ResourceContractInvalid:     "resource-contract",
-			diagnosticImplementationDeclarationInvalid: "implementation-declaration",
-			diagnosticInterfaceDeclarationInvalid:      "interface-declaration",
-			diagnosticInterfaceContractInvalid:         "interface-contract",
-			diagnosticInterfaceMetadataInvalid:         "interface-metadata",
-			diagnosticAuthoredPackageInvalid:           "authored-package",
+			diagnosticcode.ResourceProviderDeclarationInvalid: "resource-provider-declaration",
+			diagnosticcode.ResourceDeclarationInvalid:         "resource-declaration",
+			diagnosticcode.ResourceContractInvalid:            "resource-contract",
+			diagnosticImplementationDeclarationInvalid:        "implementation-declaration",
+			diagnosticInterfaceDeclarationInvalid:             "interface-declaration",
+			diagnosticInterfaceContractInvalid:                "interface-contract",
+			diagnosticInterfaceMetadataInvalid:                "interface-metadata",
+			diagnosticAuthoredPackageInvalid:                  "authored-package",
 		}[code]
 		var located *interfaceinventory.SourceError
 		if !errors.As(err, &located) || located == nil || located.SourceKind() != expectedKind {
@@ -1068,6 +1072,15 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Kind:   located.SourceKind(),
 			Line:   located.Line(),
 			Column: located.Column(),
+		})
+	case diagnosticcode.ResourceProviderInvalid:
+		var invalid *resourceproviderinventory.ValidationError
+		if !errors.As(err, &invalid) || invalid == nil {
+			return nil
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: invalid.ModulePath(), Path: invalid.SourcePath(), Kind: "resource-provider-constructor",
+			Line: invalid.Line(), Column: invalid.Column(),
 		})
 	case diagnosticImplementationConfigInvalid,
 		diagnosticImplementationRequiredInvalid,
@@ -1368,6 +1381,10 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticImplementationConformanceInvalid, "Implement every reported canonical Interface method on the constructor's concrete result type, then rerun the command.")
 	case errors.Is(err, resourcedecl.ErrInvalid):
 		return recoveryDiagnostic(diagnosticcode.ResourceDeclarationInvalid, "Correct the reported //plystra:resource directive to immediately document one non-generic defined Go interface Resource with an exact Resource ID and no Interface directive, then rerun the command.")
+	case errors.Is(err, resourceproviderdecl.ErrInvalid):
+		return recoveryDiagnostic(diagnosticcode.ResourceProviderDeclarationInvalid, "Attach exactly one //plystra:implements-resource directive with an exact Resource ID to an exported package-level constructor, without Interface directives, then rerun the command.")
+	case errors.Is(err, resourceproviderinventory.ErrInvalid):
+		return recoveryDiagnostic(diagnosticcode.ResourceProviderInvalid, "Use an optional first same-package Config value, explicitly named canonical Resource dependencies, and a concrete pointer plus error result assignable to the declared Resource; then rerun the command.")
 	case errors.Is(err, resourcecontract.ErrInvalid):
 		return recoveryDiagnostic(diagnosticcode.ResourceContractInvalid, "Correct the reported Resource's ordinary Go method set and bounded public type graph; keep lifecycle control on the provider, then rerun the command.")
 	case errors.Is(err, interfaceinventory.ErrDuplicateResourceID):

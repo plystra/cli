@@ -1304,8 +1304,23 @@ to 64 type-reference levels and 65,536 public shape nodes.
 Malformed declarations, contracts and duplicate IDs report
 `PLYSTRA_RESOURCE_DECLARATION_INVALID`, `PLYSTRA_RESOURCE_CONTRACT_INVALID` and
 `PLYSTRA_RESOURCE_ID_DUPLICATE`, respectively, with owning module-relative sources.
-Installed capability facts report `resource.contract` separately from unsupported
-Resource instance configuration, provider construction and binding.
+Provider discovery accepts one `//plystra:implements-resource <resource-id>`
+directive on an exported non-generic package-level constructor. Its optional
+first parameter is a same-package `Config` value; remaining parameters are
+exact canonical Resource types with explicit nonblank, case-sensitive Go names.
+It returns a concrete pointer plus `error`, and that pointer must be assignable
+to the declared visible Resource. Multiple provider candidates remain inert:
+discovery does not infer selection, create instances, or execute constructors.
+Contracts and constructors use the current Project's effective Go graph,
+including its selected versions and replacements, without rewriting module
+files. Invalid configuration defaults retain field context but never their value.
+Mixed Interface/Resource-provider directives, invalid signatures and failed
+assignability produce `PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID` or
+`PLYSTRA_RESOURCE_PROVIDER_INVALID` with owning source locations.
+Installed capability facts report `resource.contract` and
+`resource.provider.discovery` separately from unsupported Resource instance
+configuration, provider construction and binding. Contract inspection does not
+yet display provider candidates.
 
 `plystra explain capability <capability-name>/vN` is the corresponding causal
 read-only view. For a required Capability it reports the selected ordinary

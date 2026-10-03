@@ -117,6 +117,38 @@ func TestInvalidConfigurationTypeDoesNotDiscloseNestedDefaults(t *testing.T) {
 	}
 }
 
+func TestRejectedConfigurationDefaultsDoNotDiscloseLiterals(t *testing.T) {
+	t.Parallel()
+	durationPackage := types.NewPackage("time", "time")
+	duration := types.NewNamed(types.NewTypeName(token.NoPos, durationPackage, "Duration", nil), types.Typ[types.Int64], nil)
+	urlPackage := types.NewPackage("net/url", "url")
+	url := types.NewNamed(types.NewTypeName(token.NoPos, urlPackage, "URL", nil), types.NewStruct(nil, nil), nil)
+	for _, test := range []struct {
+		name    string
+		value   types.Type
+		literal string
+	}{
+		{"boolean", types.Typ[types.Bool], "PRIVATE_DEFAULT"},
+		{"signed-syntax", types.Typ[types.Int64], "PRIVATE_DEFAULT"},
+		{"signed-width", types.Typ[types.Int8], "123456789"},
+		{"signed-platform", types.Typ[types.Int], "123456789012345"},
+		{"unsigned-syntax", types.Typ[types.Uint64], "PRIVATE_DEFAULT"},
+		{"unsigned-width", types.Typ[types.Uint8], "123456789"},
+		{"unsigned-platform", types.Typ[types.Uint], "123456789012345"},
+		{"float", types.Typ[types.Float64], "PRIVATE_DEFAULT"},
+		{"duration", duration, "PRIVATE_DEFAULT"},
+		{"url", url, "https://PRIVATE_DEFAULT/%zz"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			object := types.NewStruct([]*types.Var{types.NewField(token.NoPos, nil, "Literal", test.value, false)}, []string{fmt.Sprintf("plystra-default:%q", test.literal)})
+			_, err := buildPrivacyConfiguration(t, object)
+			if err == nil || strings.Contains(err.Error(), test.literal) || !strings.Contains(err.Error(), "Literal") || !strings.Contains(err.Error(), "default") {
+				t.Fatalf("unsafe or missing default diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func FuzzConfigurationTypeIdentityExcludesTagLiterals(f *testing.F) {
 	f.Add([]byte("plain"))
 	f.Add([]byte("\"quoted\"\\path\nnext `tag`"))

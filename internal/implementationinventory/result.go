@@ -31,7 +31,9 @@ func (c ConcreteType) String() string {
 	})
 }
 
-func validateConstructorResult(function *types.Func) (ConcreteType, error) {
+// CompileResult validates the common concrete-pointer/error constructor result
+// contract used by ordinary Implementations and Resource providers.
+func CompileResult(function *types.Func) (ConcreteType, error) {
 	signature, ok := function.Type().(*types.Signature)
 	if !ok {
 		return ConcreteType{}, fmt.Errorf("compiled constructor is not a Go function")
