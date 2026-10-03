@@ -325,15 +325,15 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response,error) {retu
 	})
 }
 
-func TestGeneratedBootstrapLoadsSelfAdoptedTypedConfiguration(t *testing.T) {
-	for _, module := range []string{"example.com/adopted-runtime-config", "my-app"} {
+func TestGeneratedBootstrapLoadsTemplateTypedConfiguration(t *testing.T) {
+	for _, module := range []string{"example.com/template-runtime-config", "my-app"} {
 		for _, state := range []string{"active", "dormant"} {
-			t.Run(module+"/"+state, func(t *testing.T) { testGeneratedSelfAdoptedConfiguration(t, module, state == "dormant") })
+			t.Run(module+"/"+state, func(t *testing.T) { testGeneratedTemplateConfiguration(t, module, state == "dormant") })
 		}
 	}
 }
 
-func testGeneratedSelfAdoptedConfiguration(t *testing.T, module string, dormant bool) {
+func testGeneratedTemplateConfiguration(t *testing.T, module string, dormant bool) {
 	t.Helper()
 	root := t.TempDir()
 	writeApplicationModule(t, root, module)
@@ -344,8 +344,13 @@ func testGeneratedSelfAdoptedConfiguration(t *testing.T, module string, dormant 
 	if dormant {
 		interfaces = "interfaces: {use: {configuration.owner/v1: " + owner + "}}"
 	}
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "composition:\n  exports:\n    common:\n      "+interfaces+"\n      config:\n        "+owner+": {label: private-adopted-value}\n  adopt: [{module: "+module+", export: common}]\n")
-	selected := "composition: {adopt: [{module: " + module + ", export: common}]}\n"
+	const templateModule = "example.com/runtime-template"
+	templateRoot := t.TempDir()
+	writeModule(t, templateRoot, templateModule, "")
+	writeFile(t, filepath.Join(templateRoot, "plystra.yaml"), interfaces+"\nconfig:\n  "+owner+": {label: private-template-value}\n")
+	writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+templateModule+" v1.0.0\nreplace "+templateModule+" => "+filepath.ToSlash(templateRoot)+"\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "template: "+templateModule+"\n")
+	selected := "{}\n"
 	writeFile(t, filepath.Join(root, "plystra.test.yaml"), selected)
 	writeFile(t, filepath.Join(root, "selected.yaml"), selected)
 	for _, selector := range [][]string{nil, {"--env", "test"}, {"--config", "selected.yaml"}} {
@@ -360,17 +365,17 @@ func testGeneratedSelfAdoptedConfiguration(t *testing.T, module string, dormant 
 			t.Fatalf("generate --check %v = %d: %s\n%s", selector, code, stdout.Bytes(), stderr.Bytes())
 		}
 		if !reflect.DeepEqual(before, snapshotTree(t, root)) {
-			t.Fatal("self-adoption check changed project inputs")
+			t.Fatal("template check changed project inputs")
 		}
 	}
 	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 	process.Dir, process.Env = root, goEnvironment(nil)
 	output, err := process.CombinedOutput()
 	if err != nil {
-		t.Fatalf("adopted startup = %v\n%s", err, output)
+		t.Fatalf("template startup = %v\n%s", err, output)
 	}
-	if bytes.Contains(output, []byte("private-adopted-value")) {
-		t.Fatal("error leaked adopted value")
+	if bytes.Contains(output, []byte("private-template-value")) {
+		t.Fatal("error leaked template value")
 	}
 	runtimeTest := strings.ReplaceAll(`package application_test
 import (
@@ -378,45 +383,46 @@ import (
  "os"
  "path/filepath"
  "testing"
- "example.com/adopted-runtime-config/configowner"
- "example.com/adopted-runtime-config/generated/go/bootstrap"
+ "example.com/template-runtime-config/configowner"
+ "example.com/template-runtime-config/generated/go/bootstrap"
 )
-func TestSelfAdoption(t *testing.T) {
+func TestTemplateConfiguration(t *testing.T) {
  baseline,err:=filepath.Abs("dist/runtime-baseline.json");if err!=nil{t.Fatal(err)}
- const exports="composition:\n  exports:\n    common:\n      interfaces: {require: [configuration.owner/v1]}\n      config:\n        example.com/adopted-runtime-config/configowner.New: {label: private-live-root-export}\n"
- const adoption="  adopt: [{module: example.com/adopted-runtime-config, export: common}]\n"
+ const relationship="template: example.com/runtime-template\n"
+ const current="config: {example.com/template-runtime-config/configowner.New: {label: private-live-current}}\n"
  for _,mode:=range []string{"default","environment","replacement"} {
   t.Run(mode,func(t *testing.T){
    root:=t.TempDir()
-   document:=exports+adoption
+   document:=relationship+current
    args:=[]string{"--configuration-root",root,"--runtime-baseline",baseline}
    if mode=="environment" {
-    if err:=os.WriteFile(filepath.Join(root,"plystra.test.yaml"),[]byte("composition:\n"+adoption),0600);err!=nil{t.Fatal(err)}
+    document=relationship
+    if err:=os.WriteFile(filepath.Join(root,"plystra.test.yaml"),[]byte(current),0600);err!=nil{t.Fatal(err)}
     args=append(args,"--env","test")
    }
    if mode=="replacement" {
-    document=exports+"interfaces: {require: [missing.inert/v1]}\nconfig: {example.com/adopted-runtime-config/configowner.New: {label: wrong}}\n"
-    if err:=os.WriteFile(filepath.Join(root,"selected.yaml"),[]byte("composition:\n"+adoption),0600);err!=nil{t.Fatal(err)}
+    document=relationship+"interfaces: {require: [missing.inert/v1]}\nconfig: {example.com/template-runtime-config/configowner.New: {label: wrong}}\n"
+    if err:=os.WriteFile(filepath.Join(root,"selected.yaml"),[]byte(current),0600);err!=nil{t.Fatal(err)}
     args=append(args,"--config","selected.yaml")
    }
    if err:=os.WriteFile(filepath.Join(root,"plystra.yaml"),[]byte(document),0600);err!=nil{t.Fatal(err)}
    app,err:=bootstrap.New(context.Background(),bootstrap.RuntimeOptions{Arguments:args,Environment:[]string{}})
    if err!=nil{t.Fatal(err)}
-   if configowner.Last.Label!="private-live-root-export"{t.Fatal("self-adoption did not read the live root inventory")}
+   if configowner.Last.Label!="private-live-current"{t.Fatal("template configuration did not compose with the live selected layer")}
    if err:=app.Stop(context.Background());err!=nil{t.Fatal(err)}
   })
  }
 }
-`, "example.com/adopted-runtime-config", module)
+`, "example.com/template-runtime-config", module)
 	if dormant {
 		runtimeTest = strings.ReplaceAll(runtimeTest, "interfaces: {require: [configuration.owner/v1]}", interfaces)
-		runtimeTest = strings.ReplaceAll(runtimeTest, `configowner.Last.Label!="private-live-root-export"`, `configowner.Last.Label!=""`)
+		runtimeTest = strings.ReplaceAll(runtimeTest, `configowner.Last.Label!="private-live-current"`, `configowner.Last.Label!=""`)
 	}
-	writeFile(t, filepath.Join(root, "adoption_test.go"), runtimeTest)
+	writeFile(t, filepath.Join(root, "template_test.go"), runtimeTest)
 	process = exec.CommandContext(t.Context(), "go", "test", "-race", "-mod=readonly", ".")
 	process.Dir, process.Env = root, goEnvironment(nil)
 	if output, err := process.CombinedOutput(); err != nil {
-		t.Fatalf("self-adoption runtime: %v\n%s", err, output)
+		t.Fatalf("template runtime: %v\n%s", err, output)
 	}
 }
 

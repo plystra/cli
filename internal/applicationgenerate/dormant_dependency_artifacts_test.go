@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/resolutionevidence"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -29,7 +30,7 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 			applicationRoot := filepath.Join(root, "application")
 			writeApplicationModule(t, dependencyRoot, dependencyModule)
 			constructor := writeConstructorConfigurationOwner(t, dependencyRoot, dependencyModule, true)
-			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "composition: {exports: {defaults: {}}}\n")
+			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
 			writeConnectApplicationModule(t, applicationRoot, "example.com/acme/dormant-artifacts")
 			goModPath := filepath.Join(applicationRoot, "go.mod")
 			writeFile(t, goModPath, string(readAbsoluteFile(t, goModPath))+fmt.Sprintf(
@@ -51,8 +52,13 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 				writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 			}
 			const exposure = "http: {expose: {kernel.health/v1: {transport: connect}}}\n"
-			adoption := fmt.Sprintf("composition: {adopt: [{module: %s, export: defaults}]}\n", dependencyModule)
-			writeFile(t, filepath.Join(applicationRoot, selectedPath), exposure+adoption)
+			relationship := fmt.Sprintf("template: %s\n", dependencyModule)
+			writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), relationship)
+			selectedMetadata := ""
+			if selectedPath == "plystra.yaml" {
+				selectedMetadata = relationship
+			}
+			writeFile(t, filepath.Join(applicationRoot, selectedPath), selectedMetadata+exposure)
 			generate := func() applicationgen.ManifestProvenance {
 				t.Helper()
 				dependencyBefore := snapshotTree(t, dependencyRoot)
@@ -78,10 +84,10 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 				}
 			}
 			previousDigest := baseline.DependencyBaseline().Digest()
-			emptyExport := "composition: {exports: {defaults: {}}}\n"
-			selection := fmt.Sprintf("composition: {exports: {defaults: {interfaces: {use: {configuration.owner/v1: %s}}}}}\n", constructor)
-			selectionAndConfiguration := fmt.Sprintf("composition: {exports: {defaults: {interfaces: {use: {configuration.owner/v1: %s}}, config: {%s: {endpoint: private.internal, password: {env: PLYSTRA_DORMANT_DEPENDENCY_SECRET}}}}}}\n", constructor, constructor)
-			for _, source := range []string{selection, selectionAndConfiguration, selection, emptyExport} {
+			emptyTemplate := "{}\n"
+			selection := fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\n", constructor)
+			selectionAndConfiguration := selection + fmt.Sprintf("config: {%s: {endpoint: private.internal, password: {env: PLYSTRA_DORMANT_DEPENDENCY_SECRET}}}\n", constructor)
+			for _, source := range []string{selection, selectionAndConfiguration, selection, emptyTemplate} {
 				writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), source)
 				beforeCheck := snapshotTree(t, root)
 				checkOptions := options
@@ -140,7 +146,7 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 			}
 
 			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), selectionAndConfiguration)
-			writeFile(t, filepath.Join(applicationRoot, selectedPath), exposure+adoption+"interfaces: {require: [configuration.owner/v1]}\n")
+			writeFile(t, filepath.Join(applicationRoot, selectedPath), selectedMetadata+exposure+"interfaces: {require: [configuration.owner/v1]}\n")
 			active := generate()
 			bindings := active.InterfaceProvenance().Bindings()
 			if len(bindings) != 1 || bindings[0].Selection().Constructor() != constructor {
@@ -149,8 +155,8 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 			if active.ApplicationModelDigest() == baseline.ApplicationModelDigest() || len(active.DormantImplementationSelections()) != 0 || len(active.DormantConstructorConfigurations()) != 0 {
 				t.Fatal("activation did not promote dormant intent into executable provenance")
 			}
-			selectionSource := dependencyModule + `@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.use["configuration.owner/v1"]`
-			configurationSource := fmt.Sprintf("%s@v1.0.0/plystra.yaml composition.exports[\"defaults\"].config[%q]", dependencyModule, constructor)
+			selectionSource := dependencyModule + `@v1.0.0/plystra.yaml interfaces.use["configuration.owner/v1"]`
+			configurationSource := fmt.Sprintf("%s@v1.0.0/plystra.yaml config[%q]", dependencyModule, constructor)
 			for _, name := range []string{bindings[0].Mappings().ProxyPath(), bindings[0].Mappings().AssemblyPath(), "generated/go/bootstrap/bootstrap_gen.go"} {
 				artifact, exists, err := generatedfiles.ReadArtifact(applicationRoot, name)
 				if err != nil || !exists || !slices.Contains(artifact.Sources(), selectionSource) || !slices.Contains(artifact.Sources(), configurationSource) {
@@ -189,6 +195,103 @@ func TestGenerateIsolatesDormantDependencyArtifactProvenance(t *testing.T) {
 			}
 			if !reflect.DeepEqual(snapshotTree(t, root), beforeCheck) {
 				t.Fatal("stable dormant dependency check mutated Project")
+			}
+		})
+	}
+}
+
+func TestGenerateKeepsDormantTemplateDeclarationOrder(t *testing.T) {
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			const module = "example.com/dormant-history"
+			const oldest = "example.com/z-oldest"
+			const nearest = "example.com/a-nearest"
+			root := t.TempDir()
+			writeApplicationModule(t, root, module)
+			constructor := writeConstructorConfigurationOwner(t, root, module, true)
+			declarations := fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: private-equal, password: {env: PRIVATE_TEMPLATE_HISTORY_SECRET}}}\n", constructor, constructor)
+			for _, name := range []string{oldest, nearest} {
+				templateRoot := t.TempDir()
+				writeModule(t, templateRoot, name, "")
+				document := declarations
+				if name == nearest {
+					document = "template: " + oldest + "\n" + document
+				}
+				writeFile(t, filepath.Join(templateRoot, "plystra.yaml"), document)
+				writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+name+" v1.0.0\nreplace "+name+" => "+filepath.ToSlash(templateRoot)+"\n")
+			}
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "template: "+nearest+"\n")
+			selected := "plystra.yaml"
+			options := applicationgenerate.Options{Start: root, Environment: goEnvironment(nil), Validate: func(context.Context, string) error { return nil }}
+			switch mode {
+			case "environment":
+				selected, options.EnvironmentName = "plystra.test.yaml", "test"
+			case "replacement":
+				selected, options.ConfigurationPath = "selected.yaml", "selected.yaml"
+			}
+			if selected != "plystra.yaml" {
+				writeFile(t, filepath.Join(root, selected), "{}\n")
+			}
+			var beforeArtifacts []artifactEvidenceSnapshot
+			var beforeDigest string
+			for _, current := range []bool{false, true} {
+				if current {
+					document := declarations
+					if selected == "plystra.yaml" {
+						document = "template: " + nearest + "\n" + document
+					}
+					writeFile(t, filepath.Join(root, selected), document)
+				}
+				if _, err := applicationgenerate.Generate(t.Context(), options); err != nil {
+					t.Fatal(err)
+				}
+				data := readFile(t, root, generatedfiles.ApplicationManifestPath)
+				provenance, err := applicationgen.DecodeManifestProvenance(data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				selections := provenance.DormantImplementationSelections()
+				if len(selections) != 1 {
+					t.Fatalf("dormant selections = %d, want 1", len(selections))
+				}
+				field := dormantConfigurationField(t, onlyDormantConstructorConfiguration(t, provenance, constructor), fmt.Sprintf("config[%q][\"endpoint\"]", constructor))
+				for _, contributions := range [][]applicationgen.DormantSelectionContribution{selections[0].Contributions(), field.Contributions()} {
+					wantCount := 2
+					if current {
+						wantCount++
+					}
+					if len(contributions) != wantCount {
+						t.Fatalf("equal declarations collapsed: got %d contributions, want %d", len(contributions), wantCount)
+					}
+					for index, contribution := range contributions {
+						wantModule, wantPath, wantOwner, wantPrecedence, wantOrder := module, selected, string(resolutionevidence.ConfigurationOwnerRoot), 2, 0
+						if index < 2 {
+							wantModule = []string{oldest, nearest}[index]
+							wantPath, wantOwner, wantPrecedence, wantOrder = "plystra.yaml", string(resolutionevidence.ConfigurationOwnerTemplate), 1, index+1
+						} else if mode == "environment" {
+							wantOwner, wantPrecedence = string(resolutionevidence.ConfigurationOwnerEnvironment), 3
+						} else if mode == "replacement" {
+							wantOwner = string(resolutionevidence.ConfigurationOwnerExplicit)
+						}
+						sources := contribution.Sources()
+						if contribution.TemplateOrder() != wantOrder || contribution.Precedence() != wantPrecedence || contribution.Owner() != wantOwner || contribution.Effective() != (index == wantCount-1) || len(sources) != 1 || sources[0].Module() != wantModule || sources[0].Path() != wantPath {
+							t.Fatalf("contribution %d lost declaration order, ownership, or source: %#v", index, contribution)
+						}
+					}
+				}
+				for _, value := range []string{"private-equal", "PRIVATE_TEMPLATE_HISTORY_SECRET"} {
+					if bytes.Contains(data, []byte(value)) {
+						t.Fatal("dormant history exposed private values")
+					}
+				}
+				if !bytes.Contains(data, []byte(`"template_order":1`)) || !bytes.Contains(data, []byte(`"template_order":2`)) {
+					t.Fatal("public manifest omitted template order")
+				}
+				if !current {
+					beforeArtifacts, beforeDigest = snapshotExecutablePublicArtifactEvidence(t, root), provenance.ApplicationModelDigest()
+				} else if beforeDigest != provenance.ApplicationModelDigest() || !reflect.DeepEqual(beforeArtifacts, snapshotExecutablePublicArtifactEvidence(t, root)) {
+					t.Fatal("dormant declaration history changed executable output")
+				}
 			}
 		})
 	}

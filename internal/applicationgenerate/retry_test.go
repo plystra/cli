@@ -65,10 +65,10 @@ func TestGeneratedReplaySafeRetryExecution(t *testing.T) {
 	}
 	dependency := t.TempDir()
 	writeModule(t, dependency, "example.com/retry-policy", "")
-	writeFile(t, filepath.Join(dependency, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {policies: {work.run/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}}}}}\n")
+	writeFile(t, filepath.Join(dependency, "plystra.yaml"), "interfaces: {policies: {work.run/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}}\n")
 	mod := string(readFile(t, root, "go.mod"))
 	writeFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/retry-policy v1.0.0\nreplace example.com/retry-policy => "+filepath.ToSlash(dependency)+"\n")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "composition: {adopt: [{module: example.com/retry-policy, export: defaults}]}\ninterfaces: {require: [work.run/v1]}\n")
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/retry-policy\ninterfaces: {require: [work.run/v1]}\n")
 	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {policies: {work.run/v1: {timeout: 5s, retry: {eligibility: replay_safe, max_attempts: 3}}}}\n")
 	writeFile(t, filepath.Join(root, "deploy/customer.yaml"), "interfaces: {require: [work.run/v1], policies: {work.run/v1: {timeout: 5s, retry: {eligibility: replay_safe, max_attempts: 4}}}}\n")
 	for _, selected := range []struct {
@@ -76,7 +76,7 @@ func TestGeneratedReplaySafeRetryExecution(t *testing.T) {
 		arguments []string
 		attempts  int
 	}{
-		{"adopted", nil, 2},
+		{"template", nil, 2},
 		{"environment", []string{"--env", "production"}, 3},
 		{"replacement", []string{"--config", "deploy/customer.yaml"}, 4},
 	} {
