@@ -846,7 +846,7 @@ replace example.com/platform-a => ../platform-a
 replace example.com/platform-b => ../platform-b
 `)
 	rootConfiguration := "# shared root\nhttp: {address: \":8080\", cors: {allowed_origins: ['https://shared.example'], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", cors: {allow_credentials: null}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", cors: {allow_credentials: {$remove: true}}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "plystra.production.yaml"), overlayConfiguration)
 	before := snapshotTree(t, appRoot)

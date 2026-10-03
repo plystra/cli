@@ -1496,7 +1496,6 @@ timeouts:
 		`interfaces.require["audit.write/v1"]`:                   "example.com/transitive@v1.4.0",
 		`interfaces.use["app.run/v1"]`:                           "example.com/direct@v1.2.0",
 		`interfaces.use["audit.write/v1"]`:                       "example.com/transitive@v1.4.0",
-		`interfaces.policies["app.run/v1"]`:                      "example.com/direct@v1.2.0",
 		`config["example.com/direct/app.New"]["message"]`:        "example.com/direct@v1.2.0",
 		`config["example.com/transitive/audit.New"]["endpoint"]`: "example.com/transitive@v1.4.0",
 	} {
@@ -1504,6 +1503,25 @@ timeouts:
 		if len(records) != 1 || len(records[0].Sources()) != 1 || !strings.HasPrefix(records[0].Sources()[0], module+"/plystra.yaml ") {
 			t.Fatalf("dependency provenance for %s = %#v", path, records)
 		}
+	}
+	const directPolicySource = `example.com/direct@v1.2.0/plystra.yaml interfaces.policies["app.run/v1"]`
+	const transitivePolicySource = `example.com/transitive@v1.4.0/plystra.yaml interfaces.policies["app.run/v1"]`
+	policyBaseline := compositionProvenance(first.Composition().Provenance(), `interfaces.policies["app.run/v1"]`)
+	if len(policyBaseline) != 2 {
+		t.Fatalf("template policy baseline provenance = %#v", policyBaseline)
+	}
+	policyDigests := make(map[string]string)
+	for _, record := range policyBaseline {
+		if record.Removed() || len(record.Sources()) != 1 || record.Digest() == "" {
+			t.Fatalf("template policy baseline record = %#v", record)
+		}
+		policyDigests[record.Sources()[0]] = record.Digest()
+	}
+	if policyDigests[directPolicySource] == "" || policyDigests[transitivePolicySource] == "" || policyDigests[directPolicySource] == policyDigests[transitivePolicySource] {
+		t.Fatalf("template policy baseline lost distinct declarations = %#v", policyBaseline)
+	}
+	if records := compositionProvenance(first.Composition().ResolutionSources(), `interfaces.policies["app.run/v1"]`); len(records) != 1 || records[0].Removed() || records[0].Digest() != policyDigests[directPolicySource] || !reflect.DeepEqual(records[0].Sources(), []string{directPolicySource}) {
+		t.Fatalf("effective template policy provenance = %#v", records)
 	}
 	if records := compositionProvenance(first.Composition().Provenance(), `http.expose["app.run/v1"]`); len(records) != 1 || !reflect.DeepEqual(records[0].Sources(), []string{`example.com/direct@v1.2.0/plystra.yaml http.expose["app.run/v1"]`}) {
 		t.Fatalf("template exposure baseline provenance = %#v", records)
