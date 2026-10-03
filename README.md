@@ -4,6 +4,12 @@
 
 The CLI is a separate Go Module from `github.com/plystra/kernel`. It completes build-time work and emits deterministic Go and JavaScript source targeting the Kernel's versioned assembly API; it is not a second runtime.
 
+## License
+
+Plystra CLI is licensed under the [Apache License, Version 2.0](LICENSE).
+
+Using the CLI does not require your application to be open source. Any CLI template or runtime code included in generated output remains subject to Apache-2.0, including applicable license and notice requirements when redistributed. Third-party dependencies and material retain their own licenses.
+
 ## Ownership
 
 The CLI owns:
