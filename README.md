@@ -454,11 +454,15 @@ names use dot-separated lower-kebab segments, at most 128 ASCII bytes. Authored
 `use` values and Implementation consumers are exact constructor symbols;
 binding parameters are nonblank Go identifiers and binding values are instance
 names. Configuration objects and structural containers require mappings with
-unique string keys. Provider types, required fields, and target existence still
+unique string keys, including maps nested inside configuration sequences.
+Configuration scalars require valid YAML contents even without a provider schema;
+malformed tagged values are rejected without exposing decoder text or values.
+Provider types, required fields, and target existence still
 need composition and resolution; this syntax check does not enable adoption.
 Generated startup repeats these checks for private dependency inventories and
 live root exports, including replacement mode. Invalid inert Resource syntax
 or nested removal mappings fail before Secret resolution or constructor entry.
+Regenerate and rebuild to install these Resource configuration checks.
 
 Exact entries in `interfaces.use`, `interfaces.policies`, and `http.expose`
 are removed only by `{$remove: true}`. Null, empty values, false or string-valued

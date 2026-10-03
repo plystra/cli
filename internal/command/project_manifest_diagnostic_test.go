@@ -18,11 +18,12 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 		{name: "generate-check", arguments: []string{"generate", "--check"}},
 		{name: "check", arguments: []string{"check"}},
 	}
-	tests := []struct {
+	type manifestCase struct {
 		name       string
 		setup      func(*testing.T, string) string
 		wantSource string
-	}{
+	}
+	tests := []manifestCase{
 		{
 			name: "malformed-current-manifest",
 			setup: func(t *testing.T, parent string) string {
@@ -93,6 +94,31 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 		},
 	}
 
+	for _, value := range []string{
+		"!!int private-value", "!!bool private-value", "!!float private-value",
+		"!!timestamp private-value", "!!binary private-value", "!!null private-value",
+		"[!!int private-value]", "{private-key: !!null private-value}",
+		"{private-key: 1, private-key: 2}", "[{private-key: 1, private-key: 2}]",
+		"{1: private-value}", "[{1: private-value}]",
+	} {
+		manifest := "composition: {exports: {defaults: {resources: {instances: {database: {config: {value: " + value + "}}}}}}}\n"
+		tests = append(tests, manifestCase{
+			name: "invalid-current-resource-value/" + value,
+			setup: func(t *testing.T, parent string) string {
+				root := filepath.Join(parent, "application")
+				writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/application\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), manifest)
+				return root
+			},
+			wantSource: "Source: example.com/application:plystra.yaml:1:1 (project-marker)",
+		}, manifestCase{
+			name: "invalid-dependency-resource-value/" + value,
+			setup: func(t *testing.T, parent string) string {
+				return writeManifestDiagnosticDependencyProject(t, parent, manifest, false)
+			},
+			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
+		})
+	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			parent := t.TempDir()

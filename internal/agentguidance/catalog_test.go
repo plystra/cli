@@ -165,6 +165,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Public configuration type descriptions omit raw anonymous-struct tags",
 		"Authored Go default changes still require a rebuild",
 		"Resource export syntax is checked even without adoption",
+		"Resource configuration rejects malformed tagged scalar payloads even without a provider schema",
 		"Startup repeats these checks for private dependency inventories and live root exports",
 		"Resource adoption remains unsupported",
 		"Startup validates effective dormant objects without activating constructors or resolving their Secrets",

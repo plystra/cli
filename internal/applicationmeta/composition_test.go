@@ -1,6 +1,7 @@
 package applicationmeta_test
 
 import (
+	"encoding/base64"
 	"errors"
 	"reflect"
 	"strconv"
@@ -324,6 +325,18 @@ func TestParseExportsRejectsMalformedResourceDeclarations(t *testing.T) {
 		`{instances: {database: {config: []}}}`,
 		`{instances: {database: {config: {1: private-value}}}}`,
 		`{instances: {database: {config: {private-key: 1, private-key: 2}}}}`,
+		`{instances: {database: {config: {private-key: {nested: 1, nested: 2}}}}}`,
+		`{instances: {database: {config: {private-key: [{nested: 1, nested: 2}]}}}}`,
+		`{instances: {database: {config: {private-key: {1: private-value}}}}}`,
+		`{instances: {database: {config: {private-key: [{1: private-value}]}}}}`,
+		`{instances: {database: {config: {private-key: !!int private-value}}}}`,
+		`{instances: {database: {config: {private-key: !!bool private-value}}}}`,
+		`{instances: {database: {config: {private-key: !!float private-value}}}}`,
+		`{instances: {database: {config: {private-key: !!timestamp private-value}}}}`,
+		`{instances: {database: {config: {private-key: !!binary private-value}}}}`,
+		`{instances: {database: {config: {private-key: !!null private-value}}}}`,
+		`{instances: {database: {config: {private-key: [!!int private-value]}}}}`,
+		`{instances: {database: {config: {private-key: {nested: !!null private-value}}}}}`,
 		`{bind: null}`,
 		`{bind: []}`,
 		`{bind: {example.com/service.New: {database: primary}}}`,
@@ -371,6 +384,8 @@ func TestParseExportsPreservesInertResourceSyntaxWithoutResolvingIt(t *testing.T
 		`{instances: {}}`,
 		`{instances: {database: {}}}`,
 		`{instances: {database: {config: {pool: 20}}}}`,
+		`{instances: {database: {config: {binary: !!binary ` + base64.StdEncoding.EncodeToString([]byte("private-binary")) + `}}}}`,
+		`{instances: {database: {config: {integer: !!int 7, boolean: !!bool true, float: !!float 1.5, timestamp: !!timestamp 2026-10-04, string: !!str private-value, nested: [!!null null, {private-key: false}], labels: {$remove: true, ordinary: 1}}}}}`,
 		`{instances: {` + strings.Repeat("a", 128) + `: {use: example.com/db.New}}}`,
 		`{instances: {database-1.primary: {use: example.com/db.New, config: {url: {env: DATABASE_URL}, pool: 0, options: null, labels: {}, replicas: []}}}}`,
 		`{bind: {implementations: {}, instances: {}}}`,
@@ -392,6 +407,24 @@ func TestParseExportsPreservesInertResourceSyntaxWithoutResolvingIt(t *testing.T
 				if len(manifest.InterfaceRequirements()) != 0 || len(manifest.Configurations()) != 0 || len(manifest.ExportAdoptions()) != 0 {
 					t.Fatalf("inert Resource export contributed active declarations: %#v", manifest)
 				}
+			}
+		})
+	}
+}
+
+func TestParseInertResourceConfigurationDoesNotApplyTypedTraversalLimits(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct{ name, value string }{
+		{name: "wide", value: "[" + strings.Repeat("0,", 65_534) + "0]"},
+		{name: "deep", value: strings.Repeat("[", 65) + "0" + strings.Repeat("]", 65)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data := []byte("composition: {exports: {defaults: {resources: {instances: {database: {config: {value: " + test.value + "}}}}}}}\n")
+			if _, err := applicationmeta.Parse(data); err != nil {
+				t.Errorf("current inventory: %v", err)
+			}
+			if _, err := applicationmeta.ParseExportInventorySource("dependency/plystra.yaml", data); err != nil {
+				t.Errorf("dependency inventory: %v", err)
 			}
 		})
 	}

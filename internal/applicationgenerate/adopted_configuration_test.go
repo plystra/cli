@@ -342,6 +342,52 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 		}}, runtimeCase{name: "valid live resource/" + resource,
 			root: "composition: {exports: {unused: {resources: " + resource + "}}}\n", selected: adopt})
 	}
+	for _, value := range []struct {
+		name, yaml string
+		invalid    bool
+	}{
+		{name: "integer", yaml: "!!int PRIVATE_VALUE", invalid: true},
+		{name: "boolean", yaml: "!!bool PRIVATE_VALUE", invalid: true},
+		{name: "float", yaml: "!!float PRIVATE_VALUE", invalid: true},
+		{name: "timestamp", yaml: "!!timestamp PRIVATE_VALUE", invalid: true},
+		{name: "binary", yaml: "!!binary PRIVATE_VALUE", invalid: true},
+		{name: "null", yaml: "!!null PRIVATE_VALUE", invalid: true},
+		{name: "valid scalars", yaml: "[!!int 7, !!bool true, !!float 1.5, !!timestamp 2026-10-04, !!binary " + base64.StdEncoding.EncodeToString([]byte("private-binary")) + ", !!str PRIVATE_VALUE, !!null null, {PRIVATE_KEY: false}]"},
+	} {
+		for _, shape := range []string{"%s", "[%s]", "{PRIVATE_KEY: %s}"} {
+			fragment := "{resources: {instances: {database: {config: {value: " + fmt.Sprintf(shape, value.yaml) + "}}}}}"
+			for _, mode := range []string{"dependency", "dependency environment", "dependency replacement", "root", "environment", "replacement"} {
+				tc := runtimeCase{name: "inert resource scalar/" + mode + "/" + value.name + "/" + shape}
+				if value.invalid {
+					tc.rule = "invalid declarations"
+				}
+				if strings.HasPrefix(mode, "dependency") {
+					if value.invalid {
+						tc.rule = "baseline"
+					}
+					tc.edit = func(d *runtimebaseline.Document) { change(d, fragment, "unused") }
+				} else {
+					tc.root = "composition: {exports: {unused: " + fragment + "}, adopt: [{module: " + dependency + ", export: first}, {module: " + dependency + ", export: second}]}\n"
+				}
+				if strings.HasSuffix(mode, "environment") {
+					tc.overlay = "{}\n"
+				} else if strings.HasSuffix(mode, "replacement") {
+					tc.selected = adopt
+				}
+				cases = append(cases, tc)
+			}
+		}
+	}
+	for _, value := range []struct{ name, yaml string }{
+		{name: "wide", yaml: "[" + strings.Repeat("0,", 65_534) + "0]"},
+		{name: "deep", yaml: strings.Repeat("[", 65) + "0" + strings.Repeat("]", 65)},
+	} {
+		fragment := "{resources: {instances: {database: {config: {value: " + value.yaml + "}}}}}"
+		cases = append(cases, runtimeCase{name: "valid inert resource traversal/" + value.name, edit: func(d *runtimebaseline.Document) {
+			change(d, fragment, "unused")
+		}}, runtimeCase{name: "valid live resource traversal/" + value.name,
+			root: "composition: {exports: {unused: " + fragment + "}}\n", selected: adopt})
+	}
 	for _, value := range []string{
 		`{$remove: true, private-key: private-value}`, `{$remove: false, private-key: private-value}`,
 		`{$remove: null, private-key: private-value}`, `{$remove: "private-value", private-key: private-value}`,
@@ -507,6 +553,9 @@ func (*service) Run(context.Context,runv1.Request)(runv1.Response,error){return 
 				process.Env = append(process.Env, entry)
 			}
 			output, err := process.CombinedOutput()
+			if !bytes.Equal(data, readAbsoluteFile(t, privatePath)) {
+				t.Fatal("startup changed private baseline inputs")
+			}
 			if tc.rule != "" && !reflect.DeepEqual(before, snapshotTree(t, configurationRoot)) {
 				t.Fatal("rejected startup changed configuration inputs")
 			}

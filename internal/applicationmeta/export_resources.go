@@ -31,6 +31,25 @@ func validateExportResourceSyntax(node *yaml.Node, path string) error {
 			return invalid("%s may contain only instances and bind", path)
 		}
 	}
+	// The document decoder already bounds bytes and rejects references. Inert
+	// syntax validation must not impose typed-constructor traversal limits.
+	stack := []*yaml.Node{node}
+	for len(stack) > 0 {
+		value := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		switch value.Kind {
+		case yaml.MappingNode:
+			if _, err := exportResourceMapping(value, path); err != nil {
+				return err
+			}
+		case yaml.ScalarNode:
+			var decoded any
+			if err := value.Decode(&decoded); err != nil {
+				return invalid("%s must contain valid YAML scalar values", path)
+			}
+		}
+		stack = append(stack, value.Content...)
+	}
 	return nil
 }
 

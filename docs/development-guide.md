@@ -995,14 +995,18 @@ dot-separated lower-kebab segments. Bindings use exactly the `implementations`
 or `instances` namespace, followed by an exact constructor or instance name,
 then the case-sensitive nonblank Go parameter identifier, then an instance-name
 value. Structural mappings and configuration objects reject duplicate and
-non-string keys. Malformed syntax is rejected even in unadopted exports, with
+non-string keys recursively, including inside sequences. Tagged configuration
+scalars must contain valid YAML values even without a provider schema.
+Malformed syntax is rejected even in unadopted exports, with
 value-redacted Project-marker diagnostics. Missing fields and cross-fragment
 references are left for composition and typed resolution, not inferred during
 inert inventory parsing.
 Generated startup validates the same syntax in private dependency inventories
 and live root exports, including replacement mode, before Secret lookup or
 constructor entry. Inert Resource fragments remain inactive; malformed names,
-bindings, mappings, and nested removal markers still fail.
+bindings, mappings, scalar payloads, and nested removal markers still fail.
+Diagnostics exclude decoder messages and private values. Regenerate and rebuild
+to install the Resource scalar checks; valid nulls and nested values stay inert.
 
 Adopted exports compose as one unordered lower-precedence layer. Identical
 declarations deduplicate, incompatible declarations fail with every selected
