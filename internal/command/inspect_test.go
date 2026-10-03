@@ -65,10 +65,12 @@ type inspectGraphCommandEnvelope struct {
 }
 
 type inspectGraphNode struct {
-	ID      string               `json:"id"`
-	Kind    string               `json:"kind"`
-	Label   string               `json:"label"`
-	Sources []inspectGraphSource `json:"sources"`
+	ID             string               `json:"id"`
+	Kind           string               `json:"kind"`
+	Label          string               `json:"label"`
+	Sources        []inspectGraphSource `json:"sources"`
+	ContractDigest string               `json:"contract_digest"`
+	ResourceID     string               `json:"resource_id"`
 }
 
 type inspectGraphEdge struct {

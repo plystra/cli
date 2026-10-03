@@ -1197,6 +1197,7 @@ plystra inspect capabilities
 plystra inspect
 plystra inspect modules
 plystra inspect interfaces
+plystra inspect resources
 plystra inspect implementations
 plystra inspect configuration
 plystra inspect --verbose
@@ -1275,7 +1276,10 @@ implemented Interfaces, declared and resolved dependencies, constructor-owned
 configuration provenance, and reachable assembly membership. `plystra inspect
 configuration` shows selected layers, redacted field summaries, ownership and
 precedence, effective and overridden contributions, explicit removals, and
-ancestor suppression. All four graph views use the versioned
+ancestor suppression. `plystra inspect resources` shows every visible consumer
+Resource contract, its defining package and sources, exact `resource_id` and `contract_digest`
+on `resource-contract` nodes. It does not select or construct Resource instances.
+All five graph views use the versioned
 `plystra.graph` v1 schema with project-relative source references and omit
 resolved Secrets and unrestricted configuration values. The command accepts the same `--env`, `--config`,
 `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` selectors as generation and check.
@@ -1284,6 +1288,24 @@ Constructor dependency edges in both Interface and Implementation inspection
 retain `parameter_name` and one-based `parameter_position`. These fields are
 absent on other edges. Repeated dependencies on one Interface remain distinct;
 human output names each parameter alongside its position.
+
+Resource-only packages are discovered in the current and dependency Projects
+through the same Go-selected source boundary as Interfaces. Declare one
+non-generic defined Go interface named `Resource` with exactly one
+`//plystra:resource data.database/v1` directive. IDs use the Interface identity
+grammar without case folding. Duplicate identities retain every defining source.
+Completed method sets cannot expose `Start`, `Stop`, `Shutdown`, or `Close`;
+equivalent lifecycle controls also belong on providers, not consumer contracts.
+Ordinary infrastructure types are supported without Interface projection rules
+or `interface.yaml`. Digests include reachable public Go shapes, methods,
+generic arguments and recursive references, but exclude locations, comments,
+private implementation details and unrelated provider hooks. Graphs are bounded
+to 64 type-reference levels and 65,536 public shape nodes.
+Malformed declarations, contracts and duplicate IDs report
+`PLYSTRA_RESOURCE_DECLARATION_INVALID`, `PLYSTRA_RESOURCE_CONTRACT_INVALID` and
+`PLYSTRA_RESOURCE_ID_DUPLICATE`, respectively, with owning module-relative sources.
+Installed capability facts report `resource.contract` separately from unsupported
+Resource instance configuration, provider construction and binding.
 
 `plystra explain capability <capability-name>/vN` is the corresponding causal
 read-only view. For a required Capability it reports the selected ordinary

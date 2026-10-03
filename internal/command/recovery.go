@@ -56,6 +56,8 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
+	"github.com/plystra/cli/internal/resourcecontract"
+	"github.com/plystra/cli/internal/resourcedecl"
 )
 
 type recoveryContext struct {
@@ -1041,11 +1043,15 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			})
 		}
 	case diagnosticImplementationDeclarationInvalid,
+		diagnosticcode.ResourceDeclarationInvalid,
+		diagnosticcode.ResourceContractInvalid,
 		diagnosticInterfaceDeclarationInvalid,
 		diagnosticInterfaceContractInvalid,
 		diagnosticInterfaceMetadataInvalid,
 		diagnosticAuthoredPackageInvalid:
 		expectedKind := map[string]string{
+			diagnosticcode.ResourceDeclarationInvalid:  "resource-declaration",
+			diagnosticcode.ResourceContractInvalid:     "resource-contract",
 			diagnosticImplementationDeclarationInvalid: "implementation-declaration",
 			diagnosticInterfaceDeclarationInvalid:      "interface-declaration",
 			diagnosticInterfaceContractInvalid:         "interface-contract",
@@ -1079,6 +1085,18 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 			Line:   invalid.Line(),
 			Column: invalid.Column(),
 		})
+	case diagnosticcode.ResourceIDDuplicate:
+		var duplicate *interfaceinventory.DuplicateResourceIDError
+		if !errors.As(err, &duplicate) || duplicate == nil {
+			return nil
+		}
+		for _, definition := range duplicate.Definitions() {
+			position := definition.Declaration().Position()
+			sources = append(sources, diagnosticjson.Source{
+				Module: definition.ModulePath(), Path: definition.SourcePath(), Kind: "resource-declaration",
+				Line: position.Line, Column: position.Column,
+			})
+		}
 	case diagnosticInterfaceIDDuplicate:
 		var duplicate *interfaceinventory.DuplicateIDError
 		if !errors.As(err, &duplicate) || duplicate == nil {
@@ -1348,6 +1366,12 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticImplementationResultInvalid, "Change the reported constructor to return exactly one concrete value plus error, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidConformance):
 		return recoveryDiagnostic(diagnosticImplementationConformanceInvalid, "Implement every reported canonical Interface method on the constructor's concrete result type, then rerun the command.")
+	case errors.Is(err, resourcedecl.ErrInvalid):
+		return recoveryDiagnostic(diagnosticcode.ResourceDeclarationInvalid, "Correct the reported //plystra:resource directive to immediately document one non-generic defined Go interface Resource with an exact Resource ID and no Interface directive, then rerun the command.")
+	case errors.Is(err, resourcecontract.ErrInvalid):
+		return recoveryDiagnostic(diagnosticcode.ResourceContractInvalid, "Correct the reported Resource's ordinary Go method set and bounded public type graph; keep lifecycle control on the provider, then rerun the command.")
+	case errors.Is(err, interfaceinventory.ErrDuplicateResourceID):
+		return recoveryDiagnostic(diagnosticcode.ResourceIDDuplicate, "Make the reported visible Go packages declare distinct exact Resource IDs, then rerun the command.")
 	case errors.Is(err, interfacedecl.ErrInvalid):
 		return recoveryDiagnostic(diagnosticInterfaceDeclarationInvalid, "Correct the reported //plystra:interface directive so it immediately documents the exported defined type Interface and names one canonical Interface ID, then rerun the command.")
 	case errors.Is(err, interfacecontract.ErrInvalid):

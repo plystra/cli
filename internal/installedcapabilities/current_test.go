@@ -72,6 +72,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"inspect.implementations",
 		"inspect.interfaces",
 		"inspect.modules",
+		"inspect.resources",
 		"interface.create",
 		"new",
 		"plugin.create",
@@ -140,6 +141,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"invocation.default-concurrency|yes|not_applicable|yes|yes|yes",
 		"legacy.capability-timeout|yes|yes|yes|no|no",
 		"resource|yes|no|no|no|no",
+		"resource.contract|yes|yes|not_applicable|not_applicable|yes",
 		"transport.connect|yes|yes|yes|yes|yes",
 	}
 	gotSupport := make([]string, 0, len(capabilities.Support()))
@@ -189,7 +191,7 @@ func assertInstalledCommandFacts(t testing.TB, commands map[string]commandschema
 	if !implementArguments["--package"].Required() {
 		t.Fatalf("implement --package is not required: %#v", commands["implement"])
 	}
-	for _, id := range []string{"inspect", "inspect.configuration", "inspect.implementations", "inspect.interfaces", "inspect.modules", "explain.alias", "explain.capability", "explain.config", "explain.exposure", "explain.plugin"} {
+	for _, id := range []string{"inspect", "inspect.configuration", "inspect.implementations", "inspect.interfaces", "inspect.modules", "inspect.resources", "explain.alias", "explain.capability", "explain.config", "explain.exposure", "explain.plugin"} {
 		command := commands[id]
 		arguments := installedArgumentsByName(command)
 		if !reflect.DeepEqual(command.Selectors(), []string{"configuration"}) || !reflect.DeepEqual(installedDefaultFacts(command), []string{"verbosity=concise"}) ||

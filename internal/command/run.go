@@ -44,7 +44,7 @@ const (
   plystra guidance sync [--replace-generated]
   plystra guidance check
   plystra inspect capabilities [--format human|json]
-  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra inspect [modules|interfaces|implementations|resources|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain config <field-path> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -363,6 +363,7 @@ without a fabricated span.
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect modules [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect interfaces [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra inspect resources [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect implementations [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect configuration [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
 
@@ -370,6 +371,7 @@ Views:
   capabilities           Show installed command, schema, selector, default, effect, limit, toolchain, and support facts.
   modules                Show the selected current-model module graph.
   interfaces             Show visible Interfaces, active selections, and constructor dependencies.
+  resources              Show visible Resource contracts, exact digests, and owning sources.
   implementations        Show visible constructors, selection state, dependencies, configuration, and assembly.
   configuration          Show selected layers, field ownership, precedence, removals, and suppression.
 
@@ -404,6 +406,11 @@ configuration provenance, and reachable assembly membership.
 Dependency edges retain exact parameter_name and one-based parameter_position;
 other edges omit these fields. Repeated parameters remain distinct, and human
 output includes each dependency name and position.
+The resources view retains consumer contracts only, with contract_digest on
+resource-contract nodes. Resource instance construction and binding remain
+unsupported. Invalid Resource declarations, contracts, or duplicate identities
+report RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or
+RESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.
 The configuration view retains the selected current-Project layer, explicitly
 adopted exports, redacted field summaries, ownership and precedence, effective
 and overridden contributions, explicit removals, and ancestor suppression.
@@ -609,7 +616,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 	case "guidance":
 		return runGuidance(arguments, stdout, stderr, workingDirectory)
 	case "inspect":
-		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "capabilities" || arguments[1] == "modules" || arguments[1] == "interfaces" || arguments[1] == "implementations" || arguments[1] == "configuration") && isHelp(arguments[2]) {
+		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "capabilities" || arguments[1] == "modules" || arguments[1] == "interfaces" || arguments[1] == "implementations" || arguments[1] == "resources" || arguments[1] == "configuration") && isHelp(arguments[2]) {
 			_, _ = io.WriteString(stdout, inspectUsage)
 			return 0
 		}

@@ -12,9 +12,15 @@ import (
 var (
 	wantCurrentUsage = strings.NewReplacer(
 		"  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
-		"  plystra inspect capabilities [--format human|json]\n  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
+		"  plystra inspect capabilities [--format human|json]\n  plystra inspect [modules|interfaces|implementations|resources|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
 	).Replace(wantUsage)
 	wantCurrentInspectUsage = strings.NewReplacer(
+		"  plystra inspect implementations [--verbose]",
+		"  plystra inspect resources [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra inspect implementations [--verbose]",
+		"  implementations        Show visible constructors",
+		"  resources              Show visible Resource contracts, exact digests, and owning sources.\n  implementations        Show visible constructors",
+		"The configuration view retains",
+		"The resources view retains consumer contracts only, with contract_digest on\nresource-contract nodes. Resource instance construction and binding remain\nunsupported. Invalid Resource declarations, contracts, or duplicate identities\nreport RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or\nRESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.\nThe configuration view retains",
 		"configuration provenance, and reachable assembly membership.\n",
 		"configuration provenance, and reachable assembly membership.\nDependency edges retain exact parameter_name and one-based parameter_position;\nother edges omit these fields. Repeated parameters remain distinct, and human\noutput includes each dependency name and position.\n",
 		"Usage:\n",
@@ -298,6 +304,9 @@ func TestRunInspectHelp(t *testing.T) {
 		{"inspect", "interfaces", "help"},
 		{"inspect", "interfaces", "-h"},
 		{"inspect", "interfaces", "--help"},
+		{"inspect", "resources", "help"},
+		{"inspect", "resources", "-h"},
+		{"inspect", "resources", "--help"},
 		{"inspect", "implementations", "help"},
 		{"inspect", "implementations", "-h"},
 		{"inspect", "implementations", "--help"},
@@ -580,7 +589,7 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "guidance sync duplicate replacement", arguments: []string{"guidance", "sync", "--replace-generated", "--replace-generated"}, wantError: wantGuidanceUsage},
 		{name: "guidance sync unknown option", arguments: []string{"guidance", "sync", "--unknown"}, wantError: wantGuidanceUsage},
 		{name: "inspect unknown option", arguments: []string{"inspect", "--graph"}, wantError: wantCurrentInspectUsage},
-		{name: "inspect unknown view", arguments: []string{"inspect", "resources"}, wantError: wantCurrentInspectUsage},
+		{name: "inspect unknown view", arguments: []string{"inspect", "unknown"}, wantError: wantCurrentInspectUsage},
 		{name: "inspect duplicate view", arguments: []string{"inspect", "modules", "modules"}, wantError: wantCurrentInspectUsage},
 		{name: "inspect view help with extra option", arguments: []string{"inspect", "modules", "--help", "--format", "json"}, wantError: wantCurrentInspectUsage},
 		{name: "inspect duplicate verbose", arguments: []string{"inspect", "--verbose", "--verbose"}, wantError: wantCurrentInspectUsage},

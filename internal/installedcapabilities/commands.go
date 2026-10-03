@@ -90,6 +90,7 @@ func installedCommands() []commandschema.CapabilityCommandInput {
 		installedCommand("inspect.capabilities", []commandschema.CapabilityArgumentInput{formatOption()}, nil, nil, false, true),
 		projectInspectionCommand("inspect.modules", nil),
 		projectInspectionCommand("inspect.interfaces", nil),
+		projectInspectionCommand("inspect.resources", nil),
 		projectInspectionCommand("inspect.implementations", nil),
 		projectInspectionCommand("inspect.configuration", nil),
 		projectInspectionCommand("explain.capability", []commandschema.CapabilityArgumentInput{positional("capability-id", 1)}),

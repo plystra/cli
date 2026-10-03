@@ -1,7 +1,7 @@
 package interfaceinventory
 
 // SourceError attaches stable owning-Project provenance to an authored
-// Interface or Implementation error without changing its human message or
+// Interface, Resource, or Implementation error without changing its human message or
 // typed error chain.
 type SourceError struct {
 	modulePath string

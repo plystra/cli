@@ -1,6 +1,6 @@
-// Package interfaceinventory discovers and validates authored Interface
-// declarations and shares their eligible Go package-loading boundary with
-// Implementation constructor discovery.
+// Package interfaceinventory discovers and validates authored Interface and
+// Resource contracts and shares their eligible Go package-loading boundary
+// with Implementation constructor discovery.
 package interfaceinventory
 
 import (
@@ -33,6 +33,8 @@ import (
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/resourcecontract"
+	"github.com/plystra/cli/internal/resourcedecl"
 	"golang.org/x/mod/module"
 )
 
@@ -44,6 +46,8 @@ const (
 	sourceKindInterfaceContract         = "interface-contract"
 	sourceKindInterfaceDeclaration      = "interface-declaration"
 	sourceKindInterfaceMetadata         = "interface-metadata"
+	sourceKindResourceContract          = "resource-contract"
+	sourceKindResourceDeclaration       = "resource-declaration"
 )
 
 var (
@@ -234,12 +238,16 @@ func (i Index) Interfaces() []Interface {
 	return append([]Interface(nil), i.interfaces...)
 }
 
-// Discovery contains the Interface and Implementation declarations obtained
+// Discovery contains the Interface, Resource, and Implementation declarations obtained
 // from one shared eligible-package scan and the same Go-selected source files.
 type Discovery struct {
 	interfaces      Index
 	implementations implementationinventory.Index
+	resources       ResourceIndex
 }
+
+// Resources returns the validated visible Resource contracts from the shared scan.
+func (d Discovery) Resources() ResourceIndex { return d.resources }
 
 // Interfaces returns the immutable visible Interface inventory.
 func (d Discovery) Interfaces() Index { return d.interfaces }
@@ -310,9 +318,9 @@ func DiscoverExactInterfaces(ctx context.Context, selection ExactInterfacePackag
 	return index, nil
 }
 
-// DiscoverApplication obtains active Interface and Implementation declarations
+// DiscoverApplication obtains active Interface, Resource, and Implementation declarations
 // through one shared eligible-package scan. Go tooling selects source files and
-// supplies compiled type information before either declaration kind is exposed.
+// supplies compiled type information before any declaration kind is exposed.
 func DiscoverApplication(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options) (Discovery, error) {
 	if ctx == nil {
 		return Discovery{}, fmt.Errorf("%w: context is nil", ErrDiscover)
@@ -341,6 +349,7 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 	})
 
 	interfaces := make([]Interface, 0)
+	resources := make([]Resource, 0)
 	implementationInputs := make([]implementationinventory.Input, 0)
 	for _, source := range sources {
 		candidates, err := probeModule(source, application.ModulePath())
@@ -352,9 +361,14 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 			return Discovery{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
 		}
 		interfaces = append(interfaces, found.interfaces...)
+		resources = append(resources, found.resources...)
 		implementationInputs = append(implementationInputs, found.implementations...)
 	}
 
+	resourceInventory, err := resourceIndex(resources)
+	if err != nil {
+		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	}
 	sortDiscoveredInterfaces(interfaces)
 	visibleIDs := make(map[string]struct{}, len(interfaces))
 	for index := range interfaces {
@@ -387,6 +401,7 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 	return Discovery{
 		interfaces:      Index{interfaces: interfaces},
 		implementations: implementations,
+		resources:       resourceInventory,
 	}, nil
 }
 
@@ -413,6 +428,7 @@ func sortDiscoveredInterfaces(interfaces []Interface) {
 type loadedInventory struct {
 	interfaces      []Interface
 	implementations []implementationinventory.Input
+	resources       []Resource
 }
 
 func loadCandidates(ctx context.Context, candidates []packageCandidate, options Options) (loadedInventory, error) {
@@ -460,7 +476,7 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		if err != nil {
 			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 		}
-		if len(declarations.interfaces) == 0 && len(declarations.implementations) == 0 {
+		if len(declarations.interfaces) == 0 && len(declarations.implementations) == 0 && len(declarations.resources) == 0 {
 			continue
 		}
 		if err := validateLoadedPackage(candidate, loaded); err != nil {
@@ -476,6 +492,18 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		}
 		if checkedPackage.Path() != candidate.importPath || checkedPackage.Name() != loaded.Name {
 			return loadedInventory{}, fmt.Errorf("%w: compiled package identity for %q is %s %q", ErrInvalidOutput, candidate.importPath, checkedPackage.Path(), checkedPackage.Name())
+		}
+		for _, declaration := range declarations.resources {
+			contract, err := resourcecontract.Validate(declaration, checkedPackage)
+			if err != nil {
+				position := declaration.Position()
+				return loadedInventory{}, sourceError(candidate.source.path, position.Path, sourceKindResourceContract, position.Line, position.Column, err)
+			}
+			result.resources = append(result.resources, Resource{
+				modulePath: candidate.source.path, moduleVersion: candidate.source.version,
+				packagePath: candidate.importPath, local: candidate.source.local,
+				declaration: declaration, contract: contract,
+			})
 		}
 		for _, declaration := range declarations.implementations {
 			if declaration.PackageName() != loaded.Name {
@@ -899,6 +927,7 @@ func hasDeclarationDirectiveComment(filename string, source []byte) bool {
 	return hasDirectiveComment(filename, source,
 		"//plystra:interface", "/*plystra:interface",
 		"//plystra:implements", "/*plystra:implements",
+		"//plystra:resource", "/*plystra:resource",
 	)
 }
 
@@ -983,6 +1012,7 @@ func decodePackages(data []byte) (map[string]listedPackage, map[string]string, e
 type packageDeclarations struct {
 	interfaces      []interfacedecl.Declaration
 	implementations []implementationdecl.Declaration
+	resources       []resourcedecl.Declaration
 }
 
 func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packageDeclarations, error) {
@@ -1006,7 +1036,8 @@ func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packag
 		}
 		hasInterface := hasInterfaceDirectiveComment(fileName, data)
 		hasImplementation := hasImplementationDirectiveComment(fileName, data)
-		if !hasInterface && !hasImplementation {
+		hasResource := hasDirectiveComment(fileName, data, "//plystra:resource", "/*plystra:resource")
+		if !hasInterface && !hasImplementation && !hasResource {
 			continue
 		}
 		relativePath, err := filepath.Rel(candidate.source.root, absolutePath)
@@ -1014,6 +1045,18 @@ func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packag
 			return packageDeclarations{}, fmt.Errorf("%w: package %q source %q escapes its module root", ErrInvalidOutput, candidate.importPath, fileName)
 		}
 		sourcePath := filepath.ToSlash(relativePath)
+		if hasResource {
+			parsed, err := resourcedecl.ParseFile(sourcePath, data)
+			if err != nil {
+				position := resourcedecl.Position{Path: sourcePath}
+				var invalid *resourcedecl.InvalidError
+				if errors.As(err, &invalid) {
+					position = invalid.Position()
+				}
+				return packageDeclarations{}, sourceError(candidate.source.path, position.Path, sourceKindResourceDeclaration, position.Line, position.Column, err)
+			}
+			declarations.resources = append(declarations.resources, parsed...)
+		}
 		if hasInterface {
 			parsed, err := interfacedecl.ParseFile(sourcePath, data)
 			if err != nil {

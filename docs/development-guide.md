@@ -2248,6 +2248,7 @@ plystra inspect modules
 plystra inspect modules --env production
 plystra inspect modules --config deploy/customer-a.yaml
 plystra inspect interfaces
+plystra inspect resources
 plystra inspect interfaces --env production
 plystra inspect interfaces --config deploy/customer-a.yaml
 plystra inspect implementations
@@ -2318,7 +2319,10 @@ constructor-owned configuration provenance, and reachable assembly membership.
 Use `plystra inspect configuration` to show the selected current-Project layer,
 explicitly adopted exports, redacted field summaries, ownership and precedence,
 effective and overridden contributions, explicit removals, and ancestor
-suppression. All four are deterministic `plystra.graph` v1 views whose source
+suppression. Use `plystra inspect resources` for visible consumer contract IDs,
+defining packages, owning sources and exact `resource_id` and `contract_digest` values on
+`resource-contract` nodes. This inventory does not activate providers or instances.
+All five are deterministic `plystra.graph` v1 views whose source
 references stay project-relative and whose structured results omit resolved
 Secrets and unrestricted configuration values.
 
@@ -2326,6 +2330,20 @@ Both Interface and Implementation inspection preserve each constructor
 dependency as a distinct edge with exact `parameter_name` and one-based
 `parameter_position`; other edges omit these fields. Human output includes the
 same name and position even when several parameters use the same Interface.
+
+Resource declarations are checked even when no instance uses them. A single
+`//plystra:resource <resource-id>` directive must document a non-generic defined
+Go interface named `Resource`. Duplicate IDs fail with every defining source;
+mixed Interface/Resource directives and consumer lifecycle-control methods fail
+before generation. Ordinary Go parameters and results are not transport messages
+and need no Interface field tags or `interface.yaml`. Transitive public fields,
+methods, aliases, instantiated generics and recursive shapes contribute to a
+bounded deterministic contract digest. Sources and provider lifecycle hooks do
+not. `PLYSTRA_RESOURCE_DECLARATION_INVALID`,
+`PLYSTRA_RESOURCE_CONTRACT_INVALID`, and `PLYSTRA_RESOURCE_ID_DUPLICATE` identify
+the corresponding failure with module-relative ownership. The installed
+`resource.contract` support record does not imply Resource configuration,
+provider execution, binding, or Data support.
 
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the

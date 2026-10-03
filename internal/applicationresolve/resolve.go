@@ -150,6 +150,7 @@ type Result struct {
 	dependencies        moduledependency.Index
 	dependencySnapshots []dependencyManifestSnapshot
 	interfaces          interfaceinventory.Index
+	resources           interfaceinventory.ResourceIndex
 	implementations     implementationinventory.Index
 	interfaceResolution interfaceresolution.Result
 	inventory           plugininventory.Index
@@ -187,6 +188,9 @@ func (r Result) Dependencies() moduledependency.Index { return r.dependencies }
 // Interfaces returns every active local and dependency-Project Interface
 // declaration discovered through ordinary Go package loading.
 func (r Result) Interfaces() interfaceinventory.Index { return r.interfaces }
+
+// Resources returns visible consumer contracts without activating instances.
+func (r Result) Resources() interfaceinventory.ResourceIndex { return r.resources }
 
 // Implementations returns every active local and dependency-Project
 // constructor declaration discovered through the same ordinary Go package
@@ -573,6 +577,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		dependencies:        dependencies,
 		dependencySnapshots: dependencySnapshots,
 		interfaces:          interfaces,
+		resources:           declarations.Resources(),
 		implementations:     implementations,
 		interfaceResolution: interfaceResolution,
 		inventory:           inventory,

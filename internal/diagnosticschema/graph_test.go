@@ -137,7 +137,7 @@ func TestGraphV1PreservesDependencyParameterIdentity(t *testing.T) {
 func TestGraphV1SupportsEveryGraphAndConfigurationType(t *testing.T) {
 	t.Parallel()
 
-	for _, graphType := range []GraphType{GraphTypeModules, GraphTypeInterfaces, GraphTypeImplementations, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration} {
+	for _, graphType := range []GraphType{GraphTypeModules, GraphTypeInterfaces, GraphTypeResources, GraphTypeImplementations, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration} {
 		t.Run(string(graphType), func(t *testing.T) {
 			evidence := resolvedInspectEvidence(t)
 			result, err := NewGraph(GraphInput{Evidence: evidence, Type: graphType})
@@ -167,6 +167,36 @@ func TestGraphV1SupportsEveryGraphAndConfigurationType(t *testing.T) {
 				t.Fatalf("configuration mode = %q, %v", result.Envelope().ConfigurationMode(), err)
 			}
 		})
+	}
+}
+
+func TestResourceGraphRetainsOnlyValidatedContractDigests(t *testing.T) {
+	input := GraphInput{Evidence: resolvedInspectEvidence(t), Type: GraphTypeResources,
+		Nodes: []GraphNode{{ID: "resource-contract:data.database/v1", Kind: "resource-contract", Label: "example.com/api", ResourceID: "data.database/v1", ContractDigest: "sha256:" + strings.Repeat("a", 64)}},
+	}
+	result, err := NewGraph(input)
+	if err != nil || !result.Valid() || result.Nodes()[0].ContractDigest != input.Nodes[0].ContractDigest || !bytes.Contains(result.Envelope().CanonicalJSON(), []byte(`"contract_digest":"sha256:`)) {
+		t.Fatalf("Resource digest = %#v, %v", result, err)
+	}
+	view := result.Nodes()
+	view[0].ContractDigest = "modified"
+	if !result.Valid() {
+		t.Fatal("Resource digest exposed mutable graph storage")
+	}
+	for _, mutate := range []func(*GraphInput){
+		func(i *GraphInput) { i.Nodes[0].ContractDigest = "" },
+		func(i *GraphInput) { i.Nodes[0].ResourceID = "invalid" },
+		func(i *GraphInput) { i.Nodes[0].ResourceID = "other.database/v1" },
+		func(i *GraphInput) { i.Nodes[0].ContractDigest = "sha256:" + strings.Repeat("A", 64) },
+		func(i *GraphInput) { i.Nodes[0].ContractDigest = "sha256:" + strings.Repeat("g", 64) },
+		func(i *GraphInput) { i.Type = GraphTypeInterfaces },
+		func(i *GraphInput) { i.Nodes[0].Kind = "module"; i.Nodes[0].ID = "module:example.com/api" },
+	} {
+		invalid := cloneGraphInput(input)
+		mutate(&invalid)
+		if _, err := NewGraph(invalid); !errors.Is(err, ErrGraph) {
+			t.Fatalf("accepted invalid Resource digest: %v", err)
+		}
 	}
 }
 

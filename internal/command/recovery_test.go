@@ -56,6 +56,8 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providerresolution"
+	"github.com/plystra/cli/internal/resourcecontract"
+	"github.com/plystra/cli/internal/resourcedecl"
 )
 
 func TestPrimaryActionableDiagnosticScopesCancellationToNew(t *testing.T) {
@@ -1057,6 +1059,9 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "invalid Implementation result", err: implementationinventory.ErrInvalidResult, code: diagnosticcode.ImplementationResultInvalid},
 		{name: "invalid Implementation conformance", err: implementationinventory.ErrInvalidConformance, code: diagnosticcode.ImplementationConformanceInvalid},
 		{name: "invalid Interface declaration", err: interfacedecl.ErrInvalid, code: diagnosticcode.InterfaceDeclarationInvalid},
+		{name: "invalid Resource declaration", err: resourcedecl.ErrInvalid, code: diagnosticcode.ResourceDeclarationInvalid},
+		{name: "invalid Resource contract", err: resourcecontract.ErrInvalid, code: diagnosticcode.ResourceContractInvalid},
+		{name: "duplicate Resource ID", err: interfaceinventory.ErrDuplicateResourceID, code: diagnosticcode.ResourceIDDuplicate},
 		{name: "invalid Interface contract", err: interfacecontract.ErrInvalid, code: diagnosticcode.InterfaceContractInvalid},
 		{name: "invalid Interface metadata", err: interfacemeta.ErrInvalid, code: diagnosticcode.InterfaceMetadataInvalid},
 		{name: "duplicate Interface ID", err: interfaceinventory.ErrDuplicateID, code: diagnosticcode.InterfaceIDDuplicate},

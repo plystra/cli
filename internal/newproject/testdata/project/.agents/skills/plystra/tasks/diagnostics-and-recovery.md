@@ -7,6 +7,7 @@ Use read-only inspection before changing authored inputs:
     plystra inspect modules
     plystra inspect interfaces
     plystra inspect implementations
+    plystra inspect resources
     plystra inspect configuration
     plystra explain capability <capability-name>/vN
     plystra explain plugin <plugin-id>

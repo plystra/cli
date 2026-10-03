@@ -90,6 +90,9 @@ const (
 	InterfaceContractInvalid             = Prefix + "INTERFACE_CONTRACT_INVALID"
 	InterfaceMetadataInvalid             = Prefix + "INTERFACE_METADATA_INVALID"
 	InterfaceIDDuplicate                 = Prefix + "INTERFACE_ID_DUPLICATE"
+	ResourceDeclarationInvalid           = Prefix + "RESOURCE_DECLARATION_INVALID"
+	ResourceContractInvalid              = Prefix + "RESOURCE_CONTRACT_INVALID"
+	ResourceIDDuplicate                  = Prefix + "RESOURCE_ID_DUPLICATE"
 	AuthoredPackageInvalid               = Prefix + "AUTHORING_PACKAGE_INVALID"
 )
 

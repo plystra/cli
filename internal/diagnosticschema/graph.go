@@ -15,6 +15,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/diagnosticjson"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/resolutionevidence"
 )
 
@@ -38,6 +39,7 @@ type GraphType string
 const (
 	GraphTypeModules         GraphType = "modules"
 	GraphTypeInterfaces      GraphType = "interfaces"
+	GraphTypeResources       GraphType = "resources"
 	GraphTypeImplementations GraphType = "implementations"
 	GraphTypePlugins         GraphType = "plugins"
 	GraphTypeCapabilities    GraphType = "capabilities"
@@ -56,10 +58,12 @@ type GraphEdgeKind string
 // GraphNode is one typed graph vertex. ID is namespaced by Kind, Label is the
 // bounded human identity, and Sources contain stable declaration provenance.
 type GraphNode struct {
-	ID      string
-	Kind    GraphNodeKind
-	Label   string
-	Sources []diagnosticjson.Source
+	ID             string
+	Kind           GraphNodeKind
+	Label          string
+	Sources        []diagnosticjson.Source
+	ContractDigest string
+	ResourceID     string
 }
 
 // GraphEdge is one directed typed relationship between existing node IDs.
@@ -106,10 +110,12 @@ type graphDocument struct {
 }
 
 type graphNode struct {
-	ID      string        `json:"id"`
-	Kind    GraphNodeKind `json:"kind"`
-	Label   string        `json:"label"`
-	Sources []graphSource `json:"sources"`
+	ID             string        `json:"id"`
+	Kind           GraphNodeKind `json:"kind"`
+	Label          string        `json:"label"`
+	Sources        []graphSource `json:"sources"`
+	ContractDigest string        `json:"contract_digest,omitempty"`
+	ResourceID     string        `json:"resource_id,omitempty"`
 }
 
 type graphEdge struct {
@@ -279,7 +285,7 @@ func (r GraphResult) ResolutionEvidenceJSON() []byte {
 
 func validGraphType(value GraphType) bool {
 	switch value {
-	case GraphTypeModules, GraphTypeInterfaces, GraphTypeImplementations, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration:
+	case GraphTypeModules, GraphTypeInterfaces, GraphTypeResources, GraphTypeImplementations, GraphTypePlugins, GraphTypeCapabilities, GraphTypeGeneration, GraphTypeConfiguration:
 		return true
 	default:
 		return false
@@ -334,12 +340,20 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 		if err := validateDisplayText(fmt.Sprintf("nodes[%d].label", index), input.Label); err != nil {
 			return nil, nil, err
 		}
+		if input.Kind == "resource-contract" {
+			_, identityErr := interfaceid.Parse(input.ResourceID)
+			if graphType != GraphTypeResources || identityErr != nil || input.ID != GraphNodeID(input.Kind, input.ResourceID) || !validReleaseDigest(input.ContractDigest) {
+				return nil, nil, fmt.Errorf("nodes[%d] requires a Resource contract digest in the resources view", index)
+			}
+		} else if input.ContractDigest != "" || input.ResourceID != "" {
+			return nil, nil, fmt.Errorf("nodes[%d] is not a Resource contract", index)
+		}
 		sources, err := normalizeGraphSources(mode, digest, input.Sources)
 		if err != nil {
 			return nil, nil, fmt.Errorf("nodes[%d].sources: %v", index, err)
 		}
 		nodeIDs[input.ID] = struct{}{}
-		nodes[index] = GraphNode{ID: input.ID, Kind: input.Kind, Label: input.Label, Sources: sources}
+		nodes[index] = GraphNode{ID: input.ID, Kind: input.Kind, Label: input.Label, Sources: sources, ContractDigest: input.ContractDigest, ResourceID: input.ResourceID}
 	}
 	sort.Slice(nodes, func(left, right int) bool { return nodes[left].ID < nodes[right].ID })
 
@@ -437,7 +451,7 @@ func graphEdgeSemanticKey(edge GraphEdge) string {
 func graphNodes(values []GraphNode) []graphNode {
 	result := make([]graphNode, len(values))
 	for index, node := range values {
-		result[index] = graphNode{ID: node.ID, Kind: node.Kind, Label: node.Label, Sources: graphSources(node.Sources)}
+		result[index] = graphNode{ID: node.ID, Kind: node.Kind, Label: node.Label, Sources: graphSources(node.Sources), ContractDigest: node.ContractDigest, ResourceID: node.ResourceID}
 	}
 	return result
 }
@@ -481,7 +495,7 @@ func equalGraphNodes(left, right []GraphNode) bool {
 		return false
 	}
 	for index := range left {
-		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].Label != right[index].Label || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
+		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].Label != right[index].Label || left[index].ContractDigest != right[index].ContractDigest || left[index].ResourceID != right[index].ResourceID || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
 			return false
 		}
 	}
