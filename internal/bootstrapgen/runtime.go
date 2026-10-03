@@ -152,7 +152,7 @@ func renderRuntimeConfigurationSupport(schemas []runtimeConfigurationSchema, exe
 	}
 	source.WriteString("}\n\n")
 	source.WriteString(runtimeConfigurationSupport)
-	source.WriteString(runtimeAdoptionSupport)
+	source.WriteString(runtimeTemplateSupport)
 	return source.String(), nil
 }
 
@@ -194,7 +194,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	values, err := runtimeMapping(root, "effective runtime configuration", runtimeKeySet("composition", "http", "timeouts", "interfaces", "config"))
+	values, err := runtimeMapping(root, "effective runtime configuration", runtimeKeySet("http", "timeouts", "interfaces", "config"))
 	if err != nil {
 		return "", err
 	}
@@ -215,40 +215,13 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
 		},
-		"version": 10,
+		"version": 11,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")
 	}
 	sum := sha256.Sum256(canonical)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
-}
-
-type runtimeExportAdoption struct {
-	modulePath string
-	exportName string
-}
-
-func runtimeApplicationModelAdoptions(node *yaml.Node) ([]map[string]any, error) {
-	values, err := runtimeOptionalMapping(node, "composition", runtimeKeySet("adopt"))
-	if err != nil {
-		return nil, err
-	}
-	adoptions := make(map[string]runtimeExportAdoption)
-	if err := applyRuntimeExportAdoptionSet(adoptions, values["adopt"], "composition.adopt"); err != nil {
-		return nil, err
-	}
-	keys := make([]string, 0, len(adoptions))
-	for key := range adoptions {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	result := make([]map[string]any, len(keys))
-	for index, key := range keys {
-		adoption := adoptions[key]
-		result[index] = map[string]any{"export": adoption.exportName, "module": adoption.modulePath}
-	}
-	return result, nil
 }
 
 func runtimeApplicationModelHTTP(node *yaml.Node) (any, []map[string]any, error) {
@@ -443,9 +416,9 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 	defer clear(root)
 	switch selection.mode {
 	case runtimeSelectionDefault:
-		document, err := composeRuntimeAdoptedDocument(baseline, root, nil, nil)
+		document, err := composeRuntimeTemplateDocument(baseline, root, nil, nil)
 		if err != nil {
-			return nil, fmt.Errorf("%w: default %s: %v", ErrRuntimeConfiguration, defaultRuntimeDocument, err)
+			return nil, fmt.Errorf("%w: default %s: %w", ErrRuntimeConfiguration, defaultRuntimeDocument, err)
 		}
 		return document, nil
 	case runtimeSelectionEnvironment:
@@ -454,9 +427,9 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, selection.environment, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(overlay)
-		document, err := composeRuntimeAdoptedDocument(baseline, root, nil, overlay)
+		document, err := composeRuntimeTemplateDocument(baseline, root, nil, overlay)
 		if err != nil {
-			return nil, fmt.Errorf("%w: apply environment %q from %s: %v", ErrRuntimeConfiguration, selection.environment, filepath.ToSlash(selection.path), err)
+			return nil, fmt.Errorf("%w: apply environment %q from %s: %w", ErrRuntimeConfiguration, selection.environment, filepath.ToSlash(selection.path), err)
 		}
 		return document, nil
 	case runtimeSelectionExplicit:
@@ -465,9 +438,9 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: load full-replacement configuration %s: %w", ErrRuntimeSelector, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(selected)
-		document, err := composeRuntimeAdoptedDocument(baseline, root, selected, nil)
+		document, err := composeRuntimeTemplateDocument(baseline, root, selected, nil)
 		if err != nil {
-			return nil, fmt.Errorf("%w: full-replacement configuration %s: %v", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
+			return nil, fmt.Errorf("%w: full-replacement configuration %s: %w", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
 		}
 		return document, nil
 	default:
@@ -801,7 +774,7 @@ func rejectRuntimeYAMLReferences(root *yaml.Node) error {
 }
 
 func mergeRuntimeDocument(root, overlay *yaml.Node) (*yaml.Node, error) {
-	allowed := runtimeKeySet("composition", "http", "timeouts", "interfaces", "config")
+	allowed := runtimeKeySet("http", "timeouts", "interfaces", "config")
 	lower, err := runtimeMapping(root, "document", allowed)
 	if err != nil {
 		return nil, err
@@ -811,13 +784,6 @@ func mergeRuntimeDocument(root, overlay *yaml.Node) (*yaml.Node, error) {
 		return nil, err
 	}
 	result := make(map[string]*yaml.Node)
-	composition, present, err := mergeRuntimeComposition(lower["composition"], upper["composition"])
-	if err != nil {
-		return nil, err
-	}
-	if present {
-		result["composition"] = composition
-	}
 
 	http, present, err := mergeRuntimeHTTP(lower["http"], upper["http"])
 	if err != nil {
@@ -848,153 +814,6 @@ func mergeRuntimeDocument(root, overlay *yaml.Node) (*yaml.Node, error) {
 		result["config"] = configuration
 	}
 	return runtimeMappingNode(result), nil
-}
-
-func mergeRuntimeComposition(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
-	if lowerNode == nil && upperNode == nil {
-		return nil, false, nil
-	}
-	lower, err := runtimeOptionalMapping(lowerNode, "composition", runtimeKeySet("exports", "adopt"))
-	if err != nil {
-		return nil, false, err
-	}
-	upper, err := runtimeOptionalMapping(upperNode, "composition", runtimeKeySet("adopt"))
-	if err != nil {
-		return nil, false, err
-	}
-	if exports := lower["exports"]; exports != nil {
-		if _, err := runtimeMapping(exports, "composition.exports", nil); err != nil {
-			return nil, false, err
-		}
-	}
-	adoptions := make(map[string]runtimeExportAdoption)
-	if err := applyRuntimeExportAdoptionSet(adoptions, lower["adopt"], "composition.adopt"); err != nil {
-		return nil, false, err
-	}
-	if err := applyRuntimeExportAdoptionSet(adoptions, upper["adopt"], "composition.adopt"); err != nil {
-		return nil, false, err
-	}
-	if len(adoptions) == 0 {
-		return nil, false, nil
-	}
-	return runtimeMappingNode(map[string]*yaml.Node{"adopt": runtimeExportAdoptionSequenceNode(adoptions)}), true, nil
-}
-
-func applyRuntimeExportAdoptionSet(values map[string]runtimeExportAdoption, node *yaml.Node, path string) error {
-	if node == nil {
-		return nil
-	}
-	switch node.Kind {
-	case yaml.SequenceNode:
-		for key := range values {
-			delete(values, key)
-		}
-		adoptions, err := runtimeExportAdoptionSequence(node, path)
-		if err != nil {
-			return err
-		}
-		for key, adoption := range adoptions {
-			values[key] = adoption
-		}
-		return nil
-	case yaml.MappingNode:
-		fields, err := runtimeMapping(node, path, runtimeKeySet("add", "remove"))
-		if err != nil {
-			return err
-		}
-		adds, err := runtimeExportAdoptionSequence(fields["add"], path+".add")
-		if err != nil {
-			return err
-		}
-		removes, err := runtimeExportAdoptionSequence(fields["remove"], path+".remove")
-		if err != nil {
-			return err
-		}
-		for key := range adds {
-			if _, conflict := removes[key]; conflict {
-				return runtimeConfigurationError("%s cannot both add and remove one exact module/export identity", path)
-			}
-		}
-		for key, adoption := range adds {
-			values[key] = adoption
-		}
-		for key := range removes {
-			delete(values, key)
-		}
-		return nil
-	default:
-		return runtimeConfigurationError("%s must be a sequence or sparse {add, remove} mapping", path)
-	}
-}
-
-func runtimeExportAdoptionSequence(node *yaml.Node, path string) (map[string]runtimeExportAdoption, error) {
-	result := make(map[string]runtimeExportAdoption)
-	if node == nil {
-		return result, nil
-	}
-	if node.Kind != yaml.SequenceNode {
-		return nil, runtimeConfigurationError("%s must be a sequence of exact module/export objects", path)
-	}
-	for index, item := range node.Content {
-		itemPath := path + "[" + strconv.Itoa(index) + "]"
-		fields, err := runtimeMapping(item, itemPath, runtimeKeySet("module", "export"))
-		if err != nil || len(fields) != 2 || fields["module"] == nil || fields["export"] == nil {
-			return nil, runtimeConfigurationError("%s must contain exactly module and export", itemPath)
-		}
-		modulePath, moduleErr := runtimeString(fields["module"])
-		exportName, exportErr := runtimeString(fields["export"])
-		if moduleErr != nil || modulepath.CheckProject(modulePath) != nil {
-			return nil, runtimeConfigurationError("%s.module must be a valid Go Module path", itemPath)
-		}
-		if exportErr != nil || !validRuntimeExportName(exportName) {
-			return nil, runtimeConfigurationError("%s.export must be a canonical reusable configuration export name", itemPath)
-		}
-		key := modulePath + "\x00" + exportName
-		if _, duplicate := result[key]; duplicate {
-			return nil, runtimeConfigurationError("%s duplicates an earlier module/export identity", itemPath)
-		}
-		result[key] = runtimeExportAdoption{modulePath: modulePath, exportName: exportName}
-	}
-	return result, nil
-}
-
-func validRuntimeExportName(value string) bool {
-	if value == "" || len(value) > 128 || value[0] < 'a' || value[0] > 'z' {
-		return false
-	}
-	separator := false
-	for index := 1; index < len(value); index++ {
-		character := value[index]
-		switch {
-		case character >= 'a' && character <= 'z', character >= '0' && character <= '9':
-			separator = false
-		case character == '.' || character == '-':
-			if separator {
-				return false
-			}
-			separator = true
-		default:
-			return false
-		}
-	}
-	return !separator
-}
-
-func runtimeExportAdoptionSequenceNode(values map[string]runtimeExportAdoption) *yaml.Node {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	result := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	for _, key := range keys {
-		adoption := values[key]
-		result.Content = append(result.Content, runtimeMappingNode(map[string]*yaml.Node{
-			"export": runtimeStringNode(adoption.exportName),
-			"module": runtimeStringNode(adoption.modulePath),
-		}))
-	}
-	return result
 }
 
 func mergeRuntimeHTTP(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {
@@ -1103,21 +922,31 @@ func mergeRuntimeCORS(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error)
 	if err != nil {
 		return nil, false, err
 	}
-	if !hasOrigins {
-		return nil, false, runtimeConfigurationError("http.cors.allowed_origins is required when http.cors is present")
-	}
 	credentials, hasCredentials, err := selectRuntimeValue(lower["allow_credentials"], upper["allow_credentials"], "http.cors.allow_credentials", validateRuntimeBoolean)
 	if err != nil {
 		return nil, false, err
 	}
-	if hasCredentials && credentials.Value == "true" && runtimeSequenceContains(origins, "*") {
-		return nil, false, runtimeConfigurationError("http.cors cannot combine wildcard origin with allow_credentials: true")
+	result := make(map[string]*yaml.Node)
+	if hasOrigins {
+		result["allowed_origins"] = origins
 	}
-	result := map[string]*yaml.Node{"allowed_origins": origins}
 	if hasCredentials {
 		result["allow_credentials"] = credentials
 	}
 	return runtimeMappingNode(result), true, nil
+}
+
+func validateRuntimeEffectiveCORS(node *yaml.Node) error {
+	http, err := runtimeMapping(node, "http", nil)
+	if err != nil { return err }
+	if http["cors"] == nil { return nil }
+	cors, err := runtimeMapping(http["cors"], "http.cors", nil)
+	if err != nil { return err }
+	if cors["allowed_origins"] == nil { return runtimeConfigurationError("http.cors.allowed_origins is required when http.cors is present") }
+	if credentials := cors["allow_credentials"]; credentials != nil && credentials.Value == "true" && runtimeSequenceContains(cors["allowed_origins"], "*") {
+		return runtimeConfigurationError("http.cors cannot combine wildcard origin with allow_credentials: true")
+	}
+	return nil
 }
 
 func mergeRuntimeTimeouts(lowerNode, upperNode *yaml.Node) (*yaml.Node, bool, error) {

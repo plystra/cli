@@ -6,12 +6,14 @@ import (
 
 	"github.com/plystra/cli/internal/constructorconfig"
 	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/runtimebaseline"
 )
 
-type baselineModule struct {
-	Module  string `json:"module"`
-	Version string `json:"version"`
+type baselineTemplate struct {
+	Module   string `json:"module"`
+	Version  string `json:"version"`
+	Template string `json:"template"`
 }
 
 type baselineConstructor struct {
@@ -22,6 +24,9 @@ type baselineConstructor struct {
 
 // RuntimeBaseline produces private build output from the same inputs as bootstrap.
 func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
+	if modulepath.CheckProject(options.ModulePath) != nil {
+		return runtimebaseline.Document{}, ErrInvalidOptions
+	}
 	type constructor struct {
 		Symbol       string                   `json:"symbol"`
 		Schema       constructorconfig.Schema `json:"schema"`
@@ -70,14 +75,20 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 		inventory = append(inventory, entry)
 	}
 	sort.Slice(inventory, func(i, j int) bool { return inventory[i].Symbol < inventory[j].Symbol })
-	exports := append([]runtimebaseline.Export{}, options.DependencyExports...)
-	sort.Slice(exports, func(i, j int) bool { return exports[i].Module < exports[j].Module })
-	modules := make([]baselineModule, len(exports))
-	for i, export := range exports {
-		if _, err := constructorsymbol.Parse(export.Module + ".New"); err != nil || export.Module == options.ModulePath || i > 0 && exports[i-1].Module == export.Module {
+	templates := append([]runtimebaseline.Template{}, options.Templates...)
+	ancestry := make([]baselineTemplate, len(templates))
+	previous := ""
+	modules := map[string]bool{options.ModulePath: true}
+	for i, template := range templates {
+		if modulepath.CheckProject(template.Module) != nil || modules[template.Module] || template.Template != previous {
 			return runtimebaseline.Document{}, ErrInvalidOptions
 		}
-		modules[i] = baselineModule{export.Module, export.Version}
+		modules[template.Module] = true
+		previous = template.Module
+		ancestry[i] = baselineTemplate{template.Module, template.Version, template.Template}
+	}
+	if options.Template != previous {
+		return runtimebaseline.Document{}, ErrInvalidOptions
 	}
 	contract, err := json.Marshal(struct {
 		Schema               string                `json:"baseline_schema"`
@@ -86,13 +97,14 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 		Compatibility        json.RawMessage       `json:"compatibility"`
 		Constructors         []constructor         `json:"constructors"`
 		ConstructorInventory []baselineConstructor `json:"constructor_inventory"`
-		DependencyModules    []baselineModule      `json:"dependency_modules"`
+		Template             string                `json:"template"`
+		Templates            []baselineTemplate    `json:"template_ancestry"`
 		RuntimeProcessFields []string              `json:"runtime_process_fields"`
-	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, inventory, modules, []string{"http.address", "timeouts.startup"}})
+	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, inventory, options.Template, ancestry, []string{"http.address", "timeouts.startup"}})
 	if err != nil {
 		return runtimebaseline.Document{}, ErrInvalidOptions
 	}
-	return runtimebaseline.Document{Schema: runtimebaseline.Schema, ContractID: runtimebaseline.ContractID(contract), Contract: contract, Defaults: defaults, Exports: exports}, nil
+	return runtimebaseline.Document{Schema: runtimebaseline.Schema, ContractID: runtimebaseline.ContractID(contract), Contract: contract, Defaults: defaults, Templates: templates}, nil
 }
 
 const runtimeBaselineSupport = `

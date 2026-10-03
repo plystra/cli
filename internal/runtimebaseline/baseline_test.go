@@ -18,7 +18,7 @@ import (
 func baseline(t testing.TB, value string) []byte {
 	t.Helper()
 	contract := json.RawMessage(`{"module":"example.com/app"}`)
-	data, err := runtimebaseline.Encode(runtimebaseline.Document{Schema: runtimebaseline.Schema, ContractID: runtimebaseline.ContractID(contract), Contract: contract, Defaults: map[string]json.RawMessage{"constructor": json.RawMessage(fmt.Sprintf(`{"/value":%q}`, value))}, Exports: []runtimebaseline.Export{}})
+	data, err := runtimebaseline.Encode(runtimebaseline.Document{Schema: runtimebaseline.Schema, ContractID: runtimebaseline.ContractID(contract), Contract: contract, Defaults: map[string]json.RawMessage{"constructor": json.RawMessage(fmt.Sprintf(`{"/value":%q}`, value))}, Templates: []runtimebaseline.Template{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +75,37 @@ func TestCanonicalContractSupportsCompiledSchemaDepth(t *testing.T) {
 	document.ContractID = runtimebaseline.ContractID(document.Contract)
 	if _, err := runtimebaseline.Encode(document); !errors.Is(err, runtimebaseline.ErrBaseline) {
 		t.Fatal("unbounded depth accepted")
+	}
+}
+
+func TestTemplateEnvelopeIsPrivateAndRejectsObsoleteExports(t *testing.T) {
+	document, err := runtimebaseline.Decode(baseline(t, "private"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	document.Templates = []runtimebaseline.Template{{Module: "example.com/template", Version: "v1.0.0", YAML: "config: {private: PRIVATE_TEMPLATE_VALUE}\n"}}
+	encoded, err := runtimebaseline.Encode(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := runtimebaseline.Decode(encoded)
+	if err != nil || len(roundTrip.Templates) != 1 || roundTrip.Templates[0].YAML != document.Templates[0].YAML {
+		t.Fatal("lost private template layer", err)
+	}
+	for _, value := range []any{document, document.Templates, document.Templates[0]} {
+		for _, format := range []string{"%v", "%+v", "%#v", "%q"} {
+			if strings.Contains(fmt.Sprintf(format, value), "PRIVATE_TEMPLATE_VALUE") {
+				t.Fatal("format exposed private template")
+			}
+		}
+	}
+	obsolete := bytes.Replace(encoded, []byte(`"template_ancestry"`), []byte(`"dependency_exports"`), 1)
+	if _, err := runtimebaseline.Decode(obsolete); !errors.Is(err, runtimebaseline.ErrBaseline) {
+		t.Fatal("accepted obsolete envelope", err)
+	}
+	document.Templates = nil
+	if _, err := runtimebaseline.Encode(document); !errors.Is(err, runtimebaseline.ErrBaseline) {
+		t.Fatal("accepted missing ancestry", err)
 	}
 }
 
