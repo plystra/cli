@@ -104,7 +104,7 @@ http:
   address: ":9090"
   cors:
     allowed_origins: ['https://production.example', 'https://PRODUCTION.example:443']
-    allow_credentials: null
+    allow_credentials: {$remove: true}
   expose:
     reports.read/v1:
       transport: connect
@@ -299,11 +299,11 @@ config: {example.com/acme/smtp.New: {host: shared.example, settings: {mode: shar
 	}
 	aliasChain := parseOverlayManifest(t, "plystra.test.yaml", "capabilities: {aliases: {email.send/v1: reports.read/v1}}\n")
 	baseAlias := parseOverlayManifest(t, "plystra.yaml", "capabilities: {aliases: {mail.send/v1: email.send/v1}}\n")
-	if _, err := applicationmeta.ApplyOverlay(baseAlias, aliasChain, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !strings.Contains(err.Error(), "Alias chain") {
+	if _, err := composeOverlay(t, baseAlias, aliasChain, lookup); !errors.Is(err, applicationmeta.ErrCompose) || !strings.Contains(err.Error(), "Alias chain") {
 		t.Fatalf("Alias chain error = %v", err)
 	}
 	wildcard := parseOverlayManifest(t, "plystra.test.yaml", "http: {cors: {allowed_origins: ['*']}}\n")
-	if _, err := applicationmeta.ApplyOverlay(base, wildcard, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !strings.Contains(err.Error(), "wildcard origin") {
+	if _, err := composeOverlay(t, base, wildcard, lookup); !errors.Is(err, applicationmeta.ErrCompose) || !strings.Contains(err.Error(), "wildcard origin") {
 		t.Fatalf("credentialed wildcard overlay error = %v", err)
 	}
 	sparseCredentials, err := applicationmeta.ParseOverlaySource("plystra.test.yaml", []byte("http: {cors: {allow_credentials: false}}\n"))
@@ -315,10 +315,10 @@ config: {example.com/acme/smtp.New: {host: shared.example, settings: {mode: shar
 	if err != nil || !exists || !reflect.DeepEqual(sparseCORS.AllowedOrigins, []string{"https://shared.example"}) || sparseCORS.AllowCredentials {
 		t.Fatalf("sparse credential overlay HTTPCORS = %#v, %t, error %v", sparseCORS, exists, err)
 	}
-	if _, err := applicationmeta.ApplyOverlay(parseOverlayManifest(t, "plystra.yaml", "{}\n"), sparseCredentials, lookup); !errors.Is(err, applicationmeta.ErrApplyOverlay) || !strings.Contains(err.Error(), "allowed_origins is required") {
+	if _, err := composeOverlay(t, parseOverlayManifest(t, "plystra.yaml", "{}\n"), sparseCredentials, lookup); !errors.Is(err, applicationmeta.ErrCompose) || !strings.Contains(err.Error(), "allowed_origins is required") {
 		t.Fatalf("sparse CORS without root error = %v", err)
 	}
-	removed, err := applicationmeta.ApplyOverlay(base, parseOverlayManifest(t, "plystra.test.yaml", "http: {cors: null}\n"), lookup)
+	removed, err := applicationmeta.ApplyOverlay(base, parseOverlayManifest(t, "plystra.test.yaml", "http: {cors: {$remove: true}}\n"), lookup)
 	if _, exists := removed.HTTPCORS(); err != nil || exists {
 		t.Fatalf("removed HTTPCORS exists = %t, error %v", exists, err)
 	}
@@ -335,7 +335,7 @@ func TestApplyOverlayReportsSelectedEnvironmentDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithProjectModule(base): %v", err)
 	}
-	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("http: {cors: {allowed_origins: ['*']}}\n"))
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("config: {example.com/missing/service.New: {private: value}}\n"))
 	if err != nil {
 		t.Fatalf("ParseOverlaySource: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestApplyOverlayReportsSelectedEnvironmentDocument(t *testing.T) {
 
 	_, err = applicationmeta.ApplyOverlay(base, overlay, composeSchemaLookup(nil))
 	var invalid *applicationmeta.EnvironmentOverlayError
-	if !errors.Is(err, applicationmeta.ErrApplyOverlay) || !errors.As(err, &invalid) || invalid == nil || !strings.Contains(err.Error(), "http.cors cannot combine wildcard origin") {
+	if !errors.Is(err, applicationmeta.ErrApplyOverlay) || !errors.As(err, &invalid) || invalid == nil || !errors.Is(err, applicationmeta.ErrConfigurationSchema) {
 		t.Fatalf("ApplyOverlay = %v", err)
 	}
 	if invalid.ModulePath() != "example.com/application" || invalid.SourcePath() != "plystra.production.yaml" || invalid.SourceKind() != "configuration-declaration" || invalid.Line() != 1 || invalid.Column() != 1 {
@@ -388,4 +388,13 @@ func overlayProviderStrings(manifest applicationmeta.Manifest) []string {
 		result[index] = value.Capability().String() + "=" + value.PluginID()
 	}
 	return result
+}
+
+func composeOverlay(t testing.TB, base, overlay applicationmeta.Manifest, schemas applicationmeta.SchemaLookup) (applicationmeta.Composition, error) {
+	t.Helper()
+	selected, err := applicationmeta.ApplyOverlay(base, overlay, schemas)
+	if err != nil {
+		return applicationmeta.Composition{}, err
+	}
+	return applicationmeta.Compose(nil, selected, schemas)
 }

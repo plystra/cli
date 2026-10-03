@@ -60,8 +60,7 @@ http:
 	}
 	for _, timeout := range []string{"1s", "5s"} {
 		dependencies := []applicationmeta.Dependency{{
-			ModulePath: "example.com/platform", ModuleVersion: "v1.0.0", ExportName: "defaults",
-			Manifest: composeManifest(t, "interfaces: {use: {email.send/v1: example.com/platform.New}, policies: {email.send/v1: {timeout: "+timeout+"}}}\n"),
+			ModulePath: "example.com/platform", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "interfaces: {use: {email.send/v1: example.com/platform.New}, policies: {email.send/v1: {timeout: "+timeout+"}}}\n"),
 		}}
 		maintained, err := applicationmeta.MaintainDependencyConfiguration(data, before.DependencyBaseline(), initial.LocalPaths(), dependencies, lookup)
 		if err != nil || maintained.Changed() || !bytes.Equal(maintained.Data(), data) {

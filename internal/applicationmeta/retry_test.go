@@ -81,8 +81,8 @@ func TestComposeAndMaintainRetryAsOnePolicyEntry(t *testing.T) {
 	}
 	for _, fields := range []string{"eligibility: replay_safe, max_attempts: 3", "eligibility: replay_safe, backoff: 1ns"} {
 		dependencies[1].Manifest = config(fields)
-		if _, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil)); !errors.Is(err, applicationmeta.ErrInheritedConflict) {
-			t.Fatalf("different retry did not conflict: %v", err)
+		if _, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil)); err != nil {
+			t.Fatalf("ordered retry failed: %v", err)
 		}
 		current := composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 2s}}}\n")
 		resolved, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
@@ -95,8 +95,8 @@ func TestComposeAndMaintainRetryAsOnePolicyEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy := composeManifest(t, string(maintained.Data())).InterfacePolicies()[0]; policy.RetryEligibility() != "replay_safe" || policy.RetryMaxAttempts() != 2 || policy.RetryBackoff() != 0 {
-		t.Fatalf("maintenance lost retry: %s", maintained.Data())
+	if !bytes.Equal(maintained.Data(), []byte("{}\n")) {
+		t.Fatal("inherited retry was materialized")
 	}
 	composition, err := applicationmeta.Compose(dependencies, composeManifest(t, string(maintained.Data())), composeSchemaLookup(nil))
 	if err != nil {

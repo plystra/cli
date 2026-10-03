@@ -13,14 +13,12 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/modulepath"
 )
 
 var (
 	// ErrCompose reports that typed Project configuration composition failed.
 	ErrCompose = errors.New("compose Project configuration")
-	// ErrInheritedConflict reports incompatible dependency declarations that
-	// the current Project did not explicitly replace.
-	ErrInheritedConflict = errors.New("inherited Project configuration conflict")
 	// ErrConfigurationSchema reports configuration for a constructor without
 	// one compiled same-package Config schema.
 	ErrConfigurationSchema = errors.New("constructor configuration schema unavailable")
@@ -36,13 +34,11 @@ var (
 	ErrConfigurationRequired = errors.New("required constructor configuration field is missing")
 )
 
-// Dependency is one dependency Project's parsed root configuration and stable
-// Go Module provenance. Directness and graph position deliberately do not
-// participate in composition.
+// Dependency is one template root and its effective Go Module identity.
+// Compose consumes dependencies in explicit oldest-to-nearest order.
 type Dependency struct {
 	ModulePath    string
 	ModuleVersion string
-	ExportName    string
 	Manifest      Manifest
 }
 
@@ -50,11 +46,8 @@ type Dependency struct {
 // visible Implementation constructor.
 type SchemaLookup func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool)
 
-// Provenance records one dependency-derived typed field value without storing
-// the value itself. Several records may share a Path when dependencies
-// contribute incompatible public identities that a current-project replacement
-// resolves. Secret references share one public identity regardless of private
-// equality; composition validates their conflicts before publishing provenance.
+// Provenance records public-safe typed decisions and declaration ownership.
+// Private values never influence contributor selection or grouping.
 type Provenance struct {
 	path    string
 	digest  string
@@ -81,10 +74,33 @@ func (p Provenance) Sources() []string { return append([]string(nil), p.sources.
 type Composition struct {
 	current           Manifest
 	manifest          Manifest
+	templateLayers    []TemplateLayer
 	provenance        []Provenance
 	resolutionSources []Provenance
 	dependencyDigest  string
 	prepared          bool
+}
+
+// TemplateLayer is one public-safe authored template layer. Its position in
+// TemplateLayers is precedence, not Implementation discovery priority.
+type TemplateLayer struct {
+	ModulePath    string
+	ModuleVersion string
+	Source        string
+	Decisions     []ConfigurationDecision
+}
+
+// TemplateLayers returns every root layer in oldest-to-nearest order,
+// including declarations suppressed by later templates or the current Project.
+func (c Composition) TemplateLayers() []TemplateLayer {
+	if !c.Valid() {
+		return nil
+	}
+	result := append([]TemplateLayer(nil), c.templateLayers...)
+	for index := range result {
+		result[index].Decisions = append([]ConfigurationDecision(nil), result[index].Decisions...)
+	}
+	return result
 }
 
 // DependencyBaseline returns the validated non-secret dependency provenance
@@ -114,7 +130,7 @@ func (c Composition) Manifest() Manifest {
 }
 
 // CurrentManifest returns the selected current-Project declaration before any
-// adopted export contributes its lower-precedence values.
+// template contributes its lower-precedence values.
 func (c Composition) CurrentManifest() Manifest {
 	if !c.Valid() {
 		return Manifest{}
@@ -131,12 +147,8 @@ func (c Composition) Provenance() []Provenance {
 	return cloneProvenance(c.provenance)
 }
 
-// ResolutionSources returns dependency provenance whose normalized value
-// matches one effective Interface or legacy requirement, selection, Interface
-// policy, remaining Alias, or constructor-configuration root. Public exposure is
-// current-Project-owned and therefore has no dependency provenance. Superseded
-// and removed dependency declarations remain in Provenance but do not
-// introduce final application requirements or configuration ownership.
+// ResolutionSources returns the inherited declarations that still contribute
+// to the effective model, selected by layer precedence rather than value equality.
 func (c Composition) ResolutionSources() []Provenance {
 	if !c.Valid() {
 		return nil
@@ -154,114 +166,178 @@ func (c Composition) DependencyDigest() string {
 	return c.dependencyDigest
 }
 
-// Compose applies the typed dependency rules beneath one current-project
-// Manifest. Process settings and public exposure remain current-project-owned;
-// composable canonical sets union; keyed Implementation selections and
-// remaining keyed declarations require compatible inherited values unless the
-// current Project replaces that exact key.
+// Compose applies template roots in explicit oldest-to-nearest order, followed
+// by the selected current-project layers. It never ranks Implementation candidates.
 func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) (Composition, error) {
 	if schemas == nil {
 		return Composition{}, fmt.Errorf("%w: schema lookup is nil", ErrCompose)
 	}
-	ordered := append([]Dependency(nil), dependencies...)
-	for _, dependency := range ordered {
-		if dependency.ModulePath == "" {
-			return Composition{}, fmt.Errorf("%w: dependency module path is empty", ErrCompose)
-		}
+	seen := make(map[string]bool, len(dependencies)+1)
+	if current.modulePath != "" {
+		seen[current.modulePath] = true
 	}
-	sort.Slice(ordered, func(left, right int) bool {
-		if ordered[left].ModulePath != ordered[right].ModulePath {
-			return ordered[left].ModulePath < ordered[right].ModulePath
-		}
-		if ordered[left].ExportName != ordered[right].ExportName {
-			return ordered[left].ExportName < ordered[right].ExportName
-		}
-		return ordered[left].ModuleVersion < ordered[right].ModuleVersion
-	})
-	for index := 1; index < len(ordered); index++ {
-		if ordered[index-1].ModulePath == ordered[index].ModulePath && ordered[index-1].ExportName == ordered[index].ExportName {
-			identity := ordered[index].ModulePath
-			if ordered[index].ExportName != "" {
-				identity += "#" + ordered[index].ExportName
-			}
-			return Composition{}, fmt.Errorf("%w: dependency configuration source %q is repeated", ErrCompose, identity)
-		}
-	}
-
 	records := make(map[string]*provenanceRecord)
-	exposures := current.HTTPExposures()
-	requirements, err := composeRequirementSet(ordered, current.Requirements(), current.removedRequirements, records)
+	var templateLayers []TemplateLayer
+	active := make(map[string]Provenance)
+	effective := Manifest{startupTimeout: DefaultStartupTimeout}
+	apply := func(layer Manifest, owner *Dependency) error {
+		decisions, err := ConfigurationDecisions(layer, schemas)
+		if err != nil {
+			return err
+		}
+		if owner != nil {
+			templateLayers = append(templateLayers, TemplateLayer{ModulePath: owner.ModulePath, ModuleVersion: owner.ModuleVersion, Source: layer.source, Decisions: append([]ConfigurationDecision(nil), decisions...)})
+		}
+		for _, decision := range decisions {
+			if !decision.dependencyComposable {
+				continue
+			}
+			if owner != nil {
+				source := dependencySource(*owner, declarationReference(layer, decision))
+				addProvenance(records, decision.path, decision.digest, source, decision.removed)
+			}
+			applyResolutionDecision(active, layer, decision, owner)
+		}
+		if owner != nil {
+			layer = qualifyTemplateSources(layer, *owner)
+		}
+		effective, err = applyManifestLayer(effective, layer, schemas)
+		return err
+	}
+	for index, dependency := range dependencies {
+		if len(dependency.ModulePath) > 4096 || modulepath.CheckProject(dependency.ModulePath) != nil {
+			return Composition{}, fmt.Errorf("%w: invalid template module path", ErrCompose)
+		}
+		if seen[dependency.ModulePath] {
+			return Composition{}, fmt.Errorf("%w: template module %q is repeated", ErrCompose, dependency.ModulePath)
+		}
+		seen[dependency.ModulePath] = true
+		if dependency.Manifest.modulePath != "" && dependency.Manifest.modulePath != dependency.ModulePath {
+			return Composition{}, fmt.Errorf("%w: template module %q does not match its declaration owner", ErrCompose, dependency.ModulePath)
+		}
+		if strings.ContainsAny(dependency.ModuleVersion, "\x00\r\n") {
+			return Composition{}, fmt.Errorf("%w: invalid template module version", ErrCompose)
+		}
+		manifest, err := WithProjectModule(dependency.Manifest, dependency.ModulePath)
+		if err != nil {
+			return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+		}
+		path := fmt.Sprintf("template.ancestry[%d]", index)
+		source := manifest.source
+		if source == "" {
+			source = "plystra.yaml"
+		}
+		addProvenance(records, path, digestStrings("template.ancestry/v1", dependency.ModulePath, dependency.ModuleVersion, source, manifest.template), dependencySource(dependency, source), false)
+		for _, layer := range manifestLayers(manifest) {
+			layer.httpAddress, layer.hasHTTPAddress, layer.removeHTTPAddress = "", false, false
+			layer.startupTimeout, layer.hasStartupTimeout, layer.removeStartupTimeout = DefaultStartupTimeout, false, false
+			if err := apply(layer, &dependency); err != nil {
+				return Composition{}, fmt.Errorf("%w: template %s: %w", ErrCompose, dependencyIdentity(dependency), err)
+			}
+		}
+	}
+	for _, layer := range manifestLayers(current) {
+		if err := apply(layer, nil); err != nil {
+			return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+		}
+	}
+	if err := validateHTTPCORSLayer(effective.httpCORS); err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
+	if err := rejectAliasResolutionInputs(effective.requirements, effective.providerChoices, effective.aliases); err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
+	if err := rejectAliasChains(effective.aliases); err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
+	configured, err := manifestConfigDecisions(effective, schemas)
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	choices, err := composeProviderChoices(ordered, current.ProviderChoices(), current.removedProviderChoices, records)
+	effective.configurations, err = renderConstructorConfigurations(constructorConfigDecisionsByPath(configured))
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	interfaceRequirements, err := composeInterfaceRequirementSet(ordered, current.InterfaceRequirements(), current.removedInterfaceReqs, current.completeInterfaceRequirements, records)
-	if err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
-	implementationChoices, err := composeImplementationChoices(ordered, current.ImplementationChoices(), current.removedImplementationChoices, records)
-	if err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
-	interfacePolicies, err := composeInterfacePolicies(ordered, current.InterfacePolicies(), current.removedInterfacePolicies, records)
-	if err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
-	aliases, err := composeAliases(ordered, current.Aliases(), current.removedAliases, records)
-	if err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
-	configurations, err := composeConstructorConfigurations(ordered, current, schemas, records)
-	if err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
-	if err := rejectAliasResolutionInputs(requirements, choices, aliases); err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
-	if err := rejectAliasChains(aliases); err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-	}
-
+	effective.modulePath, effective.source = current.modulePath, current.source
+	effective.template, effective.templateSource = current.template, current.templateSource
+	effective.layers = nil
 	provenance := finalizeProvenance(records)
 	digest, err := digestProvenance(provenance)
 	if err != nil {
-		return Composition{}, fmt.Errorf("%w: encode dependency provenance: %v", ErrCompose, err)
-	}
-	manifest := Manifest{
-		modulePath:                    current.modulePath,
-		source:                        current.source,
-		exports:                       append([]ConfigurationExport(nil), current.exports...),
-		exportAdoptions:               append([]ExportAdoption(nil), current.exportAdoptions...),
-		removedExportAdoptions:        append([]ExportAdoption(nil), current.removedExportAdoptions...),
-		adoptionMode:                  current.adoptionMode,
-		httpAddress:                   current.httpAddress,
-		hasHTTPAddress:                current.hasHTTPAddress,
-		removeHTTPAddress:             current.removeHTTPAddress,
-		httpCORS:                      cloneHTTPCORSLayer(current.httpCORS),
-		httpExposures:                 exposures,
-		requirements:                  requirements,
-		providerChoices:               choices,
-		interfaceRequirements:         interfaceRequirements,
-		completeInterfaceRequirements: current.completeInterfaceRequirements,
-		implementationChoices:         implementationChoices,
-		interfacePolicies:             interfacePolicies,
-		aliases:                       aliases,
-		configurations:                configurations,
-		startupTimeout:                current.startupTimeout,
-		hasStartupTimeout:             current.hasStartupTimeout,
-		removeStartupTimeout:          current.removeStartupTimeout,
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
 	return Composition{
-		current:           current,
-		manifest:          manifest,
-		provenance:        provenance,
-		resolutionSources: effectiveResolutionSources(manifest, provenance),
-		dependencyDigest:  digest,
-		prepared:          true,
+		current: current, manifest: effective, provenance: provenance,
+		templateLayers:    templateLayers,
+		resolutionSources: activeResolutionSources(active), dependencyDigest: digest, prepared: true,
 	}, nil
+}
+
+func declarationReference(layer Manifest, decision ConfigurationDecision) string {
+	// Typed configuration keeps per-object source references; ordinary decisions
+	// expose document names and get their canonical path appended here.
+	source := decision.source
+	if source == "" {
+		source = layer.source
+	}
+	if source == "" {
+		source = "plystra.yaml"
+	}
+	if strings.Contains(source, " ") {
+		return source
+	}
+	return source + " " + decision.path
+}
+
+func applyResolutionDecision(active map[string]Provenance, layer Manifest, decision ConfigurationDecision, owner *Dependency) {
+	path := decision.path
+	clear := func(prefix string) {
+		for key := range active {
+			if strings.HasPrefix(key, prefix) {
+				delete(active, key)
+			}
+		}
+	}
+	if decision.summary == ConfigurationSummaryCompleteSet {
+		clear(path + "[")
+	}
+	if decision.removed || decision.summary != ConfigurationSummaryObject {
+		clear(path + "[")
+		clear(path + ".")
+	}
+	// Empty sources mark current ownership and suppress inherited attribution.
+	record := Provenance{path: path, digest: decision.digest, removed: decision.removed}
+	if owner != nil {
+		record.sources = []string{dependencySource(*owner, declarationReference(layer, decision))}
+	}
+	active[path] = record
+}
+
+func activeResolutionSources(active map[string]Provenance) []Provenance {
+	records := make(map[string]*provenanceRecord)
+	for _, record := range active {
+		if record.removed || len(record.sources) == 0 {
+			continue
+		}
+		for _, source := range record.sources {
+			if !strings.HasPrefix(record.path, "config[") {
+				addProvenance(records, record.path, record.digest, source, false)
+			}
+			// Configuration ownership includes surviving inherited fixed-struct
+			// fields even when a nearer layer supplied the object container.
+			if strings.HasPrefix(record.path, "config[") {
+				root := record.path
+				if end := strings.Index(root, "]["); end >= 0 {
+					root = root[:end+1]
+				}
+				if field := strings.Index(source, " config["); field >= 0 {
+					source = source[:field+1] + root
+				}
+				addProvenance(records, root, digestStrings("config.contributor", root), source, false)
+			}
+		}
+	}
+	return finalizeProvenance(records)
 }
 
 func cloneProvenance(values []Provenance) []Provenance {
@@ -275,60 +351,6 @@ func cloneProvenance(values []Provenance) []Provenance {
 		}
 	}
 	return result
-}
-
-func effectiveResolutionSources(manifest Manifest, provenance []Provenance) []Provenance {
-	effective := make(map[string]string)
-	effectiveConfigurationRoots := make(map[string]struct{}, len(manifest.configurations))
-	for _, exposure := range manifest.httpExposures {
-		path := fmt.Sprintf("http.expose[%q]", exposure.id.String())
-		effective[path] = httpExposureDigest(exposure)
-	}
-	for _, requirement := range manifest.requirements {
-		path := fmt.Sprintf("capabilities.require[%q]", requirement.id.String())
-		effective[path] = declarationDigest("capabilities.require", requirement.id, false)
-	}
-	for _, choice := range manifest.providerChoices {
-		path := fmt.Sprintf("capabilities.use[%q]", choice.capability.String())
-		effective[path] = digestStrings("capabilities.use", choice.capability.String(), choice.pluginID)
-	}
-	for _, requirement := range manifest.interfaceRequirements {
-		path := fmt.Sprintf("interfaces.require[%q]", requirement.id.String())
-		effective[path] = interfaceDeclarationDigest("interfaces.require", requirement.id, false)
-	}
-	for _, choice := range manifest.implementationChoices {
-		path := fmt.Sprintf("interfaces.use[%q]", choice.interfaceID.String())
-		effective[path] = implementationChoiceDigest(choice)
-	}
-	for _, policy := range manifest.interfacePolicies {
-		effective[interfacePolicyPath(policy.interfaceID)] = interfacePolicyDigest(policy)
-	}
-	for _, alias := range manifest.aliases {
-		path := fmt.Sprintf("capabilities.aliases[%q]", alias.id.String())
-		effective[path] = aliasDigest(alias)
-	}
-	for _, configured := range manifest.configurations {
-		effectiveConfigurationRoots[constructorConfigPath(configured.constructor, nil)] = struct{}{}
-	}
-	result := make([]Provenance, 0, len(effective)+len(effectiveConfigurationRoots))
-	for _, record := range provenance {
-		if manifest.completeInterfaceRequirements && strings.HasPrefix(record.path, "interfaces.require[") {
-			continue
-		}
-		if record.removed {
-			continue
-		}
-		if digest, exists := effective[record.path]; exists {
-			if digest == record.digest {
-				result = append(result, record)
-			}
-			continue
-		}
-		if _, exists := effectiveConfigurationRoots[record.path]; exists {
-			result = append(result, record)
-		}
-	}
-	return cloneProvenance(result)
 }
 
 type provenanceRecord struct {
@@ -348,342 +370,12 @@ func addProvenance(records map[string]*provenanceRecord, path, digest, source st
 	record.sources[source] = struct{}{}
 }
 
-type setCandidate struct {
-	valueSources   map[string]struct{}
-	removalSources map[string]struct{}
-	declarations   configurationDeclarationSources
-}
-
-func composeRequirementSet(dependencies []Dependency, current []CapabilityRequirement, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]CapabilityRequirement, error) {
-	inherited := make(map[capabilityid.Identifier]*setCandidate)
-	for _, dependency := range dependencies {
-		for _, requirement := range dependency.Manifest.Requirements() {
-			path := fmt.Sprintf("capabilities.require[%q]", requirement.id.String())
-			source := dependencySource(dependency, requirement.source)
-			addProvenance(records, path, declarationDigest("capabilities.require", requirement.id, false), source, false)
-			candidate := ensureSetCandidate(inherited, requirement.id)
-			candidate.valueSources[source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
-		}
-		for _, removal := range dependency.Manifest.removedRequirements {
-			path := fmt.Sprintf("capabilities.require[%q]", removal.id.String())
-			source := dependencySource(dependency, removal.source)
-			addProvenance(records, path, declarationDigest("capabilities.require", removal.id, true), source, true)
-			candidate := ensureSetCandidate(inherited, removal.id)
-			candidate.removalSources[source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
-		}
-	}
-	values := make(map[capabilityid.Identifier]CapabilityRequirement)
-	for _, requirement := range current {
-		values[requirement.id] = requirement
-	}
-	removed := capabilityRemovalSet(currentRemovals)
-	ids := sortedCandidateIDs(inherited)
-	for _, id := range ids {
-		if _, replaced := values[id]; replaced {
-			continue
-		}
-		if _, explicitlyRemoved := removed[id]; explicitlyRemoved {
-			continue
-		}
-		candidate := inherited[id]
-		if len(candidate.valueSources) > 0 && len(candidate.removalSources) > 0 {
-			return nil, inheritedSetConflict("capabilities.require", id, candidate)
-		}
-		if len(candidate.valueSources) > 0 {
-			values[id] = CapabilityRequirement{id: id, source: sortedSet(candidate.valueSources)[0]}
-		}
-	}
-	result := make([]CapabilityRequirement, 0, len(values))
-	for _, requirement := range values {
-		result = append(result, requirement)
-	}
-	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
-	return result, nil
-}
-
-func ensureSetCandidate(values map[capabilityid.Identifier]*setCandidate, id capabilityid.Identifier) *setCandidate {
-	candidate := values[id]
-	if candidate == nil {
-		candidate = &setCandidate{
-			valueSources:   make(map[string]struct{}),
-			removalSources: make(map[string]struct{}),
-			declarations:   make(configurationDeclarationSources),
-		}
-		values[id] = candidate
-	}
-	return candidate
-}
-
-func sortedCandidateIDs(values map[capabilityid.Identifier]*setCandidate) []capabilityid.Identifier {
-	ids := make([]capabilityid.Identifier, 0, len(values))
-	for id := range values {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(left, right int) bool { return ids[left].String() < ids[right].String() })
-	return ids
-}
-
-func capabilityRemovalSet(values []capabilityRemoval) map[capabilityid.Identifier]struct{} {
-	result := make(map[capabilityid.Identifier]struct{}, len(values))
-	for _, value := range values {
-		result[value.id] = struct{}{}
-	}
-	return result
-}
-
-func inheritedSetConflict(path string, id capabilityid.Identifier, candidate *setCandidate) error {
-	field := fmt.Sprintf("%s[%q]", path, id.String())
-	return newInheritedConflictError(
-		field,
-		fmt.Sprintf(
-			"%s is added by %s and removed by %s; explicitly add or remove that exact Capability in the current Project configuration",
-			field,
-			strings.Join(sortedSet(candidate.valueSources), ", "),
-			strings.Join(sortedSet(candidate.removalSources), ", "),
-		),
-		candidate.declarations,
-	)
-}
-
-type providerCandidate struct {
-	choice       ProviderChoice
-	removed      bool
-	sources      map[string]struct{}
-	declarations configurationDeclarationSources
-}
-
-func composeProviderChoices(dependencies []Dependency, current []ProviderChoice, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]ProviderChoice, error) {
-	inherited := make(map[capabilityid.Identifier]map[string]*providerCandidate)
-	for _, dependency := range dependencies {
-		for _, choice := range dependency.Manifest.ProviderChoices() {
-			path := fmt.Sprintf("capabilities.use[%q]", choice.capability.String())
-			source := dependencySource(dependency, choice.source)
-			digest := digestStrings("capabilities.use", choice.capability.String(), choice.pluginID)
-			addProvenance(records, path, digest, source, false)
-			byDigest := inherited[choice.capability]
-			if byDigest == nil {
-				byDigest = make(map[string]*providerCandidate)
-				inherited[choice.capability] = byDigest
-			}
-			candidate := byDigest[digest]
-			if candidate == nil {
-				candidate = &providerCandidate{
-					choice:       ProviderChoice{capability: choice.capability, pluginID: choice.pluginID, source: source},
-					sources:      make(map[string]struct{}),
-					declarations: make(configurationDeclarationSources),
-				}
-				byDigest[digest] = candidate
-			}
-			candidate.sources[source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
-			if source < candidate.choice.source {
-				candidate.choice.source = source
-			}
-		}
-		for _, removal := range dependency.Manifest.removedProviderChoices {
-			path := fmt.Sprintf("capabilities.use[%q]", removal.id.String())
-			source := dependencySource(dependency, removal.source)
-			digest := declarationDigest("capabilities.use", removal.id, true)
-			addProvenance(records, path, digest, source, true)
-			byDigest := inherited[removal.id]
-			if byDigest == nil {
-				byDigest = make(map[string]*providerCandidate)
-				inherited[removal.id] = byDigest
-			}
-			candidate := byDigest[digest]
-			if candidate == nil {
-				candidate = &providerCandidate{removed: true, sources: make(map[string]struct{}), declarations: make(configurationDeclarationSources)}
-				byDigest[digest] = candidate
-			}
-			candidate.sources[source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
-		}
-	}
-	selected := make(map[capabilityid.Identifier]ProviderChoice)
-	for _, choice := range current {
-		selected[choice.capability] = choice
-	}
-	removed := capabilityRemovalSet(currentRemovals)
-	capabilities := make([]capabilityid.Identifier, 0, len(inherited))
-	for capability := range inherited {
-		capabilities = append(capabilities, capability)
-	}
-	sort.Slice(capabilities, func(left, right int) bool { return capabilities[left].String() < capabilities[right].String() })
-	for _, capability := range capabilities {
-		candidates := inherited[capability]
-		if _, replaced := selected[capability]; replaced {
-			continue
-		}
-		if _, explicitlyRemoved := removed[capability]; explicitlyRemoved {
-			continue
-		}
-		if len(candidates) != 1 {
-			return nil, inheritedProviderConflict(capability, candidates)
-		}
-		for _, candidate := range candidates {
-			if !candidate.removed {
-				selected[capability] = candidate.choice
-			}
-		}
-	}
-	result := make([]ProviderChoice, 0, len(selected))
-	for _, choice := range selected {
-		result = append(result, choice)
-	}
-	sort.Slice(result, func(left, right int) bool {
-		return result[left].capability.String() < result[right].capability.String()
-	})
-	return result, nil
-}
-
-func inheritedProviderConflict(capability capabilityid.Identifier, candidates map[string]*providerCandidate) error {
-	digests := make([]string, 0, len(candidates))
-	for digest := range candidates {
-		digests = append(digests, digest)
-	}
-	sort.Strings(digests)
-	parts := make([]string, 0, len(digests))
-	declarations := make(configurationDeclarationSources)
-	for _, digest := range digests {
-		candidate := candidates[digest]
-		declaration := candidate.choice.pluginID
-		if candidate.removed {
-			declaration = "<removed>"
-		}
-		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
-		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
-	}
-	field := fmt.Sprintf("capabilities.use[%q]", capability.String())
-	return newInheritedConflictError(
-		field,
-		fmt.Sprintf("%s has incompatible Provider declarations: %s; set or remove that exact key in the current Project configuration", field, strings.Join(parts, "; ")),
-		declarations,
-	)
-}
-
-type aliasCandidate struct {
-	alias        Alias
-	removed      bool
-	sources      map[string]struct{}
-	declarations configurationDeclarationSources
-}
-
-func composeAliases(dependencies []Dependency, current []Alias, currentRemovals []capabilityRemoval, records map[string]*provenanceRecord) ([]Alias, error) {
-	inherited := make(map[capabilityid.Identifier]map[string]*aliasCandidate)
-	for _, dependency := range dependencies {
-		for _, alias := range dependency.Manifest.Aliases() {
-			path := fmt.Sprintf("capabilities.aliases[%q]", alias.id.String())
-			source := dependencySource(dependency, alias.source)
-			digest := aliasDigest(alias)
-			addProvenance(records, path, digest, source, false)
-			byDigest := inherited[alias.id]
-			if byDigest == nil {
-				byDigest = make(map[string]*aliasCandidate)
-				inherited[alias.id] = byDigest
-			}
-			candidate := byDigest[digest]
-			if candidate == nil {
-				alias.source = source
-				candidate = &aliasCandidate{alias: alias, sources: make(map[string]struct{}), declarations: make(configurationDeclarationSources)}
-				byDigest[digest] = candidate
-			}
-			candidate.sources[source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
-			if source < candidate.alias.source {
-				candidate.alias.source = source
-			}
-		}
-		for _, removal := range dependency.Manifest.removedAliases {
-			path := fmt.Sprintf("capabilities.aliases[%q]", removal.id.String())
-			source := dependencySource(dependency, removal.source)
-			digest := declarationDigest("capabilities.aliases", removal.id, true)
-			addProvenance(records, path, digest, source, true)
-			byDigest := inherited[removal.id]
-			if byDigest == nil {
-				byDigest = make(map[string]*aliasCandidate)
-				inherited[removal.id] = byDigest
-			}
-			candidate := byDigest[digest]
-			if candidate == nil {
-				candidate = &aliasCandidate{removed: true, sources: make(map[string]struct{}), declarations: make(configurationDeclarationSources)}
-				byDigest[digest] = candidate
-			}
-			candidate.sources[source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
-		}
-	}
-	selected := make(map[capabilityid.Identifier]Alias)
-	for _, alias := range current {
-		selected[alias.id] = alias
-	}
-	removed := capabilityRemovalSet(currentRemovals)
-	ids := make([]capabilityid.Identifier, 0, len(inherited))
-	for id := range inherited {
-		ids = append(ids, id)
-	}
-	sort.Slice(ids, func(left, right int) bool { return ids[left].String() < ids[right].String() })
-	for _, id := range ids {
-		candidates := inherited[id]
-		if _, replaced := selected[id]; replaced {
-			continue
-		}
-		if _, explicitlyRemoved := removed[id]; explicitlyRemoved {
-			continue
-		}
-		if len(candidates) != 1 {
-			return nil, inheritedAliasConflict(id, candidates)
-		}
-		for _, candidate := range candidates {
-			if !candidate.removed {
-				selected[id] = candidate.alias
-			}
-		}
-	}
-	result := make([]Alias, 0, len(selected))
-	for _, alias := range selected {
-		result = append(result, alias)
-	}
-	sort.Slice(result, func(left, right int) bool { return result[left].id.String() < result[right].id.String() })
-	return result, nil
-}
-
-func inheritedAliasConflict(id capabilityid.Identifier, candidates map[string]*aliasCandidate) error {
-	digests := make([]string, 0, len(candidates))
-	for digest := range candidates {
-		digests = append(digests, digest)
-	}
-	sort.Strings(digests)
-	parts := make([]string, 0, len(digests))
-	declarations := make(configurationDeclarationSources)
-	for _, digest := range digests {
-		candidate := candidates[digest]
-		declaration := "removed"
-		if !candidate.removed {
-			declaration = "target " + candidate.alias.target.String()
-		}
-		parts = append(parts, fmt.Sprintf("%s from %s", declaration, strings.Join(sortedSet(candidate.sources), ", ")))
-		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
-	}
-	field := fmt.Sprintf("capabilities.aliases[%q]", id.String())
-	return newInheritedConflictError(
-		field,
-		fmt.Sprintf("%s has incompatible declarations: %s; set or remove that exact key in the current Project configuration", field, strings.Join(parts, "; ")),
-		declarations,
-	)
-}
-
 func dependencySource(dependency Dependency, source string) string {
 	return dependencyModuleIdentity(dependency) + "/" + source
 }
 
 func dependencyIdentity(dependency Dependency) string {
-	identity := dependencyModuleIdentity(dependency)
-	if dependency.ExportName != "" {
-		identity += "#" + dependency.ExportName
-	}
-	return identity
+	return dependencyModuleIdentity(dependency)
 }
 
 func dependencyModuleIdentity(dependency Dependency) string {

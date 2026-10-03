@@ -2,6 +2,7 @@ package constructorconfig_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-func TestAdoptedConfigurationAlgebra(t *testing.T) {
+func TestOrderedConfigurationAlgebra(t *testing.T) {
 	text := constructorconfig.Schema{Kind: "string"}
 	nested := object(constructorconfig.Field{Name: "a", Value: text}, constructorconfig.Field{Name: "b", Value: text})
 	schema := object(
@@ -26,20 +27,20 @@ func TestAdoptedConfigurationAlgebra(t *testing.T) {
 		{name: "partial structs", first: "object: {a: private-a}", second: "object: {b: private-b}", want: "object: {a: private-a, b: private-b}"},
 		{name: "normalized equality", first: "number: 1.0", second: "number: 1", want: "number: 1.0"},
 		{name: "map ordering", first: "map: {x: a, y: b}", second: "map: {y: b, x: a}", want: "map: {x: a, y: b}"},
-		{name: "private conflict", first: "object: {a: private-a}", second: "object: {a: private-b}", rule: "config.object.a"},
-		{name: "secret conflict", first: "secret: {env: PRIVATE_FIRST}", second: "secret: {env: PRIVATE_SECOND}", rule: "config.secret"},
+		{name: "private replacement", first: "object: {a: private-a}", second: "object: {a: private-b}", want: "object: {a: private-b}"},
+		{name: "secret replacement", first: "secret: {env: PRIVATE_FIRST}", second: "secret: {env: PRIVATE_SECOND}", want: "secret: {env: PRIVATE_SECOND}"},
 		{name: "field replacement", first: "object: {a: private-a, b: inherited}", second: "object: {a: private-b}", root: "object: {a: local}", want: "object: {a: local, b: inherited}"},
 		{name: "field removal", first: "object: {a: private-a, b: inherited}", second: "object: {a: private-b}", root: "object: {a: {$remove: true}}", overlay: "object: {b: overlay}", want: "object: {b: overlay}"},
 		{name: "ancestor removal", first: "object: {a: private-a}", second: "object: {a: private-b}", overlay: "object: {$remove: true}", want: "{}"},
 		{name: "object removal", first: "object: {a: private-a}", second: "object: {a: private-b}", root: "{$remove: true}", want: "null"},
-		{name: "reintroduced object", first: "object: {a: inherited}", root: "object: {$remove: true}", overlay: "object: {b: overlay}", want: "object: {a: inherited, b: overlay}"},
+		{name: "reintroduced object", first: "object: {a: inherited}", root: "object: {$remove: true}", overlay: "object: {b: overlay}", want: "object: {b: overlay}"},
 		{name: "empty struct inherits", first: "object: {a: inherited}", root: "object: {}", want: "object: {a: inherited}"},
-		{name: "atomic pointers conflict", first: "pointer: {a: private-a}", second: "pointer: {b: private-b}", rule: "config.pointer"},
+		{name: "atomic pointers replace", first: "pointer: {a: private-a}", second: "pointer: {b: private-b}", want: "pointer: {b: private-b}"},
 		{name: "atomic pointer override", first: "pointer: {a: private-a}", second: "pointer: {b: private-b}", root: "pointer: {}", want: "pointer: {}"},
 		{name: "nil overrides", first: "pointer: {a: private-a}", root: "pointer: null", want: "pointer: null"},
 		{name: "empty map replaces", first: "map: {x: private-a}", root: "map: {}", want: "map: {}"},
-		{name: "invalid export remains invalid", first: "object: {a: 2}", root: "object: {$remove: true}", rule: "compiled Go type"},
-		{name: "export removal forbidden", first: "object: {a: {$remove: true}}", root: "object: {a: local}", rule: "reserved removal"},
+		{name: "invalid ancestor remains invalid", first: "object: {a: 2}", root: "object: {$remove: true}", rule: "compiled Go type"},
+		{name: "ancestor removal reintroduced", first: "object: {a: {$remove: true}}", root: "object: {a: local}", want: "object: {a: local}"},
 		{name: "atomic removal forbidden", first: "pointer: {a: inherited}", root: "pointer: {a: {$remove: true}}", rule: "reserved removal"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,8 +50,8 @@ func TestAdoptedConfigurationAlgebra(t *testing.T) {
 				}
 				return decode(t, text)
 			}
-			for _, peers := range [][]*yaml.Node{{node(tc.first), node(tc.second)}, {node(tc.second), node(tc.first)}} {
-				got, err := constructorconfig.ComposeAdopted(schema, peers, node(tc.root), node(tc.overlay))
+			for range 2 {
+				got, err := constructorconfig.ComposeLayers(schema, node(tc.first), node(tc.second), node(tc.root), node(tc.overlay))
 				if tc.rule != "" {
 					if !errors.Is(err, constructorconfig.ErrValue) || !strings.Contains(err.Error(), tc.rule) {
 						t.Fatalf("composition = %v", err)
@@ -80,7 +81,49 @@ func TestAdoptedConfigurationAlgebra(t *testing.T) {
 	}
 }
 
-func FuzzAdoptedConfigurationOrder(f *testing.F) {
+func TestOrderedLayersDeferDefaultsAndRequiredness(t *testing.T) {
+	leaf := constructorconfig.Schema{Kind: "string"}
+	schema := object(constructorconfig.Field{Name: "settings", GoName: "Settings", Value: object(
+		constructorconfig.Field{Name: "required", GoName: "Required", Required: true, Value: leaf},
+		constructorconfig.Field{Name: "defaulted", GoName: "Defaulted", HasDefault: true, Default: []byte(`"PRIVATE_DEFAULT"`), Value: leaf},
+	)})
+	layers := []*yaml.Node{
+		decode(t, "settings: {required: inherited, defaulted: inherited}"),
+		decode(t, "settings: {$remove: true}"),
+		decode(t, "settings: {}"),
+	}
+	partial, err := constructorconfig.ComposeLayers(schema, layers...)
+	if err != nil {
+		t.Fatalf("partial required object rejected: %v", err)
+	}
+	data, _ := yaml.Marshal(partial)
+	if strings.Contains(string(data), "defaulted") || strings.Contains(string(data), "inherited") {
+		t.Fatal("composition applied defaults or resurrected excluded values")
+	}
+	if _, err := constructorconfig.Normalize(schema, partial); !errors.Is(err, constructorconfig.ErrValue) {
+		t.Fatalf("missing final required field accepted: %v", err)
+	}
+	layers = append(layers, decode(t, "settings: {required: selected}"))
+	composed, err := constructorconfig.ComposeLayers(schema, layers...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := constructorconfig.Normalize(schema, composed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Settings struct{ Required, Defaulted string }
+	}
+	if err := constructorconfig.Bind(context.Background(), nil, schema, normalized, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Settings.Required != "selected" || result.Settings.Defaulted != "PRIVATE_DEFAULT" {
+		t.Fatal("final typed delivery lost required field or restored default")
+	}
+}
+
+func FuzzOrderedConfigurationOrder(f *testing.F) {
 	for _, seed := range [][3]string{
 		{"object: {a: first}", "object: {b: second}", "{}"},
 		{"object: {a: first}", "object: {a: second}", "object: {a: {$remove: true}}"},
@@ -104,10 +147,10 @@ func FuzzAdoptedConfigurationOrder(f *testing.F) {
 			}
 			nodes = append(nodes, document.Content[0])
 		}
-		a, firstErr := constructorconfig.ComposeAdopted(schema, nodes[:2], nodes[2])
-		b, secondErr := constructorconfig.ComposeAdopted(schema, []*yaml.Node{nodes[1], nodes[0]}, nodes[2])
+		a, firstErr := constructorconfig.ComposeLayers(schema, nodes...)
+		b, secondErr := constructorconfig.ComposeLayers(schema, nodes[0], nodes[1], nodes[2])
 		if (firstErr == nil) != (secondErr == nil) {
-			t.Fatal("peer ordering changed acceptance")
+			t.Fatal("repeat changed acceptance")
 		}
 		if firstErr != nil {
 			return
@@ -115,7 +158,7 @@ func FuzzAdoptedConfigurationOrder(f *testing.F) {
 		left, _ := yaml.Marshal(a)
 		right, _ := yaml.Marshal(b)
 		if !bytes.Equal(left, right) {
-			t.Fatal("peer ordering changed composition")
+			t.Fatal("repeat changed composition")
 		}
 	})
 }

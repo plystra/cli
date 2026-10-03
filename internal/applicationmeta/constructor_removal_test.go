@@ -50,7 +50,7 @@ func TestConstructorEntryTombstoneSurvivesAbsentAndChangedLowerValues(t *testing
 		t.Fatal(err)
 	}
 	for _, value := range []string{"first.internal", "changed.internal"} {
-		dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/platform", ExportName: "defaults", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {endpoint: "+value+"}}\n")}}
+		dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/platform", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {endpoint: "+value+"}}\n")}}
 		maintained, err := applicationmeta.MaintainDependencyConfiguration(data, before.DependencyBaseline(), nil, dependencies, lookup)
 		if err != nil || maintained.Changed() || !bytes.Equal(data, maintained.Data()) {
 			t.Fatalf("maintenance changed authored exclusion: %v\n%s", err, maintained.Data())
@@ -67,20 +67,5 @@ func TestConstructorEntryTombstoneSurvivesAbsentAndChangedLowerValues(t *testing
 		if err != nil || len(decisions) != 1 || !decisions[0].Removed() || decisions[0].Path() != `config["example.com/acme/smtp.New"]` {
 			t.Fatalf("retained exclusion evidence = %v, %v", decisions, err)
 		}
-	}
-}
-
-func TestConstructorEntryMaintenanceWritesCanonicalTombstone(t *testing.T) {
-	t.Parallel()
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-		constructorConfigurationSymbol: composeSchema(t, "\tEndpoint string\n"),
-	})
-	dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/legacy", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {$remove: true}}\n")}}
-	maintained, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, nil, dependencies, lookup)
-	if err != nil || !bytes.Contains(maintained.Data(), []byte("{$remove: true}")) || bytes.Contains(maintained.Data(), []byte("null")) {
-		t.Fatalf("maintained removal = %v\n%s", err, maintained.Data())
-	}
-	if _, err := applicationmeta.Parse(maintained.Data()); err != nil {
-		t.Fatal(err)
 	}
 }

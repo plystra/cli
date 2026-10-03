@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/interfaceid"
@@ -25,6 +26,9 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 	if schemas == nil {
 		return Manifest{}, fmt.Errorf("%w: schema lookup is nil", ErrApplyOverlay)
 	}
+	if overlay.template != "" {
+		return Manifest{}, fmt.Errorf("%w: overlay cannot declare template metadata", ErrApplyOverlay)
+	}
 	projectModule := base.modulePath
 	if projectModule == "" {
 		projectModule = overlay.modulePath
@@ -32,6 +36,24 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 		return Manifest{}, fmt.Errorf("%w: base and overlay belong to different Project modules", ErrApplyOverlay)
 	}
 
+	result, err := applyManifestLayer(base, overlay, schemas)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
+	}
+	result.modulePath = projectModule
+	result.template, result.templateSource = base.template, base.templateSource
+	result.layers = append(append([]Manifest(nil), manifestLayers(base)...), manifestLayers(overlay)...)
+	return result, nil
+}
+
+func manifestLayers(manifest Manifest) []Manifest {
+	if len(manifest.layers) != 0 {
+		return manifest.layers
+	}
+	return []Manifest{manifest}
+}
+
+func applyManifestLayer(base, overlay Manifest, schemas SchemaLookup) (Manifest, error) {
 	httpAddress, hasHTTPAddress, removeHTTPAddress := base.httpAddress, base.hasHTTPAddress, base.removeHTTPAddress
 	if overlay.removeHTTPAddress {
 		httpAddress, hasHTTPAddress, removeHTTPAddress = "", false, true
@@ -60,25 +82,12 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
 	}
-	if err := rejectAliasResolutionInputs(requirements, choices, aliases); err != nil {
-		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
-	}
-	if err := rejectAliasChains(aliases); err != nil {
-		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
-	}
-	exportAdoptions, removedExportAdoptions := overlayExportAdoptions(base, overlay)
-	adoptionMode := base.adoptionMode
-	if adoptionMode == adoptionSetAbsent || overlay.adoptionMode == adoptionSetComplete {
-		adoptionMode = overlay.adoptionMode
-	}
 
 	return Manifest{
-		modulePath:                    projectModule,
+		modulePath:                    overlay.modulePath,
 		source:                        base.source,
-		exports:                       append([]ConfigurationExport(nil), base.exports...),
-		exportAdoptions:               exportAdoptions,
-		removedExportAdoptions:        removedExportAdoptions,
-		adoptionMode:                  adoptionMode,
+		template:                      base.template,
+		templateSource:                base.templateSource,
 		httpAddress:                   httpAddress,
 		hasHTTPAddress:                hasHTTPAddress,
 		removeHTTPAddress:             removeHTTPAddress,
@@ -106,51 +115,13 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 	}, nil
 }
 
-func overlayExportAdoptions(base, overlay Manifest) ([]ExportAdoption, []ExportAdoption) {
-	if overlay.adoptionMode == adoptionSetAbsent {
-		return append([]ExportAdoption(nil), base.exportAdoptions...), append([]ExportAdoption(nil), base.removedExportAdoptions...)
-	}
-	if overlay.adoptionMode == adoptionSetComplete {
-		return append([]ExportAdoption(nil), overlay.exportAdoptions...), nil
-	}
-	values := make(map[string]ExportAdoption, len(base.exportAdoptions)+len(overlay.exportAdoptions))
-	removals := make(map[string]ExportAdoption, len(base.removedExportAdoptions)+len(overlay.removedExportAdoptions))
-	for _, adoption := range base.exportAdoptions {
-		values[exportAdoptionKey(adoption)] = adoption
-	}
-	for _, removal := range base.removedExportAdoptions {
-		removals[exportAdoptionKey(removal)] = removal
-	}
-	for _, adoption := range overlay.exportAdoptions {
-		key := exportAdoptionKey(adoption)
-		values[key] = adoption
-		delete(removals, key)
-	}
-	for _, removal := range overlay.removedExportAdoptions {
-		key := exportAdoptionKey(removal)
-		delete(values, key)
-		removals[key] = removal
-	}
-	adoptions := make([]ExportAdoption, 0, len(values))
-	for _, adoption := range values {
-		adoptions = append(adoptions, adoption)
-	}
-	removed := make([]ExportAdoption, 0, len(removals))
-	for _, removal := range removals {
-		removed = append(removed, removal)
-	}
-	sortExportAdoptions(adoptions)
-	sortExportAdoptions(removed)
-	return adoptions, removed
-}
-
 func overlayHTTPCORS(base, overlay httpCORSLayer) (httpCORSLayer, error) {
 	if overlay.remove {
 		return httpCORSLayer{remove: true}, nil
 	}
 	result := cloneHTTPCORSLayer(base)
 	if !overlay.present {
-		return result, validateHTTPCORSLayer(result)
+		return result, nil
 	}
 	if !result.present || result.remove {
 		result = httpCORSLayer{present: true}
@@ -158,9 +129,14 @@ func overlayHTTPCORS(base, overlay httpCORSLayer) (httpCORSLayer, error) {
 		result.present = true
 		result.remove = false
 	}
-	if overlay.hasAllowedOrigins {
+	if overlay.removeAllowedOrigins {
+		result.allowedOrigins = nil
+		result.hasAllowedOrigins = false
+		result.removeAllowedOrigins = true
+	} else if overlay.hasAllowedOrigins {
 		result.allowedOrigins = append([]string(nil), overlay.allowedOrigins...)
 		result.hasAllowedOrigins = true
+		result.removeAllowedOrigins = false
 	}
 	if overlay.removeAllowCredentials {
 		result.allowCredentials = false
@@ -170,9 +146,6 @@ func overlayHTTPCORS(base, overlay httpCORSLayer) (httpCORSLayer, error) {
 		result.allowCredentials = overlay.allowCredentials
 		result.hasAllowCredentials = true
 		result.removeAllowCredentials = false
-	}
-	if err := validateHTTPCORSLayer(result); err != nil {
-		return httpCORSLayer{}, err
 	}
 	return result, nil
 }
@@ -388,60 +361,17 @@ func overlayConstructorConfigurations(base, overlay Manifest, schemas SchemaLook
 	if err != nil {
 		return nil, nil, err
 	}
-	lowerByPath := constructorConfigDecisionsByPath(lower)
-	upperByPath := constructorConfigDecisionsByPath(upper)
-	paths := make(map[string]struct{}, len(lowerByPath)+len(upperByPath))
-	for path := range lowerByPath {
-		paths[path] = struct{}{}
-	}
-	for path := range upperByPath {
-		paths[path] = struct{}{}
-	}
-	ordered := make([]string, 0, len(paths))
-	for path := range paths {
-		ordered = append(ordered, path)
-	}
-	sort.Strings(ordered)
-
-	selected := make(map[string]constructorConfigDecision, len(ordered))
-	for _, path := range ordered {
-		upperDecision, hasUpper := upperByPath[path]
-		prototype := upperDecision
-		if !hasUpper {
-			prototype = lowerByPath[path]
-		}
-		if hasUpper {
-			for length := 0; length < len(prototype.segments); length++ {
-				ancestorPath := constructorConfigPath(prototype.constructor, prototype.segments[:length])
-				if ancestor, exists := selected[ancestorPath]; exists && ancestor.kind != constructorConfigObject {
-					declarations := make(configurationDeclarationSources)
-					addConfigurationDeclarationSource(declarations, ancestor.declarationSource)
-					addConfigurationDeclarationSource(declarations, prototype.declarationSource)
-					return nil, nil, newInheritedConflictError(
-						path,
-						fmt.Sprintf("%s has incompatible lower %s and overlay %s types from %s and %s", path, constructorConfigDecisionDescription(ancestor), constructorConfigDecisionDescription(prototype), ancestor.source, prototype.source),
-						declarations,
-					)
+	selected := constructorConfigDecisionsByPath(lower)
+	for _, decision := range upper {
+		path := constructorConfigPath(decision.constructor, decision.segments)
+		if decision.kind != constructorConfigObject {
+			for candidate := range selected {
+				if strings.HasPrefix(candidate, path+"[") {
+					delete(selected, candidate)
 				}
 			}
-			candidates := map[string]*constructorConfigCandidate{}
-			if lowerDecision, exists := lowerByPath[path]; exists {
-				candidates[constructorConfigCandidateKey(lowerDecision)] = &constructorConfigCandidate{
-					decision:     lowerDecision,
-					sources:      map[string]struct{}{lowerDecision.source: {}},
-					declarations: configurationDeclarationSources{lowerDecision.declarationSource: {}},
-				}
-			}
-			if err := validateCurrentConstructorConfigDecision(path, upperDecision, candidates); err != nil {
-				return nil, nil, err
-			}
-			selected[path] = cloneConstructorConfigDecision(upperDecision)
-			continue
 		}
-		if suppressedByConstructorConfigAncestor(selected, prototype) {
-			continue
-		}
-		selected[path] = cloneConstructorConfigDecision(prototype)
+		selected[path] = cloneConstructorConfigDecision(decision)
 	}
 	return renderConstructorConfigurationLayer(selected)
 }

@@ -96,11 +96,11 @@ func TestRequiredConstructorConfigurationAfterComposition(t *testing.T) {
 		constructorConfigurationSymbol: composeSchema(t, "Endpoint string `plystra:\"required\"`\nSettings struct { Region string `plystra:\"required\"` }\nPointer *struct { Region string `plystra:\"required\"` }"),
 	})
 	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/alpha", ExportName: "first", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {endpoint: PRIVATE_ENDPOINT}}\n")},
-		{ModulePath: "example.com/beta", ExportName: "second", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {region: PRIVATE_REGION}, pointer: {region: PRIVATE_POINTER}}}\n")},
+		{ModulePath: "example.com/alpha", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {endpoint: PRIVATE_ENDPOINT}}\n")},
+		{ModulePath: "example.com/beta", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {region: PRIVATE_REGION}, pointer: {region: PRIVATE_POINTER}}}\n")},
 	}
 	for _, test := range []struct{ name, fields, missing string }{
-		{"partial exports", "", ""},
+		{"partial templates", "", ""},
 		{"empty fixed struct inherits", "settings: {}", ""},
 		{"empty pointer replaces", "pointer: {}", `["pointer"]["region"]`},
 		{"nil pointer replaces", "pointer: null", ""},
@@ -128,8 +128,8 @@ func TestRequiredConstructorConfigurationAfterComposition(t *testing.T) {
 			}
 		})
 	}
-	// An incomplete export can be completed by the selected layer, not rejected
-	// while the export or sparse environment override is still being normalized.
+	// An incomplete template can be completed by the selected layer, not rejected
+	// while the template or sparse environment override is still being normalized.
 	root := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {}}\n")
 	overlay := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {region: current}}}\n")
 	current, err := applicationmeta.ApplyOverlay(root, overlay, lookup)

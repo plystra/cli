@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/constructorsymbol"
@@ -17,9 +16,6 @@ var (
 	// ErrMaintainConfiguration reports failure to preserve current-project
 	// intent while the dependency-derived configuration baseline changes.
 	ErrMaintainConfiguration = errors.New("maintain dependency-derived project configuration")
-	// ErrAmbiguousConfigurationOwnership reports a prior inherited decision
-	// whose authored representation disappeared without an explicit tombstone.
-	ErrAmbiguousConfigurationOwnership = errors.New("ambiguous current-project configuration ownership")
 )
 
 type maintenanceField uint8
@@ -51,12 +47,6 @@ type maintenanceDecision struct {
 	source      string
 }
 
-type maintenanceCandidate struct {
-	decision     maintenanceDecision
-	sources      map[string]struct{}
-	declarations configurationDeclarationSources
-}
-
 // ConfigurationMaintenance is one immutable, comment-preserving planned
 // update of the selected current-project document.
 type ConfigurationMaintenance struct {
@@ -78,12 +68,9 @@ func (m ConfigurationMaintenance) LocalPaths() []string {
 	return append([]string(nil), m.localPaths...)
 }
 
-// MaintainDependencyConfiguration performs a typed three-way merge using the
-// prior generated dependency baseline, the developer's current YAML, and the
-// newly discovered dependency Projects. A zero previous baseline means no
-// generated baseline has been recorded yet; existing values are then treated
-// as current-project decisions and missing compatible dependency values are
-// introduced without overwriting them.
+// MaintainDependencyConfiguration validates the authored document and ordered
+// template composition without materializing inherited values. Prior generated
+// evidence is never configuration authority.
 func MaintainDependencyConfiguration(data []byte, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
 	return maintainDependencyConfiguration(data, "", "", nil, previous, previousLocalPaths, dependencies, schemas)
 }
@@ -95,16 +82,14 @@ func MaintainDependencyConfigurationSource(data []byte, modulePath, sourcePath s
 	return maintainDependencyConfiguration(data, modulePath, sourcePath, nil, previous, previousLocalPaths, dependencies, schemas)
 }
 
-// MaintainDependencyConfigurationWithOverlay maintains only the shared root
-// document while allowing explicit sparse overlay decisions to resolve exact
-// inherited conflicts. Overlay values are never materialized into root data.
+// MaintainDependencyConfigurationWithOverlay validates root and selected overlay
+// without copying template values into either authored document.
 func MaintainDependencyConfigurationWithOverlay(data []byte, overlay Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
 	return maintainDependencyConfiguration(data, "", "", &overlay, previous, previousLocalPaths, dependencies, schemas)
 }
 
-// MaintainDependencyConfigurationSourceWithOverlay performs root-document
-// dependency maintenance with module-relative diagnostic provenance while an
-// explicit sparse overlay resolves inherited conflicts.
+// MaintainDependencyConfigurationSourceWithOverlay retains diagnostic ownership
+// while validating the selected root and environment layers.
 func MaintainDependencyConfigurationSourceWithOverlay(data []byte, modulePath, sourcePath string, overlay Manifest, previous DependencyBaseline, previousLocalPaths []string, dependencies []Dependency, schemas SchemaLookup) (ConfigurationMaintenance, error) {
 	return maintainDependencyConfiguration(data, modulePath, sourcePath, &overlay, previous, previousLocalPaths, dependencies, schemas)
 }
@@ -116,139 +101,31 @@ func maintainDependencyConfiguration(data []byte, modulePath, sourcePath string,
 	if (modulePath == "") != (sourcePath == "") {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: diagnostic module and source path must be provided together", ErrMaintainConfiguration)
 	}
-	previousLocal, err := validatePreviousLocalPaths(previous, previousLocalPaths)
+	current, err := parseMaintenanceManifest(data, modulePath, sourcePath)
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
-	currentManifest, err := parseMaintenanceManifest(data, modulePath, sourcePath)
-	if err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: current Project configuration: %w", ErrMaintainConfiguration, err)
-	}
-	current, err := maintenanceDecisions(currentManifest, schemas)
-	if err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: current Project configuration: %w", ErrMaintainConfiguration, err)
-	}
-	currentByPath, err := indexMaintenanceDecisions(current)
+	decisions, err := ConfigurationDecisions(current, schemas)
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
-	overlayByPath := map[string]maintenanceDecision{}
+	local := make([]string, 0, len(decisions))
+	for _, decision := range decisions {
+		if decision.dependencyComposable {
+			local = append(local, decision.path)
+		}
+	}
+	selected := current
 	if overlay != nil {
-		overlayDecisions, err := maintenanceDecisions(*overlay, schemas)
+		selected, err = ApplyOverlay(current, *overlay, schemas)
 		if err != nil {
-			return ConfigurationMaintenance{}, fmt.Errorf("%w: environment overlay: %w", ErrMaintainConfiguration, err)
-		}
-		overlayByPath, err = indexMaintenanceDecisions(overlayDecisions)
-		if err != nil {
-			return ConfigurationMaintenance{}, fmt.Errorf("%w: environment overlay: %w", ErrMaintainConfiguration, err)
+			return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 		}
 	}
-	newCandidates, err := dependencyMaintenanceCandidates(dependencies, schemas)
-	if err != nil {
+	if _, err := Compose(dependencies, selected, schemas); err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
-	oldCandidates := make(map[string]map[string]BaselineRecord)
-	if previous.Valid() {
-		for _, record := range previous.Records() {
-			if !supportedMaintenancePath(record.Path) {
-				return ConfigurationMaintenance{}, fmt.Errorf("%w: prior baseline path %q has no typed composition rule", ErrMaintainConfiguration, record.Path)
-			}
-			byDecision := oldCandidates[record.Path]
-			if byDecision == nil {
-				byDecision = make(map[string]BaselineRecord)
-				oldCandidates[record.Path] = byDecision
-			}
-			byDecision[maintenanceRecordKey(record.Digest, record.Removed)] = record
-		}
-	}
-
-	local := make(map[string]maintenanceDecision)
-	for path, decision := range currentByPath {
-		old := oldCandidates[path]
-		_, previouslyLocal := previousLocal[path]
-		if previouslyLocal || len(old) != 1 || !baselineMatchesDecision(old, decision) {
-			local[path] = cloneMaintenanceDecision(decision)
-		}
-	}
-	propagateLocalConfigObjects(currentByPath, local)
-	for path, old := range oldCandidates {
-		if _, exists := currentByPath[path]; exists {
-			continue
-		}
-		if _, previouslyLocal := previousLocal[path]; previouslyLocal {
-			continue
-		}
-		if len(old) != 1 || maintenanceDecisionResolvesPath(local, path) || maintenanceDecisionResolvesPath(overlayByPath, path) {
-			continue
-		}
-		sources := baselineSources(old)
-		return ConfigurationMaintenance{}, fmt.Errorf(
-			"%w: %w",
-			ErrMaintainConfiguration,
-			newAmbiguousConfigurationOwnershipError(
-				path,
-				fmt.Sprintf("inherited %s from %s is absent; restore it or add an explicit typed removal", path, strings.Join(sources, ", ")),
-				sources,
-			),
-		)
-	}
-
-	target := make(map[string]maintenanceDecision)
-	paths := sortedMaintenanceCandidatePaths(newCandidates)
-	for _, path := range paths {
-		candidates := newCandidates[path]
-		if len(candidates) != 1 {
-			if maintenanceDecisionResolvesPath(local, path) || maintenanceDecisionResolvesPath(overlayByPath, path) {
-				continue
-			}
-			return ConfigurationMaintenance{}, dependencyMaintenanceConflict(path, candidates)
-		}
-		for _, candidate := range candidates {
-			target[path] = cloneMaintenanceDecision(candidate.decision)
-		}
-	}
-	for path, decision := range local {
-		target[path] = cloneMaintenanceDecision(decision)
-	}
-	target = suppressMaintenanceDescendants(target)
-	localPaths := sortedMaintenanceDecisionPaths(local)
-
-	if maintenanceDecisionMapsEqual(currentByPath, target) {
-		return ConfigurationMaintenance{data: append([]byte(nil), data...), localPaths: localPaths}, nil
-	}
-	document, err := decodeDocument(data)
-	if err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: decode current Project configuration: %w", ErrMaintainConfiguration, err)
-	}
-	if err := applyMaintenanceDecisions(document, currentByPath, target); err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: update current Project configuration: %w", ErrMaintainConfiguration, err)
-	}
-	updated, err := encodeMaintainedDocument(document)
-	if err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: encode current Project configuration: %w", ErrMaintainConfiguration, err)
-	}
-	if len(updated) > MaximumSize {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration exceeds %d bytes", ErrMaintainConfiguration, MaximumSize)
-	}
-	afterManifest, err := parseMaintenanceManifest(updated, modulePath, sourcePath)
-	if err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: validate updated Project configuration: %w", ErrMaintainConfiguration, err)
-	}
-	after, err := maintenanceDecisions(afterManifest, schemas)
-	if err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: normalize updated Project configuration: %w", ErrMaintainConfiguration, err)
-	}
-	afterByPath, err := indexMaintenanceDecisions(after)
-	if err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
-	}
-	if !maintenanceDecisionMapsEqual(afterByPath, target) {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration does not represent the planned typed decisions", ErrMaintainConfiguration)
-	}
-	if !sameCurrentProjectProcessSettings(currentManifest, afterManifest) {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: updated Project configuration changed current-project process settings", ErrMaintainConfiguration)
-	}
-	return ConfigurationMaintenance{data: append([]byte(nil), updated...), localPaths: localPaths, changed: !bytes.Equal(data, updated)}, nil
+	return ConfigurationMaintenance{data: append([]byte(nil), data...), localPaths: local}, nil
 }
 
 func parseMaintenanceManifest(data []byte, modulePath, sourcePath string) (Manifest, error) {
@@ -260,37 +137,6 @@ func parseMaintenanceManifest(data []byte, modulePath, sourcePath string) (Manif
 		return Manifest{}, err
 	}
 	return WithProjectModule(manifest, modulePath)
-}
-
-func validatePreviousLocalPaths(previous DependencyBaseline, paths []string) (map[string]struct{}, error) {
-	if len(paths) != 0 && !previous.Valid() {
-		return nil, errors.New("current-project ownership paths require a valid prior dependency baseline")
-	}
-	result := make(map[string]struct{}, len(paths))
-	for index, path := range paths {
-		if !supportedMaintenancePath(path) {
-			return nil, fmt.Errorf("prior current-project ownership path %q has no typed composition rule", path)
-		}
-		if index > 0 && paths[index-1] >= path {
-			return nil, errors.New("prior current-project ownership paths must be unique and canonically ordered")
-		}
-		result[path] = struct{}{}
-	}
-	return result, nil
-}
-
-func sortedMaintenanceDecisionPaths(values map[string]maintenanceDecision) []string {
-	paths := make([]string, 0, len(values))
-	for path := range values {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	return paths
-}
-
-func maintenanceDecisionResolvesPath(decisions map[string]maintenanceDecision, path string) bool {
-	_, exact := decisions[path]
-	return exact || suppressedByMaintenanceAncestor(decisions, path)
 }
 
 func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanceDecision, error) {
@@ -440,7 +286,7 @@ func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanc
 	for _, configuration := range configurations {
 		result = append(result, maintenanceDecision{
 			path:        constructorConfigPath(configuration.constructor, configuration.segments),
-			digest:      configuration.digest,
+			digest:      constructorConfigPublicDigest(configuration),
 			removed:     configuration.kind == constructorConfigRemoval,
 			field:       maintenanceConstructorConfig,
 			constructor: configuration.constructor,
@@ -452,436 +298,6 @@ func maintenanceDecisions(manifest Manifest, schemas SchemaLookup) ([]maintenanc
 	return result, nil
 }
 
-func dependencyMaintenanceCandidates(dependencies []Dependency, schemas SchemaLookup) (map[string]map[string]*maintenanceCandidate, error) {
-	ordered := append([]Dependency(nil), dependencies...)
-	sort.Slice(ordered, func(left, right int) bool {
-		if ordered[left].ModulePath != ordered[right].ModulePath {
-			return ordered[left].ModulePath < ordered[right].ModulePath
-		}
-		return ordered[left].ModuleVersion < ordered[right].ModuleVersion
-	})
-	result := make(map[string]map[string]*maintenanceCandidate)
-	for _, dependency := range ordered {
-		dependencyManifest := dependency.Manifest
-		dependencyManifest.modulePath = dependency.ModulePath
-		decisions, err := maintenanceDecisions(dependencyManifest, schemas)
-		if err != nil {
-			return nil, fmt.Errorf("dependency %s: %w", dependencyIdentity(dependency), err)
-		}
-		for _, decision := range decisions {
-			if decision.field == maintenanceHTTPExposure {
-				continue
-			}
-			source := dependencySource(dependency, decision.source)
-			byDecision := result[decision.path]
-			if byDecision == nil {
-				byDecision = make(map[string]*maintenanceCandidate)
-				result[decision.path] = byDecision
-			}
-			key := maintenanceDecisionKey(decision)
-			candidate := byDecision[key]
-			if candidate == nil {
-				candidate = &maintenanceCandidate{
-					decision:     cloneMaintenanceDecision(decision),
-					sources:      make(map[string]struct{}),
-					declarations: make(configurationDeclarationSources),
-				}
-				byDecision[key] = candidate
-			}
-			candidate.sources[source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, dependencyConfigurationDeclarationSource(dependency))
-			if candidate.decision.source == "" || source < candidate.decision.source {
-				candidate.decision.source = source
-			}
-		}
-	}
-	return result, nil
-}
-
-func indexMaintenanceDecisions(decisions []maintenanceDecision) (map[string]maintenanceDecision, error) {
-	result := make(map[string]maintenanceDecision, len(decisions))
-	for _, decision := range decisions {
-		if previous, duplicate := result[decision.path]; duplicate {
-			return nil, fmt.Errorf("typed configuration path %s has both %s and %s", decision.path, maintenanceDecisionDescription(previous), maintenanceDecisionDescription(decision))
-		}
-		result[decision.path] = cloneMaintenanceDecision(decision)
-	}
-	return result, nil
-}
-
-func maintenanceDecisionKey(decision maintenanceDecision) string {
-	return maintenanceRecordKey(decision.digest, decision.removed)
-}
-
-func maintenanceRecordKey(digest string, removed bool) string {
-	return fmt.Sprintf("%s\x00%t", digest, removed)
-}
-
-func baselineMatchesDecision(records map[string]BaselineRecord, decision maintenanceDecision) bool {
-	_, exists := records[maintenanceDecisionKey(decision)]
-	return exists
-}
-
-func cloneMaintenanceDecision(decision maintenanceDecision) maintenanceDecision {
-	decision.config = cloneConstructorConfigDecision(decision.config)
-	return decision
-}
-
-func propagateLocalConfigObjects(current, local map[string]maintenanceDecision) {
-	changed := true
-	for changed {
-		changed = false
-		for path, decision := range current {
-			if decision.field != maintenanceConstructorConfig || decision.config.kind != constructorConfigObject {
-				continue
-			}
-			if _, exists := local[path]; exists {
-				continue
-			}
-			for localPath := range local {
-				if strings.HasPrefix(localPath, path+"[") {
-					local[path] = cloneMaintenanceDecision(decision)
-					changed = true
-					break
-				}
-			}
-		}
-	}
-}
-
-func suppressedByMaintenanceAncestor(decisions map[string]maintenanceDecision, path string) bool {
-	if !strings.HasPrefix(path, "config[") {
-		return false
-	}
-	for candidatePath, candidate := range decisions {
-		if candidate.field != maintenanceConstructorConfig || candidate.config.kind == constructorConfigObject {
-			continue
-		}
-		if strings.HasPrefix(path, candidatePath+"[") {
-			return true
-		}
-	}
-	return false
-}
-
-func suppressMaintenanceDescendants(decisions map[string]maintenanceDecision) map[string]maintenanceDecision {
-	paths := make([]string, 0, len(decisions))
-	for path := range decisions {
-		paths = append(paths, path)
-	}
-	sort.Slice(paths, func(left, right int) bool {
-		leftDepth := strings.Count(paths[left], "[")
-		rightDepth := strings.Count(paths[right], "[")
-		if leftDepth != rightDepth {
-			return leftDepth < rightDepth
-		}
-		return paths[left] < paths[right]
-	})
-	result := make(map[string]maintenanceDecision, len(decisions))
-	for _, path := range paths {
-		if suppressedByMaintenanceAncestor(result, path) {
-			continue
-		}
-		result[path] = cloneMaintenanceDecision(decisions[path])
-	}
-	return result
-}
-
-func sortedMaintenanceCandidatePaths(values map[string]map[string]*maintenanceCandidate) []string {
-	paths := make([]string, 0, len(values))
-	for path := range values {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	return paths
-}
-
-func dependencyMaintenanceConflict(path string, candidates map[string]*maintenanceCandidate) error {
-	keys := make([]string, 0, len(candidates))
-	for key := range candidates {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	declarations := make(configurationDeclarationSources)
-	for _, key := range keys {
-		candidate := candidates[key]
-		parts = append(parts, fmt.Sprintf("%s from %s", maintenanceDecisionDescription(candidate.decision), strings.Join(sortedSet(candidate.sources), ", ")))
-		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
-	}
-	return newInheritedConflictError(
-		path,
-		fmt.Sprintf("%s has incompatible dependency declarations: %s; set or remove that exact field in the current Project configuration", path, strings.Join(parts, "; ")),
-		declarations,
-	)
-}
-
-func maintenanceDecisionDescription(decision maintenanceDecision) string {
-	if decision.removed {
-		return "removal"
-	}
-	switch decision.field {
-	case maintenanceHTTPExposure, maintenanceRequirement, maintenanceInterfaceRequirement:
-		return "addition"
-	case maintenanceProvider:
-		return "Provider " + decision.providerID
-	case maintenanceImplementationChoice:
-		return "Implementation " + decision.constructor.String()
-	case maintenanceInterfacePolicy:
-		return "Interface policy " + interfacePolicyDescription(decision.policy)
-	case maintenanceAlias:
-		return "Alias target " + decision.alias.target.String()
-	case maintenanceConstructorConfig:
-		return constructorConfigDecisionDescription(decision.config)
-	default:
-		return "invalid decision"
-	}
-}
-
-func baselineSources(records map[string]BaselineRecord) []string {
-	set := make(map[string]struct{})
-	for _, record := range records {
-		for _, source := range record.Sources {
-			set[source] = struct{}{}
-		}
-	}
-	return sortedSet(set)
-}
-
-func supportedMaintenancePath(path string) bool {
-	return strings.HasPrefix(path, "http.expose[") ||
-		strings.HasPrefix(path, "capabilities.require[") ||
-		strings.HasPrefix(path, "capabilities.use[") ||
-		strings.HasPrefix(path, "capabilities.aliases[") ||
-		strings.HasPrefix(path, "interfaces.require[") ||
-		strings.HasPrefix(path, "interfaces.use[") ||
-		strings.HasPrefix(path, "interfaces.policies[") ||
-		strings.HasPrefix(path, "config[")
-}
-
-func maintenanceDecisionMapsEqual(left, right map[string]maintenanceDecision) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for path, leftDecision := range left {
-		rightDecision, exists := right[path]
-		if !exists || maintenanceDecisionKey(leftDecision) != maintenanceDecisionKey(rightDecision) || leftDecision.field != rightDecision.field {
-			return false
-		}
-	}
-	return true
-}
-
-func sameCurrentProjectProcessSettings(left, right Manifest) bool {
-	leftAddress, leftHasAddress := left.HTTPAddress()
-	rightAddress, rightHasAddress := right.HTTPAddress()
-	return leftAddress == rightAddress && leftHasAddress == rightHasAddress &&
-		left.removeHTTPAddress == right.removeHTTPAddress &&
-		equalHTTPCORSLayers(left.httpCORS, right.httpCORS) &&
-		left.StartupTimeout() == right.StartupTimeout() &&
-		left.hasStartupTimeout == right.hasStartupTimeout &&
-		left.removeStartupTimeout == right.removeStartupTimeout
-}
-
-func applyMaintenanceDecisions(root *yaml.Node, current, target map[string]maintenanceDecision) error {
-	removePaths := make([]string, 0)
-	setPaths := make([]string, 0)
-	for path, decision := range current {
-		targetDecision, exists := target[path]
-		if !exists {
-			removePaths = append(removePaths, path)
-			continue
-		}
-		if maintenanceDecisionKey(decision) != maintenanceDecisionKey(targetDecision) || decision.field != targetDecision.field {
-			setPaths = append(setPaths, path)
-		}
-	}
-	for path := range target {
-		if _, exists := current[path]; !exists {
-			setPaths = append(setPaths, path)
-		}
-	}
-	sort.Slice(removePaths, func(left, right int) bool {
-		leftDepth := strings.Count(removePaths[left], "[")
-		rightDepth := strings.Count(removePaths[right], "[")
-		if leftDepth != rightDepth {
-			return leftDepth > rightDepth
-		}
-		return removePaths[left] > removePaths[right]
-	})
-	for _, path := range removePaths {
-		if err := removeMaintenanceDecision(root, current[path]); err != nil {
-			return err
-		}
-	}
-	sort.Slice(setPaths, func(left, right int) bool {
-		leftDepth := strings.Count(setPaths[left], "[")
-		rightDepth := strings.Count(setPaths[right], "[")
-		if leftDepth != rightDepth {
-			return leftDepth < rightDepth
-		}
-		return setPaths[left] < setPaths[right]
-	})
-	for _, path := range setPaths {
-		if err := setMaintenanceDecision(root, target[path]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func removeMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error {
-	switch decision.field {
-	case maintenanceHTTPExposure:
-		return removeKeyedMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String())
-	case maintenanceRequirement:
-		return removeSetMaintenanceDecision(root, []string{"capabilities", "require"}, decision.id.String(), decision.removed)
-	case maintenanceProvider:
-		return removeKeyedMaintenanceDecision(root, []string{"capabilities", "use"}, decision.id.String())
-	case maintenanceInterfaceRequirement:
-		return removeSetMaintenanceDecision(root, []string{"interfaces", "require"}, decision.interfaceID.String(), decision.removed)
-	case maintenanceImplementationChoice:
-		return removeKeyedMaintenanceDecision(root, []string{"interfaces", "use"}, decision.interfaceID.String())
-	case maintenanceInterfacePolicy:
-		return removeKeyedMaintenanceDecision(root, []string{"interfaces", "policies"}, decision.interfaceID.String())
-	case maintenanceAlias:
-		return removeKeyedMaintenanceDecision(root, []string{"capabilities", "aliases"}, decision.id.String())
-	case maintenanceConstructorConfig:
-		return removeConfigMaintenanceDecision(root, decision.config)
-	default:
-		return errors.New("unknown configuration decision field")
-	}
-}
-
-func setMaintenanceDecision(root *yaml.Node, decision maintenanceDecision) error {
-	switch decision.field {
-	case maintenanceHTTPExposure:
-		value := removalYAMLNode()
-		if !decision.removed {
-			value = httpExposureYAML(decision.exposure)
-		}
-		return setKeyedMaintenanceDecision(root, []string{"http", "expose"}, decision.interfaceID.String(), value)
-	case maintenanceRequirement:
-		return setSetMaintenanceDecision(root, []string{"capabilities", "require"}, decision.id.String(), decision.removed)
-	case maintenanceProvider:
-		value := nullYAMLNode()
-		if !decision.removed {
-			value = stringYAMLNode(decision.providerID)
-		}
-		return setKeyedMaintenanceDecision(root, []string{"capabilities", "use"}, decision.id.String(), value)
-	case maintenanceInterfaceRequirement:
-		return setSetMaintenanceDecision(root, []string{"interfaces", "require"}, decision.interfaceID.String(), decision.removed)
-	case maintenanceImplementationChoice:
-		value := removalYAMLNode()
-		if !decision.removed {
-			value = stringYAMLNode(decision.constructor.String())
-		}
-		return setKeyedMaintenanceDecision(root, []string{"interfaces", "use"}, decision.interfaceID.String(), value)
-	case maintenanceInterfacePolicy:
-		value := removalYAMLNode()
-		if !decision.removed {
-			value = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-			setMappingValue(value, "timeout", stringYAMLNode(decision.policy.timeout.String()))
-			if retry := decision.policy.retry; retry.Eligibility != "" {
-				fields := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-				setMappingValue(fields, "eligibility", stringYAMLNode(retry.Eligibility))
-				setMappingValue(fields, "max_attempts", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!int", Value: fmt.Sprint(retry.MaxAttempts)})
-				setMappingValue(fields, "backoff", stringYAMLNode(retry.Backoff.String()))
-				setMappingValue(value, "retry", fields)
-			}
-		}
-		return setKeyedMaintenanceDecision(root, []string{"interfaces", "policies"}, decision.interfaceID.String(), value)
-	case maintenanceAlias:
-		value := nullYAMLNode()
-		if !decision.removed {
-			value = aliasYAMLNode(decision.alias)
-		}
-		return setKeyedMaintenanceDecision(root, []string{"capabilities", "aliases"}, decision.id.String(), value)
-	case maintenanceConstructorConfig:
-		return setConfigMaintenanceDecision(root, decision.config)
-	default:
-		return errors.New("unknown configuration decision field")
-	}
-}
-
-func setSetMaintenanceDecision(root *yaml.Node, path []string, value string, removed bool) error {
-	parent, err := ensureMappingPath(root, path[:len(path)-1])
-	if err != nil {
-		return err
-	}
-	fieldName := path[len(path)-1]
-	field := mappingChild(parent, fieldName)
-	if field == nil {
-		if removed {
-			field = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-			setMappingValue(parent, fieldName, field)
-		} else {
-			field = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-			setMappingValue(parent, fieldName, field)
-		}
-	}
-	if field.Kind == yaml.SequenceNode && removed {
-		add := cloneYAMLNode(field)
-		field.Kind = yaml.MappingNode
-		field.Tag = "!!map"
-		field.Value = ""
-		field.Content = nil
-		setMappingValue(field, "add", add)
-		setMappingValue(field, "remove", &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"})
-	}
-	if field.Kind == yaml.SequenceNode {
-		removeSequenceValue(field, value)
-		field.Content = append(field.Content, stringYAMLNode(value))
-		sortYAMLStringSequence(field)
-		return nil
-	}
-	if field.Kind != yaml.MappingNode {
-		return fmt.Errorf("%s must remain a sequence or sparse set mapping", strings.Join(path, "."))
-	}
-	desired := "add"
-	opposite := "remove"
-	if removed {
-		desired, opposite = opposite, desired
-	}
-	if oppositeNode := mappingChild(field, opposite); oppositeNode != nil {
-		removeSequenceValue(oppositeNode, value)
-	}
-	sequence := mappingChild(field, desired)
-	if sequence == nil {
-		sequence = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-		setMappingValue(field, desired, sequence)
-	}
-	if sequence.Kind != yaml.SequenceNode {
-		return fmt.Errorf("%s.%s must remain a sequence", strings.Join(path, "."), desired)
-	}
-	removeSequenceValue(sequence, value)
-	sequence.Content = append(sequence.Content, stringYAMLNode(value))
-	sortYAMLStringSequence(sequence)
-	return nil
-}
-
-func removeSetMaintenanceDecision(root *yaml.Node, path []string, value string, removed bool) error {
-	field := mappingPath(root, path)
-	if field == nil {
-		return nil
-	}
-	if field.Kind == yaml.SequenceNode {
-		if !removed {
-			removeSequenceValue(field, value)
-		}
-		return nil
-	}
-	if field.Kind != yaml.MappingNode {
-		return fmt.Errorf("%s must remain a sequence or sparse set mapping", strings.Join(path, "."))
-	}
-	name := "add"
-	if removed {
-		name = "remove"
-	}
-	removeSequenceValue(mappingChild(field, name), value)
-	return nil
-}
-
 func setKeyedMaintenanceDecision(root *yaml.Node, path []string, key string, value *yaml.Node) error {
 	parent, err := ensureMappingPath(root, path)
 	if err != nil {
@@ -890,76 +306,6 @@ func setKeyedMaintenanceDecision(root *yaml.Node, path []string, key string, val
 	setMappingValue(parent, key, value)
 	sortYAMLMapping(parent)
 	return nil
-}
-
-func removeKeyedMaintenanceDecision(root *yaml.Node, path []string, key string) error {
-	parent := mappingPath(root, path)
-	if parent == nil {
-		return nil
-	}
-	removeMappingValue(parent, key)
-	return nil
-}
-
-func setConfigMaintenanceDecision(root *yaml.Node, decision constructorConfigDecision) error {
-	path := append([]string{"config", decision.constructor.String()}, decision.segments...)
-	parent, err := ensureMappingPath(root, path[:len(path)-1])
-	if err != nil {
-		return err
-	}
-	name := path[len(path)-1]
-	var value *yaml.Node
-	switch decision.kind {
-	case constructorConfigObject:
-		value = mappingChild(parent, name)
-		if value != nil && value.Kind == yaml.MappingNode {
-			return nil
-		}
-		value = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	case constructorConfigRemoval:
-		value = removalYAMLNode()
-	case constructorConfigValue:
-		value, err = decodeNormalizedConfigNode(decision.yaml)
-		if err != nil {
-			return err
-		}
-	default:
-		return errors.New("invalid constructor configuration decision")
-	}
-	setMappingValue(parent, name, value)
-	sortYAMLMapping(parent)
-	return nil
-}
-
-func removeConfigMaintenanceDecision(root *yaml.Node, decision constructorConfigDecision) error {
-	path := append([]string{"config", decision.constructor.String()}, decision.segments...)
-	parent := mappingPath(root, path[:len(path)-1])
-	if parent == nil {
-		return nil
-	}
-	removeMappingValue(parent, path[len(path)-1])
-	return nil
-}
-
-func aliasYAMLNode(alias Alias) *yaml.Node {
-	if !alias.hasExposure && alias.deprecated == "" {
-		return stringYAMLNode(alias.target.String())
-	}
-	result := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	setMappingValue(result, "target", stringYAMLNode(alias.target.String()))
-	if alias.hasExposure {
-		exposure := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		setMappingValue(exposure, "go", boolYAMLNode(alias.exposure.Go))
-		setMappingValue(exposure, "http", boolYAMLNode(alias.exposure.HTTP))
-		setMappingValue(exposure, "javascript", boolYAMLNode(alias.exposure.JavaScript))
-		setMappingValue(result, "expose", exposure)
-	}
-	if alias.deprecated != "" {
-		deprecated := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		setMappingValue(deprecated, "message", stringYAMLNode(alias.deprecated))
-		setMappingValue(result, "deprecated", deprecated)
-	}
-	return result
 }
 
 func ensureMappingPath(root *yaml.Node, path []string) (*yaml.Node, error) {
@@ -982,17 +328,6 @@ func ensureMappingPath(root *yaml.Node, path []string) (*yaml.Node, error) {
 		current = next
 	}
 	return current, nil
-}
-
-func mappingPath(root *yaml.Node, path []string) *yaml.Node {
-	current := root
-	for _, name := range path {
-		current = mappingChild(current, name)
-		if current == nil {
-			return nil
-		}
-	}
-	return current
 }
 
 func setMappingValue(mapping *yaml.Node, name string, value *yaml.Node) {
@@ -1039,13 +374,6 @@ func sortYAMLMapping(mapping *yaml.Node) {
 	}
 }
 
-func sortYAMLStringSequence(sequence *yaml.Node) {
-	if sequence == nil || sequence.Kind != yaml.SequenceNode {
-		return
-	}
-	sort.SliceStable(sequence.Content, func(left, right int) bool { return sequence.Content[left].Value < sequence.Content[right].Value })
-}
-
 func preserveYAMLComments(target, source *yaml.Node) {
 	if target == nil || source == nil {
 		return
@@ -1055,31 +383,8 @@ func preserveYAMLComments(target, source *yaml.Node) {
 	target.FootComment = source.FootComment
 }
 
-func cloneYAMLNode(node *yaml.Node) *yaml.Node {
-	if node == nil {
-		return nil
-	}
-	result := *node
-	result.Content = make([]*yaml.Node, len(node.Content))
-	for index, child := range node.Content {
-		result.Content[index] = cloneYAMLNode(child)
-	}
-	return &result
-}
-
 func stringYAMLNode(value string) *yaml.Node {
 	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
-}
-
-func boolYAMLNode(value bool) *yaml.Node {
-	if value {
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"}
-	}
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "false"}
-}
-
-func nullYAMLNode() *yaml.Node {
-	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}
 }
 
 func removalYAMLNode() *yaml.Node {

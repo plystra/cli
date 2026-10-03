@@ -231,7 +231,7 @@ http:
 
 	for _, data := range []string{
 		"{}\n",
-		"http: {cors: null}\n",
+		"http: {cors: {$remove: true}}\n",
 	} {
 		withoutCORS, err := applicationmeta.Parse([]byte(data))
 		if _, exists := withoutCORS.HTTPCORS(); err != nil || exists {
@@ -332,8 +332,6 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 	for _, data := range [][]byte{
 		[]byte(`{}`),
 		[]byte("http: {}\n"),
-		[]byte("http: {}\n"),
-		[]byte("http: {}\n"),
 		[]byte("http: {expose: {}}\n"),
 		[]byte("http: {address: null, expose: {}}\n"),
 		[]byte("capabilities: {}\n"),
@@ -388,7 +386,6 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "whole exposure removal", data: "http: {expose: null}\n", want: "http.expose must be a mapping"},
 		{name: "CORS type", data: "http: {cors: []}\n", want: "http.cors must be a mapping"},
 		{name: "unknown CORS field", data: "http: {cors: {allowed_origins: ['*'], allowed_headers: ['*']}}\n", want: `http.cors contains unknown key "allowed_headers"`},
-		{name: "missing CORS origins", data: "http: {cors: {allow_credentials: false}}\n", want: "http.cors.allowed_origins is required"},
 		{name: "CORS origins type", data: "http: {cors: {allowed_origins: '*'}}\n", want: "must be a nonempty sequence"},
 		{name: "empty CORS origins", data: "http: {cors: {allowed_origins: []}}\n", want: "must be a nonempty sequence"},
 		{name: "CORS origin item type", data: "http: {cors: {allowed_origins: [true]}}\n", want: "allowed_origins[0] must be an origin string"},
@@ -397,8 +394,7 @@ func TestParseRejectsUnsafeOrInvalidApplicationManifest(t *testing.T) {
 		{name: "CORS origin userinfo", data: "http: {cors: {allowed_origins: ['https://user@example.com']}}\n", want: "must contain only an http or https scheme, host, and optional port"},
 		{name: "CORS origin unicode host", data: "http: {cors: {allowed_origins: ['https://münich.example']}}\n", want: "must contain a valid ASCII host"},
 		{name: "CORS origin port", data: "http: {cors: {allowed_origins: ['https://example.com:0']}}\n", want: "port from 1 through 65535"},
-		{name: "CORS credentials type", data: "http: {cors: {allowed_origins: ['https://example.com'], allow_credentials: yes}}\n", want: "allow_credentials must be true, false, or null"},
-		{name: "credentialed wildcard CORS", data: "http: {cors: {allowed_origins: ['*'], allow_credentials: true}}\n", want: "cannot combine wildcard origin"},
+		{name: "CORS credentials type", data: "http: {cors: {allowed_origins: ['https://example.com'], allow_credentials: yes}}\n", want: "allow_credentials must be true, false, or {$remove: true}"},
 		{name: "http exposure sparse key", data: "http: {expose: {append: []}}\n", want: "not a canonical Interface ID"},
 		{name: "http exposure sparse add", data: "http: {expose: {add: [email.send/v1]}}\n", want: "not a canonical Interface ID"},
 		{name: "http exposure sparse remove", data: "http: {expose: {remove: [email.send/v1]}}\n", want: "not a canonical Interface ID"},
@@ -503,7 +499,7 @@ func FuzzParseApplicationManifest(f *testing.F) {
 		"http: {}\n",
 		"http: {}\n",
 		"http: {cors: {allowed_origins: [https://example.com, http://localhost:80], allow_credentials: true}}\n",
-		"http: {cors: null}\n",
+		"http: {cors: {$remove: true}}\n",
 		"http: {address: null, expose: {kernel.health/v1: {transport: connect}, order.create/v1: {$remove: true}}}\n",
 		"capabilities: {aliases: {}}\n",
 		"capabilities: {require: {remove: [order.create/v1]}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n",
