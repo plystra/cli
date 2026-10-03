@@ -96,6 +96,8 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.InterfaceIDDuplicate,
 		diagnosticcode.ResourceDeclarationInvalid,
 		diagnosticcode.ResourceContractInvalid,
+		diagnosticcode.ResourceProviderDeclarationInvalid,
+		diagnosticcode.ResourceProviderInvalid,
 		diagnosticcode.ResourceIDDuplicate,
 		diagnosticcode.AuthoredPackageInvalid,
 		diagnosticcode.ProjectCreateInvocationInvalid,

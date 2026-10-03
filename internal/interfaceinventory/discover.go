@@ -35,19 +35,22 @@ import (
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/resourcecontract"
 	"github.com/plystra/cli/internal/resourcedecl"
+	"github.com/plystra/cli/internal/resourceproviderdecl"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 	"golang.org/x/mod/module"
 )
 
 const (
-	defaultOutputLimit                  = 64 << 20
-	maximumSourceSize                   = 16 << 20
-	sourceKindAuthoredPackage           = "authored-package"
-	sourceKindImplementationDeclaration = "implementation-declaration"
-	sourceKindInterfaceContract         = "interface-contract"
-	sourceKindInterfaceDeclaration      = "interface-declaration"
-	sourceKindInterfaceMetadata         = "interface-metadata"
-	sourceKindResourceContract          = "resource-contract"
-	sourceKindResourceDeclaration       = "resource-declaration"
+	defaultOutputLimit                    = 64 << 20
+	maximumSourceSize                     = 16 << 20
+	sourceKindAuthoredPackage             = "authored-package"
+	sourceKindImplementationDeclaration   = "implementation-declaration"
+	sourceKindInterfaceContract           = "interface-contract"
+	sourceKindInterfaceDeclaration        = "interface-declaration"
+	sourceKindInterfaceMetadata           = "interface-metadata"
+	sourceKindResourceContract            = "resource-contract"
+	sourceKindResourceDeclaration         = "resource-declaration"
+	sourceKindResourceProviderDeclaration = "resource-provider-declaration"
 )
 
 var (
@@ -241,13 +244,17 @@ func (i Index) Interfaces() []Interface {
 // Discovery contains the Interface, Resource, and Implementation declarations obtained
 // from one shared eligible-package scan and the same Go-selected source files.
 type Discovery struct {
-	interfaces      Index
-	implementations implementationinventory.Index
-	resources       ResourceIndex
+	interfaces        Index
+	implementations   implementationinventory.Index
+	resources         ResourceIndex
+	resourceProviders resourceproviderinventory.Index
 }
 
 // Resources returns the validated visible Resource contracts from the shared scan.
 func (d Discovery) Resources() ResourceIndex { return d.resources }
+
+// ResourceProviders returns validated declarations without activating instances.
+func (d Discovery) ResourceProviders() resourceproviderinventory.Index { return d.resourceProviders }
 
 // Interfaces returns the immutable visible Interface inventory.
 func (d Discovery) Interfaces() Index { return d.interfaces }
@@ -348,24 +355,30 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 		return sources[left].root < sources[right].root
 	})
 
-	interfaces := make([]Interface, 0)
-	resources := make([]Resource, 0)
-	implementationInputs := make([]implementationinventory.Input, 0)
+	var candidates []packageCandidate
 	for _, source := range sources {
-		candidates, err := probeModule(source, application.ModulePath())
+		found, err := probeModule(source, application.ModulePath())
 		if err != nil {
 			return Discovery{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
 		}
-		found, err := loadCandidates(ctx, candidates, options)
-		if err != nil {
-			return Discovery{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
-		}
-		interfaces = append(interfaces, found.interfaces...)
-		resources = append(resources, found.resources...)
-		implementationInputs = append(implementationInputs, found.implementations...)
+		candidates = append(candidates, found...)
 	}
-
-	resourceInventory, err := resourceIndex(resources)
+	// Compile all eligible packages under the current Project's selected graph,
+	// not each dependency's standalone minimum versions or replacements.
+	found, err := loadProjectCandidates(ctx, application, dependencies, candidates, options)
+	if err != nil {
+		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	}
+	interfaces := found.interfaces
+	resourceInventory, err := resourceIndex(found.resources)
+	if err != nil {
+		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	}
+	resourceContracts := make([]resourceproviderinventory.ContractInput, len(resourceInventory.resources))
+	for n, resource := range resourceInventory.resources {
+		resourceContracts[n] = resourceproviderinventory.ContractInput{ID: resource.ID(), PackagePath: resource.PackagePath()}
+	}
+	providers, err := resourceproviderinventory.Build(found.resourceProviders, resourceContracts, found.importer)
 	if err != nil {
 		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
@@ -394,14 +407,15 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 			Types:       discovered.types,
 		}
 	}
-	implementations, err := implementationinventory.Build(implementationInputs, canonicalInterfaces)
+	implementations, err := implementationinventory.Build(found.implementations, canonicalInterfaces)
 	if err != nil {
 		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
 	return Discovery{
-		interfaces:      Index{interfaces: interfaces},
-		implementations: implementations,
-		resources:       resourceInventory,
+		interfaces:        Index{interfaces: interfaces},
+		implementations:   implementations,
+		resources:         resourceInventory,
+		resourceProviders: providers,
 	}, nil
 }
 
@@ -426,12 +440,21 @@ func sortDiscoveredInterfaces(interfaces []Interface) {
 }
 
 type loadedInventory struct {
-	interfaces      []Interface
-	implementations []implementationinventory.Input
-	resources       []Resource
+	interfaces        []Interface
+	implementations   []implementationinventory.Input
+	resources         []Resource
+	resourceProviders []resourceproviderinventory.Input
+	importer          types.Importer
 }
 
 func loadCandidates(ctx context.Context, candidates []packageCandidate, options Options) (loadedInventory, error) {
+	if len(candidates) == 0 {
+		return loadedInventory{}, nil
+	}
+	return loadCandidatesAt(ctx, candidates, options, candidates[0].source.root)
+}
+
+func loadCandidatesAt(ctx context.Context, candidates []packageCandidate, options Options, directory string, flags ...string) (loadedInventory, error) {
 	if len(candidates) == 0 {
 		return loadedInventory{}, nil
 	}
@@ -448,12 +471,13 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		limit = defaultOutputLimit
 	}
 	arguments := []string{"list", "-deps", "-export", "-json", "-e", "-mod=readonly"}
+	arguments = append(arguments, flags...)
 	for _, candidate := range candidates {
 		arguments = append(arguments, candidate.importPath)
 	}
 	output, err := gocommand.Output(ctx, gocommand.Options{
 		Command:     options.GoCommand,
-		Directory:   candidates[0].source.root,
+		Directory:   directory,
 		Environment: append([]string(nil), options.Environment...),
 		OutputLimit: limit,
 	}, arguments...)
@@ -466,7 +490,7 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		return loadedInventory{}, err
 	}
 	checkedImporter := importer.ForCompiler(token.NewFileSet(), runtime.Compiler, exportLookup(exports))
-	result := loadedInventory{}
+	result := loadedInventory{importer: checkedImporter}
 	for _, candidate := range candidates {
 		loaded, exists := listed[candidate.importPath]
 		if !exists {
@@ -476,19 +500,19 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 		if err != nil {
 			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 		}
-		if len(declarations.interfaces) == 0 && len(declarations.implementations) == 0 && len(declarations.resources) == 0 {
+		if len(declarations.interfaces) == 0 && len(declarations.implementations) == 0 && len(declarations.resources) == 0 && len(declarations.resourceProviders) == 0 {
 			continue
 		}
 		if err := validateLoadedPackage(candidate, loaded); err != nil {
 			if errors.Is(err, ErrPackage) {
-				err = locateAuthoredPackageError(candidate, loaded, err)
+				err = locateAuthoredPackageError(candidate, loaded, directory, err)
 			}
 			return loadedInventory{}, err
 		}
 		checkedPackage, err := checkedImporter.Import(candidate.importPath)
 		if err != nil {
 			packageErr := fmt.Errorf("%w: import compiled package %s: %s", ErrPackage, candidate.importPath, sanitizePackageError(err.Error(), candidate))
-			return loadedInventory{}, locateAuthoredPackageError(candidate, loaded, packageErr)
+			return loadedInventory{}, locateAuthoredPackageError(candidate, loaded, directory, packageErr)
 		}
 		if checkedPackage.Path() != candidate.importPath || checkedPackage.Name() != loaded.Name {
 			return loadedInventory{}, fmt.Errorf("%w: compiled package identity for %q is %s %q", ErrInvalidOutput, candidate.importPath, checkedPackage.Path(), checkedPackage.Name())
@@ -503,6 +527,12 @@ func loadCandidates(ctx context.Context, candidates []packageCandidate, options 
 				modulePath: candidate.source.path, moduleVersion: candidate.source.version,
 				packagePath: candidate.importPath, local: candidate.source.local,
 				declaration: declaration, contract: contract,
+			})
+		}
+		for _, declaration := range declarations.resourceProviders {
+			result.resourceProviders = append(result.resourceProviders, resourceproviderinventory.Input{
+				ModulePath: candidate.source.path, ModuleVersion: candidate.source.version,
+				PackagePath: candidate.importPath, Local: candidate.source.local, Declaration: declaration,
 			})
 		}
 		for _, declaration := range declarations.implementations {
@@ -1010,9 +1040,10 @@ func decodePackages(data []byte) (map[string]listedPackage, map[string]string, e
 }
 
 type packageDeclarations struct {
-	interfaces      []interfacedecl.Declaration
-	implementations []implementationdecl.Declaration
-	resources       []resourcedecl.Declaration
+	interfaces        []interfacedecl.Declaration
+	implementations   []implementationdecl.Declaration
+	resources         []resourcedecl.Declaration
+	resourceProviders []resourceproviderdecl.Declaration
 }
 
 func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packageDeclarations, error) {
@@ -1045,6 +1076,18 @@ func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packag
 			return packageDeclarations{}, fmt.Errorf("%w: package %q source %q escapes its module root", ErrInvalidOutput, candidate.importPath, fileName)
 		}
 		sourcePath := filepath.ToSlash(relativePath)
+		if hasDirectiveComment(fileName, data, "//plystra:implements-resource", "/*plystra:implements-resource") {
+			parsed, err := resourceproviderdecl.ParseFile(sourcePath, data)
+			if err != nil {
+				position := resourceproviderdecl.Position{Path: sourcePath}
+				var invalid *resourceproviderdecl.InvalidError
+				if errors.As(err, &invalid) {
+					position = invalid.Position()
+				}
+				return packageDeclarations{}, sourceError(candidate.source.path, position.Path, sourceKindResourceProviderDeclaration, position.Line, position.Column, err)
+			}
+			declarations.resourceProviders = append(declarations.resourceProviders, parsed...)
+		}
 		if hasResource {
 			parsed, err := resourcedecl.ParseFile(sourcePath, data)
 			if err != nil {
@@ -1141,12 +1184,12 @@ func packageError(candidate packageCandidate, loaded listedPackage, message stri
 	return fmt.Errorf("%w: package %s: %s", ErrPackage, candidate.importPath, sanitizePackageError(message, candidate, loaded.Dir))
 }
 
-func locateAuthoredPackageError(candidate packageCandidate, loaded listedPackage, err error) error {
-	sourcePath, line, column := authoredPackageSource(candidate, loaded)
+func locateAuthoredPackageError(candidate packageCandidate, loaded listedPackage, directory string, err error) error {
+	sourcePath, line, column := authoredPackageSource(candidate, loaded, directory)
 	return sourceError(candidate.source.path, sourcePath, sourceKindAuthoredPackage, line, column, err)
 }
 
-func authoredPackageSource(candidate packageCandidate, loaded listedPackage) (string, int, int) {
+func authoredPackageSource(candidate packageCandidate, loaded listedPackage, directory string) (string, int, int) {
 	packageErrors := make([]*listedPackageError, 0, 1+len(loaded.DepsErrors))
 	packageErrors = append(packageErrors, loaded.Error)
 	packageErrors = append(packageErrors, loaded.DepsErrors...)
@@ -1154,7 +1197,7 @@ func authoredPackageSource(candidate packageCandidate, loaded listedPackage) (st
 		if packageErr == nil {
 			continue
 		}
-		if sourcePath, line, column, ok := listedPackageSource(candidate, packageErr.Pos); ok {
+		if sourcePath, line, column, ok := listedPackageSource(candidate, directory, packageErr.Pos); ok {
 			return sourcePath, line, column
 		}
 	}
@@ -1175,7 +1218,7 @@ func authoredPackageSource(candidate packageCandidate, loaded listedPackage) (st
 	return "go.mod", 0, 0
 }
 
-func listedPackageSource(candidate packageCandidate, value string) (string, int, int, bool) {
+func listedPackageSource(candidate packageCandidate, directory, value string) (string, int, int, bool) {
 	fileName, line, column, ok := splitListedPosition(value)
 	if !ok {
 		return "", 0, 0, false
@@ -1184,10 +1227,13 @@ func listedPackageSource(candidate packageCandidate, value string) (string, int,
 	absoluteCandidates := make([]string, 0, 2)
 	if filepath.IsAbs(fileName) || filepath.VolumeName(fileName) != "" {
 		absoluteCandidates = append(absoluteCandidates, fileName)
-	} else if filepath.Base(fileName) == fileName {
-		absoluteCandidates = append(absoluteCandidates, filepath.Join(candidate.directory, fileName))
 	} else {
-		absoluteCandidates = append(absoluteCandidates, filepath.Join(candidate.source.root, fileName), filepath.Join(candidate.directory, fileName))
+		// Go reports import positions relative to the loading command, including
+		// when the owning package belongs to a dependency Project.
+		absoluteCandidates = append(absoluteCandidates, filepath.Join(directory, fileName))
+		if filepath.Base(fileName) == fileName {
+			absoluteCandidates = append(absoluteCandidates, filepath.Join(candidate.directory, fileName))
+		}
 	}
 	fallback := ""
 	for _, absolutePath := range absoluteCandidates {

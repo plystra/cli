@@ -24,6 +24,7 @@ func TestBuiltCLIInspectsResourceContracts(t *testing.T) {
 	}
 	root, nested := createInspectModuleGraphProject(t)
 	writeCommandFile(t, filepath.Join(root, "api", "resource.go"), commandResourceSource)
+	writeCommandFile(t, filepath.Join(root, "provider", "provider.go"), commandResourceProviderSource("example.com/acme/inspect"))
 	before := snapshotInspectProject(t, root)
 	cmd := exec.CommandContext(t.Context(), binary, "inspect", "resources", "--format", "json")
 	cmd.Dir = nested

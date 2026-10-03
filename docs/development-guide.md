@@ -2345,6 +2345,25 @@ the corresponding failure with module-relative ownership. The installed
 `resource.contract` support record does not imply Resource configuration,
 provider execution, binding, or Data support.
 
+Provider declarations are also checked without selecting an instance. Attach
+one `//plystra:implements-resource <resource-id>` directive to an exported,
+non-generic, non-variadic package-level function. Use an optional first
+same-package `Config` value, then explicitly named canonical Resource
+dependencies, and return a concrete pointer plus `error`. Go assignability to
+the exact visible contract is required. Dependency names and positions are
+retained without case folding; Interface, optional Interface, pointer, and
+structural substitute dependencies are invalid here. Ordinary Implementation
+and Resource-provider directives cannot share a constructor.
+Discovery compiles eligible packages under the current Project's effective Go
+graph rather than dependency-local minimum versions or replacements. Transitive
+packages do not cause edits to authored module files or checksums. Rejected Go
+configuration defaults report field/type context without their literal values.
+`PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID` and
+`PLYSTRA_RESOURCE_PROVIDER_INVALID` identify declaration and typed-constructor
+failures with module-relative sources. `resource.provider.discovery` means
+validation only: provider inspection, instance configuration, selection,
+binding, construction, and lifecycle execution remain unsupported.
+
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the
 selected Plugin Provider or Kernel intrinsic, the direct selection reason and

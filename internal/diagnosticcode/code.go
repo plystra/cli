@@ -93,6 +93,8 @@ const (
 	ResourceDeclarationInvalid           = Prefix + "RESOURCE_DECLARATION_INVALID"
 	ResourceContractInvalid              = Prefix + "RESOURCE_CONTRACT_INVALID"
 	ResourceIDDuplicate                  = Prefix + "RESOURCE_ID_DUPLICATE"
+	ResourceProviderDeclarationInvalid   = Prefix + "RESOURCE_PROVIDER_DECLARATION_INVALID"
+	ResourceProviderInvalid              = Prefix + "RESOURCE_PROVIDER_INVALID"
 	AuthoredPackageInvalid               = Prefix + "AUTHORING_PACKAGE_INVALID"
 )
 

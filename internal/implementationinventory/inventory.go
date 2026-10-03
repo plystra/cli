@@ -260,7 +260,7 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 		if requiredErr != nil {
 			return Index{}, validationError(ErrInvalidRequiredInterface, input, symbol.String(), requiredErr)
 		}
-		concrete, resultErr := validateConstructorResult(function)
+		concrete, resultErr := CompileResult(function)
 		if resultErr != nil {
 			return Index{}, validationError(ErrInvalidResult, input, symbol.String(), resultErr)
 		}

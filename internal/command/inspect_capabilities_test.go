@@ -155,6 +155,7 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 		"invocation.default-concurrency: specified=yes parsed=not_applicable generated=yes executed=yes accepted=yes\n",
 		"inspect.capabilities: specified=yes parsed=yes generated=not_applicable executed=yes accepted=yes\n",
 		"resource.contract: specified=yes parsed=yes generated=not_applicable executed=not_applicable accepted=yes\n",
+		"resource.provider.discovery: specified=yes parsed=yes generated=not_applicable executed=not_applicable accepted=yes\n",
 		"Command argument, selector, effect-class, and transport component details are omitted from human output; use --format json for the complete installed payload.\n",
 	} {
 		if !strings.Contains(stdout, expected) {

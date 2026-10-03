@@ -552,7 +552,7 @@ func compileConfigurationDefault(value ConfigurationValue, raw string) (string, 
 		case "true", "false":
 			return raw, nil
 		default:
-			return "", fmt.Errorf("default %q is not a canonical boolean", raw)
+			return "", fmt.Errorf("default is not a canonical boolean")
 		}
 	case ConfigurationValueSignedInteger:
 		bits := value.numericBits
@@ -562,12 +562,12 @@ func compileConfigurationDefault(value ConfigurationValue, raw string) (string, 
 		parsed, err := strconv.ParseInt(raw, 10, bits)
 		if err != nil {
 			if numericError, ok := err.(*strconv.NumError); ok && numericError.Err == strconv.ErrSyntax {
-				return "", fmt.Errorf("default %q is not a base-10 %s value", raw, value.typeIdentity)
+				return "", fmt.Errorf("default is not a base-10 %s value", value.typeIdentity)
 			}
 			if value.platformSize {
-				return "", fmt.Errorf("default %q is outside the portable 32-bit range for %s", raw, value.typeIdentity)
+				return "", fmt.Errorf("default is outside the portable 32-bit range for %s", value.typeIdentity)
 			}
-			return "", fmt.Errorf("default %q is outside the %d-bit range for %s", raw, bits, value.typeIdentity)
+			return "", fmt.Errorf("default is outside the %d-bit range for %s", bits, value.typeIdentity)
 		}
 		return strconv.FormatInt(parsed, 10), nil
 	case ConfigurationValueUnsignedInteger:
@@ -578,30 +578,30 @@ func compileConfigurationDefault(value ConfigurationValue, raw string) (string, 
 		parsed, err := strconv.ParseUint(raw, 10, bits)
 		if err != nil {
 			if numericError, ok := err.(*strconv.NumError); ok && numericError.Err == strconv.ErrSyntax {
-				return "", fmt.Errorf("default %q is not a base-10 %s value", raw, value.typeIdentity)
+				return "", fmt.Errorf("default is not a base-10 %s value", value.typeIdentity)
 			}
 			if value.platformSize {
-				return "", fmt.Errorf("default %q is outside the portable 32-bit range for %s", raw, value.typeIdentity)
+				return "", fmt.Errorf("default is outside the portable 32-bit range for %s", value.typeIdentity)
 			}
-			return "", fmt.Errorf("default %q is outside the %d-bit range for %s", raw, bits, value.typeIdentity)
+			return "", fmt.Errorf("default is outside the %d-bit range for %s", bits, value.typeIdentity)
 		}
 		return strconv.FormatUint(parsed, 10), nil
 	case ConfigurationValueNumber:
 		parsed, err := strconv.ParseFloat(raw, value.numericBits)
 		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
-			return "", fmt.Errorf("default %q is not a finite %s value", raw, value.typeIdentity)
+			return "", fmt.Errorf("default is not a finite %s value", value.typeIdentity)
 		}
 		return strconv.FormatFloat(parsed, 'g', -1, value.numericBits), nil
 	case ConfigurationValueDuration:
 		parsed, err := time.ParseDuration(raw)
 		if err != nil {
-			return "", fmt.Errorf("default %q is not a valid time.Duration", raw)
+			return "", fmt.Errorf("default is not a valid time.Duration")
 		}
 		return marshalConfigurationDefaultString(parsed.String()), nil
 	case ConfigurationValueURL:
 		parsed, err := url.Parse(raw)
 		if err != nil {
-			return "", fmt.Errorf("default %q is not a valid net/url.URL", raw)
+			return "", fmt.Errorf("default is not a valid net/url.URL")
 		}
 		return marshalConfigurationDefaultString(parsed.String()), nil
 	case ConfigurationValueSecret:
