@@ -44,7 +44,7 @@ func TestPublicMissingRequiredConstructorConfigurationDoesNotMutate(t *testing.T
 						if code == 0 || stdout != "" || !strings.Contains(stderr, "PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID") || !strings.Contains(stderr, "required constructor configuration field is missing") || !strings.Contains(stderr, selected+":1:1") {
 							t.Fatalf("active=%t, entry=%s, %v = %d, %q, %q", active, entry, args, code, stdout, stderr)
 						}
-						if !strings.Contains(stderr, "Supply the missing required field in "+selected+" or an adopted export") {
+						if !strings.Contains(stderr, "Supply the missing required field in "+selected+" or a template root") {
 							t.Fatalf("%v omitted selected-document requiredness recovery: %s", args, stderr)
 						}
 						if !reflect.DeepEqual(commandTree(t, root), before) {
@@ -58,7 +58,7 @@ func TestPublicMissingRequiredConstructorConfigurationDoesNotMutate(t *testing.T
 	}
 }
 
-func TestPublicRequiredConstructorConfigurationComposesPartialExports(t *testing.T) {
+func TestPublicRequiredConstructorConfigurationComposesPartialTemplates(t *testing.T) {
 	const constructor = "example.com/acme/implementation-use/smtp.New"
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
@@ -70,7 +70,8 @@ func TestPublicRequiredConstructorConfigurationComposesPartialExports(t *testing
 				t.Fatal(err)
 			}
 			writeCommandFile(t, implementationPath, strings.Replace(string(implementation), "type Config struct {", "type Config struct {\n\tSettings struct { Region string `plystra:\"required\"` }", 1))
-			exports := "composition:\n  exports:\n    endpoint:\n      config: {" + constructor + ": {endpoint: PRIVATE_ENDPOINT}}\n    settings:\n      config: {" + constructor + ": {settings: {region: PRIVATE_REGION}}}\n"
+			ancestor, _ := writeCommandTemplate(t, root, "endpoint", "config: {"+constructor+": {endpoint: PRIVATE_ENDPOINT}}\n")
+			relationship, _ := writeCommandTemplate(t, root, "settings", ancestor+"config: {"+constructor+": {settings: {region: PRIVATE_REGION}}}\n")
 			selected, selector := "plystra.yaml", []string(nil)
 			switch mode {
 			case "environment":
@@ -78,16 +79,15 @@ func TestPublicRequiredConstructorConfigurationComposesPartialExports(t *testing
 			case "replacement":
 				selected, selector = "deploy/customer.yaml", []string{"--config", "deploy/customer.yaml"}
 			}
-			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), exports)
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), relationship)
 			for _, active := range []bool{false, true} {
 				selection := "interfaces: {use: {email.send/v1: " + constructor + "}}\n"
 				if active {
 					selection = "interfaces: {require: [email.send/v1], use: {email.send/v1: " + constructor + "}}\n"
 				}
-				adoption := "  adopt: [{module: example.com/acme/implementation-use, export: endpoint}, {module: example.com/acme/implementation-use, export: settings}]\n"
-				prefix := "composition:\n" + adoption
+				prefix := ""
 				if mode == "default" {
-					prefix = exports + adoption
+					prefix = relationship
 				}
 				for _, entry := range []string{"{}", "{endpoint: {$remove: true}}", `{endpoint: ""}`} {
 					source := prefix + selection + "config: {" + constructor + ": " + entry + "}\n"
@@ -105,7 +105,7 @@ func TestPublicRequiredConstructorConfigurationComposesPartialExports(t *testing
 						continue
 					}
 					if code != 0 {
-						t.Fatalf("partial exports, active=%t, entry=%s: %d, %s", active, entry, code, stderr)
+						t.Fatalf("partial templates, active=%t, entry=%s: %d, %s", active, entry, code, stderr)
 					}
 					if data, err := os.ReadFile(filepath.Join(root, selected)); err != nil || string(data) != source {
 						t.Fatal("generation rewrote partial authored configuration")

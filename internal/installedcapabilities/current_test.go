@@ -143,6 +143,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"resource|yes|no|no|no|no",
 		"resource.contract|yes|yes|not_applicable|not_applicable|yes",
 		"resource.provider.discovery|yes|yes|not_applicable|not_applicable|yes",
+		"template.interface-inheritance|yes|yes|yes|yes|yes",
 		"transport.connect|yes|yes|yes|yes|yes",
 	}
 	gotSupport := make([]string, 0, len(capabilities.Support()))

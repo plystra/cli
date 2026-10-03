@@ -271,6 +271,7 @@ func explainConfiguration(resolved applicationresolve.Result, subject string) (c
 	explanation := commandExplanation{subjectLabel: "Configuration"}
 	changePath := field.Path()
 	var owner resolutionevidence.ConfigurationOwner
+	var templateOrder int
 	var sources []resolutionevidence.Source
 	if field.Effective() {
 		contribution, found := effectiveConfigurationContribution(field)
@@ -279,6 +280,7 @@ func explainConfiguration(resolved applicationresolve.Result, subject string) (c
 		}
 		owner = field.Owner()
 		sources = contribution.Sources()
+		templateOrder = contribution.TemplateOrder()
 		input.Reason = string(owner)
 		if field.Removed() {
 			input.Outcome = "removed"
@@ -288,24 +290,24 @@ func explainConfiguration(resolved applicationresolve.Result, subject string) (c
 			explanation.decision = fmt.Sprintf("effective %s%s from %s", field.Summary(), configurationPluginDescription(field.Path(), evidence), owner)
 		}
 	} else {
-		suppressor, found := suppressingConfigurationField(evidence, field.Path())
+		suppressor, contribution, found := suppressingConfigurationContribution(evidence, field.Path())
 		if !found {
-			return commandExplanation{}, fmt.Errorf("suppressed configuration field %q omits its effective ancestor", canonicalSubject)
+			return commandExplanation{}, fmt.Errorf("suppressed configuration field %q omits its causal ancestor contribution", canonicalSubject)
 		}
-		contribution, found := effectiveConfigurationContribution(suppressor)
-		if !found {
-			return commandExplanation{}, fmt.Errorf("suppressing configuration field %q omits its winning contribution", suppressor.Path())
-		}
-		owner = suppressor.Owner()
+		owner = contribution.Owner()
 		sources = contribution.Sources()
+		templateOrder = contribution.TemplateOrder()
 		changePath = suppressor.Path()
 		input.Outcome = "suppressed"
-		if suppressor.Removed() {
+		if contribution.Removed() {
 			input.Reason = "ancestor-removal"
 		} else {
 			input.Reason = "ancestor-replacement"
 		}
 		explanation.decision = fmt.Sprintf("suppressed%s by %s at %s", configurationPluginDescription(field.Path(), evidence), owner, suppressor.Path())
+	}
+	if owner == resolutionevidence.ConfigurationOwnerTemplate {
+		explanation.decision += fmt.Sprintf(" (template order %d, oldest to nearest)", templateOrder)
 	}
 	if len(sources) == 0 {
 		return commandExplanation{}, fmt.Errorf("configuration field %q omits causal source provenance", canonicalSubject)
@@ -677,25 +679,51 @@ func effectiveConfigurationContribution(field resolutionevidence.ConfigurationFi
 	return resolutionevidence.ConfigurationContribution{}, false
 }
 
-func suppressingConfigurationField(evidence resolutionevidence.Evidence, path string) (resolutionevidence.ConfigurationField, bool) {
+func suppressingConfigurationContribution(evidence resolutionevidence.Evidence, path string) (resolutionevidence.ConfigurationField, resolutionevidence.ConfigurationContribution, bool) {
 	fields := evidence.ConfigurationFields()
 	byPath := make(map[string]resolutionevidence.ConfigurationField, len(fields))
 	for _, field := range fields {
 		byPath[field.Path()] = field
 	}
+	var latestChild resolutionevidence.ConfigurationContribution
+	for _, contribution := range byPath[path].Contributors() {
+		if configurationContributionAfter(contribution, latestChild) {
+			latestChild = contribution
+		}
+	}
+	var suppressor resolutionevidence.ConfigurationField
+	var cause resolutionevidence.ConfigurationContribution
+	found := false
 	ancestors := explainConfigurationPathAncestors(path)
 	for index := len(ancestors) - 1; index >= 0; index-- {
 		ancestor, exists := byPath[ancestors[index]]
-		if !exists || !ancestor.Effective() || configurationFieldIsObject(ancestor, fields) {
+		if !exists {
 			continue
 		}
-		return ancestor, true
+		// A later object revival does not resurrect children erased by an
+		// earlier tombstone. Retain that historical removal as the cause.
+		for _, contribution := range ancestor.Contributors() {
+			barrier := contribution.Removed() || contribution.Effective() && !configurationFieldIsObject(ancestor, fields)
+			if !barrier || !configurationContributionAfter(contribution, latestChild) {
+				continue
+			}
+			if !found || configurationContributionAfter(contribution, cause) {
+				suppressor, cause, found = ancestor, contribution, true
+			}
+		}
 	}
-	return resolutionevidence.ConfigurationField{}, false
+	return suppressor, cause, found
+}
+
+func configurationContributionAfter(left, right resolutionevidence.ConfigurationContribution) bool {
+	if left.Precedence() != right.Precedence() {
+		return left.Precedence() > right.Precedence()
+	}
+	return left.TemplateOrder() > right.TemplateOrder()
 }
 
 func explainConfigurationPathAncestors(value string) []string {
-	for _, setPath := range []string{"interfaces.require", "composition.adopt"} {
+	for _, setPath := range []string{"interfaces.require"} {
 		if strings.HasPrefix(value, setPath+"[") {
 			return []string{setPath}
 		}
@@ -754,7 +782,7 @@ func configurationPluginDescription(path string, evidence resolutionevidence.Evi
 
 func configurationFieldChange(selection resolutionevidence.ConfigurationSelection, currentModule, field string, owner resolutionevidence.ConfigurationOwner, sources []resolutionevidence.Source) diagnosticschema.ExplainChange {
 	path := selection.SelectedPath()
-	if owner != resolutionevidence.ConfigurationOwnerAdopted {
+	if owner != resolutionevidence.ConfigurationOwnerTemplate {
 		for _, source := range sources {
 			if source.Module() == currentModule {
 				path = source.Path()

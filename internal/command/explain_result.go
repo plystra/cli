@@ -372,7 +372,7 @@ func classifyExplainFailure(err error, recovery recoveryContext) explainFailureC
 	}
 	status := commandschema.StatusValidationFailed
 	switch actionable.code {
-	case diagnosticProviderAmbiguous, diagnosticResolveMultipleImplementations, diagnosticConfigurationOwnershipAmbiguous:
+	case diagnosticProviderAmbiguous, diagnosticResolveMultipleImplementations:
 		status = commandschema.StatusDecisionRequired
 	case diagnosticGoModuleUnavailable, diagnosticGoCommandFailed:
 		status = commandschema.StatusPrerequisiteMissing

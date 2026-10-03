@@ -27,22 +27,21 @@ func TestPublicInterfaceRequirementCompleteSets(t *testing.T) {
 				root := writeCommandPolicyProject(t)
 				dependency := t.TempDir()
 				writeCommandFile(t, filepath.Join(dependency, "go.mod"), "module example.com/requirements\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "composition:\n  exports:\n    defaults:\n      interfaces: {require: [missing.read/v1, email.send/v1]}\n")
+				writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "interfaces: {require: [missing.read/v1, email.send/v1]}\n")
 				mod := string(readCommandFile(t, root, "go.mod"))
 				writeCommandFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/requirements v1.0.0\nreplace example.com/requirements => "+filepath.ToSlash(dependency)+"\n")
-				inventory := "composition:\n  exports:\n    defaults:\n      interfaces: {require: [missing.read/v1, email.send/v1]}\n"
-				adopt := "  adopt: [{module: example.com/requirements, export: defaults}, {module: example.com/acme/policy, export: defaults}]\n"
-				rootData := inventory + adopt + test.selected + "\n"
+				inventory := "template: example.com/requirements\n"
+				rootData := inventory + test.selected + "\n"
 				selectedData, selectedPath := rootData, "plystra.yaml"
 				var selector []string
 				switch mode {
 				case "environment":
-					rootData = inventory + adopt + test.lower + "\n"
+					rootData = inventory + test.lower + "\n"
 					selectedData, selectedPath = test.selected+"\n", "plystra.production.yaml"
 					selector = []string{"--env", "production"}
 				case "replacement":
 					rootData = inventory + "interfaces: {require: [excluded.root/v1]}\n"
-					selectedData, selectedPath = "composition:\n"+adopt+test.selected+"\n", "deploy/customer.yaml"
+					selectedData, selectedPath = test.selected+"\n", "deploy/customer.yaml"
 					selector = []string{"--config", selectedPath}
 				}
 				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
@@ -62,8 +61,8 @@ func TestPublicInterfaceRequirementCompleteSets(t *testing.T) {
 				}
 				if test.bindings == 1 && test.name != "sparse removal" {
 					for _, source := range bindings[0].RootSources() {
-						if strings.Contains(source, "composition.exports") || strings.Contains(source, "example.com/requirements") {
-							t.Fatalf("suppressed adopted requirement retained effective ownership: %s", source)
+						if strings.Contains(source, "example.com/requirements") {
+							t.Fatalf("suppressed template requirement retained effective ownership: %s", source)
 						}
 					}
 				}

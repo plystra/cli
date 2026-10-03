@@ -69,7 +69,7 @@ canonical module-relative Source lines first.
 
 Adds one ordinary Go Module dependency, regenerates, tidies, and validates the
 complete Project in one rollback boundary. Dependency Project configuration
-remains inert unless the selected current Project explicitly adopts a named export.
+remains inert unless reached through the root Project's template ancestry.
 
 Malformed queries emit PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID before Project
 discovery or mutation.
@@ -79,7 +79,7 @@ discovery or mutation.
 
 Removes one ordinary Go Module dependency, regenerates, tidies, and validates
 the complete Project in one rollback boundary. Dependency Project configuration
-remains inert unless the selected current Project explicitly adopts a named export.
+remains inert unless reached through the root Project's template ancestry.
 
 Malformed paths emit PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID before Project
 discovery or mutation.
@@ -92,7 +92,7 @@ before mutation.
 Updates one selected ordinary Go Module dependency, regenerates, tidies, and
 validates the complete Project in one rollback boundary. Dependency Project
 configuration remains inert unless the selected current Project explicitly
-adopts a named export.
+selects it through the root template ancestry.
 
 Malformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project
 discovery or mutation.
@@ -131,7 +131,7 @@ diagnostic.
 A normalized Project-contained selected document that cannot be loaded reports
 one span-less configuration-selection source; conflicting or unsafe selectors
 report none.
-Dependency Project roots contribute only explicitly adopted named exports.
+Template Project roots compose oldest to nearest below the current Project delta.
 Generation does not rewrite the selected current-Project configuration document.
 PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
 installed CLI/Kernel pair both generates and executes it. The diagnostic reports
@@ -253,7 +253,7 @@ stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 A normalized Project-contained selected document that cannot be loaded reports
 one span-less configuration-selection source; conflicting or unsafe selectors
 report none.
-Adopted-export conflicts and invalid or unselected constructor configuration
+Invalid template ancestry and invalid or unselected constructor configuration
 failures emit module-relative
 configuration-declaration sources before selector-aware recovery.
 PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
@@ -411,8 +411,8 @@ resource-contract nodes. Resource instance construction and binding remain
 unsupported. Invalid Resource declarations, contracts, or duplicate identities
 report RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or
 RESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.
-The configuration view retains the selected current-Project layer, explicitly
-adopted exports, redacted field summaries, ownership and precedence, effective
+The configuration view retains the selected current-Project layer, selected
+template ancestry, redacted field summaries, ownership and precedence, effective
 and overridden contributions, explicit removals, and ancestor suppression.
 PLYSTRA_ENV and PLYSTRA_CONFIG
 supply equivalent selectors when no explicit selector is present; setting both

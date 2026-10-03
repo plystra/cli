@@ -21,10 +21,10 @@ func TestPublicGenerationRejectsLegacyTimeoutAndRetryPolicies(t *testing.T) {
 	writeCommandFile(t, filepath.Join(root, "business", "capabilities", "audit.write", "v1", "capability.yaml"), "id: audit.write/v1\nrequest: {}\nresponse: {}\n")
 	dependency := t.TempDir()
 	writeCommandFile(t, filepath.Join(dependency, "go.mod"), "module example.com/policy-export\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "composition:\n  exports:\n    defaults:\n      interfaces:\n        policies: {audit.write/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}\n")
+	writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "interfaces:\n  policies: {audit.write/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}\n")
 	mod := string(readCommandFile(t, root, "go.mod"))
 	writeCommandFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/policy-export v1.0.0\nreplace example.com/policy-export => "+filepath.ToSlash(dependency)+"\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "composition:\n  adopt: [{module: example.com/policy-export, export: defaults}]\ncapabilities: {require: [audit.write/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/policy-export\ncapabilities: {require: [audit.write/v1]}\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {policies: {audit.write/v1: {timeout: 2s, retry: {eligibility: replay_safe, max_attempts: 3}}}}\n")
 	writeCommandFile(t, filepath.Join(root, "generated", "sentinel.txt"), "untouched\n")
 	before, dependencyBefore := commandTree(t, root), commandTree(t, dependency)
@@ -88,20 +88,20 @@ func TestPublicGenerationEnforcesActiveTimeoutPolicies(t *testing.T) {
 	}
 }
 
-func TestPublicGenerationEnforcesAdoptedPolicyAndCurrentReplacement(t *testing.T) {
+func TestPublicGenerationEnforcesTemplatePolicyAndCurrentReplacement(t *testing.T) {
 	root := writeCommandPolicyProject(t)
 	dependency := t.TempDir()
 	writeCommandFile(t, filepath.Join(dependency, "go.mod"), "module example.com/policy-export\n\ngo 1.26\n")
-	writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "composition:\n  exports:\n    defaults:\n      interfaces:\n        policies: {email.send/v1: {timeout: 5s}}\n")
+	writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "interfaces:\n  policies: {email.send/v1: {timeout: 5s}}\n")
 	mod := string(readCommandFile(t, root, "go.mod"))
 	writeCommandFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/policy-export v1.0.0\nreplace example.com/policy-export => "+filepath.ToSlash(dependency)+"\n")
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "composition:\n  adopt: [{module: example.com/policy-export, export: defaults}]\ninterfaces: {require: [email.send/v1]}\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/policy-export\ninterfaces: {require: [email.send/v1]}\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {policies: {email.send/v1: {timeout: 2s}}}\n")
 	dependencyBefore := commandTree(t, dependency)
 	assertCommandTimeoutPolicy(t, root, nil, commandGoEnvironment(), 5*time.Second)
 	assertCommandTimeoutPolicy(t, root, []string{"--env", "production"}, commandGoEnvironment(), 2*time.Second)
 	if !reflect.DeepEqual(commandTree(t, dependency), dependencyBefore) {
-		t.Fatal("generation changed adopted source")
+		t.Fatal("generation changed template source")
 	}
 }
 

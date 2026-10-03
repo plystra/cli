@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
+	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/newproject"
 )
 
@@ -36,8 +38,10 @@ JSON success nests one plystra.project-created/v1 payload with the Go Module
 path and relative created directory. Enter payload.directory and run
 plystra check independently before treating creation as complete.
 
-This installed CLI records --template as a dependency only. Persisted template
-ancestry and automatic configuration inheritance are not implemented yet.
+Creation records --template as a direct dependency and root template relationship.
+Its linear ancestry immediately supplies the supported Interface baseline,
+including CORS, without copying source or configuration or ranking candidates.
+Resource and Data inheritance remain unsupported.
 
 Invalid Project names, explicit Go Module paths, and template queries emit
 PLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,
@@ -448,9 +452,10 @@ func (e newResultEncoder) success(created newProjectResult) (commandschema.Resul
 func (e newResultEncoder) failure(err error) (commandschema.Result, error) {
 	status, code, message := classifyNewFailure(err)
 	diagnostic, diagnosticErr := commandschema.NewDiagnostic(commandschema.DiagnosticInput{
-		Code:     code,
-		Severity: diagnosticjson.SeverityError,
-		Message:  message,
+		Code:      code,
+		Severity:  diagnosticjson.SeverityError,
+		Message:   message,
+		Locations: actionableDiagnosticSources(err, code),
 	})
 	if diagnosticErr != nil {
 		return commandschema.Result{}, diagnosticErr
@@ -483,8 +488,10 @@ func classifyNewFailure(err error) (commandschema.Status, string, string) {
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateModuleInvalid, "The Go Module path is invalid."
 	case errors.Is(err, newproject.ErrInvalidTemplateQuery):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateTemplateInvalid, "The Project template input is invalid."
-	case errors.Is(err, newproject.ErrInvalidTemplate):
+	case errors.Is(err, applicationresolve.ErrTemplate), errors.Is(err, newproject.ErrInvalidTemplate):
 		return commandschema.StatusValidationFailed, diagnosticcode.TemplateInvalid, "The resolved Project template is invalid."
+	case errors.Is(err, interfaceresolution.ErrAmbiguousImplementation):
+		return commandschema.StatusDecisionRequired, diagnosticcode.ResolveMultipleImplementations, "The Project template requires an explicit Interface implementation choice."
 	case errors.Is(err, newproject.ErrInvalidPluginName):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreatePluginNameInvalid, "The initial Plugin name is invalid."
 	case errors.Is(err, newproject.ErrInvalidPluginID):
@@ -516,7 +523,7 @@ func newFailureRecovery(code string) (commandschema.Recovery, error) {
 		id, targetKind, targetID, precondition = "correct-project-name", "argument", "project-name", "canonical_project_name"
 	case diagnosticcode.ProjectCreateModuleInvalid:
 		id, targetKind, targetID, precondition = "correct-project-module", "argument", "module", "valid_module_path"
-	case diagnosticcode.ProjectCreateTemplateInvalid, diagnosticcode.TemplateInvalid:
+	case diagnosticcode.ProjectCreateTemplateInvalid, diagnosticcode.TemplateInvalid, diagnosticcode.ResolveMultipleImplementations:
 		id, targetKind, targetID, precondition = "correct-project-template", "argument", "template", "valid_template_input"
 	case diagnosticcode.ProjectCreatePluginNameInvalid:
 		id, targetKind, targetID, precondition = "correct-project-plugin-name", "argument", "plugin", "canonical_plugin_name"

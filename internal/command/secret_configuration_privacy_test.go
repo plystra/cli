@@ -34,7 +34,7 @@ func TestPublicRuntimeOnlyChangesKeepGeneratedIdentity(t *testing.T) {
 func testPublicPrivateConfigurationIdentity(t *testing.T, fields string, values []string, publicChange string) {
 	t.Helper()
 	for _, mode := range []string{"default", "environment", "replacement"} {
-		for _, ownership := range []string{"active", "dormant", "adopted"} {
+		for _, ownership := range []string{"active", "dormant", "template"} {
 			t.Run(mode+"/"+ownership, func(t *testing.T) {
 				root := writeImplementationSelectionCommandProject(t)
 				writeCommandFile(t, filepath.Join(root, "smtp", "implementation.go"), `package smtp
@@ -71,21 +71,25 @@ func (*Service) Send(context.Context, contract.Request) (contract.Response, erro
 				document := func(value string) string {
 					return "config: {example.com/acme/implementation-use/smtp.New: " + value + "}\n"
 				}
+				relationship, dependency := "", ""
+				if ownership == "template" {
+					relationship, dependency = writeCommandTemplate(t, root, "private", document(values[0]))
+				}
 				write := func(reference string) {
 					selected := "interfaces:\n  use: {email.send/v1: example.com/acme/implementation-use/smtp.New}\n"
 					if ownership != "dormant" {
 						selected += "  require: [email.send/v1]\n"
 					}
 					rootDocument := "{}\n"
-					if ownership == "adopted" {
-						rootDocument = "composition:\n  exports:\n    shared:\n      " + document(reference)
-						selected += "composition:\n  adopt: [{module: example.com/acme/implementation-use, export: shared}]\n"
+					if ownership == "template" {
+						rootDocument = relationship
+						writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), document(reference))
 					} else {
 						selected += document(reference)
 					}
 					if selectedPath == "plystra.yaml" {
-						if ownership == "adopted" {
-							selected = strings.Replace(selected, "composition:\n", rootDocument, 1)
+						if ownership == "template" {
+							selected = rootDocument + selected
 						}
 					} else {
 						writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootDocument)
