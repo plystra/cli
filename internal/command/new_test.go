@@ -121,6 +121,50 @@ func TestRunNewCommandHonorsJSONIntentAfterMalformedArgument(t *testing.T) {
 	}
 }
 
+func TestRunNewCommandRejectsRemovedExportAdoptionBeforeEffects(t *testing.T) {
+	t.Parallel()
+	forms := [][]string{
+		{"--adopt-export"},
+		{"--adopt-export", "retired-export-probe"},
+		{"--adopt-export=retired-export-probe"},
+		{"--adopt-export", "retired-export-probe", "--adopt-export", "runtime"},
+		{"--adopt-export=retired-export-probe", "--adopt-export=runtime"},
+	}
+	for index, form := range forms {
+		for _, format := range []string{"human", "json"} {
+			t.Run(fmt.Sprintf("%d/%s", index, format), func(t *testing.T) {
+				t.Parallel()
+				arguments := []string{"new", "app", "--template", "example.com/acme/platform@v1.2.3", "--interactive"}
+				arguments = append(arguments, form...)
+				arguments = append(arguments, "--format", format)
+				creator := func(context.Context, newproject.Options) (newProjectResult, error) {
+					t.Fatal("removed option reached Project creation")
+					return nil, nil
+				}
+				prompt := func(string, bool) (bool, error) {
+					t.Fatal("removed option prompted before rejection")
+					return false, nil
+				}
+				exitCode, stdout, stderr := runNewCommandForTest(t, arguments, creator, prompt)
+				if exitCode != 2 {
+					t.Fatalf("exit = %d, want invalid invocation", exitCode)
+				}
+				if strings.Contains(stdout+stderr, "--adopt-export") || strings.Contains(stdout+stderr, "retired-export-probe") {
+					t.Fatalf("recovery advertised the retired option or echoed its value: %q %q", stdout, stderr)
+				}
+				if format == "json" {
+					if stderr != "" {
+						t.Fatalf("JSON stderr = %q", stderr)
+					}
+					assertNewFailure(t, decodeNewResult(t, stdout), "invalid_invocation", 2, diagnosticcode.ProjectCreateInvocationInvalid)
+				} else if stdout != "" || !strings.Contains(stderr, "Diagnostic: "+diagnosticcode.ProjectCreateInvocationInvalid) {
+					t.Fatalf("human result = %q %q", stdout, stderr)
+				}
+			})
+		}
+	}
+}
+
 func TestRunNewCommandClassifiesClosedFailureOutcomes(t *testing.T) {
 	t.Parallel()
 

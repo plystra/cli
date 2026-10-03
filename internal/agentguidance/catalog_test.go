@@ -48,6 +48,21 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	if !reflect.DeepEqual(gotPaths, wantPaths) {
 		t.Fatalf("projection paths = %v, want %v", gotPaths, wantPaths)
 	}
+	for path, data := range byPath {
+		if bytes.Contains(data, []byte("--adopt-export")) {
+			t.Fatalf("guidance %s advertises removed creation option", path)
+		}
+	}
+	project := byPath[Root+"/tasks/project-and-dependencies.md"]
+	for _, phrase := range []string{
+		"records one direct dependency only",
+		"Persisted template ancestry and automatic configuration inheritance are not implemented yet",
+		"Creation writes no adoption declarations",
+	} {
+		if !bytes.Contains(project, []byte(phrase)) {
+			t.Fatalf("Project guidance omits %q", phrase)
+		}
+	}
 
 	skill := byPath[Root+"/SKILL.md"]
 	if len(skill) == 0 || len(skill) > 4096 {

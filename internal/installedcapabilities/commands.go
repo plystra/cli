@@ -36,13 +36,6 @@ func installedCommands() []commandschema.CapabilityCommandInput {
 			positional("project-name", 1),
 			stringOption("--module"),
 			stringOption("--template"),
-			{
-				Name:       "--adopt-export",
-				Kind:       commandschema.CapabilityArgumentOption,
-				Value:      commandschema.CapabilityArgumentString,
-				Repeatable: true,
-				Requires:   []string{"--template"},
-			},
 			stringOption("--plugin"),
 			flagOption("--git"),
 			flagOption("--github-ci"),

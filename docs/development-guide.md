@@ -248,7 +248,7 @@ choices, and Enter accepts yes.
 ```powershell
 plystra new orders
 plystra new orders --module example.com/acme/orders
-plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3 --adopt-export application
+plystra new orders --module example.com/acme/orders --template example.com/acme/platform@v1.2.3
 plystra new orders --module example.com/acme/orders --format json
 ```
 
@@ -274,12 +274,10 @@ cannot derive one canonical Plugin ID emit
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It accepts one standard Go Module
 query. Go resolves the query, the selected module must contain regular root
 `plystra.yaml`, and the new Project retains it as a direct `go.mod`
-requirement. Its top-level Project configuration remains inert. Repeatable
-`--adopt-export <name>` options select exact entries from that module's root
-`composition.exports` inventory and record the corresponding module/export
-identities under the new Project's `composition.adopt` set. The option is valid
-only with `--template`; malformed, duplicate, or absent export names reject
-creation before the target is installed. The CLI regenerates the complete
+requirement. This installed CLI provides dependency-only template creation:
+persisted template ancestry and automatic configuration inheritance are not
+implemented yet. Creation writes no adoption declarations and copies no
+template configuration into the new Project. The CLI regenerates the complete
 application and validates the staged Project without cloning a source
 repository, copying Plugin directories, inspecting dependency environment
 overlays, modifying Module Cache source, generating `go.work`, or assigning the
@@ -288,13 +286,6 @@ template special Provider or configuration precedence after creation.
 The CLI validates and prepares module state; it never publishes refs. Any
 corrected template, dependency, or release version is handed to the project
 owner for manual publication.
-
-Only explicitly adopted template exports enter the staged application model.
-When those exports create a required Capability with several compatible
-Providers and no exact choice, creation reports every candidate and leaves no
-target directory. The template author can put the intended choice in the named
-export, or the consumer can create without that export and author its own
-current-Project intent.
 
 Template dependencies must not match the effective `GOPRIVATE` setting. The
 CLI checks the complete direct and transitive graph, reports every selected
@@ -337,13 +328,10 @@ is removed after success, failure, timeout, or cancellation. Any failure rolls
 back the complete target. This is not the later public `plystra build`
 executable, `dist/` output, or selector-aware runtime startup contract.
 
-Only explicitly adopted template exports contribute configuration. The new
-root `plystra.yaml` records their exact module and export identities but never
-materializes their values. Creation composes and validates adopted values in
-memory against selected Plugin schemas without resolving an `env` or `file`
-reference, so neither Secret targets nor process values enter generated source
-or manifest provenance. The CLI does not guess an undeclared required field;
-that omission fails the transaction and leaves no target directory.
+The new root `plystra.yaml` contains ordinary new-Project declarations only,
+with no adoption identities or materialized template values. Secret-reference
+targets and resolved Secret values remain excluded from generated source and
+public manifest provenance.
 
 Use explicit opt-ins for Git and CI, and the explicit opt-out only when Agent
 guidance is not wanted:
@@ -978,11 +966,7 @@ with canonical null, so known schemas cannot hide malformed null payloads.
 The shared runtime loader applies that same check to selected current-project
 layers before replacements or removals can hide malformed lower values.
 
-For Project creation, the repeatable
-`--template <query> --adopt-export <name>` form writes those exact identities
-after validating that every named export exists in the resolved template.
-For an existing Project, edit the selected current-Project document and then
-run `plystra generate` with the same selector. This installed CLI inventories a
+The transitional composition reader still inventories a
 syntactically valid Resource-bearing export and its currently supported
 `interfaces` and `config` fragment while the export remains unadopted. Exact adoption fails before any
 portion activates because Resource composition is not yet supported; the CLI

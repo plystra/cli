@@ -3,6 +3,7 @@ package command_test
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -67,12 +68,11 @@ command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
 	wantUpdateUsage = "Usage:\n  plystra update <go-module-query>\n\nUpdates one selected ordinary Go Module dependency, regenerates, tidies, and\nvalidates the complete Project in one rollback boundary. Dependency Project\nconfiguration remains inert unless the selected current Project explicitly\nadopts a named export.\n\nMalformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project\ndiscovery or mutation.\nValid queries whose module path is absent from go.mod emit\nPLYSTRA_DEPENDENCY_UPDATE_NOT_SELECTED before mutation.\n"
 	wantUseUsage    = "Usage:\n  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Write the Implementation choice to plystra.<environment>.yaml.\n  --config <yaml-path>   Write the Implementation choice to one complete replacement configuration.\n\nAn exact compatible choice may be recorded before its Interface is required. It\nremains dormant without creating a root, binding, constructor, or generated\nInterface runtime until that Interface becomes reachable; invalid choices are\nrejected immediately.\n\nAn effective choice for an intrinsic kernel.* Interface emits\nPLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing\nimplementation-selection Source. Set that interfaces.use entry to {$remove: true} in the\nselected current-Project document to remove either a local or adopted-export choice.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root.\nInvalid or conflicting selections emit the stable\nPLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.\nA normalized Project-contained selected document that cannot be loaded reports\none span-less configuration-selection source; conflicting or unsafe selectors\nreport none.\n"
 	wantNewUsage    = `Usage:
-  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--adopt-export <name>]... [--plugin <name>] [--git] [--github-ci] [--interactive] [--no-agent-guidance] [--format human|json]
+  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--plugin <name>] [--git] [--github-ci] [--interactive] [--no-agent-guidance] [--format human|json]
 
 Options:
   --module <go-module-path> Set the Go Module path; defaults to the project name.
   --template <module-query> Create from one public, portable Plystra Project dependency.
-  --adopt-export <name>     Adopt one named export from the resolved template; repeatable.
   --plugin <name>           Create an initial root-level plugin.
   --git                     Initialize a Git repository; default is off.
   --github-ci               Include GitHub Actions CI; default is off.
@@ -88,11 +88,10 @@ JSON success nests one plystra.project-created/v1 payload with the Go Module
 path and relative created directory. Enter payload.directory and run
 plystra check independently before treating creation as complete.
 
-Without --adopt-export, the template's Project configuration remains inert.
-Every requested export must exist in the resolved template's root inventory.
+This installed CLI records --template as a dependency only. Persisted template
+ancestry and automatic configuration inheritance are not implemented yet.
 
-Invalid Project names, explicit Go Module paths, template queries, and template
-export adoptions emit
+Invalid Project names, explicit Go Module paths, and template queries emit
 PLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,
 and PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID.
 
@@ -535,6 +534,9 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "new duplicate template query", arguments: []string{"new", "app", "--template", "example.com/a", "--template", "example.com/b"}, wantError: wantNewInvalidInvocation},
 		{name: "new missing adopted export", arguments: []string{"new", "app", "--template", "example.com/a", "--adopt-export"}, wantError: wantNewInvalidInvocation},
 		{name: "new adopted export without template", arguments: []string{"new", "app", "--adopt-export", "defaults"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed adopted export", arguments: []string{"new", "app", "--template", "example.com/a", "--adopt-export", "defaults"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed adopted export equals form", arguments: []string{"new", "app", "--template", "example.com/a", "--adopt-export=defaults"}, wantError: wantNewInvalidInvocation},
+		{name: "new removed repeated adopted exports", arguments: []string{"new", "app", "--template", "example.com/a", "--adopt-export", "defaults", "--adopt-export", "runtime"}, wantError: wantNewInvalidInvocation},
 		{name: "new missing plugin name", arguments: []string{"new", "app", "--plugin"}, wantError: wantNewInvalidInvocation},
 		{name: "new removed library option", arguments: []string{"new", "app", "--library"}, wantError: wantNewInvalidInvocation},
 		{name: "new extra argument", arguments: []string{"new", "app", "extra"}, wantError: wantNewInvalidInvocation},
@@ -639,6 +641,32 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 				t.Fatalf("Run(%q) stderr = %q, want %q", test.arguments, stderr.String(), wantError)
 			}
 		})
+	}
+}
+
+func TestRunNewRejectsRemovedExportAdoptionWithoutMutation(t *testing.T) {
+	t.Parallel()
+	for _, form := range [][]string{
+		{"--adopt-export", "defaults"},
+		{"--adopt-export=defaults"},
+		{"--adopt-export", "defaults", "--adopt-export", "runtime"},
+	} {
+		for _, format := range []string{"human", "json"} {
+			t.Run(strings.Join(form, " ")+"/"+format, func(t *testing.T) {
+				t.Parallel()
+				parent := t.TempDir()
+				arguments := []string{"new", "app", "--template", "example.com/acme/platform@v1.2.3", "--interactive"}
+				arguments = append(arguments, form...)
+				arguments = append(arguments, "--format", format)
+				var stdout, stderr bytes.Buffer
+				if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, []string{"PATH=", "GOPROXY=off"}); exitCode != 2 {
+					t.Fatalf("RunIn = %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
+				}
+				if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+					t.Fatalf("removed option mutated parent: %v, %v", entries, err)
+				}
+			})
+		}
 	}
 }
 
