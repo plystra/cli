@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/newproject"
 )
 
@@ -178,6 +180,8 @@ func TestRunNewCommandClassifiesClosedFailureOutcomes(t *testing.T) {
 		targetID   string
 	}{
 		{name: "validation", err: fmtError(newproject.ErrInvalidProjectName), status: "validation_failed", exit: 3, code: diagnosticcode.ProjectCreateNameInvalid, targetKind: "argument", targetID: "project-name"},
+		{name: "template ancestry", err: fmt.Errorf("%w: %w: %w", newproject.ErrCreate, applicationresolve.ErrTemplate, applicationresolve.ErrTemplateCycle), status: "validation_failed", exit: 3, code: diagnosticcode.TemplateInvalid, targetKind: "argument", targetID: "template"},
+		{name: "template implementation ambiguity", err: fmt.Errorf("%w: %w", newproject.ErrCreate, interfaceresolution.ErrAmbiguousImplementation), status: "decision_required", exit: 4, code: diagnosticcode.ResolveMultipleImplementations, targetKind: "argument", targetID: "template"},
 		{name: "git unavailable", err: fmt.Errorf("%w: %w", newproject.ErrGitInitialization, newproject.ErrGitUnavailable), status: "prerequisite_missing", exit: 4, code: diagnosticcode.ProjectCreateGitUnavailable, targetKind: "tool", targetID: "git"},
 		{name: "cancelled", err: context.Canceled, status: "cancelled", exit: 5, code: diagnosticcode.ProjectCreateCancelled, targetKind: "command", targetID: "new"},
 		{name: "git failed", err: fmtError(newproject.ErrGitInitialization), status: "execution_failed", exit: 8, code: diagnosticcode.ProjectCreateGitInitializationFailed, targetKind: "tool", targetID: "git"},

@@ -15,7 +15,7 @@ func TestPublicConstructorEntryTombstones(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			root := writeImplementationSelectionCommandProject(t)
 			writeCommandConfigurableImplementation(t, root, "smtp", "email.send/v1", "email/send/v1", "Send")
-			inventory := "composition:\n  exports:\n    defaults:\n      config: {" + constructor + ": {endpoint: adopted.internal}}\n  adopt: [{module: example.com/acme/implementation-use, export: defaults}]\n"
+			inventory, _ := writeCommandTemplate(t, root, "constructor", "config: {"+constructor+": {endpoint: inherited.internal}}\n")
 			selection := "interfaces: {use: {email.send/v1: " + constructor + "}}\n"
 			removal := "config: {" + constructor + ": {$remove: true}}\n"
 			rootData := inventory + selection + removal

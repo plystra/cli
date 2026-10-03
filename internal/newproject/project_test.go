@@ -25,11 +25,13 @@ import (
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/connectgen"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulepath"
@@ -40,6 +42,7 @@ import (
 	"github.com/plystra/cli/internal/projectsmoke"
 	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/version"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 )
@@ -468,271 +471,195 @@ func TestPublicCommandDefaultsModulePathToProjectName(t *testing.T) {
 	}
 }
 
-func TestCreateFromTemplateDependencyResolvesWithoutAdoptionOrSourceMutation(t *testing.T) {
+func TestPublicCreateInheritsLinearTemplateBaselineWithoutCopyingOrSourceMutation(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/platform"
 	const templateVersion = "v1.2.3"
 	const templateQuery = templatePath + "@" + templateVersion
-	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
-		"template.go":      []byte("package platform\n\nconst Identity = \"template-source-only\"\n"),
-		"TEMPLATE_ONLY.md": []byte("This file must remain in the dependency source.\n"),
-		"plystra.yaml": []byte(`http:
-  expose:
-    kernel.health/v1:
-      transport: connect
-composition:
-  exports:
-    defaults:
-      interfaces:
-        require:
-          - email.send/v1
-          - kernel.info/v1
-        use:
-          email.send/v1: example.com/acme/platform/mailer.New
-        policies:
-          email.preview/v1:
-            timeout: 7s
-      config:
-        example.com/acme/platform/mailer.New:
-          sender: template-only
-`),
-		"plystra.production.yaml": []byte("interfaces:\n  require:\n    - missing.overlay/v1\n"),
-		"interfaces/email/send/v1/interface.go": []byte(`package sendv1
-
-import "context"
-
-//plystra:interface email.send/v1
-type Interface interface {
-	Send(context.Context, Request) (Response, error)
-}
-
-type Request struct{}
-type Response struct{}
-`),
-		"mailer/mailer.go": []byte(`package mailer
-
-import (
-	"context"
-
-	sendv1 "example.com/acme/platform/interfaces/email/send/v1"
-)
-
-type Service struct {
-	sender string
-}
-
-type Config struct {
-	Sender string ` + "`yaml:\"sender\" plystra:\"required,build-visible\"`" + `
-}
-
-//plystra:implements email.send/v1
-func New(configuration Config) (*Service, error) {
-	return &Service{sender: configuration.Sender}, nil
-}
-
-func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
-	return sendv1.Response{}, nil
-}
-
-var _ sendv1.Interface = (*Service)(nil)
-`),
+	const basePath = "example.com/acme/base"
+	writeProxyModule(t, proxy, basePath, "v1.0.0", map[string][]byte{
+		"plystra.yaml":            []byte("interfaces: {require: [email.send/v1], use: {email.send/v1: example.com/acme/platform/mailer.New}}\nconfig: {example.com/acme/platform/mailer.New: {sender: ancestor-only, region: ancestor-region}}\nhttp: {address: ancestor.invalid:9000, cors: {allowed_origins: [https://template.example], allow_credentials: true}}\ntimeouts: {startup: 1ns}\n"),
+		"plystra.production.yaml": []byte("interfaces: {require: [missing.overlay/v1]}\n"),
 	})
+	templateFiles := map[string][]byte{
+		"go.mod":                                []byte("module " + templatePath + "\n\ngo 1.26\n\nrequire " + basePath + " v1.0.0\n"),
+		"template.go":                           []byte("package platform\n\nconst Identity = \"template-source-only\"\n"),
+		"TEMPLATE_ONLY.md":                      []byte("This file must remain in the dependency source.\n"),
+		"plystra.yaml":                          []byte("template: " + basePath + "\ninterfaces: {policies: {email.send/v1: {timeout: 7s}}}\nconfig: {example.com/acme/platform/mailer.New: {sender: template-only}}\nhttp: {cors: {allow_credentials: {$remove: true}}}\n"),
+		"plystra.production.yaml":               []byte("interfaces: {require: [missing.overlay/v1]}\n"),
+		"interfaces/email/send/v1/interface.go": []byte("package sendv1\n\nimport \"context\"\n\n//plystra:interface email.send/v1\ntype Interface interface { Send(context.Context, Request) (Response, error) }\ntype Request struct{}\ntype Response struct{}\n"),
+		"mailer/mailer.go":                      []byte("package mailer\n\nimport (\n \"context\"\n \"errors\"\n contract \"example.com/acme/platform/interfaces/email/send/v1\"\n)\n\ntype Service struct{}\ntype Config struct {\n Sender string \x60yaml:\"sender\" plystra:\"required,build-visible\"\x60\n Region string \x60yaml:\"region\" plystra:\"required,build-visible\"\x60\n}\n\n//plystra:implements email.send/v1\nfunc New(config Config) (*Service, error) {\n if config.Sender == \"\" || config.Region == \"\" { return nil, errors.New(\"inherited configuration absent\") }\n return &Service{}, nil\n}\nfunc (*Service) Send(context.Context, contract.Request) (contract.Response, error) { return contract.Response{}, nil }\n"),
+	}
+	writeProxyModule(t, proxy, templatePath, templateVersion, templateFiles)
+	templateFiles["plystra.yaml"] = []byte("template: " + basePath + "\ninterfaces: {policies: {email.send/v1: {timeout: 9s}}}\nconfig: {example.com/acme/platform/mailer.New: {sender: updated-template, region: updated-region}}\nhttp: {cors: {allow_credentials: {$remove: true}}}\n")
+	writeProxyModule(t, proxy, templatePath, "v1.2.4", templateFiles)
 	environment := setEnvironmentValue(isolatedGoEnvironment(t, proxy), "GOPRIVATE", "corp.example.com")
-	if err := gocommand.Run(t.Context(), gocommand.Options{
-		Directory:   t.TempDir(),
-		Environment: environment,
-	}, "mod", "download", templateQuery); err != nil {
-		t.Fatalf("pre-download template: %v", err)
+	for _, query := range []string{templateQuery, basePath + "@v1.0.0"} {
+		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: t.TempDir(), Environment: environment}, "mod", "download", query); err != nil {
+			t.Fatalf("pre-download template: %v", err)
+		}
 	}
 	cacheRoot := moduleCacheRoot(t, environment, templatePath, templateVersion)
-	cacheBefore := snapshotTree(t, cacheRoot)
+	baseCacheRoot := moduleCacheRoot(t, environment, basePath, "v1.0.0")
+	cacheBefore, baseBefore := snapshotTree(t, cacheRoot), snapshotTree(t, baseCacheRoot)
 	proxyBefore := snapshotTree(t, proxy)
-
 	parent := t.TempDir()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	arguments := []string{
-		"new", "my-app",
-		"--module", "example.com/acme/my-app",
-		"--template", templateQuery,
-	}
-	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 0 {
-		t.Fatalf("RunIn exit code = %d, stderr = %q", exitCode, stderr.String())
+	var stdout, stderr bytes.Buffer
+	arguments := []string{"new", "my-app", "--module", "example.com/acme/my-app", "--template", templateQuery}
+	if code := command.RunIn(arguments, &stdout, &stderr, parent, environment); code != 0 {
+		t.Fatalf("new = %d, %q, %q", code, stdout.String(), stderr.String())
 	}
 	target := filepath.Join(parent, "my-app")
-	wantOutput := fmt.Sprintf(
-		"Created my-app from %s\nConfiguration scaffolded\nGenerated, checked, built, and locally verified\n\nNext:\n  cd my-app\n  plystra check\n",
-		templateQuery,
-	)
+	wantOutput := fmt.Sprintf("Created my-app from %s\nConfiguration scaffolded\nGenerated, checked, built, and locally verified\n\nNext:\n  cd my-app\n  plystra check\n", templateQuery)
 	if stdout.String() != wantOutput || stderr.Len() != 0 {
-		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+		t.Fatalf("new output = %q, %q", stdout.String(), stderr.String())
 	}
 	assertDirectRequirement(t, target, templatePath, templateVersion)
 	configuration, err := os.ReadFile(filepath.Join(target, "plystra.yaml"))
 	if err != nil {
-		t.Fatalf("ReadFile(plystra.yaml): %v", err)
+		t.Fatal(err)
 	}
 	assertDefaultTransportScaffold(t, configuration)
 	model, err := applicationmeta.Parse(configuration)
 	if err != nil {
-		t.Fatalf("Parse(plystra.yaml): %v", err)
+		t.Fatal(err)
 	}
-	exposures := model.HTTPExposures()
-	if len(exposures) != 0 {
-		t.Fatalf("dependency HTTP exposure entered created Project = %#v", exposures)
+	if model.Template() != templatePath || len(model.InterfaceRequirements()) != 0 || len(model.ImplementationChoices()) != 0 || len(model.InterfacePolicies()) != 0 || len(model.Configurations()) != 0 || len(model.HTTPExposures()) != 0 {
+		t.Fatalf("creation did not preserve root-only template metadata and local delta: %#v", model)
 	}
-	if transports := model.HTTPTransports(); transports != (applicationmeta.HTTPTransports{}) {
-		t.Fatalf("composed HTTP transports = %#v, want no transport without exposure", transports)
+	if bytes.Contains(configuration, []byte("template-only")) || bytes.Contains(configuration, []byte("missing.overlay")) {
+		t.Fatalf("creation materialized template or overlay values:\n%s", configuration)
 	}
-	if requirements := model.InterfaceRequirements(); len(requirements) != 0 {
-		t.Fatalf("template requirements were copied into current-project declarations = %#v", requirements)
-	}
-	if choices := model.ImplementationChoices(); len(choices) != 0 {
-		t.Fatalf("template Implementation choices were copied into current-project declarations = %#v", choices)
-	}
-	if policies := model.InterfacePolicies(); len(policies) != 0 {
-		t.Fatalf("template Interface policies were copied into current-project declarations = %#v", policies)
-	}
-	if configurations := model.Configurations(); len(configurations) != 0 {
-		t.Fatalf("template constructor configuration was copied into current-project declarations = %#v", configurations)
-	}
-	if adoptions := model.ExportAdoptions(); len(adoptions) != 0 {
-		t.Fatalf("creation materialized template export adoptions = %#v", adoptions)
-	}
-	if bytes.Contains(configuration, []byte("composition:")) || bytes.Contains(configuration, []byte("template-only")) {
-		t.Fatalf("creation materialized template export state:\n%s", configuration)
-	}
-	if bytes.Contains(configuration, []byte("missing.overlay/v1")) {
-		t.Fatalf("dependency environment overlay was inherited:\n%s", configuration)
-	}
-	for _, copied := range []string{"template.go", "TEMPLATE_ONLY.md", "plystra.production.yaml", "interfaces", "mailer", "go.work"} {
-		if _, err := os.Lstat(filepath.Join(target, copied)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("template source path %s was copied into the Project: %v", copied, err)
+	for _, path := range []string{"template.go", "TEMPLATE_ONLY.md", "plystra.production.yaml", "interfaces", "mailer", "go.work"} {
+		if _, err := os.Lstat(filepath.Join(target, path)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("copied template path %s: %v", path, err)
 		}
 	}
-	manifest, err := os.ReadFile(filepath.Join(target, "generated", "manifest.json"))
+	data, err := os.ReadFile(filepath.Join(target, "generated", "manifest.json"))
 	if err != nil {
-		t.Fatalf("ReadFile(generated/manifest.json): %v", err)
+		t.Fatal(err)
 	}
-	provenance, err := applicationgen.DecodeManifestProvenance(manifest)
+	provenance, err := applicationgen.DecodeManifestProvenance(data)
 	if err != nil {
-		t.Fatalf("DecodeManifestProvenance: %v", err)
+		t.Fatal(err)
+	}
+	bindings, constructors := provenance.InterfaceProvenance().Bindings(), provenance.InterfaceProvenance().Constructors()
+	if len(bindings) != 1 || len(constructors) != 1 || bindings[0].InterfaceID() != "email.send/v1" {
+		t.Fatalf("inherited baseline is not active: bindings %#v, constructors %#v", bindings, constructors)
 	}
 	interfaces := provenance.InterfaceProvenance().Interfaces()
-	if len(interfaces) != 1 || interfaces[0].ID() != "email.send/v1" || interfaces[0].ModulePath() != templatePath || interfaces[0].ModuleVersion() != templateVersion {
-		t.Fatalf("template Interface discovery provenance = %#v", interfaces)
-	}
-	if bindings, constructors := provenance.InterfaceProvenance().Bindings(), provenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
-		t.Fatalf("creation activated template exports = bindings %#v, constructors %#v", bindings, constructors)
+	if len(interfaces) != 1 || interfaces[0].ModulePath() != templatePath || interfaces[0].ModuleVersion() != templateVersion {
+		t.Fatalf("template discovery provenance = %#v", interfaces)
 	}
 	if len(provenance.DormantImplementationSelections()) != 0 || len(provenance.DormantConstructorConfigurations()) != 0 {
-		t.Fatalf("creation adopted dormant template intent = selections %#v, configurations %#v", provenance.DormantImplementationSelections(), provenance.DormantConstructorConfigurations())
+		t.Fatal("active baseline retained dormant membership")
 	}
+	assertValues := func(sender, region string) {
+		t.Helper()
+		resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: target, Environment: environment})
+		if err != nil {
+			t.Fatal(err)
+		}
+		symbol, err := constructorsymbol.Parse(templatePath + "/mailer.New")
+		if err != nil {
+			t.Fatal(err)
+		}
+		configured, found := resolved.Manifest().Configuration(symbol)
+		if !found {
+			t.Fatal("inherited configuration is absent")
+		}
+		var value struct {
+			Sender string
+			Region string
+		}
+		if err := yaml.Unmarshal(configured.YAML(), &value); err != nil {
+			t.Fatal(err)
+		}
+		if value.Sender != sender || value.Region != region {
+			t.Fatalf("effective configuration = %#v", value)
+		}
+		cors, exists := resolved.Manifest().HTTPCORS()
+		if !exists || cors.AllowCredentials || !reflect.DeepEqual(cors.AllowedOrigins, []string{"https://template.example"}) {
+			t.Fatalf("inherited CORS did not preserve nearest credential tombstone: %#v, %t", cors, exists)
+		}
+	}
+	assertValues("template-only", "ancestor-region")
 	beforeCheck := snapshotTree(t, target)
-	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start:       target,
-		Check:       true,
-		Environment: environment,
-	})
-	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
-		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
+	if code := command.RunIn([]string{"generate", "--check"}, &stdout, &stderr, target, environment); code != 0 {
+		t.Fatalf("check = %d, %s", code, stderr.String())
 	}
 	if !reflect.DeepEqual(beforeCheck, snapshotTree(t, target)) {
-		t.Fatal("template generation check mutated the created Project")
+		t.Fatal("read-only check changed Project")
 	}
+	var rootDocument yaml.Node
+	if err := yaml.Unmarshal(configuration, &rootDocument); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < len(rootDocument.Content[0].Content); index += 2 {
+		if rootDocument.Content[0].Content[index].Value == "config" {
+			var delta yaml.Node
+			if err := yaml.Unmarshal([]byte("{example.com/acme/platform/mailer.New: {sender: current-only}}"), &delta); err != nil {
+				t.Fatal(err)
+			}
+			rootDocument.Content[0].Content[index+1] = delta.Content[0]
+		}
+	}
+	delta, err := yaml.Marshal(&rootDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(target, "plystra.yaml"), delta)
+	for _, args := range [][]string{{"generate"}, {"update", templatePath + "@v1.2.4"}, {"generate", "--check"}, {"check"}} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := command.RunIn(args, &stdout, &stderr, target, environment); code != 0 {
+			t.Fatalf("%v = %d, %s, %s", args, code, stdout.String(), stderr.String())
+		}
+		if got, err := os.ReadFile(filepath.Join(target, "plystra.yaml")); err != nil || !bytes.Equal(got, delta) {
+			t.Fatalf("%v materialized authored delta: %s, %v", args, got, err)
+		}
+	}
+	assertValues("current-only", "updated-region")
+	assertDirectRequirement(t, target, templatePath, "v1.2.4")
 	assertPlystraGuidance(t, target, "example.com/acme/my-app")
 	assertNoTransactionFiles(t, parent)
-	if cacheAfter := snapshotTree(t, cacheRoot); !reflect.DeepEqual(cacheAfter, cacheBefore) {
-		t.Fatalf("template Module Cache source changed:\nbefore: %#v\nafter:  %#v", cacheBefore, cacheAfter)
+	if !reflect.DeepEqual(cacheBefore, snapshotTree(t, cacheRoot)) || !reflect.DeepEqual(baseBefore, snapshotTree(t, baseCacheRoot)) {
+		t.Fatal("creation or update changed template sources")
 	}
-	if proxyAfter := snapshotTree(t, proxy); !reflect.DeepEqual(proxyAfter, proxyBefore) {
-		t.Fatalf("Go Module proxy changed during template creation:\nbefore: %#v\nafter:  %#v", proxyBefore, proxyAfter)
-	}
-}
-
-func TestCreateKeepsTemplateResourceDataAndUnadoptedResourceExportInert(t *testing.T) {
-	proxy := createKernelProxy(t)
-	const templatePath = "example.com/acme/resource-platform"
-	const templateVersion = "v1.0.0"
-	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
-		"template.go": []byte("package platform\n"),
-		"plystra.yaml": []byte(`resources: invalid-consumer-root
-data: [invalid-consumer-root]
-composition:
-  exports:
-    resource-defaults:
-      interfaces:
-        require: [missing.unadopted/v1]
-      resources:
-        instances:
-          primary:
-            use: example.com/acme/resource-platform/postgres.New
-`),
-	})
-	environment := isolatedGoEnvironment(t, proxy)
-	result, err := newproject.Create(t.Context(), newproject.Options{
-		Parent:      t.TempDir(),
-		ProjectName: "my-app",
-		ModulePath:  "example.com/acme/my-app",
-		Template:    templatePath + "@" + templateVersion,
-		Environment: environment,
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	assertDirectRequirement(t, result.Path(), templatePath, templateVersion)
-	configuration, err := os.ReadFile(filepath.Join(result.Path(), "plystra.yaml"))
-	if err != nil {
-		t.Fatalf("ReadFile(plystra.yaml): %v", err)
-	}
-	manifest, err := applicationmeta.Parse(configuration)
-	if err != nil || len(manifest.ExportAdoptions()) != 0 || len(manifest.InterfaceRequirements()) != 0 {
-		t.Fatalf("created Project activated inert template state = manifest %#v, %v", manifest, err)
-	}
-	generatedManifest, err := os.ReadFile(filepath.Join(result.Path(), "generated", "manifest.json"))
-	if err != nil {
-		t.Fatalf("ReadFile(generated/manifest.json): %v", err)
-	}
-	provenance, err := applicationgen.DecodeManifestProvenance(generatedManifest)
-	if err != nil {
-		t.Fatalf("DecodeManifestProvenance: %v", err)
-	}
-	if bindings, constructors := provenance.InterfaceProvenance().Bindings(), provenance.InterfaceProvenance().Constructors(); len(bindings) != 0 || len(constructors) != 0 {
-		t.Fatalf("inert template state entered runtime membership = bindings %#v, constructors %#v", bindings, constructors)
-	}
-	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: result.Path(), Check: true, Environment: environment})
-	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
-		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
+	if !reflect.DeepEqual(proxyBefore, snapshotTree(t, proxy)) {
+		t.Fatal("creation or update changed Go Module proxy")
 	}
 }
 
-func TestCreateRejectsMalformedUnadoptedTemplateResourceExport(t *testing.T) {
-	proxy := createKernelProxy(t)
-	const templatePath = "example.com/acme/resource-platform"
-	const templateVersion = "v1.0.0"
-	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
-		"template.go":  []byte("package platform\n"),
-		"plystra.yaml": []byte("composition:\n  exports:\n    resource-defaults:\n      resources: [invalid-private-fragment]\n"),
-	})
-	parent := t.TempDir()
-	_, err := newproject.Create(t.Context(), newproject.Options{
-		Parent:      parent,
-		ProjectName: "my-app",
-		ModulePath:  "example.com/acme/my-app",
-		Template:    templatePath + "@" + templateVersion,
-		Environment: isolatedGoEnvironment(t, proxy),
-	})
-	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, applicationmeta.ErrInvalidManifest) ||
-		!strings.Contains(err.Error(), `composition.exports["resource-defaults"].resources`) || strings.Contains(err.Error(), "invalid-private-fragment") {
-		t.Fatalf("Create malformed unadopted export = %v", err)
+func TestCreateRejectsUnsupportedTemplateResourceAndDataBeforeInstallation(t *testing.T) {
+	for _, configuration := range []string{
+		"resources: {instances: {primary: {use: example.com/acme/resource-platform/postgres.New}}}\n",
+		"data: {members: {primary: {use: private.member}}}\n",
+	} {
+		t.Run(strings.Split(configuration, ":")[0], func(t *testing.T) {
+			proxy := createKernelProxy(t)
+			const templatePath = "example.com/acme/resource-platform"
+			writeProxyModule(t, proxy, templatePath, "v1.0.0", map[string][]byte{
+				"template.go":  []byte("package platform\n"),
+				"plystra.yaml": []byte(configuration),
+			})
+			parent := t.TempDir()
+			_, err := newproject.Create(t.Context(), newproject.Options{
+				Parent: parent, ProjectName: "my-app", ModulePath: "example.com/acme/my-app",
+				Template: templatePath + "@v1.0.0", Environment: isolatedGoEnvironment(t, proxy),
+			})
+			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || strings.Contains(err.Error(), "private.member") {
+				t.Fatalf("Create unsupported template = %v", err)
+			}
+			if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("target exists after unsupported template: %v", err)
+			}
+			assertNoTransactionFiles(t, parent)
+		})
 	}
-	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("target exists after invalid Resource export: %v", err)
-	}
-	assertNoTransactionFiles(t, parent)
 }
 
-func TestCreateIgnoresTemplateExposureWithoutGeneratingJavaScriptSDK(t *testing.T) {
+func TestCreateInheritsTemplateExposureAndQualifiesGeneratedJavaScriptSDK(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/javascript-platform"
 	const templateVersion = "v1.0.0"
@@ -772,8 +699,8 @@ func TestCreateIgnoresTemplateExposureWithoutGeneratingJavaScriptSDK(t *testing.
 	if err != nil || len(manifest.HTTPExposures()) != 0 {
 		t.Fatalf("created Project exposure = %#v, %v", manifest.HTTPExposures(), err)
 	}
-	if _, err := os.Lstat(filepath.Join(result.Path(), "generated", "sdk", "javascript")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("ignored dependency exposure generated a JavaScript SDK: %v", err)
+	if _, err := os.Lstat(filepath.Join(result.Path(), "generated", "sdk", "javascript")); err != nil {
+		t.Fatalf("inherited exposure did not generate a JavaScript SDK: %v", err)
 	}
 	if err := gocommand.Run(t.Context(), gocommand.Options{
 		Directory:   result.Path(),
@@ -781,8 +708,8 @@ func TestCreateIgnoresTemplateExposureWithoutGeneratingJavaScriptSDK(t *testing.
 	}, "list", "-mod=readonly", "./..."); err != nil {
 		t.Fatalf("created Project does not resolve with GOWORK=off: %v", err)
 	}
-	if _, err := os.Lstat(logPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("ignored dependency exposure invoked npm validation: %v", err)
+	if data, err := os.ReadFile(logPath); err != nil || !bytes.Contains(data, []byte("typecheck")) || !bytes.Contains(data, []byte("pack")) {
+		t.Fatalf("inherited exposure skipped npm qualification: %s, %v", data, err)
 	}
 }
 
@@ -811,19 +738,38 @@ func TestCreateRejectsTemplateWithoutRootProjectMarkerAndRollsBack(t *testing.T)
 	assertNoTransactionFiles(t, parent)
 }
 
-func TestPublicCommandIgnoresAmbiguousTemplateTopLevelProviderModel(t *testing.T) {
+func TestPublicCommandRejectsAmbiguousTemplateWithoutCandidateRanking(t *testing.T) {
 	proxy := createKernelProxy(t)
 	const templatePath = "example.com/acme/ambiguous-platform"
 	const templateVersion = "v1.0.0"
 	const templateQuery = templatePath + "@" + templateVersion
-	contract := []byte("id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n" + newProjectQuerySemanticsYAML)
+	const basePath = "example.com/acme/ambiguous-base"
+	contract := []byte(`package sendv1
+import "context"
+//plystra:interface email.send/v1
+type Interface interface { Send(context.Context, Request) (Response, error) }
+type Request struct{}
+type Response struct{}
+`)
+	implementation := []byte(`package sender
+import (
+	"context"
+	contract "example.com/acme/ambiguous-base/interfaces/email/send/v1"
+)
+type Service struct{}
+//plystra:implements email.send/v1
+func New() (*Service, error) { return &Service{}, nil }
+func (*Service) Send(context.Context, contract.Request) (contract.Response, error) { return contract.Response{}, nil }
+`)
+	writeProxyModule(t, proxy, basePath, templateVersion, map[string][]byte{
+		"plystra.yaml":                          []byte("interfaces: {require: [email.send/v1]}\n"),
+		"interfaces/email/send/v1/interface.go": contract,
+		"sender/service.go":                     implementation,
+	})
 	writeProxyModule(t, proxy, templatePath, templateVersion, map[string][]byte{
-		"template.go":        []byte("package platform\n"),
-		"plystra.yaml":       []byte("capabilities:\n  require:\n    - email.send/v1\n"),
-		"memory/plugin.yaml": []byte("id: acme.platform.memory\nprovides: [email.send/v1]\n"),
-		"memory/capabilities/email.send/v1/capability.yaml": contract,
-		"smtp/plugin.yaml": []byte("id: acme.platform.smtp\nprovides: [email.send/v1]\n"),
-		"smtp/capabilities/email.send/v1/capability.yaml": contract,
+		"go.mod":            []byte("module " + templatePath + "\n\ngo 1.26\nrequire " + basePath + " " + templateVersion + "\n"),
+		"plystra.yaml":      []byte("template: " + basePath + "\n"),
+		"sender/service.go": implementation,
 	})
 	environment := isolatedGoEnvironment(t, proxy)
 	parent := t.TempDir()
@@ -836,29 +782,65 @@ func TestPublicCommandIgnoresAmbiguousTemplateTopLevelProviderModel(t *testing.T
 		"--no-agent-guidance",
 	}
 
-	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 0 {
-		t.Fatalf("RunIn exit code = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
+	if exitCode := command.RunIn(arguments, &stdout, &stderr, parent, environment); exitCode != 4 || stdout.Len() != 0 {
+		t.Fatalf("ambiguous template = %d, %q, %q", exitCode, stdout.String(), stderr.String())
 	}
-	target := filepath.Join(parent, "my-app")
-	wantOutput := fmt.Sprintf(
-		"Created my-app from %s\nConfiguration scaffolded\nGenerated, checked, built, and locally verified\n\nNext:\n  cd my-app\n  plystra check\n",
-		templateQuery,
-	)
-	if stdout.String() != wantOutput || stderr.Len() != 0 {
-		t.Fatalf("RunIn output = stdout %q, stderr %q", stdout.String(), stderr.String())
+	if !strings.Contains(stderr.String(), diagnosticcode.ResolveMultipleImplementations) || !strings.Contains(stderr.String(), "ambiguous") || !strings.Contains(stderr.String(), basePath+"/sender.New") || !strings.Contains(stderr.String(), templatePath+"/sender.New") {
+		t.Fatalf("template candidates were not reported: %s", stderr.String())
 	}
-	assertDirectRequirement(t, target, templatePath, templateVersion)
-	configuration, err := os.ReadFile(filepath.Join(target, "plystra.yaml"))
-	if err != nil {
-		t.Fatalf("ReadFile(plystra.yaml): %v", err)
+	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target exists after ambiguous template: %v", err)
 	}
-	manifest, err := applicationmeta.Parse(configuration)
-	if err != nil || len(manifest.InterfaceRequirements()) != 0 || len(manifest.ExportAdoptions()) != 0 {
-		t.Fatalf("created current-project configuration activated template top-level intent = %#v, %v", manifest.InterfaceRequirements(), err)
-	}
-	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: target, Check: true, Environment: environment})
-	if err != nil || !checked.Report().Clean() || checked.ConfigurationChanged() {
-		t.Fatalf("template generation check = changes %#v, configuration changed %t, %v", checked.Report().Changes(), checked.ConfigurationChanged(), err)
+	assertNoTransactionFiles(t, parent)
+}
+
+func TestPublicCommandTemplateFailureReportsJSONSourcesAndRollsBack(t *testing.T) {
+	for _, relationship := range []string{"[private-value]", "example.com/absent"} {
+		t.Run(relationship, func(t *testing.T) {
+			proxy := createKernelProxy(t)
+			const templatePath = "example.com/acme/invalid-ancestry"
+			writeProxyModule(t, proxy, templatePath, "v1.0.0", map[string][]byte{
+				"template.go":  []byte("package template\n"),
+				"plystra.yaml": []byte("# invalid relationship\n\ntemplate: " + relationship + "\n"),
+			})
+			parent := t.TempDir()
+			var stdout, stderr bytes.Buffer
+			code := command.RunIn([]string{"new", "my-app", "--template", templatePath + "@v1.0.0", "--format", "json"}, &stdout, &stderr, parent, isolatedGoEnvironment(t, proxy))
+			if code != 3 || stderr.Len() != 0 || strings.Contains(stdout.String(), "private-value") || strings.Contains(stdout.String(), parent) {
+				t.Fatalf("new invalid ancestry = %d, %q, %q", code, stdout.String(), stderr.String())
+			}
+			var result struct {
+				Status      string `json:"status"`
+				Diagnostics []struct {
+					Code      string `json:"code"`
+					Locations []struct {
+						Module string `json:"module"`
+						Path   string `json:"path"`
+						Kind   string `json:"kind"`
+						Line   int    `json:"line"`
+						Column int    `json:"column"`
+					} `json:"locations"`
+				} `json:"diagnostics"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != "validation_failed" || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diagnosticcode.TemplateInvalid {
+				t.Fatalf("new ancestry result = %#v", result)
+			}
+			found := false
+			for _, source := range result.Diagnostics[0].Locations {
+				if source.Module == templatePath && source.Path == "plystra.yaml" && source.Kind == "configuration-declaration" && source.Line == 3 && source.Column == 1 {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("new ancestry diagnostic lost exact template source: %#v", result)
+			}
+			if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+				t.Fatalf("rejected ancestry left a staged Project: %v, %v", entries, err)
+			}
+		})
 	}
 }
 
@@ -1369,7 +1351,8 @@ func assertReadmeUsesAvailableCommands(t *testing.T, readme []byte) {
 		[]byte("`PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID` identifies a safe declared field"),
 		[]byte("`PLYSTRA_CONFIGURATION_INVALID` reports a malformed selected"),
 		[]byte("`PLYSTRA_ENVIRONMENT_OVERLAY_INVALID` reports the selected"),
-		[]byte("This installed CLI provides dependency-only template creation"),
+		[]byte("Creation persists the exact root template module path"),
+		[]byte("Remove http.cors or either of its fields with {$remove: true}; null is invalid"),
 		[]byte("`PLYSTRA_GENERATED_DRIFT` reports every stale, missing, or manually modified"),
 		[]byte("`PLYSTRA_GENERATED_MANIFEST_INVALID` reports `generated/.plystra-manifest.json`"),
 		[]byte("`PLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID` reports `generated/proto/wire-map.json`"),

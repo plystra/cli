@@ -42,36 +42,36 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
 		},
 		{
-			name: "reserved-removal-in-current-export",
+			name: "malformed-current-template-relationship",
 			setup: func(t *testing.T, parent string) string {
 				applicationRoot := filepath.Join(parent, "application")
 				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), "module example.com/application\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: {exports: {defaults: {config: {example.com/application/service.New: {settings: {private-key: {$remove: true}}}}}}}\n")
+				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: [private-value]\n")
+				return applicationRoot
+			},
+			wantSource: "Source: example.com/application:plystra.yaml:1:1 (configuration-declaration)",
+		},
+		{
+			name: "malformed-template-ancestor-relationship",
+			setup: func(t *testing.T, parent string) string {
+				return writeManifestDiagnosticDependencyProject(t, parent, "template: {private-key: private-value}\n", false)
+			},
+			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (configuration-declaration)",
+		},
+		{
+			name: "unsupported-current-resource",
+			setup: func(t *testing.T, parent string) string {
+				applicationRoot := filepath.Join(parent, "application")
+				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), "module example.com/application\n\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "resources: {instances: {database: {config: {private-key: 1, private-key: 2}}}}\n")
 				return applicationRoot
 			},
 			wantSource: "Source: example.com/application:plystra.yaml:1:1 (project-marker)",
 		},
 		{
-			name: "reserved-removal-in-unadopted-dependency-export",
+			name: "unsupported-template-resource",
 			setup: func(t *testing.T, parent string) string {
-				return writeManifestDiagnosticDependencyProject(t, parent, "composition: {exports: {defaults: {resources: {instances: {private-key: {$remove: true}}}}}}\n", false)
-			},
-			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
-		},
-		{
-			name: "malformed-resource-in-current-export",
-			setup: func(t *testing.T, parent string) string {
-				applicationRoot := filepath.Join(parent, "application")
-				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), "module example.com/application\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: {exports: {defaults: {resources: {instances: {database: {config: {private-key: 1, private-key: 2}}}}}}}\n")
-				return applicationRoot
-			},
-			wantSource: "Source: example.com/application:plystra.yaml:1:1 (project-marker)",
-		},
-		{
-			name: "malformed-resource-in-unadopted-dependency-export",
-			setup: func(t *testing.T, parent string) string {
-				return writeManifestDiagnosticDependencyProject(t, parent, "composition: {exports: {defaults: {resources: {bind: {private-key: private-value}}}}}\n", false)
+				return writeManifestDiagnosticDependencyProject(t, parent, "resources: {bind: {private-key: private-value}}\n", false)
 			},
 			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
 		},
@@ -101,7 +101,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 		"{private-key: 1, private-key: 2}", "[{private-key: 1, private-key: 2}]",
 		"{1: private-value}", "[{1: private-value}]",
 	} {
-		manifest := "composition: {exports: {defaults: {resources: {instances: {database: {config: {value: " + value + "}}}}}}}\n"
+		manifest := "resources: {instances: {database: {config: {value: " + value + "}}}}\n"
 		tests = append(tests, manifestCase{
 			name: "invalid-current-resource-value/" + value,
 			setup: func(t *testing.T, parent string) string {
@@ -134,7 +134,11 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 					if !strings.Contains(stderr, "\n\n"+test.wantSource+"\n\nRecovery:\n") || strings.Count(stderr, "Source: ") != 1 {
 						t.Fatalf("%v source output = %q, want exactly %q", command.arguments, stderr, test.wantSource)
 					}
-					if !strings.HasSuffix(stderr, "Diagnostic: "+diagnosticcode.ProjectManifestInvalid+"\n") || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+					code := diagnosticcode.ProjectManifestInvalid
+					if strings.Contains(test.name, "relationship") {
+						code = diagnosticcode.TemplateInvalid
+					}
+					if !strings.HasSuffix(stderr, "Diagnostic: "+code+"\n") || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
 						t.Fatalf("%v diagnostic envelope = %q", command.arguments, stderr)
 					}
 					for _, privatePath := range []string{parent, filepath.ToSlash(parent), applicationRoot, filepath.ToSlash(applicationRoot), "private-key", "private-value"} {
@@ -158,7 +162,7 @@ func writeManifestDiagnosticDependencyProject(t *testing.T, parent, manifest str
 	applicationRoot := filepath.Join(parent, "application")
 	dependencyRoot := filepath.Join(parent, "dependency")
 	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), "module example.com/application\n\ngo 1.26\n\nrequire example.com/dependency v0.0.0\n\nreplace example.com/dependency => ../dependency\n")
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/dependency\n")
 	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/dependency\n\ngo 1.26\n")
 	if unsafe {
 		writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml", "sentinel.txt"), "preserve\n")

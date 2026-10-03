@@ -88,8 +88,8 @@ func inspectConfigurationGraph(evidence resolutionevidence.Evidence) (diagnostic
 				return diagnosticschema.GraphResult{}, fmt.Errorf("configuration field %s: %w", field.Path(), err)
 			}
 			for moduleNode, sources := range groups {
-				if contribution.Owner() == resolutionevidence.ConfigurationOwnerAdopted {
-					edges.add("composes-configuration", moduleNode, selectionNode, string(resolutionevidence.ConfigurationOwnerAdopted), sources)
+				if contribution.Owner() == resolutionevidence.ConfigurationOwnerTemplate {
+					edges.add("composes-configuration", moduleNode, selectionNode, string(resolutionevidence.ConfigurationOwnerTemplate), sources)
 				}
 				edges.add("contributes-configuration", moduleNode, fieldNode, string(contribution.Owner()), sources)
 				if !contribution.Effective() {
@@ -105,16 +105,12 @@ func inspectConfigurationGraph(evidence resolutionevidence.Evidence) (diagnostic
 		if field.Effective() {
 			continue
 		}
-		suppressor, found := suppressingConfigurationField(evidence, field.Path())
+		suppressor, contribution, found := suppressingConfigurationContribution(evidence, field.Path())
 		if !found {
-			return diagnosticschema.GraphResult{}, fmt.Errorf("suppressed configuration field %s omits its effective ancestor", field.Path())
-		}
-		contribution, found := effectiveConfigurationContribution(suppressor)
-		if !found {
-			return diagnosticschema.GraphResult{}, fmt.Errorf("suppressing configuration field %s omits its winning contribution", suppressor.Path())
+			return diagnosticschema.GraphResult{}, fmt.Errorf("suppressed configuration field %s omits its causal ancestor contribution", field.Path())
 		}
 		reason := "ancestor-replacement"
-		if suppressor.Removed() {
+		if contribution.Removed() {
 			reason = "ancestor-removal"
 		}
 		sources := make([]diagnosticjson.Source, 0, len(contribution.Sources()))
@@ -151,7 +147,7 @@ func configurationGraphSelectionLabel(selection resolutionevidence.Configuration
 	case generation.ConfigurationModeEnvironment:
 		return fmt.Sprintf("environment %q: %s over %s", selection.Environment(), selection.SelectedPath(), selection.RootPath())
 	case generation.ConfigurationModeExplicit:
-		return fmt.Sprintf("explicit-config: %s; %s is Project marker and export inventory only", selection.SelectedPath(), selection.RootPath())
+		return fmt.Sprintf("explicit-config: %s; %s supplies Project marker and template relationship only", selection.SelectedPath(), selection.RootPath())
 	default:
 		return string(selection.Mode())
 	}
@@ -212,6 +208,9 @@ func writeHumanConfigurationGraph(writer io.Writer, result diagnosticschema.Grap
 				contributionState,
 				contribution.Summary(),
 			)
+			if contribution.Owner() == resolutionevidence.ConfigurationOwnerTemplate {
+				fmt.Fprintf(&content, "    Template order: %d (oldest to nearest)\n", contribution.TemplateOrder())
+			}
 			for _, source := range contribution.Sources() {
 				fmt.Fprintf(&content, "    Source: %s\n", explainSourceSummary(explainSource(source)))
 			}
@@ -233,13 +232,13 @@ func humanConfigurationFieldState(evidence resolutionevidence.Evidence, field re
 		}
 		return fmt.Sprintf("effective %s from %s", field.Summary(), field.Owner()), nil
 	}
-	suppressor, found := suppressingConfigurationField(evidence, field.Path())
+	suppressor, contribution, found := suppressingConfigurationContribution(evidence, field.Path())
 	if !found {
-		return "", fmt.Errorf("suppressed configuration field %s omits its effective ancestor", field.Path())
+		return "", fmt.Errorf("suppressed configuration field %s omits its causal ancestor contribution", field.Path())
 	}
 	reason := "ancestor replacement"
-	if suppressor.Removed() {
+	if contribution.Removed() {
 		reason = "ancestor removal"
 	}
-	return fmt.Sprintf("suppressed by %s at %s through %s", suppressor.Owner(), suppressor.Path(), reason), nil
+	return fmt.Sprintf("suppressed by %s at %s through %s", contribution.Owner(), suppressor.Path(), reason), nil
 }
