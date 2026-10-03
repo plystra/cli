@@ -607,6 +607,15 @@ All active objects and build-visible values are checked before any Secret is
 resolved or constructor runs. Binding invokes no custom YAML unmarshalling.
 Defaults come from the compiled Go type; private values, defaults, and reference
 targets stay out of generated source. Dormant objects create no runtime binding.
+The private baseline carries a discovery-derived inventory of every visible
+constructor's supported Interfaces and configuration schema. Startup checks
+dormant selection ownership, typed composition, defaults, required fields, and
+Secret-reference syntax against that inventory, then discards dormant objects
+without resolving their Secrets or importing or calling their constructors.
+An absent dormant object needs no required values. Dormant-only value or choice
+edits preserve executable artifacts; schema-inventory changes require a matching
+regenerated baseline and rebuilt binary. Regenerate older baseline/binary pairs
+to include this validation inventory.
 Startup rejects invalid recompiled field metadata, including duplicate tags,
 metadata on ignored or unexported fields, and invalid defaults hidden by runtime
 overrides. Regenerate and rebuild after correcting the authored Go declaration.

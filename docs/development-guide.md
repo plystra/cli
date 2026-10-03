@@ -1868,10 +1868,18 @@ Startup checks the complete tag syntax and policy of the recompiled Config,
 including ignored and unexported fields. An authored runtime value cannot hide
 an invalid compiled default. These failures reject the schema before Secret
 lookup or constructor entry with redacted regeneration and rebuild guidance.
-Dormant objects create no runtime binding. Active configurable constructors
-receive adopted exports below the selected current-project layers. Dormant
-runtime validation, Resource configuration, and complete frozen-model
-compatibility remain incomplete, so this path does not complete Gate 9.
+Dormant objects create no runtime binding. The private baseline records every
+visible constructor's discovery-validated Interface membership and Config schema,
+independently of current dormant choices. Startup checks ownership and composes
+effective dormant objects through those schemas, applies private defaults and
+requiredness, then discards them without Secret resolution or constructor entry.
+Absent dormant objects do not require values. Dormant-only choice and value
+changes preserve executable output; changing the validation inventory requires
+regeneration and rebuilding. Regenerate older baseline/binary pairs to include
+this inventory. Active configurable constructors receive adopted exports below
+the selected current-project layers. Resource configuration and complete
+frozen-model compatibility remain incomplete, so this path does not complete
+Gate 9.
 
 The first command loads only root `plystra.yaml`. The second requires
 `plystra.production.yaml` and applies it as one typed sparse overlay above the

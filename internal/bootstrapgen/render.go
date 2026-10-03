@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/transportprovenance"
@@ -29,6 +30,7 @@ var (
 // default is embedded, while the application-specific value remains in the
 // runtime document and never enters generated source.
 type Options struct {
+	ConstructorInventory          []implementationinventory.Implementation
 	DependencyExports             []runtimebaseline.Export
 	ModulePath                    string
 	DefaultStartupTimeout         time.Duration

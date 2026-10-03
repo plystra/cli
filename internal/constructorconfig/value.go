@@ -2,6 +2,7 @@
 package constructorconfig
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -700,6 +701,62 @@ func DefaultsJSON(s Schema) ([]byte, error) {
 	}
 	visit(s, "")
 	return json.Marshal(defaults)
+}
+
+// RestoreDefaults binds one canonical private default inventory to a detached
+// discovery-derived schema. It performs no Go loading or Secret resolution.
+func RestoreDefaults(s *Schema, data []byte) error {
+	var defaults map[string]json.RawMessage
+	if s == nil || json.Unmarshal(data, &defaults) != nil || defaults == nil {
+		return invalid("config", "invalid private defaults")
+	}
+	canonical, err := json.Marshal(defaults)
+	if err != nil || !bytes.Equal(canonical, data) {
+		return invalid("config", "invalid private defaults")
+	}
+	count := 0
+	var visit func(*Schema, string, int) error
+	visit = func(schema *Schema, path string, depth int) error {
+		count++
+		if depth > 64 || count > 65536 {
+			return invalid("config", "configuration exceeds traversal bounds")
+		}
+		if schema.Element != nil {
+			if err := visit(schema.Element, path+"/*", depth+1); err != nil {
+				return err
+			}
+		}
+		for i := range schema.Fields {
+			field := &schema.Fields[i]
+			key := path + "/" + strings.ReplaceAll(strings.ReplaceAll(field.Name, "~", "~0"), "/", "~1")
+			if field.HasDefault {
+				value, exists := defaults[key]
+				if !exists || bytes.Equal(value, []byte("null")) {
+					return invalid("config", "invalid private defaults")
+				}
+				node, err := defaultNode(field.Value, value)
+				if err != nil {
+					return invalid("config", "invalid private defaults")
+				}
+				if _, err := Normalize(field.Value, node); err != nil {
+					return invalid("config", "invalid private defaults")
+				}
+				field.Default = append(json.RawMessage(nil), value...)
+				delete(defaults, key)
+			}
+			if err := visit(&field.Value, key, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := visit(s, "", 0); err != nil {
+		return err
+	}
+	if len(defaults) != 0 {
+		return invalid("config", "invalid private defaults")
+	}
+	return nil
 }
 
 func matchesType(s Schema, t reflect.Type) bool {

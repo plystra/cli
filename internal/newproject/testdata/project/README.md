@@ -6,6 +6,8 @@ Local plugins belong in direct child directories containing `plugin.yaml`. Do no
 
 Generation and scaffolding create ignored dist/runtime-baseline.json with native owner-only permissions. Supply --runtime-baseline dist/runtime-baseline.json when starting the generated binary, and preserve private permissions when deploying this file with the matching binary. Missing, malformed, publicly readable, or mismatched baselines fail before application work. Refresh the private baseline with plystra generate after compiled default edits and rebuild authored Go. Startup composes dependency exports from this baseline and self-adopted exports from the configuration root, including in replacement mode. No source tree or Module Cache is a runtime input. Resource configuration and complete frozen-model compatibility remain unfinished.
 
+The baseline's validation inventory covers every visible constructor independently of current selection. Startup validates dormant choices and effective Config objects, including composition, defaults, requiredness, and Secret-reference syntax, then discards dormant objects without resolving Secrets or constructing values. Dormant-only choice and value edits preserve executable output. Regenerate the baseline and rebuild when its validation schema inventory changes; regenerate older pairs to include this inventory.
+
 ## Development
 
 ```powershell

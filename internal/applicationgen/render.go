@@ -31,6 +31,7 @@ import (
 	"github.com/plystra/cli/internal/httpgen"
 	"github.com/plystra/cli/internal/implementationadaptergen"
 	"github.com/plystra/cli/internal/implementationassemblygen"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfacecompatibility"
 	"github.com/plystra/cli/internal/interfaceproxygen"
 	"github.com/plystra/cli/internal/invocationgen"
@@ -66,6 +67,7 @@ var (
 
 // Options carries application-owned generated package identities.
 type Options struct {
+	ConstructorInventory      []implementationinventory.Implementation
 	DependencyExports         []runtimebaseline.Export
 	ModulePath                string
 	JavaScriptPackage         string
@@ -382,6 +384,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (R
 		constructorOrder[i] = constructor.Symbol.String()
 	}
 	bootstrapOptions := bootstrapgen.Options{
+		ConstructorInventory:          options.ConstructorInventory,
 		DependencyExports:             options.DependencyExports,
 		ModulePath:                    options.ModulePath,
 		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,

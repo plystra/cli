@@ -731,6 +731,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		return preparedGeneration{}, err
 	}
 	output, err := applicationgen.Render(applicationgen.Options{
+		ConstructorInventory:      resolved.Implementations().Implementations(),
 		DependencyExports:         dependencyExports,
 		ModulePath:                resolved.Module().ModulePath(),
 		JavaScriptPackage:         javaScriptPackage,

@@ -821,7 +821,7 @@ import (
 
 const bootstrapRemoteConfiguration = "  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n"
 
-const validRuntimeDocument = "composition:\n  exports: {ignored: {}}\n  adopt: []\nconfig:\n" + bootstrapRemoteConfiguration
+const validRuntimeDocument = "composition:\n  adopt: []\nconfig:\n" + bootstrapRemoteConfiguration
 
 func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
@@ -940,7 +940,7 @@ func TestApplicationSelectsOneNamedEnvironment(t *testing.T) {
 
 func TestApplicationSelectsCompleteReplacement(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
-	writeRuntimeDocument(t, "config: [root-is-intentionally-invalid\n")
+	writeRuntimeDocument(t, "composition: {exports: {ignored: {}}}\nconfig: [root-is-intentionally-invalid]\n")
 	replacementPath := filepath.Join("deploy", "customer.yaml")
 	writeReplacementDocument(t, replacementPath, "config:\n  acme.local-service:\n    label: replacement-label\n  zeta.remote-store:\n    endpoint: replacement-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n")
 	writeReplacementDocument(t, filepath.Join("deploy", "ignored.yaml"), "not: [valid\n")
@@ -1001,7 +1001,7 @@ interfaces:
   require:
     add: [records.write/v1]
     remove: [records.read/v1]
-  use: {records.read/v1: example.com/assemblydependency/remote-store.New}
+  use: {records.read/v1: {$remove: true}}
 ` + "`" + `
 	writeRuntimeDocument(t, root)
 	writeEnvironmentDocument(t, "production", overlay)
@@ -1038,7 +1038,7 @@ interfaces:
 	if strings.Join(effective.HTTP.CORS.AllowedOrigins, ",") != "https://production.example" || len(effective.HTTP.Expose) != 1 || effective.HTTP.Expose["kernel.info/v1"].Transport != "connect" {
 		t.Fatalf("HTTP exposure composition = %#v", effective.HTTP)
 	}
-	if effective.Timeouts.Startup != "45s" || strings.Join(effective.Interfaces.Require, ",") != "records.write/v1" || effective.Interfaces.Use["records.read/v1"] != "example.com/assemblydependency/remote-store.New" {
+	if effective.Timeouts.Startup != "45s" || strings.Join(effective.Interfaces.Require, ",") != "records.write/v1" || len(effective.Interfaces.Use) != 0 {
 		t.Fatalf("application composition = %#v, %#v", effective.Timeouts, effective.Interfaces)
 	}
 }
@@ -1103,7 +1103,7 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 			name: "export adoption",
 			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}},
 			prepare: func(t *testing.T) {
-				writeRuntimeDocument(t, "composition: {adopt: [{module: example.com/platform, export: defaults}]}\nconfig:\n"+bootstrapRemoteConfiguration)
+				writeRuntimeDocument(t, "composition: {exports: {defaults: {interfaces: {require: [kernel.health/v1]}}}, adopt: [{module: example.com/assemblyapp, export: defaults}]}\nconfig:\n"+bootstrapRemoteConfiguration)
 			},
 		},
 		{
@@ -1364,7 +1364,7 @@ func TestRuntimeAdoptionCompleteSets(t *testing.T) {
 		{"complete over removal", "{remove: ["+adoption+"]}", "["+adoption+"]", "defaults"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			writeRuntimeDocument(t, "composition: {adopt: "+test.root+"}\nconfig:\n"+bootstrapRemoteConfiguration)
+			writeRuntimeDocument(t, "composition: {exports: {defaults: {}, other: {}}, adopt: "+test.root+"}\nconfig:\n"+bootstrapRemoteConfiguration)
 			writeEnvironmentDocument(t, "adoptions", "composition: {adopt: "+test.overlay+"}\n")
 			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "adoptions"}}
 			document, err := loadRuntimeDocument(options)
@@ -1389,15 +1389,8 @@ func TestRuntimeAdoptionCompleteSets(t *testing.T) {
 			localservice.Reset()
 			remotestore.Reset()
 			application, err := New(context.Background(), options)
-			if test.want != "" {
-				if application != nil || !errors.Is(err, ErrRuntimeCompatibility) {
-					t.Fatalf("changed adoptions accepted: %#v, %v", application, err)
-				}
-				assertNoBootstrapConstructorCalls(t)
-				return
-			}
 			if err != nil || application == nil {
-				t.Fatalf("New after clearing lower adoptions = %#v, %v", application, err)
+				t.Fatalf("New with equivalent empty adoptions = %#v, %v", application, err)
 			}
 			if err := application.Start(context.Background()); err != nil {
 				t.Fatal(err)

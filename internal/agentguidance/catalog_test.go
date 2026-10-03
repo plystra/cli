@@ -159,6 +159,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Resource export syntax is checked even without adoption",
 		"Startup repeats these checks for private dependency inventories and live root exports",
 		"Resource adoption remains unsupported",
+		"Startup validates effective dormant objects without activating constructors or resolving their Secrets",
 	} {
 		if !bytes.Contains(configuration, []byte(phrase)) {
 			t.Fatalf("configuration guidance omits %q:\n%s", phrase, configuration)

@@ -46,7 +46,11 @@ func composeRuntimeAdoptedDocument(baseline runtimebaseline.Document, rootData, 
 	}
 	interfaces, err := composeRuntimeExportInterfaces(peers, lower["interfaces"], upper["interfaces"])
 	if err != nil { return nil, runtimeAdoptionError(err, sources) }
-	configuration, err := composeRuntimeExportConfigurations(peers, lower["config"], upper["config"])
+	inventory, err := runtimeConstructorInventory(baseline)
+	if err != nil { return nil, err }
+	owners, err := runtimeConfigurationOwners(interfaces, inventory)
+	if err != nil { return nil, err }
+	configuration, err := composeRuntimeExportConfigurations(peers, lower["config"], upper["config"], inventory, owners)
 	if err != nil { return nil, runtimeAdoptionError(err, sources) }
 	// The remaining fields are owned exclusively by the current Project.
 	delete(lower, "interfaces"); delete(upper, "interfaces")
@@ -244,7 +248,32 @@ func composeRuntimeExportEntries(path string, peers []*yaml.Node, lowerNode, upp
 	return result, err
 }
 
-func composeRuntimeExportConfigurations(peers []map[string]*yaml.Node, lowerNode, upperNode *yaml.Node) (*yaml.Node, error) {
+func runtimeConfigurationOwners(interfaces *yaml.Node, inventory map[string]runtimeConstructorInventoryEntry) (map[string]bool, error) {
+	fields, err := runtimeOptionalMapping(interfaces, "interfaces", nil)
+	if err != nil { return nil, err }
+	uses, err := runtimeOptionalMapping(fields["use"], "interfaces.use", nil)
+	if err != nil { return nil, err }
+	owners := make(map[string]bool)
+	ids := make([]string, 0, len(uses))
+	for id := range uses { ids = append(ids, id) }
+	sort.Strings(ids)
+	for _, id := range ids {
+		// Intrinsic choices are rejected by executable compatibility and own no Config.
+		if strings.HasPrefix(id, "kernel.") { continue }
+		symbol := uses[id].Value
+		if _, active := runtimeExecutableInterfaceChoices[id]; !active {
+			entry, exists := inventory[symbol]
+			index := sort.SearchStrings(entry.Interfaces, id)
+			if !exists || index == len(entry.Interfaces) || entry.Interfaces[index] != id {
+				return nil, runtimeConfigurationError("interfaces.use[%q] does not match the constructor inventory", id)
+			}
+		}
+		owners[symbol] = true
+	}
+	return owners, nil
+}
+
+func composeRuntimeExportConfigurations(peers []map[string]*yaml.Node, lowerNode, upperNode *yaml.Node, inventory map[string]runtimeConstructorInventoryEntry, owners map[string]bool) (*yaml.Node, error) {
 	lower, err := runtimeOptionalMapping(lowerNode, "config", nil)
 	if err != nil { return nil, err }
 	upper, err := runtimeOptionalMapping(upperNode, "config", nil)
@@ -266,14 +295,20 @@ func composeRuntimeExportConfigurations(peers []map[string]*yaml.Node, lowerNode
 	for _, symbol := range ordered {
 		schema, typed, err := runtimeConstructorSchema(symbol)
 		if err != nil { return nil, err }
-		if typed {
+		entry, visible := inventory[symbol]
+		if !typed && entry.Schema != nil { schema = *entry.Schema }
+		if typed || entry.Schema != nil {
 			node, err := constructorconfig.ComposeAdopted(schema, inherited[symbol], lower[symbol], upper[symbol])
 			if err != nil { return nil, fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, symbol, err) }
-			if node != nil { result[symbol] = node }
+			if typed {
+				if node != nil { result[symbol] = node }
+			} else if node != nil {
+				if !owners[symbol] { return nil, runtimeConfigurationError("config for %s has no effective constructor owner", symbol) }
+				if _, err := constructorconfig.Normalize(schema, node); err != nil { return nil, fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, symbol, err) }
+			}
 			continue
 		}
-		// Dormant constructor objects have no compiled runtime binding. Preserve
-		// the existing runtime boundary; generation owns their schema validation.
+		if visible || validRuntimeConstructorSymbol(symbol) { return nil, runtimeConfigurationError("config for %s has no schema in the constructor inventory", symbol) }
 		for _, node := range inherited[symbol] {
 			if _, _, err := mergeRuntimeConfigurations(runtimeMappingNode(map[string]*yaml.Node{symbol: node}), nil); err != nil { return nil, err }
 		}
