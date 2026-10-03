@@ -73,7 +73,9 @@ func TestGeneratedTemplateRuntimeWithoutSourceTree(t *testing.T) {
 	if err := json.Unmarshal(baseline.Contract, &contract); err != nil {
 		t.Fatal(err)
 	}
-	contract["constructor_inventory"], err = json.Marshal([]baselineConstructor{dormant})
+	contract["constructor_inventory"], err = json.Marshal([]baselineConstructor{dormant, {
+		Symbol: "example.com/unconfigured.New", Interfaces: []string{"records.unconfigured/v1"},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,6 +190,7 @@ import (
  "os"
  "path/filepath"
  "reflect"
+ "strconv"
  "strings"
  "testing"
  "github.com/plystra/cli/internal/constructorconfig"
@@ -271,6 +274,50 @@ func TestDormantTypedValidationWithoutResolution(t *testing.T) {
  }
  removed := compose(t, d, valid, "", "interfaces: {use: {records.dormant/v1: {$remove: true}}}\nconfig: {example.com/dormant.New: {$remove: true}}\n")
  if err := validateRuntimeApplicationModel(removed); err != nil { t.Fatal(err) }
+}
+
+func TestConstructorRemovalsRequireSchemaAcrossSelectors(t *testing.T) {
+ for _, symbol := range []string{"example.com/unconfigured.New", "example.com/missing.New"} {
+  for _, mode := range []string{"default", "environment", "replacement"} {
+   for _, lower := range []bool{false, true} {
+    t.Run(symbol+"/"+mode+"/lower="+strconv.FormatBool(lower), func(t *testing.T) {
+     d := fixture(t)
+     if lower { d.Templates[0].YAML = strings.Replace(d.Templates[0].YAML, "config: {", "config: {"+symbol+": {value: PRIVATE_SENTINEL}, ", 1) }
+     root, selected, overlay := []byte(rootRelationship), []byte(nil), []byte(nil)
+     layer := []byte("config: {"+symbol+": {$remove: true}}\n")
+     switch mode { case "default": root = append(root, layer...); case "environment": overlay = layer; case "replacement": selected = layer }
+     _, err := composeRuntimeTemplateDocument(d, root, selected, overlay)
+     if !errors.Is(err, ErrRuntimeConfiguration) || !strings.Contains(err.Error(), "no schema") { t.Fatal("schema-less removal accepted or lost schema error", err) }
+     if strings.Contains(err.Error(), "PRIVATE_SENTINEL") { t.Fatal("schema error disclosed private input") }
+    })
+   }
+  }
+ }
+}
+
+func TestTypedDeferredRemovalsWithoutEffectiveOwner(t *testing.T) {
+ for _, mode := range []string{"default", "environment", "replacement"} {
+  for _, lower := range []string{"", "{}", "{value: PRIVATE_SENTINEL}", "{token: {env: NEVER_RESOLVE_DORMANT}}"} {
+   t.Run(mode+"/"+lower, func(t *testing.T) {
+    d := fixture(t)
+    if lower != "" { d.Templates[0].YAML = strings.Replace(d.Templates[0].YAML, "config: {", "config: {example.com/dormant.New: "+lower+", ", 1) }
+    root, selected, overlay := rootRelationship, "", ""
+    layer := "config: {example.com/dormant.New: {$remove: true}}\n"
+    switch mode { case "default": root += layer; case "environment": overlay = layer; case "replacement": selected = layer }
+    document := compose(t, d, root, selected, overlay)
+    if err := validateRuntimeApplicationModel(document); err != nil { t.Fatal(err) }
+    if bytes.Contains(document, []byte("example.com/dormant.New")) || bytes.Contains(document, []byte("$remove")) { t.Fatal("typed removal entered effective configuration") }
+    if config(t, document).configuration.Config0.Value != "near" { t.Fatal("deferred removal changed active configuration") }
+   })
+  }
+ }
+ for _, lower := range []string{"{value: [PRIVATE_SENTINEL]}", "{unknown: PRIVATE_SENTINEL}", "{token: {env: NEVER_RESOLVE_DORMANT, file: PRIVATE_SENTINEL}}"} {
+  d := fixture(t)
+  d.Templates[0].YAML = strings.Replace(d.Templates[0].YAML, "config: {", "config: {example.com/dormant.New: "+lower+", ", 1)
+  _, err := composeRuntimeTemplateDocument(d, []byte(rootRelationship+"config: {example.com/dormant.New: {$remove: true}}\n"), nil, nil)
+  if !errors.Is(err, ErrRuntimeConfiguration) { t.Fatal("typed removal suppressed invalid lower value", err) }
+  if strings.Contains(err.Error(), "PRIVATE_SENTINEL") || strings.Contains(err.Error(), "NEVER_RESOLVE_DORMANT") { t.Fatal("typed error disclosed private input") }
+ }
 }
 
 func TestAncestryIdentityAndLayerRejections(t *testing.T) {
