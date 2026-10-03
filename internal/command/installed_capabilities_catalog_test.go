@@ -38,8 +38,9 @@ func TestInstalledCapabilityCatalogAgreesWithCommandParsers(t *testing.T) {
 		{id: "inspect.implementations", invocations: [][]string{{"inspect", "implementations", "--verbose", "--format", "json", "--env", "production"}}},
 		{id: "inspect.interfaces", invocations: [][]string{{"inspect", "interfaces", "--verbose", "--format", "json", "--config", "deploy/customer.yaml"}}},
 		{id: "inspect.modules", invocations: [][]string{{"inspect", "modules", "--verbose", "--format", "json", "--env", "production"}}},
+		{id: "inspect.resources", invocations: [][]string{{"inspect", "resources", "--verbose", "--format", "json", "--config", "deploy/customer.yaml"}}},
 		{id: "interface.create", invocations: [][]string{{"interface", "create", "records.list"}}},
-		{id: "new", invocations: [][]string{{"new", "app", "--module", "example.com/acme/app", "--template", "example.com/acme/platform@v1.0.0", "--adopt-export", "defaults", "--adopt-export", "testing", "--plugin", "records", "--git", "--github-ci", "--interactive", "--no-agent-guidance", "--format", "json"}}},
+		{id: "new", invocations: [][]string{{"new", "app", "--module", "example.com/acme/app", "--template", "example.com/acme/platform@v1.0.0", "--plugin", "records", "--git", "--github-ci", "--interactive", "--no-agent-guidance", "--format", "json"}}},
 		{id: "plugin.create", invocations: [][]string{{"plugin", "create", "records"}}},
 		{id: "remove", invocations: [][]string{{"remove", "example.com/acme/platform"}}},
 		{id: "update", invocations: [][]string{{"update", "example.com/acme/platform@v1.1.0"}}},
@@ -98,7 +99,7 @@ func installedParserAccepts(t testing.TB, commandID string, arguments []string) 
 	case "inspect.capabilities":
 		_, ok := parseInspectCapabilitiesArguments(arguments)
 		return ok
-	case "inspect", "inspect.configuration", "inspect.implementations", "inspect.interfaces", "inspect.modules":
+	case "inspect", "inspect.configuration", "inspect.implementations", "inspect.interfaces", "inspect.modules", "inspect.resources":
 		parsed, ok := parseInspectArguments(arguments)
 		if !ok {
 			return false

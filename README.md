@@ -801,7 +801,7 @@ and GitHub Actions CI default off:
 ```powershell
 plystra new my-app
 plystra new my-app --module github.com/acme/my-app
-plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3 --adopt-export application
+plystra new my-app --module github.com/acme/my-app --template github.com/acme/platform@v1.2.3
 plystra new my-app --module github.com/acme/my-app --format json
 ```
 
@@ -827,23 +827,14 @@ Plugin command or echoing rejected input.
 `--template` rejects a malformed query before staging with
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It resolves one standard Go Module
 query, requires that selected module to contain regular root `plystra.yaml`,
-and retains it as an ordinary direct dependency. Its top-level Project
-configuration remains inert. Repeatable `--adopt-export <name>` options select
-exact entries from that template module's root `composition.exports` inventory
-and record their module/export identities under the new Project's
-`composition.adopt` set. The flag is invalid without `--template`; duplicate,
-malformed, or absent export names reject creation before target installation.
+and retains it as an ordinary direct dependency. This installed CLI provides
+dependency-only template creation: persisted template ancestry and automatic
+configuration inheritance are not implemented yet. Creation writes no adoption
+declarations and copies no template configuration into the new Project.
 The CLI does not clone or copy dependency source, inspect dependency
 environment overlays, modify the Go Module Cache, create `go.work`, or grant
 the template any Provider or configuration priority. A module without root
 `plystra.yaml` is rejected and the target directory is not installed.
-
-Only explicitly adopted template exports enter the staged application model.
-If those exports introduce several compatible Providers for one required
-Capability without an exact choice, creation reports every candidate and
-leaves no target directory. The template publisher can place the intended
-choice in the adopted export, or the consumer can create without that export
-and author its own current-Project intent.
 
 The complete effective template graph must also use public Go Modules. Creation
 rejects every direct or transitive module matched by the effective `GOPRIVATE`
@@ -881,15 +872,10 @@ surfaced and the temporary executable is removed on every path. Failure remains
 inside the same creation transaction. This private qualification executable is
 not the later public `plystra build` and `dist/` contract.
 
-Creation never materializes export values into the new root `plystra.yaml`.
-That document contains only the exact `composition.adopt` identities requested
-by the caller plus ordinary new-Project declarations. Creation validates the
-effective adopted values against selected Plugin schemas but never reads an
-`env` or `file` reference, even when the referenced value exists in the
-creation environment. Secret-reference targets and resolved Secret values are
-excluded from generated source and public manifest provenance. A required
-Plugin field omitted by the selected exports and current Project is not
-invented; generation fails transactionally.
+The new root `plystra.yaml` contains ordinary new-Project declarations only,
+with no adoption identities or materialized template values. Secret-reference
+targets and resolved Secret values remain excluded from generated source and
+public manifest provenance.
 
 Use `--git` and `--github-ci` to opt into those independent tools. Use
 `--no-agent-guidance` to omit the default guidance. Only `--interactive` permits

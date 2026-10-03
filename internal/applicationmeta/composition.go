@@ -23,9 +23,6 @@ var (
 	// ErrExportNotFound reports an adoption whose exact module/export identity
 	// is not present in the current effective Go Module graph.
 	ErrExportNotFound = errors.New("reusable configuration export not found")
-	// ErrSetExportAdoptions reports failure to write one exact complete adoption
-	// set into a current-Project root document.
-	ErrSetExportAdoptions = errors.New("set reusable configuration export adoptions")
 )
 
 // ConfigurationExport is one inert named reusable configuration fragment from
@@ -470,59 +467,6 @@ func ResolveAdoptedExports(currentProjectModule string, root, selected Manifest,
 		})
 	}
 	return result, nil
-}
-
-// SetExportAdoptions writes one deterministic complete adoption set while
-// preserving unrelated root-document content and comments.
-func SetExportAdoptions(data []byte, modulePath string, exportNames []string) ([]byte, error) {
-	if modulepath.CheckProject(modulePath) != nil {
-		return nil, fmt.Errorf("%w: module %q is not a valid Go Module path", ErrSetExportAdoptions, modulePath)
-	}
-	names := append([]string(nil), exportNames...)
-	sort.Strings(names)
-	for index, name := range names {
-		if err := CheckExportName(name); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrSetExportAdoptions, err)
-		}
-		if index > 0 && names[index-1] == name {
-			return nil, fmt.Errorf("%w: export name %q is repeated", ErrSetExportAdoptions, name)
-		}
-	}
-	root, err := decodeDocument(data)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSetExportAdoptions, err)
-	}
-	if _, err := mapping(root, "document"); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSetExportAdoptions, err)
-	}
-	composition := mappingChild(root, "composition")
-	if composition == nil {
-		composition = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		setMappingValue(root, "composition", composition)
-	} else if composition.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("%w: composition must be a mapping", ErrSetExportAdoptions)
-	}
-	adoptions := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	for _, name := range names {
-		item := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		setMappingValue(item, "module", stringYAMLNode(modulePath))
-		setMappingValue(item, "export", stringYAMLNode(name))
-		adoptions.Content = append(adoptions.Content, item)
-	}
-	setMappingValue(composition, "adopt", adoptions)
-	sortYAMLMapping(composition)
-	sortYAMLMapping(root)
-	updated, err := encodeMaintainedDocument(root)
-	if err != nil {
-		return nil, fmt.Errorf("%w: encode updated root document: %v", ErrSetExportAdoptions, err)
-	}
-	if len(updated) > MaximumSize {
-		return nil, fmt.Errorf("%w: updated root document exceeds %d bytes", ErrSetExportAdoptions, MaximumSize)
-	}
-	if _, err := Parse(updated); err != nil {
-		return nil, fmt.Errorf("%w: validate updated root document: %v", ErrSetExportAdoptions, err)
-	}
-	return updated, nil
 }
 
 func compositionConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]ConfigurationDecision, error) {

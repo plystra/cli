@@ -175,8 +175,10 @@ func assertInstalledCommandFacts(t testing.TB, commands map[string]commandschema
 
 	newCommand := commands["new"]
 	newArguments := installedArgumentsByName(newCommand)
-	if len(newArguments) != 10 || newArguments["project-name"].Kind() != commandschema.CapabilityArgumentPositional || newArguments["project-name"].Position() != 1 || !newArguments["project-name"].Required() ||
-		!newArguments["--adopt-export"].Repeatable() || !reflect.DeepEqual(newArguments["--adopt-export"].Requires(), []string{"--template"}) ||
+	if _, exists := newArguments["--adopt-export"]; exists {
+		t.Fatal("new command advertises removed export adoption option")
+	}
+	if len(newArguments) != 9 || newArguments["project-name"].Kind() != commandschema.CapabilityArgumentPositional || newArguments["project-name"].Position() != 1 || !newArguments["project-name"].Required() ||
 		!reflect.DeepEqual(newArguments["--format"].Choices(), []string{"human", "json"}) ||
 		!reflect.DeepEqual(newCommand.InteractionModes(), []commandschema.CapabilityInteractionMode{commandschema.CapabilityInteractionNonInteractive, commandschema.CapabilityInteractionExplicit}) ||
 		!reflect.DeepEqual(newCommand.OutputFormats(), []commandschema.CapabilityOutputFormat{commandschema.CapabilityOutputHuman, commandschema.CapabilityOutputJSON}) ||

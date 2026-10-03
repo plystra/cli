@@ -6,7 +6,7 @@ Use this task for Project creation, module identity, templates, and ordinary Go 
 
     plystra new app
     plystra new app --module example.com/acme/app
-    plystra new app --template example.com/acme/platform@v1.2.3 --adopt-export application
+    plystra new app --template example.com/acme/platform@v1.2.3
     plystra new app --plugin records
     plystra add example.com/acme/email@v1.4.2
     plystra update example.com/acme/email@v1.5.0
@@ -16,14 +16,14 @@ Use this task for Project creation, module identity, templates, and ordinary Go 
 
 The positional name is one safe child directory; `--module` sets its independent Go Module identity. A new Project contains root `plystra.yaml`, module files, and committed generated source, but no environment overlay, example configuration, or `go.work`.
 
-`--template` records one direct dependency. Its configuration stays inert unless repeatable `--adopt-export <name>` selects an exact root export; source is never copied and template origin grants no priority.
+`--template` records one direct dependency only. Persisted template ancestry and automatic configuration inheritance are not implemented yet. Creation writes no adoption declarations, copies no template source or configuration, and grants template origin no priority.
 
 `--format json` returns one `plystra.result/v1` document. Success nests `plystra.project-created/v1`; enter `payload.directory` and run `plystra check` independently.
 
 ## Completion checks
 
 1. Confirm `go.mod` has the intended module identity and direct dependencies.
-2. Confirm root `plystra.yaml` is the only automatically created configuration document and contains only intended explicit adoptions.
+2. Confirm root `plystra.yaml` is the only automatically created configuration document and contains no copied template configuration.
 3. Run `plystra generate --check`, `plystra check`, and the relevant Go tests.
 4. Follow any emitted `Recovery:` action before retrying.
 

@@ -16,12 +16,11 @@ import (
 )
 
 const newUsage = `Usage:
-  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--adopt-export <name>]... [--plugin <name>] [--git] [--github-ci] [--interactive] [--no-agent-guidance] [--format human|json]
+  plystra new <project-name> [--module <go-module-path>] [--template <go-module-query>] [--plugin <name>] [--git] [--github-ci] [--interactive] [--no-agent-guidance] [--format human|json]
 
 Options:
   --module <go-module-path> Set the Go Module path; defaults to the project name.
   --template <module-query> Create from one public, portable Plystra Project dependency.
-  --adopt-export <name>     Adopt one named export from the resolved template; repeatable.
   --plugin <name>           Create an initial root-level plugin.
   --git                     Initialize a Git repository; default is off.
   --github-ci               Include GitHub Actions CI; default is off.
@@ -37,11 +36,10 @@ JSON success nests one plystra.project-created/v1 payload with the Go Module
 path and relative created directory. Enter payload.directory and run
 plystra check independently before treating creation as complete.
 
-Without --adopt-export, the template's Project configuration remains inert.
-Every requested export must exist in the resolved template's root inventory.
+This installed CLI records --template as a dependency only. Persisted template
+ancestry and automatic configuration inheritance are not implemented yet.
 
-Invalid Project names, explicit Go Module paths, template queries, and template
-export adoptions emit
+Invalid Project names, explicit Go Module paths, and template queries emit
 PLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,
 and PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID.
 
@@ -72,7 +70,6 @@ type newArguments struct {
 	projectName     string
 	modulePath      string
 	template        string
-	adoptExports    []string
 	plugin          string
 	git             booleanChoice
 	githubCI        booleanChoice
@@ -186,7 +183,6 @@ func runNewCommand(arguments []string, stdout, stderr io.Writer, workingDirector
 		ProjectName:     options.projectName,
 		ModulePath:      options.modulePath,
 		Template:        options.template,
-		AdoptExports:    options.adoptExports,
 		Plugin:          options.plugin,
 		Git:             choices.git,
 		GitHubCI:        choices.githubCI,
@@ -247,12 +243,6 @@ func parseNewArguments(arguments []string) (newArguments, bool) {
 			templateSet = true
 			index++
 			result.template = arguments[index]
-		case "--adopt-export":
-			if !newArgumentValueAvailable(arguments, index) {
-				return newArguments{}, false
-			}
-			index++
-			result.adoptExports = append(result.adoptExports, arguments[index])
 		case "--plugin":
 			if pluginSet || !newArgumentValueAvailable(arguments, index) {
 				return newArguments{}, false
@@ -297,9 +287,6 @@ func parseNewArguments(arguments []string) (newArguments, bool) {
 		default:
 			return newArguments{}, false
 		}
-	}
-	if len(result.adoptExports) != 0 && result.template == "" {
-		return newArguments{}, false
 	}
 	return result, true
 }
@@ -494,7 +481,7 @@ func classifyNewFailure(err error) (commandschema.Status, string, string) {
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateNameInvalid, "The Project name is invalid."
 	case errors.Is(err, newproject.ErrInvalidModulePath):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateModuleInvalid, "The Go Module path is invalid."
-	case errors.Is(err, newproject.ErrInvalidTemplateQuery), errors.Is(err, newproject.ErrInvalidTemplateExport):
+	case errors.Is(err, newproject.ErrInvalidTemplateQuery):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateTemplateInvalid, "The Project template input is invalid."
 	case errors.Is(err, newproject.ErrInvalidTemplate):
 		return commandschema.StatusValidationFailed, diagnosticcode.TemplateInvalid, "The resolved Project template is invalid."
