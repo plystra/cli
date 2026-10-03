@@ -825,7 +825,7 @@ import (
 
 const bootstrapRemoteConfiguration = "  zeta.remote-store:\n    endpoint: runtime-private-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n"
 
-const validRuntimeDocument = "composition:\n  adopt: []\nconfig:\n" + bootstrapRemoteConfiguration
+const validRuntimeDocument = "config:\n" + bootstrapRemoteConfiguration
 
 func TestApplicationConstructsStartsAndStopsSelectedProviders(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
@@ -944,7 +944,7 @@ func TestApplicationSelectsOneNamedEnvironment(t *testing.T) {
 
 func TestApplicationSelectsCompleteReplacement(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
-	writeRuntimeDocument(t, "composition: {exports: {ignored: {}}}\nconfig: [root-is-intentionally-invalid]\n")
+	writeRuntimeDocument(t, "interfaces: [root-is-intentionally-invalid]\nconfig: [root-is-intentionally-invalid]\n")
 	replacementPath := filepath.Join("deploy", "customer.yaml")
 	writeReplacementDocument(t, replacementPath, "config:\n  acme.local-service:\n    label: replacement-label\n  zeta.remote-store:\n    endpoint: replacement-endpoint\n    token: {env: PLYSTRA_ASSEMBLY_PRIVATE_SECRET}\n")
 	writeReplacementDocument(t, filepath.Join("deploy", "ignored.yaml"), "not: [valid\n")
@@ -1104,10 +1104,10 @@ func TestApplicationRejectsBuildAffectingRuntimeChangesBeforeConstructors(t *tes
 			},
 		},
 		{
-			name: "export adoption",
+			name: "root requirements",
 			options: RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}},
 			prepare: func(t *testing.T) {
-				writeRuntimeDocument(t, "composition: {exports: {defaults: {interfaces: {require: [kernel.health/v1]}}}, adopt: [{module: example.com/assemblyapp, export: defaults}]}\nconfig:\n"+bootstrapRemoteConfiguration)
+				writeRuntimeDocument(t, "interfaces: {require: [kernel.health/v1]}\n"+validRuntimeDocument)
 			},
 		},
 		{
@@ -1352,57 +1352,51 @@ func TestRuntimeConstructorEntryRemoval(t *testing.T) {
 	assertNoBootstrapConstructorCalls(t)
 }
 
-func TestRuntimeAdoptionCompleteSets(t *testing.T) {
+func TestRuntimeRejectsObsoleteCompositionAcrossSelections(t *testing.T) {
 	t.Setenv("PLYSTRA_ASSEMBLY_PRIVATE_SECRET", "runtime-private-secret-value")
 	const adoption = "{module: example.com/assemblyapp, export: defaults}"
 	const other = "{module: example.com/assemblyapp, export: other}"
 	for _, test := range []struct {
-		name, root, overlay, want string
+		name, composition string
 	}{
-		{"subset", "["+adoption+", "+other+"]", "["+adoption+"]", "defaults"},
-		{"empty", "["+adoption+"]", "[]", ""},
-		{"sparse empty", "["+adoption+"]", "{}", "defaults"},
-		{"sparse addition", "["+adoption+"]", "{add: ["+other+"]}", "defaults,other"},
-		{"sparse removal", "["+adoption+"]", "{remove: ["+adoption+"]}", ""},
-		{"sparse over empty", "[]", "{add: ["+adoption+"]}", "defaults"},
-		{"complete over removal", "{remove: ["+adoption+"]}", "["+adoption+"]", "defaults"},
+		{"empty composition", "{}"},
+		{"exports", "{exports: {defaults: {}}}"},
+		{"adopt one", "{adopt: ["+adoption+"]}"},
+		{"adopt multiple", "{adopt: ["+adoption+", "+other+"]}"},
+		{"empty set", "{adopt: []}"},
+		{"sparse empty", "{adopt: {}}"},
+		{"sparse addition", "{adopt: {add: ["+other+"]}}"},
+		{"sparse removal", "{adopt: {remove: ["+adoption+"]}}"},
+		{"export and activation", "{exports: {defaults: {interfaces: {require: [kernel.health/v1]}}}, adopt: ["+adoption+"]}"},
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			writeRuntimeDocument(t, "composition: {exports: {defaults: {}, other: {}}, adopt: "+test.root+"}\nconfig:\n"+bootstrapRemoteConfiguration)
-			writeEnvironmentDocument(t, "adoptions", "composition: {adopt: "+test.overlay+"}\n")
-			options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "adoptions"}}
-			document, err := loadRuntimeDocument(options)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer clear(document)
-			var effective struct { Composition struct { Adopt []struct { Module, Export string } } }
-			if err := yaml.Unmarshal(document, &effective); err != nil {
-				t.Fatal(err)
-			}
-			var names []string
-			for _, value := range effective.Composition.Adopt {
-				if value.Module != "example.com/assemblyapp" {
-					t.Fatalf("unexpected adoption module: %s", value.Module)
+		for _, mode := range []string{"default", "environment", "replacement", "excluded root"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				writeRuntimeDocument(t, validRuntimeDocument)
+				document := "composition: "+test.composition+"\n"+validRuntimeDocument
+				options := RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}
+				switch mode {
+				case "default": writeRuntimeDocument(t, document)
+				case "environment":
+					writeEnvironmentDocument(t, "obsolete-composition", document)
+					options.Arguments = append(options.Arguments, "--env", "obsolete-composition")
+				case "replacement":
+					writeReplacementDocument(t, "obsolete-composition.yaml", document)
+					options.Arguments = append(options.Arguments, "--config", "obsolete-composition.yaml")
+				case "excluded root":
+					writeRuntimeDocument(t, document)
+					writeReplacementDocument(t, "valid-replacement.yaml", validRuntimeDocument)
+					options.Arguments = append(options.Arguments, "--config", "valid-replacement.yaml")
 				}
-				names = append(names, value.Export)
-			}
-			if got := strings.Join(names, ","); got != test.want {
-				t.Fatalf("adoptions = %q, want %q", got, test.want)
-			}
-			localservice.Reset()
-			remotestore.Reset()
-			application, err := New(context.Background(), options)
-			if err != nil || application == nil {
-				t.Fatalf("New with equivalent empty adoptions = %#v, %v", application, err)
-			}
-			if err := application.Start(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if err := application.Stop(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-		})
+				localservice.Reset()
+				remotestore.Reset()
+				application, err := New(context.Background(), options)
+				if application != nil || !errors.Is(err, ErrBootstrap) || !errors.Is(err, ErrRuntimeConfiguration) {
+					t.Fatalf("New accepted obsolete composition: %#v, %v", application, err)
+				}
+				assertNoBootstrapConstructorCalls(t)
+				assertSafeBootstrapError(t, err)
+			})
+		}
 	}
 }
 
