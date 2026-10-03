@@ -316,6 +316,47 @@ func TestRuntimeBuildVisibleDriftAndDefaults(t *testing.T) {
  if _, err := prepareRuntimeConstructorConfiguration(document); err == nil { t.Fatal("accepted removed required field") }
 }
 
+func TestReplacementRootValidatesRawYAMLBeforeExclusion(t *testing.T) {
+ for name, excluded := range map[string]string{
+  "integer": "config: {private: {value: !!int PRIVATE_SENTINEL}}\n",
+  "null": "config: {private: {value: !!null PRIVATE_SENTINEL}}\n",
+  "binary": "config: {private: {value: !!binary PRIVATE_SENTINEL}}\n",
+  "nested duplicate": "config: {private: {PRIVATE_KEY: one, PRIVATE_KEY: two}}\n",
+  "sequence duplicate": "interfaces: [{PRIVATE_KEY: one, PRIVATE_KEY: two}]\n",
+  "non-string key": "config: {private: {true: PRIVATE_SENTINEL}}\n",
+  "anchor": "config: {private: &private PRIVATE_SENTINEL}\n",
+  "depth": "config: "+strings.Repeat("[",64)+"PRIVATE_SENTINEL"+strings.Repeat("]",64)+"\n",
+  "nodes": "config: ["+strings.Repeat("0,",65535)+"]\n",
+ } {
+  t.Run(name, func(t *testing.T) {
+   root := []byte(rootRelationship+excluded)
+   before := bytes.Clone(root)
+   _, err := composeRuntimeTemplateDocument(fixture(t), root, []byte("{}\n"), nil)
+   if !errors.Is(err,ErrRuntimeConfiguration) { t.Fatal("excluded malformed YAML accepted",err) }
+   if strings.Contains(err.Error(),"PRIVATE_SENTINEL") || strings.Contains(err.Error(),"PRIVATE_KEY") { t.Fatal("raw YAML diagnostic exposed private input") }
+   if !bytes.Equal(root,before) { t.Fatal("raw validation changed authored root") }
+  })
+ }
+}
+
+func TestReplacementRootExcludesValidApplicationTypeErrors(t *testing.T) {
+ for _, excluded := range []string{
+  "interfaces: PRIVATE_SENTINEL\n",
+  "config: {private: [invalid, schema]}\nhttp: {address: false}\ntimeouts: [invalid]\nresources: {private: value}\ndata: {private: value}\n",
+  "capabilities: PRIVATE_SENTINEL\n",
+  "config: {private: {nilvalue: !!null null, integer: !!int 7, binary: !!binary cHJpdmF0ZQ==}}\n",
+  "config: "+strings.Repeat("[",63)+"PRIVATE_SENTINEL"+strings.Repeat("]",63)+"\n",
+ } {
+  document := compose(t,fixture(t),rootRelationship+excluded,"{}\n","")
+  if err := validateRuntimeApplicationModel(document); err != nil { t.Fatal(err) }
+  if config(t,document).configuration.Config0.Value != "near" || bytes.Contains(document,[]byte("PRIVATE_SENTINEL")) { t.Fatal("excluded root application value became active") }
+ }
+ for _, selectors := range [][2][]byte{{nil,nil},{nil,[]byte("{}\n")},{[]byte("capabilities: PRIVATE_SENTINEL\n"),nil}} {
+  root := rootRelationship+"capabilities: PRIVATE_SENTINEL\n"
+  if _, err := composeRuntimeTemplateDocument(fixture(t),[]byte(root),selectors[0],selectors[1]); err == nil { t.Fatal("capabilities accepted as active runtime configuration") }
+ }
+}
+
 func TestDeployedSelectorsUseOnlyConfigurationRootAndPrivateBaseline(t *testing.T) {
  root := t.TempDir()
  write := func(name, content string) { t.Helper(); if err := os.WriteFile(filepath.Join(root,name), []byte(content), 0600); err != nil { t.Fatal(err) } }
