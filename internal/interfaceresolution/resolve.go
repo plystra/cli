@@ -54,33 +54,9 @@ type selector struct {
 // create requirements and become available only when their Interface is
 // selected for another reason.
 func Resolve(input Input) (Result, error) {
-	catalog, err := buildCatalog(input.Interfaces, input.Implementations, intrinsicinterface.Definitions())
+	resolver, requirements, intrinsicRequirements, _, err := selectConstructors(input)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrInvalidInput, err)
-	}
-	requirements, intrinsicRequirements, err := normalizeRequirements(input.Requirements, catalog.interfaces, catalog.intrinsics)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	choices, err := normalizeChoices(input.Choices, catalog)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-
-	resolver := selector{
-		catalog:             catalog,
-		choices:             choices,
-		selections:          make(map[string]constructorgraph.Selection),
-		visitedConstructors: make(map[string]struct{}),
-	}
-	for _, requirement := range requirements {
-		missing, selectErr := resolver.selectInterface(requirement.InterfaceID)
-		if selectErr != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrResolve, selectErr)
-		}
-		if missing {
-			break
-		}
+		return Result{}, err
 	}
 	selections := resolver.sortedSelections()
 	graphRequirements := make([]constructorgraph.Requirement, len(requirements))
@@ -103,6 +79,67 @@ func Resolve(input Input) (Result, error) {
 		selections:            cloneSelections(selections),
 		intrinsicRequirements: cloneIntrinsicRequirements(intrinsicRequirements),
 	}, nil
+}
+
+// SelectedConstructors returns explicit and reachable Implementation owners
+// without validating Resource bindings, constructor cycles, or configuration.
+// It is an ownership-planning input, not acceptance of an executable model.
+// On an incomplete reachable closure, the returned owners are only the exact
+// positive selections established before the error. They never establish that
+// an omitted constructor is unowned.
+func SelectedConstructors(input Input) ([]constructorsymbol.Symbol, error) {
+	resolver, _, _, missing, err := selectConstructors(input)
+	if err != nil && resolver.choices == nil {
+		return nil, err
+	}
+	if missing {
+		err = fmt.Errorf("%w: %w", ErrResolve, constructorgraph.ErrMissingBinding)
+	}
+	owners := make(map[string]constructorsymbol.Symbol)
+	for _, choice := range resolver.choices {
+		owners[choice.constructor.String()] = choice.constructor
+	}
+	for _, selection := range resolver.selections {
+		owners[selection.Constructor.String()] = selection.Constructor
+	}
+	result := make([]constructorsymbol.Symbol, 0, len(owners))
+	for _, symbol := range owners {
+		result = append(result, symbol)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].String() < result[j].String() })
+	return result, err
+}
+
+func selectConstructors(input Input) (selector, []Requirement, []IntrinsicRequirement, bool, error) {
+	catalog, err := buildCatalog(input.Interfaces, input.Implementations, intrinsicinterface.Definitions())
+	if err != nil {
+		return selector{}, nil, nil, false, fmt.Errorf("%w: %w: %w", ErrResolve, ErrInvalidInput, err)
+	}
+	requirements, intrinsicRequirements, err := normalizeRequirements(input.Requirements, catalog.interfaces, catalog.intrinsics)
+	if err != nil {
+		return selector{}, nil, nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	choices, err := normalizeChoices(input.Choices, catalog)
+	if err != nil {
+		return selector{}, nil, nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+
+	resolver := selector{
+		catalog:             catalog,
+		choices:             choices,
+		selections:          make(map[string]constructorgraph.Selection),
+		visitedConstructors: make(map[string]struct{}),
+	}
+	for _, requirement := range requirements {
+		missing, selectErr := resolver.selectInterface(requirement.InterfaceID)
+		if selectErr != nil {
+			return resolver, requirements, intrinsicRequirements, false, fmt.Errorf("%w: %w", ErrResolve, selectErr)
+		}
+		if missing {
+			return resolver, requirements, intrinsicRequirements, true, nil
+		}
+	}
+	return resolver, requirements, intrinsicRequirements, false, nil
 }
 
 func buildCatalog(interfaces interfaceinventory.Index, implementations implementationinventory.Index, intrinsicDefinitions []intrinsicinterface.Definition) (catalog, error) {

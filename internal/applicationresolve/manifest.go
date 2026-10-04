@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -96,7 +97,7 @@ func (e *ManifestSourceError) Unwrap() error {
 	return e.cause
 }
 
-// ManifestSnapshot is one bounded, non-symbolic plystra.yaml read together
+// ManifestSnapshot is one bounded, non-symbolic document read together
 // with the filesystem identity needed to detect replacement during a longer
 // operation.
 type ManifestSnapshot struct {
@@ -106,6 +107,13 @@ type ManifestSnapshot struct {
 	file       fs.FileInfo
 	data       []byte
 }
+
+func (ManifestSnapshot) String() string   { return "<private-manifest-snapshot>" }
+func (ManifestSnapshot) GoString() string { return "<private-manifest-snapshot>" }
+func (ManifestSnapshot) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte("<private-manifest-snapshot>"))
+}
+func (ManifestSnapshot) LogValue() slog.Value { return slog.StringValue("<private-manifest-snapshot>") }
 
 // Path returns the stable Project-relative slash path that was read.
 func (s ManifestSnapshot) Path() string { return s.path }
@@ -189,14 +197,22 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 			fmt.Errorf("%w: %w", ErrManifest, err),
 		)
 	}
+	manifest, err := parseConfigurationSnapshot(modulePath, snapshot, parse)
+	if err != nil {
+		return ManifestSnapshot{}, applicationmeta.Manifest{}, err
+	}
+	return snapshot, manifest, nil
+}
+
+func parseConfigurationSnapshot(modulePath string, snapshot ManifestSnapshot, parse func(string, []byte) (applicationmeta.Manifest, error)) (applicationmeta.Manifest, error) {
 	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
 		var template *applicationmeta.TemplateMetadataError
 		if errors.As(err, &template) {
 			source := template.Source()
-			return ManifestSnapshot{}, applicationmeta.Manifest{}, configurationSourceError(modulePath, snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: %w", ErrManifest, ErrTemplate, err))
+			return applicationmeta.Manifest{}, configurationSourceError(modulePath, snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: %w", ErrManifest, ErrTemplate, err))
 		}
-		return ManifestSnapshot{}, applicationmeta.Manifest{}, configurationSourceError(
+		return applicationmeta.Manifest{}, configurationSourceError(
 			modulePath,
 			snapshot.path,
 			1,
@@ -204,7 +220,7 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 			fmt.Errorf("%w: %w", ErrManifest, err),
 		)
 	}
-	return snapshot, manifest, nil
+	return manifest, nil
 }
 
 type dependencyManifestSnapshot struct {
@@ -338,7 +354,7 @@ func recheckDependencyManifests(snapshots []dependencyManifestSnapshot) error {
 				before.snapshot.path,
 				0,
 				0,
-				fmt.Errorf("%w: dependency Project %s plystra.yaml: %v", ErrConcurrentChange, before.identity, err),
+				fmt.Errorf("%w: dependency Project %s plystra.yaml cannot be rechecked", ErrConcurrentChange, before.identity),
 			)
 		}
 		if !sameManifestSnapshot(before.snapshot, after) {
