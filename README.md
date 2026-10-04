@@ -911,18 +911,23 @@ plystra implement email.send/v1 --package ./smtp
 ```
 
 The package path is a canonical Project-relative path beginning with `./`, and
-the target package must not already exist. The command imports the canonical
-Interface package, creates `Service` and `New`, adds the exact
-`//plystra:implements` directive, scaffolds the one operation method, and adds a
-compile-time Interface assertion. It does not copy the Interface contract,
-write authored registration or configuration, or create generated output.
-Plystra rediscovers and type-checks the new constructor before committing the
-transaction; any failure removes the complete scaffold.
+the target package must not already exist. The command accepts either a visible
+Interface or Resource ID and infers the contract kind. Interface scaffolds
+import the canonical contract, create `Service` and `New`, add the exact
+`//plystra:implements` directive, scaffold the operation method, and add a
+compile-time assertion. Resource scaffolds use a concrete `Provider`; `New`
+returns `errNotImplemented`, and every provider method panics with that error
+until authored. Resource scaffolds contain no guessed Config, dependencies, or
+lifecycle hooks, create no selected instance, and do not activate the provider.
+Neither kind copies the contract, writes configuration or registration, or
+creates generated output. Plystra rediscovers and type-checks the new contract
+before committing; any failure removes the complete scaffold.
 
-Creation diagnostics distinguish invalid Interface names, invalid or invisible
-versioned Interface IDs, unsafe Implementation package paths, and existing
-Interface or Implementation targets. Each failure emits one recovery command or
-replacement choice and leaves the Project unchanged.
+Creation diagnostics distinguish invalid, missing, ambiguous, or inaccessible
+Interface and Resource IDs, unsafe Implementation package paths, and existing
+targets. Each failure emits one recovery command or replacement choice and
+leaves the Project unchanged. A successful scaffold is explicitly unfinished
+and inactive; author behavior before using it in a generation workflow.
 
 Plugin-target inference resolves an explicit target, the enclosing plugin, or
 the only local plugin without prompting. Only an explicit `--interactive`
@@ -1278,8 +1283,14 @@ structural or build-visible edits require regeneration and rebuilding.
 Use `plystra use <instance-name> <provider-constructor>` to replace a compatible
 provider on an existing named instance. It applies deterministic ownership
 cleanup, regenerates, and validates with the same selector. Resource
-`plystra implement` and instance creation commands remain unsupported. After
-manual declaration or binding edits, run `plystra generate`,
+`plystra implement <resource-id> --package ./<package>` creates an unfinished,
+inactive ordinary Resource provider scaffold. It does not create a named
+instance, select a provider, infer configuration, or provide runtime behavior:
+implement `New`, provider methods, configuration, dependencies, and lifecycle
+hooks as appropriate before generation. Instance creation remains unsupported.
+Installed `resource.provider.scaffold` reports the scaffold stages separately
+from provider selection and full Resource acceptance; generated and executed
+scaffold support does not establish `accepted: yes`. After manual declaration or binding edits, run `plystra generate`,
 `plystra generate --check`, and `plystra check` with the same selector. Do not
 hand-edit generated assembly. Installed `resource.provider.selection` support
 does not establish Resource, Data, or Gate 5 acceptance.

@@ -11,12 +11,16 @@ import (
 )
 
 const implementUsage = `Usage:
-  plystra implement <interface-id> --package <project-relative-package>
+  plystra implement <contract> --package <project-relative-package>
 
-Creates a new ordinary Go package that implements one visible canonical
-Interface. The package path must begin with ./ and its target directory must not
-already exist. The scaffold imports the canonical Interface package and creates
-no copied contract, generated substitute, configuration, or registration code.
+Creates an unfinished ordinary Go scaffold for one visible canonical Interface
+or Resource ID including /vN. The kind is inferred without a flag. The package
+path must begin with ./ and its target directory must not already exist.
+The scaffold imports the canonical contract and adds a conformance assertion.
+Resource constructors return an error and methods panic until implemented.
+No configuration, dependencies, lifecycle hooks, or activation are invented;
+the command creates no selected Resource instance or generated output.
+Missing, ambiguous, or inaccessible contracts fail before mutation.
 `
 
 func runImplement(arguments []string, stdout, stderr io.Writer, workingDirectory string, environment []string) int {
@@ -33,14 +37,14 @@ func runImplement(arguments []string, stdout, stderr io.Writer, workingDirectory
 	defer cancel()
 	result, err := implementationcreate.Create(ctx, implementationcreate.Options{
 		Start:       workingDirectory,
-		InterfaceID: arguments[1],
+		ContractID:  arguments[1],
 		Package:     arguments[3],
 		Environment: environment,
 	})
 	if err != nil {
-		writeCommandFailure(stderr, "create Implementation", err, commandRecoveryContext("", "", environment))
+		writeCommandFailure(stderr, "scaffold contract implementation", err, commandRecoveryContext("", "", environment))
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "created Implementation %s for %s at %s\n", result.Constructor(), result.InterfaceID(), result.SourcePath())
+	_, _ = fmt.Fprintf(stdout, "created unfinished %s scaffold %s for %s at %s; not activated\n", result.Kind(), result.Constructor(), result.ContractID(), result.SourcePath())
 	return 0
 }

@@ -40,7 +40,7 @@ type Response struct{}
 		start,
 		append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off"),
 	)
-	if exitCode != 0 || stdout.String() != "created Implementation example.com/acme/records/postgres.New for records.list/v1 at postgres/implementation.go\n" || stderr.Len() != 0 {
+	if exitCode != 0 || stdout.String() != "created unfinished interface scaffold example.com/acme/records/postgres.New for records.list/v1 at postgres/implementation.go; not activated\n" || stderr.Len() != 0 {
 		t.Fatalf("implement = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
 	data, err := os.ReadFile(filepath.Join(root, "postgres", "implementation.go"))
@@ -66,11 +66,11 @@ func TestRunImplementClassifiesAuthoringFailuresWithoutMutation(t *testing.T) {
 		diagnostic string
 	}{
 		{
-			name:       "invalid Interface ID",
+			name:       "invalid contract ID",
 			arguments:  []string{"implement", "records.list", "--package", "./postgres"},
-			problem:    "invalid Interface ID",
-			recovery:   "Rerun `plystra implement <interface-name>/vN --package <project-relative-package>` with one canonical versioned Interface ID.",
-			diagnostic: diagnosticcode.ImplementationCreateInterfaceInvalid,
+			problem:    "invalid contract ID",
+			recovery:   "Rerun `plystra implement <contract> --package <project-relative-package>` with one canonical versioned Interface or Resource ID.",
+			diagnostic: diagnosticcode.ImplementationCreateContractInvalid,
 		},
 		{
 			name:       "invalid package",
@@ -80,17 +80,17 @@ func TestRunImplementClassifiesAuthoringFailuresWithoutMutation(t *testing.T) {
 			diagnostic: diagnosticcode.ImplementationCreatePackageInvalid,
 		},
 		{
-			name:       "missing Interface",
+			name:       "missing contract",
 			arguments:  []string{"implement", "records.missing/v1", "--package", "./postgres"},
-			problem:    "Interface is not visible",
-			recovery:   "Replace the reported Interface ID with one canonical Interface visible in the effective Plystra Project graph, then rerun the command.",
-			diagnostic: diagnosticcode.ImplementationCreateInterfaceNotFound,
+			problem:    "contract is not visible",
+			recovery:   "Replace the reported contract ID with one canonical Interface or Resource visible in the effective Plystra Project graph, then rerun the command.",
+			diagnostic: diagnosticcode.ImplementationCreateContractNotFound,
 		},
 		{
 			name:       "existing target",
 			arguments:  []string{"implement", "records.list/v1", "--package", "./postgres"},
 			target:     true,
-			problem:    "Implementation target already exists",
+			problem:    "implementation target already exists",
 			recovery:   "Rerun with a different `--package ./<project-relative-go-package>` whose target directory does not exist.",
 			diagnostic: diagnosticcode.ImplementationCreateTargetExists,
 		},

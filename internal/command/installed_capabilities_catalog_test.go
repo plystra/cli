@@ -31,7 +31,7 @@ func TestInstalledCapabilityCatalogAgreesWithCommandParsers(t *testing.T) {
 		{id: "guidance.check", invocations: [][]string{{"guidance", "check"}}},
 		{id: "guidance.sync", invocations: [][]string{{"guidance", "sync", "--replace-generated"}}},
 		{id: "help", invocations: [][]string{{"help"}}},
-		{id: "implement", invocations: [][]string{{"implement", "records.list/v1", "--package", "./recordlist"}}},
+		{id: "implement", invocations: [][]string{{"implement", "records.list/v1", "--package", "./recordlist"}, {"implement", "storage.database/v1", "--package", "./database"}}},
 		{id: "inspect", invocations: [][]string{{"inspect", "--verbose", "--format", "json", "--env", "production"}, {"inspect", "--config", "deploy/customer.yaml"}}},
 		{id: "inspect.capabilities", invocations: [][]string{{"inspect", "capabilities", "--format", "json"}}},
 		{id: "inspect.configuration", invocations: [][]string{{"inspect", "configuration", "--verbose", "--format", "json", "--config", "deploy/customer.yaml"}}},
@@ -131,7 +131,7 @@ func installedParserAccepts(t testing.TB, commandID string, arguments []string) 
 	}
 }
 
-func TestInstalledResourceSelectionAdvertisesOnlyUnifiedUse(t *testing.T) {
+func TestInstalledResourceAuthoringAdvertisesUnifiedCommands(t *testing.T) {
 	t.Parallel()
 
 	capabilities, err := installedcapabilities.Current()
@@ -145,7 +145,7 @@ func TestInstalledResourceSelectionAdvertisesOnlyUnifiedUse(t *testing.T) {
 		if command.ID() != "use" && command.ID() != "implement" {
 			continue
 		}
-		wantTarget := "interface-id"
+		wantTarget := "contract"
 		if command.ID() == "use" {
 			wantTarget = "target"
 		}
