@@ -7,12 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 )
 
 func resourceInstanceGraphInput(t testing.TB) GraphInput {
 	t.Helper()
 	contract := GraphNode{ID: "resource-contract:data.database/v1", Kind: "resource-contract", Label: "example.com/app/database", ResourceID: "data.database/v1", ContractDigest: "sha256:" + strings.Repeat("a", 64)}
+	contract.Sources = []diagnosticjson.Source{{Module: "example.com/app", Path: "database/resource.go", Kind: "resource-declaration", Line: 2, Column: 1}}
 	sources := []interfaceprovenance.ResourceSource{{Module: "example.com/app", Path: "plystra.yaml", Kind: "resource-selection", Line: 2, Column: 3}}
 	input := GraphInput{Evidence: resolvedInspectEvidence(t), Type: GraphTypeResources, Nodes: []GraphNode{contract, {ID: "constructor:example.com/app/service.New", Kind: "constructor", Label: "example.com/app/service.New"}}}
 	for i, name := range []string{"database.primary", "database.unconsumed"} {
@@ -84,6 +86,43 @@ func TestResourceInstanceGraphRejectsContradictoryTypedEdges(t *testing.T) {
 			change(&input)
 			if _, err := NewGraph(input); !errors.Is(err, ErrGraph) {
 				t.Fatalf("invalid graph accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestResourceInstanceGraphRequiresMatchingContractSource(t *testing.T) {
+	t.Parallel()
+	for _, view := range []GraphType{GraphTypeResources, GraphTypeImplementations} {
+		t.Run(string(view), func(t *testing.T) {
+			for name, change := range map[string]func(*GraphInput){
+				"module":  func(i *GraphInput) { i.Nodes[0].Sources[0].Module = "example.com/other" },
+				"path":    func(i *GraphInput) { i.Nodes[0].Sources[0].Path = "database/other.go" },
+				"kind":    func(i *GraphInput) { i.Nodes[0].Sources[0].Kind = "resource-provider-constructor" },
+				"line":    func(i *GraphInput) { i.Nodes[0].Sources[0].Line++ },
+				"column":  func(i *GraphInput) { i.Nodes[0].Sources[0].Column++ },
+				"missing": func(i *GraphInput) { i.Nodes[0].Sources = nil },
+				"additional-declaration": func(i *GraphInput) {
+					other := i.Nodes[0].Sources[0]
+					other.Line++
+					i.Nodes[0].Sources = append(i.Nodes[0].Sources, other)
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					input := resourceInstanceGraphInput(t)
+					input.Type = view
+					change(&input)
+					if _, err := NewGraph(input); !errors.Is(err, ErrGraph) || !strings.Contains(err.Error(), "contract source") {
+						t.Fatalf("inconsistent contract source accepted: %v", err)
+					}
+				})
+			}
+			input := resourceInstanceGraphInput(t)
+			input.Type = view
+			input.Nodes[0].Sources = append(input.Nodes[0].Sources, diagnosticjson.Source{Module: "example.com/app", Path: "go.mod", Kind: "project-marker"})
+			result, err := NewGraph(input)
+			if err != nil || !result.Valid() {
+				t.Fatalf("matching declaration with unrelated source rejected: %v", err)
 			}
 		})
 	}

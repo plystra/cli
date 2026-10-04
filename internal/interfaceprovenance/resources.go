@@ -73,6 +73,7 @@ func (p Provenance) ResourceBindings() []ResourceBindingInput {
 
 // NormalizeResources validates and copies the shared non-secret record format
 // used by live resolution evidence and persisted application provenance.
+// Instances sharing a provider must agree on its declared dependency signature.
 func NormalizeResources(resources []ResourceInput, bindings []ResourceBindingInput) ([]ResourceInput, []ResourceBindingInput, error) {
 	if len(resources) > maximumRecords || len(bindings) > maximumRecords {
 		return nil, nil, fmt.Errorf("%w: too many Resource records", ErrInvalid)
@@ -167,6 +168,7 @@ func validateResourceRecords(resources []ResourceInput, bindings []ResourceBindi
 		contracts[resource.ResourceID], providers[resource.Provider], instances[resource.Name] = resource, resource, resource
 	}
 	parameters := make(map[string]bool)
+	instanceDependencies := make(map[string][]ResourceBindingInput)
 	for i, binding := range bindings {
 		if i > 0 && resourceBindingKey(bindings[i-1]) >= resourceBindingKey(binding) {
 			return errors.New("resource bindings must be unique and ordered by consumer and parameter position")
@@ -224,6 +226,7 @@ func validateResourceRecords(resources []ResourceInput, bindings []ResourceBindi
 			if binding.DeclarationSource != consumer.DeclarationSource || !equalResourceSources(binding.ConsumerSelectionSources, consumer.SelectionSources) {
 				return errors.New("resource consumer provenance disagrees with selection")
 			}
+			instanceDependencies[binding.Consumer] = append(instanceDependencies[binding.Consumer], binding)
 		case "implementations":
 			if binding.Consumer != binding.Constructor || len(binding.ConsumerSelectionSources) != 0 {
 				return errors.New("invalid Implementation Resource consumer")
@@ -247,6 +250,20 @@ func validateResourceRecords(resources []ResourceInput, bindings []ResourceBindi
 			}
 		default:
 			return errors.New("invalid Resource consumer kind")
+		}
+	}
+	// Each instance calls the same typed provider, even when its targets differ.
+	for _, resource := range resources {
+		dependencies := instanceDependencies[resource.Name]
+		expected := instanceDependencies[providers[resource.Provider].Name]
+		if len(dependencies) != len(expected) {
+			return errors.New("inconsistent Resource provider dependency signature")
+		}
+		for i, dependency := range dependencies {
+			other := expected[i]
+			if dependency.ParameterName != other.ParameterName || dependency.ParameterPosition != other.ParameterPosition || dependency.ResourceID != other.ResourceID || dependency.PackagePath != other.PackagePath {
+				return errors.New("inconsistent Resource provider dependency signature")
+			}
 		}
 	}
 	return nil

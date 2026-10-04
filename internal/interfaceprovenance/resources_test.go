@@ -176,3 +176,121 @@ func TestResourceNormalizationAllowsUniqueImplicitBinding(t *testing.T) {
 		t.Fatal("selection sources differ")
 	}
 }
+
+func reusedResourceProviderInput() interfaceprovenance.Input {
+	input := resourceProvenanceInput()
+	second := input.Resources[3]
+	second.Name, second.ConstructionOrder = "view.second", 5
+	second.SelectionSources = []interfaceprovenance.ResourceSource{{Module: "example.com/app", Path: "plystra.production.yaml", Kind: "resource-selection", Line: 15, Column: 7}}
+	input.Resources = append(input.Resources, second)
+	dependency := input.ResourceBindings[3]
+	dependency.Consumer = second.Name
+	dependency.ConsumerSelectionSources = second.SelectionSources
+	dependency.InstanceName = input.Resources[1].Name
+	dependency.BindingSources = []interfaceprovenance.ResourceSource{{Module: "example.com/app", Path: "plystra.production.yaml", Kind: "resource-binding", Line: 20, Column: 9}}
+	input.ResourceBindings = append(input.ResourceBindings, dependency)
+	return input
+}
+
+func TestResourceProviderSignaturesAllowIndependentBindings(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"different-targets", "mixed-reasons", "different-providers"} {
+		t.Run(mode, func(t *testing.T) {
+			input := reusedResourceProviderInput()
+			switch mode {
+			case "mixed-reasons":
+				input.Resources = []interfaceprovenance.ResourceInput{input.Resources[0], input.Resources[3], input.Resources[4]}
+				input.ResourceBindings = input.ResourceBindings[3:]
+				for i := range input.Resources {
+					input.Resources[i].ConstructionOrder = i + 1
+				}
+				input.ResourceBindings[1].InstanceName = input.Resources[0].Name
+				input.ResourceBindings[1].Reason = interfaceprovenance.SelectionUniqueCompatible
+				input.ResourceBindings[1].BindingSources = nil
+			case "different-providers":
+				input.Resources[4].Provider = "example.com/provider/view.Alternate"
+				input.Resources[4].DeclarationSource.Line = 20
+				input.ResourceBindings[4].Constructor = input.Resources[4].Provider
+				input.ResourceBindings[4].DeclarationSource = input.Resources[4].DeclarationSource
+				input.ResourceBindings[4].ParameterName = "different"
+				input.ResourceBindings[4].ParameterPosition = 2
+			}
+			provenance, err := interfaceprovenance.New(input)
+			if err != nil || !provenance.Valid() {
+				t.Fatalf("valid provider bindings rejected: %v", err)
+			}
+			before := provenance.RecordJSON()
+			slices.Reverse(input.Resources)
+			slices.Reverse(input.ResourceBindings)
+			reordered, err := interfaceprovenance.New(input)
+			if err != nil || !bytes.Equal(before, reordered.RecordJSON()) {
+				t.Fatalf("provider validation depends on input order: %v", err)
+			}
+			decoded, err := interfaceprovenance.Decode(before)
+			if err != nil || !bytes.Equal(before, decoded.RecordJSON()) {
+				t.Fatalf("valid provider bindings did not round trip: %v", err)
+			}
+		})
+	}
+}
+
+func TestResourceProviderSignaturesRejectInconsistentParameters(t *testing.T) {
+	t.Parallel()
+	for name, change := range map[string]func(*interfaceprovenance.Input){
+		"name":     func(i *interfaceprovenance.Input) { i.ResourceBindings[4].ParameterName = "Upstream" },
+		"position": func(i *interfaceprovenance.Input) { i.ResourceBindings[4].ParameterPosition = 2 },
+		"contract": func(i *interfaceprovenance.Input) {
+			target := i.Resources[3]
+			i.ResourceBindings[4].InstanceName = target.Name
+			i.ResourceBindings[4].Provider = target.Provider
+			i.ResourceBindings[4].ResourceID = target.ResourceID
+			i.ResourceBindings[4].PackagePath = target.PackagePath
+			i.ResourceBindings[4].SelectionSources = target.SelectionSources
+		},
+		"missing-first": func(i *interfaceprovenance.Input) {
+			i.ResourceBindings = append(i.ResourceBindings[:3], i.ResourceBindings[4])
+		},
+		"missing-second": func(i *interfaceprovenance.Input) { i.ResourceBindings = i.ResourceBindings[:4] },
+		"extra": func(i *interfaceprovenance.Input) {
+			extra := i.ResourceBindings[4]
+			extra.ParameterName, extra.ParameterPosition = "another", 2
+			i.ResourceBindings = append(i.ResourceBindings, extra)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input := reusedResourceProviderInput()
+			valid, err := interfaceprovenance.New(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input.Resources, input.ResourceBindings = valid.Resources(), valid.ResourceBindings()
+			change(&input)
+			if _, err := interfaceprovenance.New(input); !errors.Is(err, interfaceprovenance.ErrInvalid) || !strings.Contains(err.Error(), "provider dependency signature") {
+				t.Fatalf("New accepted contradictory provider signature: %v", err)
+			}
+			if err := interfaceprovenance.ValidateResources(input.Resources, input.ResourceBindings); err == nil || !strings.Contains(err.Error(), "provider dependency signature") {
+				t.Fatalf("ValidateResources accepted contradictory provider signature: %v", err)
+			}
+			var record map[string]json.RawMessage
+			if err := json.Unmarshal(valid.RecordJSON(), &record); err != nil {
+				t.Fatal(err)
+			}
+			record["resource_bindings"], err = json.Marshal(input.ResourceBindings)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := interfaceprovenance.Decode(encoded); !errors.Is(err, interfaceprovenance.ErrRecord) || !strings.Contains(err.Error(), "provider dependency signature") {
+				t.Fatalf("Decode did not reject signature before digest comparison: %v", err)
+			}
+			slices.Reverse(input.Resources)
+			slices.Reverse(input.ResourceBindings)
+			if _, _, err := interfaceprovenance.NormalizeResources(input.Resources, input.ResourceBindings); !errors.Is(err, interfaceprovenance.ErrInvalid) || !strings.Contains(err.Error(), "provider dependency signature") {
+				t.Fatalf("NormalizeResources accepted contradictory provider signature: %v", err)
+			}
+		})
+	}
+}
