@@ -1288,7 +1288,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		}
 		return recoveryDiagnostic(diagnosticTemplateInvalid, "Use a corrected published template version whose clean Project passes generation, check, build, and lifecycle validation.")
 	}
-	if errors.Is(err, newproject.ErrCreate) {
+	if errors.Is(err, newproject.ErrCreate) && !errors.Is(err, interfaceresolution.ErrAmbiguousImplementation) {
 		return recoveryDiagnostic(diagnosticProjectCreateFailed, "Inspect and correct the reported Project creation failure, then rerun the same `plystra new` invocation.")
 	}
 	var requirementConflict *providerresolution.RequirementConflictError
