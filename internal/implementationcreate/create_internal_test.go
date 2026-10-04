@@ -29,7 +29,7 @@ type Response struct{}
 	want := errors.New("forced post-validation failure")
 	_, err := create(context.Background(), Options{
 		Start:       root,
-		InterfaceID: "email.send/v1",
+		ContractID:  "email.send/v1",
 		Package:     "./smtp",
 		Environment: append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off"),
 	}, func(string, interfaceinventory.Discovery) error {
