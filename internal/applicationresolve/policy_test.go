@@ -83,11 +83,11 @@ func TestResolveExecutablePoliciesAcceptsReachableDependencies(t *testing.T) {
 	}
 }
 
-func TestResolveExecutablePoliciesPreservesAdoptedSourcesAndDormantIntent(t *testing.T) {
+func TestResolveExecutablePoliciesPreservesTemplateSourcesAndDormantIntent(t *testing.T) {
 	root := writeResolvedInterfaceProject(t)
 	dependency := filepath.Join(filepath.Dir(root), "cache", "plystra.yaml")
-	writeFile(t, dependency, "composition:\n  exports:\n    defaults:\n      interfaces:\n        policies:\n          audit.write/v1: {timeout: 5s}\n")
-	configuration := "composition:\n  adopt: [{module: example.com/interface-cache, export: defaults}]\ninterfaces:\n  require: [app.run/v1]\n  use: {audit.write/v1: example.com/interface-app/auditone.New}\n"
+	writeFile(t, dependency, "interfaces:\n  policies:\n    audit.write/v1: {timeout: 5s}\n")
+	configuration := "template: example.com/interface-cache\ninterfaces:\n  require: [app.run/v1]\n  use: {audit.write/v1: example.com/interface-app/auditone.New}\n"
 	writeFile(t, filepath.Join(root, "plystra.yaml"), configuration)
 	options := applicationresolve.Options{
 		Start:                     root,
@@ -97,26 +97,34 @@ func TestResolveExecutablePoliciesPreservesAdoptedSourcesAndDormantIntent(t *tes
 	before := snapshotTree(t, filepath.Dir(root))
 	resolved, err := applicationresolve.Resolve(t.Context(), options)
 	if err != nil {
-		t.Fatalf("adopted policy = %v", err)
+		t.Fatalf("template policy = %v", err)
 	}
 	policies := resolved.Manifest().InterfacePolicies()
-	if len(policies) != 1 || policies[0].Timeout() != 5*time.Second || !strings.Contains(policies[0].Source(), "example.com/interface-cache") {
-		t.Fatalf("adopted policies = %#v", policies)
+	if len(policies) != 1 || policies[0].InterfaceID().String() != "audit.write/v1" || policies[0].Timeout() != 5*time.Second || policies[0].Source() != `example.com/interface-cache@v1.0.0/plystra.yaml interfaces.policies["audit.write/v1"]` {
+		t.Fatalf("template policies = %#v", policies)
 	}
 	if after := snapshotTree(t, filepath.Dir(root)); !reflect.DeepEqual(after, before) {
-		t.Fatal("adopted policy failure changed input")
+		t.Fatal("template policy resolution changed input")
 	}
-	// Removing the root leaves the same adopted policy dormant.
+	// Removing the root leaves the same template policy dormant.
 	writeFile(t, filepath.Join(root, "plystra.yaml"), strings.Replace(configuration, "require: [app.run/v1]", "require: []", 1))
-	if _, err := applicationresolve.Resolve(t.Context(), options); err != nil {
-		t.Fatalf("dormant adopted policy = %v", err)
+	dormant, err := applicationresolve.Resolve(t.Context(), options)
+	if err != nil {
+		t.Fatalf("dormant template policy = %v", err)
+	}
+	if policies := dormant.Manifest().InterfacePolicies(); len(policies) != 1 || policies[0].Source() != `example.com/interface-cache@v1.0.0/plystra.yaml interfaces.policies["audit.write/v1"]` || len(dormant.InterfaceResolution().Graph().ConstructionOrder()) != 0 {
+		t.Fatalf("dormant template policy or executable membership = %#v", dormant)
 	}
 	// The selected overlay can explicitly remove an active inherited policy.
 	writeFile(t, filepath.Join(root, "plystra.yaml"), configuration)
 	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces:\n  policies: {audit.write/v1: {$remove: true}}\n")
 	options.EnvironmentName = "production"
-	if _, err := applicationresolve.Resolve(t.Context(), options); err != nil {
-		t.Fatalf("removed adopted policy = %v", err)
+	removed, err := applicationresolve.Resolve(t.Context(), options)
+	if err != nil {
+		t.Fatalf("removed template policy = %v", err)
+	}
+	if policies := removed.Manifest().InterfacePolicies(); len(policies) != 0 {
+		t.Fatalf("removed template policy remains effective = %#v", policies)
 	}
 }
 

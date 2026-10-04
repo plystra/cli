@@ -24,26 +24,25 @@ func TestPublicTypedConfigurationNilAndRemoval(t *testing.T) {
 				root := writeImplementationSelectionCommandProject(t)
 				writeCommandNullableConfigurationImplementation(t, root)
 				lower := "config: {" + constructor + ": {settings: {keep: retained.internal, remove: removed.internal}, pointer: lower.internal, items: [lower.internal], labels: {private_key: lower.internal}}}\n"
-				inventory := "composition:\n  exports:\n    defaults:\n      " + lower
-				adoption := "  adopt: [{module: example.com/acme/implementation-use, export: defaults}]\n"
+				inventory, _ := writeCommandTemplate(t, root, "removal", lower)
 				selection := "interfaces: {use: {email.send/v1: " + constructor + "}}\n"
 				if active {
 					selection = "interfaces: {require: [email.send/v1], use: {email.send/v1: " + constructor + "}}\n"
 				}
 				configuration := "config: {" + constructor + ": {settings: {remove: {$remove: true}}, pointer: null, items: ~, labels: }}\n"
-				rootData := inventory + adoption + selection + configuration
+				rootData := inventory + selection + configuration
 				selectedPath, selectedData := "plystra.yaml", rootData
 				options := applicationresolve.Options{Start: root, Environment: commandGoEnvironment()}
 				var selector []string
 				switch mode {
 				case "environment":
-					rootData = inventory + adoption + selection + lower
+					rootData = inventory + selection + lower
 					selectedPath, selectedData = "plystra.production.yaml", configuration
 					selector = []string{"--env", "production"}
 					options.EnvironmentName = "production"
 				case "replacement":
 					rootData = inventory + selection + lower
-					selectedPath, selectedData = "deploy/customer.yaml", "composition:\n"+adoption+selection+configuration
+					selectedPath, selectedData = "deploy/customer.yaml", selection+configuration
 					selector = []string{"--config", selectedPath}
 					options.ConfigurationPath = selectedPath
 				}

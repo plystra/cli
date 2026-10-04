@@ -80,7 +80,7 @@ func (p InterfacePolicy) RetryBackoff() time.Duration { return p.retry.Backoff }
 func (p InterfacePolicy) Source() string { return p.source }
 
 // interfaceRemoval is one exact-key or sparse-set tombstone retained until
-// schema-aware overlay or adopted-export composition applies it.
+// schema-aware overlay or template composition applies it.
 type interfaceRemoval struct {
 	id     interfaceid.Identifier
 	source string

@@ -39,20 +39,11 @@ func TestGenerateIsDeterministicAcrossEffectiveGraphPermutations(t *testing.T) {
 
 		writeModule(t, dependencyRoots["a"], "example.com/platform/a", "require example.com/platform/b v1.0.0\n")
 		configurationOwner := writeConstructorConfigurationOwner(t, dependencyRoots["a"], "example.com/platform/a", false)
-		writeFile(t, filepath.Join(dependencyRoots["a"], "plystra.yaml"), fmt.Sprintf(`composition:
-  exports:
-    defaults:
-      interfaces:
-        require: [configuration.owner/v1]
-        use: {configuration.owner/v1: %s}
-      config:
-        %s: {endpoint: smtp.example}
-http:
-  expose: {email.send/v1: {transport: connect}}
-capabilities:
-  require: [email.send/v1]
-  use: {email.send/v1: example.smtp}
-  aliases: {mail.send/v1: email.send/v1}
+		writeFile(t, filepath.Join(dependencyRoots["a"], "plystra.yaml"), fmt.Sprintf(`interfaces:
+  require: [configuration.owner/v1]
+  use: {configuration.owner/v1: %s}
+config:
+  %s: {endpoint: smtp.example}
 `, configurationOwner, configurationOwner))
 		writePlugin(t, dependencyRoots["a"], "smtp", "id: example.smtp\nprovides: [email.send/v1]\nconfig:\n  endpoint: {type: string}\n")
 		writeCapability(t, dependencyRoots["a"], "smtp", "email.send/v1", "id: email.send/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
@@ -61,7 +52,7 @@ capabilities:
 		goModPath := filepath.Join(appRoot, "go.mod")
 		goMod := string(readAbsoluteFile(t, goModPath)) + permutationModuleDirectives(order, dependencyRoots)
 		writeFile(t, goModPath, goMod)
-		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# stable current Project\ncomposition: {adopt: [{module: example.com/platform/a, export: defaults}]}\nhttp: {address: \":8080\"}\n")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# stable current Project\ntemplate: example.com/platform/a\nhttp: {address: \":8080\"}\n")
 
 		result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start:       appRoot,
@@ -84,7 +75,7 @@ capabilities:
 		}
 		sources := baselineSources(provenance)
 		if !strings.Contains(sources, "example.com/platform/a@v1.0.0") {
-			t.Fatalf("permutation %d baseline omits adopted export owner: %s", index, sources)
+			t.Fatalf("permutation %d baseline omits template owner: %s", index, sources)
 		}
 		for _, inert := range []string{"example.com/platform/b@v1.0.0", "example.com/platform/c@v1.0.0"} {
 			if strings.Contains(sources, inert) {

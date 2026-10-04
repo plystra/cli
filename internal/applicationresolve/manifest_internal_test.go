@@ -13,21 +13,21 @@ import (
 	"github.com/plystra/cli/internal/atomicfs"
 )
 
-func TestDependencyRuntimeExportsAreCapturedPrivateSnapshots(t *testing.T) {
-	const contents = "composition: {exports: {common: {config: {example.com/dependency/service.New: {label: PRIVATE_EXPORT}}}}}\n"
+func TestRuntimeTemplatesAreCapturedPrivateSnapshots(t *testing.T) {
+	const contents = "config: {example.com/dependency/service.New: {label: PRIVATE_TEMPLATE}}\n"
 	result := Result{dependencySnapshots: []dependencyManifestSnapshot{{modulePath: "example.com/dependency", version: "v1.2.3", snapshot: ManifestSnapshot{data: []byte(contents)}}}}
-	exports, err := result.DependencyRuntimeExports()
-	want, wantErr := applicationmeta.PrivateExportInventoryYAML([]byte(contents))
+	exports, err := result.RuntimeTemplates()
+	want, wantErr := applicationmeta.PrivateTemplateYAML([]byte(contents))
 	if err != nil || wantErr != nil || len(exports) != 1 || exports[0].Module != "example.com/dependency" || exports[0].Version != "v1.2.3" || exports[0].YAML != string(want) {
-		t.Fatal("captured exports lost identity or data")
+		t.Fatal("captured templates lost identity or data")
 	}
 	for _, format := range []string{"%v", "%+v", "%#v"} {
-		if strings.Contains(fmt.Sprintf(format, exports), "PRIVATE_EXPORT") {
-			t.Fatal("formatted exports are not redacted")
+		if strings.Contains(fmt.Sprintf(format, exports), "PRIVATE_TEMPLATE") {
+			t.Fatal("formatted templates are not redacted")
 		}
 	}
 	exports[0].YAML = "changed"
-	repeated, err := result.DependencyRuntimeExports()
+	repeated, err := result.RuntimeTemplates()
 	if err != nil || repeated[0].YAML != string(want) {
 		t.Fatal("mutated resolver snapshot")
 	}

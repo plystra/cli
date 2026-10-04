@@ -97,8 +97,6 @@ const (
 	diagnosticProviderMissing                      = diagnosticcode.ProviderMissing
 	diagnosticProviderAmbiguous                    = diagnosticcode.ProviderAmbiguous
 	diagnosticProjectManifestInvalid               = diagnosticcode.ProjectManifestInvalid
-	diagnosticConfigurationInheritedConflict       = diagnosticcode.ConfigurationInheritedConflict
-	diagnosticConfigurationOwnershipAmbiguous      = diagnosticcode.ConfigurationOwnershipAmbiguous
 	diagnosticEnvironmentOverlayInvalid            = diagnosticcode.EnvironmentOverlayInvalid
 	diagnosticConfigurationInvalid                 = diagnosticcode.ConfigurationInvalid
 	diagnosticPolicyNotEnforced                    = diagnosticcode.PolicyNotEnforced
@@ -350,26 +348,16 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: source.Column(),
 			})
 		}
-	case diagnosticConfigurationInheritedConflict:
-		var conflict *applicationmeta.InheritedConflictError
-		if !errors.As(err, &conflict) || conflict == nil {
-			return nil
+	case diagnosticTemplateInvalid:
+		var ancestry *applicationresolve.TemplateError
+		if !errors.As(err, &ancestry) || ancestry == nil {
+			var located *applicationresolve.ManifestSourceError
+			if !errors.As(err, &located) || located == nil || !errors.Is(err, applicationresolve.ErrTemplate) {
+				return nil
+			}
+			return []diagnosticjson.Source{{Module: located.ModulePath(), Path: located.SourcePath(), Kind: located.SourceKind(), Line: located.Line(), Column: located.Column()}}
 		}
-		for _, source := range conflict.Sources() {
-			sources = append(sources, diagnosticjson.Source{
-				Module: source.ModulePath(),
-				Path:   source.Path(),
-				Kind:   "configuration-declaration",
-				Line:   source.Line(),
-				Column: source.Column(),
-			})
-		}
-	case diagnosticConfigurationOwnershipAmbiguous:
-		var conflict *applicationmeta.AmbiguousConfigurationOwnershipError
-		if !errors.As(err, &conflict) || conflict == nil {
-			return nil
-		}
-		for _, source := range conflict.Sources() {
+		for _, source := range ancestry.Sources() {
 			sources = append(sources, diagnosticjson.Source{
 				Module: source.ModulePath(),
 				Path:   source.Path(),
@@ -1249,6 +1237,9 @@ func primaryFailureMessage(err error) string {
 }
 
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
+	if errors.Is(err, applicationresolve.ErrTemplate) {
+		return recoveryDiagnostic(diagnosticTemplateInvalid, "Correct the root template relationship and its Go Module dependency graph; every ancestor must be a Project and the chain must not repeat a module, then rerun the command.")
+	}
 	if errors.Is(err, applicationresolve.ErrPolicyNotEnforced) {
 		return recoveryDiagnostic(diagnosticPolicyNotEnforced, "Remove the reported policy from the selected configuration, or install a compatible CLI/Kernel pair that generates and executes it. Run `plystra inspect capabilities --format json` to verify installed support before retrying.")
 	}
@@ -1296,9 +1287,6 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 			return recoveryDiagnostic(diagnosticTemplateInvalid, action)
 		}
 		return recoveryDiagnostic(diagnosticTemplateInvalid, "Use a corrected published template version whose clean Project passes generation, check, build, and lifecycle validation.")
-	}
-	if errors.Is(err, newproject.ErrCreate) {
-		return recoveryDiagnostic(diagnosticProjectCreateFailed, "Inspect and correct the reported Project creation failure, then rerun the same `plystra new` invocation.")
 	}
 	var requirementConflict *providerresolution.RequirementConflictError
 	if errors.As(err, &requirementConflict) && requirementConflict != nil {
@@ -1448,14 +1436,10 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticUseConstructorInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one visible fully qualified exported constructor symbol.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
 		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
-	case errors.Is(err, applicationmeta.ErrInheritedConflict):
-		return recoveryDiagnostic(diagnosticConfigurationInheritedConflict, "Set or remove the conflicting field explicitly in "+context.configurationTarget()+", then rerun the command.")
-	case errors.Is(err, applicationmeta.ErrAmbiguousConfigurationOwnership):
-		return recoveryDiagnostic(diagnosticConfigurationOwnershipAmbiguous, "Make the inherited field intent explicit in "+context.configurationTarget()+" by restoring it or writing its typed removal.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationRequired):
-		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Supply the missing required field in "+context.configurationTarget()+" or an adopted export, or correct the tombstone that removed it, then rerun the command.")
+		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Supply the missing required field in "+context.configurationTarget()+" or a template root, or correct the tombstone that removed it, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationValues):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.")
 	case errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration):
@@ -1556,6 +1540,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticGeneratedManifestInvalid, "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, capabilitymeta.ErrInvalidManifest):
 		return recoveryDiagnostic(diagnosticCapabilityManifestInvalid, "Correct the reported authored capability.yaml, then rerun the command.")
+	case errors.Is(err, newproject.ErrCreate):
+		return recoveryDiagnostic(diagnosticProjectCreateFailed, "Inspect and correct the reported Project creation failure, then rerun the same `plystra new` invocation.")
 	default:
 		return actionableDiagnostic{}, false
 	}

@@ -118,36 +118,31 @@ replace github.com/plystra/kernel => %s
 	}
 }
 
-func TestRunCheckReportsEveryInheritedConfigurationConflictSource(t *testing.T) {
+func TestRunCheckReportsTemplateCycleSourcesIndependentlyOfModuleOrder(t *testing.T) {
 	parent := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := testkernel.Root(t)
 	dependencies := []struct {
-		module      string
-		version     string
-		directory   string
-		constructor string
+		module    string
+		version   string
+		directory string
+		template  string
 	}{
-		{module: "example.com/a", version: "v1.0.0", directory: "a", constructor: "example.com/implementation/primary.New"},
-		{module: "example.com/b", version: "v1.1.0", directory: "b", constructor: "example.com/implementation/primary.New"},
-		{module: "example.com/c", version: "v1.2.0", directory: "c", constructor: "example.com/implementation/secondary.New"},
+		{module: "example.com/a", version: "v1.0.0", directory: "a", template: "example.com/b"},
+		{module: "example.com/b", version: "v1.1.0", directory: "b", template: "example.com/c"},
+		{module: "example.com/c", version: "v1.2.0", directory: "c", template: "example.com/a"},
 	}
 	dependencyTrees := make(map[string]map[string][]byte, len(dependencies))
 	for _, dependency := range dependencies {
 		root := filepath.Join(parent, dependency.directory)
 		writeCommandFile(t, filepath.Join(root, "go.mod"), "module "+dependency.module+"\n\ngo 1.26\n")
 		writeCommandFile(t, filepath.Join(root, "package.go"), "package placeholder\n")
-		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "composition: {exports: {defaults: {interfaces: {use: {email.send/v1: "+dependency.constructor+"}}}}}\n")
+		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "template: "+dependency.template+"\n")
 		dependencyTrees[root] = commandTree(t, root)
 	}
 
 	orders := [][]int{{0, 1, 2}, {2, 1, 0}}
 	outputs := make([]string, len(orders))
-	sourceBlock := strings.Join([]string{
-		"Source: example.com/a:plystra.yaml:1:1 (configuration-declaration)",
-		"Source: example.com/b:plystra.yaml:1:1 (configuration-declaration)",
-		"Source: example.com/c:plystra.yaml:1:1 (configuration-declaration)",
-	}, "\n") + "\n"
 	for orderIndex, order := range orders {
 		root := filepath.Join(parent, fmt.Sprintf("application-%d", orderIndex))
 		var moduleFile strings.Builder
@@ -169,38 +164,20 @@ func TestRunCheckReportsEveryInheritedConfigurationConflictSource(t *testing.T) 
 			t.Fatalf("ReadFile(go.sum): %v", err)
 		}
 		writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
-		var selected strings.Builder
-		selected.WriteString("composition:\n  adopt:\n")
-		for _, dependencyIndex := range order {
-			dependency := dependencies[dependencyIndex]
-			fmt.Fprintf(&selected, "    - {module: %s, export: defaults}\n", dependency.module)
-		}
-		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), selected.String())
+		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/a\n")
 		before := commandTree(t, root)
 
 		exitCode, stdout, stderr := runCommand(t, []string{"check"}, root, commandGoEnvironment())
 		if exitCode != 1 || stdout != "" {
 			t.Fatalf("check order %d = exit %d, stdout %q, stderr %q", orderIndex, exitCode, stdout, stderr)
 		}
-		for _, fragment := range []string{
-			`interfaces.use["email.send/v1"]`,
-			"example.com/implementation/primary.New",
-			"example.com/implementation/secondary.New",
-			`example.com/a@v1.0.0/plystra.yaml composition.exports["defaults"].interfaces.use["email.send/v1"]`,
-			`example.com/b@v1.1.0/plystra.yaml composition.exports["defaults"].interfaces.use["email.send/v1"]`,
-			`example.com/c@v1.2.0/plystra.yaml composition.exports["defaults"].interfaces.use["email.send/v1"]`,
-			"Set or remove the conflicting field explicitly in plystra.yaml, then rerun the command.",
-			"Diagnostic: " + diagnosticcode.ConfigurationInheritedConflict,
-		} {
-			if !strings.Contains(stderr, fragment) {
-				t.Fatalf("check order %d omits %q: %s", orderIndex, fragment, stderr)
+		for _, module := range []string{"example.com/application", "example.com/a", "example.com/b", "example.com/c"} {
+			if !strings.Contains(stderr, "Source: "+module+":plystra.yaml:") {
+				t.Fatalf("cycle diagnostic omitted %s: %s", module, stderr)
 			}
 		}
-		if !strings.Contains(stderr, "\n\n"+sourceBlock+"\nRecovery:\n") {
-			t.Fatalf("check order %d source block is absent or out of order: %s", orderIndex, stderr)
-		}
-		if strings.Count(stderr, "Source: ") != 3 || strings.Count(stderr, "example.com/implementation/primary.New") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
-			t.Fatalf("check order %d has unstable deduplication or recovery: %s", orderIndex, stderr)
+		if !strings.Contains(stderr, "Diagnostic: "+diagnosticcode.TemplateInvalid) || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
+			t.Fatalf("cycle diagnostic lacks typed recovery: %s", stderr)
 		}
 		if strings.Contains(stderr, parent) || strings.Contains(stderr, filepath.ToSlash(parent)) {
 			t.Fatalf("check order %d exposes an absolute Project path: %s", orderIndex, stderr)
@@ -220,7 +197,7 @@ func TestRunCheckReportsEveryInheritedConfigurationConflictSource(t *testing.T) 
 	}
 }
 
-func TestRunGenerateNeverMaterializesAdoptedValuesIntoSelectedConfiguration(t *testing.T) {
+func TestRunGenerateNeverMaterializesTemplateValuesIntoSelectedConfiguration(t *testing.T) {
 	parent := t.TempDir()
 	platformRoot := filepath.Join(parent, "platform")
 	applicationRoot := filepath.Join(parent, "application")
@@ -246,12 +223,9 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 	return sendv1.Response{}, nil
 }
 `)
-	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `composition:
-  exports:
-    application:
-      interfaces:
-        require: [email.send/v1]
-        use: {email.send/v1: example.com/platform/smtp.New}
+	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `interfaces:
+  require: [email.send/v1]
+  use: {email.send/v1: example.com/platform/smtp.New}
 `)
 	platformBefore := commandTree(t, platformRoot)
 
@@ -276,9 +250,7 @@ replace github.com/plystra/kernel => %s
 	}
 	writeCommandFile(t, filepath.Join(applicationRoot, "go.sum"), string(goSum))
 	selectedConfiguration := `# selected current Project remains authored only
-composition:
-  adopt:
-    - {module: example.com/platform, export: application}
+template: example.com/platform
 `
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), selectedConfiguration)
 	environment := commandGoEnvironment()
@@ -288,11 +260,11 @@ composition:
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != selectedConfiguration {
-		t.Fatalf("generate materialized adopted values into selected configuration:\n%s", got)
+		t.Fatalf("generate materialized template values into selected configuration:\n%s", got)
 	}
 	assembly := string(readCommandFile(t, applicationRoot, "generated/go/assembly/interfaces_gen.go"))
 	if !strings.Contains(assembly, "example.com/platform/smtp.New") {
-		t.Fatalf("generated assembly omitted adopted constructor:\n%s", assembly)
+		t.Fatalf("generated assembly omitted template constructor:\n%s", assembly)
 	}
 	beforeCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"check"}, applicationRoot, environment)

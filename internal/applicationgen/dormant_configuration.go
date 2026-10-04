@@ -126,7 +126,8 @@ func NewDormantConstructorConfiguration(
 			})
 			normalizedContributions[contributionIndex] = DormantConfigurationContribution{
 				owner: string(contribution.Owner()), precedence: contribution.Precedence(),
-				digest: contribution.Digest(), summary: contribution.Summary(),
+				templateOrder: contribution.TemplateOrder(),
+				digest:        contribution.Digest(), summary: contribution.Summary(),
 				removed: contribution.Removed(), effective: contribution.Effective(), sources: normalizedSources,
 			}
 		}
@@ -339,6 +340,9 @@ func validateDormantConfigurationField(value DormantConfigurationField) error {
 }
 
 func validateDormantConfigurationContribution(value DormantConfigurationContribution) error {
+	if !validDormantTemplateOrder(value) {
+		return errors.New("template order is invalid")
+	}
 	if !validDormantOwner(value.owner) || value.precedence != dormantOwnerPrecedence(value.owner) || !validSHA256(value.digest) {
 		return errors.New("owner, precedence, or digest is invalid")
 	}
@@ -436,7 +440,8 @@ func dormantConstructorConfigurationWires(values []DormantConstructorConfigurati
 				}
 				contributions[contributionIndex] = applicationManifestDormantSelectionContribution{
 					Owner: contribution.owner, Precedence: contribution.precedence,
-					Digest: contribution.digest, Summary: contribution.summary,
+					TemplateOrder: contribution.templateOrder,
+					Digest:        contribution.digest, Summary: contribution.summary,
 					Removed: contribution.removed, Effective: contribution.effective, Sources: sources,
 				}
 			}
@@ -477,7 +482,8 @@ func restoreDormantConstructorConfigurations(values []applicationManifestDormant
 				}
 				contributions[contributionIndex] = DormantConfigurationContribution{
 					owner: contribution.Owner, precedence: contribution.Precedence,
-					digest: contribution.Digest, summary: contribution.Summary,
+					templateOrder: contribution.TemplateOrder,
+					digest:        contribution.Digest, summary: contribution.Summary,
 					removed: contribution.Removed, effective: contribution.Effective, sources: sources,
 				}
 			}

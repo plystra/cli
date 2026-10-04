@@ -18,7 +18,6 @@ func TestSecretReferencePublicIdentityExcludesKindAndTarget(t *testing.T) {
 	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	for _, wrapper := range []string{
 		"config: {example.com/acme/smtp.New: %s}",
-		"composition: {exports: {shared: {config: {example.com/acme/smtp.New: %s}}}}",
 		"config: {example.com/acme/smtp.New: %s, example.com/unavailable/service.New: {unknown: private}}",
 	} {
 		var first string
@@ -35,9 +34,6 @@ func TestSecretReferencePublicIdentityExcludesKindAndTarget(t *testing.T) {
 			first = digest
 		}
 		for _, values := range []string{"{}", "{password: {$remove: true}}"} {
-			if strings.Contains(wrapper, "exports") && strings.Contains(values, "$remove") {
-				continue
-			}
 			digest, err := applicationmeta.ConfigurationLayerDigest(composeManifest(t, fmt.Sprintf(wrapper, values)), lookup)
 			if err != nil || digest == first {
 				t.Fatalf("absence or explicit removal lost its public identity: %v", err)
@@ -46,7 +42,7 @@ func TestSecretReferencePublicIdentityExcludesKindAndTarget(t *testing.T) {
 	}
 }
 
-func TestSecretReferencePrivateConflictsSurvivePublicRedaction(t *testing.T) {
+func TestSecretReferenceLinearPrecedencePreservesPublicRedaction(t *testing.T) {
 	t.Parallel()
 	schema := composeSchema(t, "Password configuration.Secret\n")
 	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
@@ -70,8 +66,8 @@ func TestSecretReferencePrivateConflictsSurvivePublicRedaction(t *testing.T) {
 	for _, reference := range []string{"{env: PRIVATE_SECOND}", "{file: /PRIVATE_FILE}"} {
 		dependencies[1].Manifest = manifest(reference)
 		_, err := applicationmeta.Compose(dependencies, empty, lookup)
-		if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "PRIVATE_") {
-			t.Fatalf("private Secret conflict = %v", err)
+		if err != nil {
+			t.Fatalf("ordered Secret replacement = %v", err)
 		}
 		for _, current := range []string{"{env: PRIVATE_LOCAL}", "{$remove: true}"} {
 			resolved, err := applicationmeta.Compose(dependencies, manifest(current), lookup)

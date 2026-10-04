@@ -1219,13 +1219,10 @@ func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error
 	return writev1.Response{}, nil
 }
 `)
-	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `composition:
-  exports:
-    defaults:
-      interfaces:
-        require: [email.send/v1]
-        use:
-          email.send/v1: example.com/platform/smtp.New
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `interfaces:
+  require: [email.send/v1]
+  use:
+    email.send/v1: example.com/platform/smtp.New
 `)
 
 	goMod := fmt.Sprintf(`module example.com/acme/maintenance
@@ -1267,9 +1264,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 }
 `)
 	initialConfiguration := `# shared application configuration
-composition:
-  adopt:
-    - {module: example.com/platform, export: defaults}
+template: example.com/platform
 `
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), initialConfiguration)
 	environment := commandGoEnvironment()
@@ -1279,26 +1274,21 @@ composition:
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != initialConfiguration {
-		t.Fatalf("initial generate materialized adopted values into selected configuration:\n%s", got)
+		t.Fatalf("initial generate materialized template values into selected configuration:\n%s", got)
 	}
 	locallyEdited := `# shared application configuration
 # explicit local selection
-composition:
-  adopt:
-    - {module: example.com/platform, export: defaults}
+template: example.com/platform
 interfaces:
   use:
     email.send/v1: example.com/acme/maintenance/local.New
 `
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), locallyEdited)
-	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `composition:
-  exports:
-    defaults:
-      interfaces:
-        require: [audit.write/v1, email.send/v1]
-        use:
-          audit.write/v1: example.com/platform/audit.New
-          email.send/v1: example.com/platform/other.New
+	writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `interfaces:
+  require: [audit.write/v1, email.send/v1]
+  use:
+    audit.write/v1: example.com/platform/audit.New
+    email.send/v1: example.com/platform/other.New
 `)
 
 	exitCode, stdout, stderr = runCommand(t, []string{"generate"}, applicationRoot, environment)
@@ -1349,7 +1339,7 @@ replace github.com/plystra/kernel => %s
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
 	rootConfiguration := "# shared root\nhttp: {cors: {allowed_origins: [https://app.example.com], allow_credentials: true}}\ninterfaces: {require: [kernel.health/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\nhttp: {cors: {allow_credentials: null}}\ninterfaces:\n  require:\n    add: [kernel.info/v1]\n    remove: [kernel.health/v1]\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {cors: {allow_credentials: {$remove: true}}}\ninterfaces:\n  require:\n    add: [kernel.info/v1]\n    remove: [kernel.health/v1]\n"
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), overlayConfiguration)
 	start := filepath.Join(root, "nested")
@@ -1437,7 +1427,7 @@ replace github.com/plystra/kernel => %s
 
 	credentialedWildcardOverlay := strings.Replace(
 		overlayConfiguration,
-		"http: {cors: {allow_credentials: null}}",
+		"http: {cors: {allow_credentials: {$remove: true}}}",
 		"http: {cors: {allowed_origins: ['*']}}",
 		1,
 	)
@@ -1611,7 +1601,7 @@ interfaces:
 		}
 	}
 
-	const inertRoot = "interfaces: {require: PRIVATE_INERT_REQUIREMENTS}\nhttp: PRIVATE_INERT_PROCESS\nconfig: PRIVATE_INERT_CONFIGURATION\ncomposition: {exports: {}}\n"
+	const inertRoot = "interfaces: {require: PRIVATE_INERT_REQUIREMENTS}\nhttp: PRIVATE_INERT_PROCESS\nconfig: PRIVATE_INERT_CONFIGURATION\n"
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), inertRoot)
 	runtimeOutsidePath := filepath.Join(root, "runtime-outside.yaml")
 	writeCommandFile(t, runtimeOutsidePath, "{}\n")
@@ -1692,7 +1682,7 @@ interfaces:
 			t.Fatalf("remove runtime configuration path alias: %v", err)
 		}
 	}
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "composition: [PRIVATE_INVALID_YAML\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: [PRIVATE_INVALID_YAML\n")
 	invalidRoot := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "deploy/customer.yaml")
 	invalidRoot.Dir, invalidRoot.Env = applicationRoot, environment
 	if output, err := invalidRoot.CombinedOutput(); err == nil || !bytes.Contains(output, []byte("decode plystra.yaml YAML")) || bytes.Contains(output, []byte("PRIVATE_INVALID_YAML")) {

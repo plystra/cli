@@ -9,7 +9,6 @@ import (
 	"go/token"
 	"go/types"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -17,213 +16,6 @@ import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
 )
-
-func TestComposeDeterministicallyAppliesTypedDependencyDeclarations(t *testing.T) {
-	t.Parallel()
-
-	schema := composeSchema(t, `
-	Host string `+"`plystra:\"required\"`"+`
-	Labels map[string]string
-	Port int64 `+"`plystra:\"required\"`"+`
-	Ratio float64
-	Token configuration.Secret `+"`plystra:\"required\"`"+`
-`)
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
-	dependencyA := applicationmeta.Dependency{
-		ModulePath:    "example.com/a",
-		ModuleVersion: "v1.2.0",
-		Manifest: composeManifest(t, `
-http:
-  address: ":9001"
-  expose: {email.send/v1: {transport: connect}}
-timeouts: {startup: 1s}
-capabilities:
-  require: [audit.write/v1]
-  use: {email.send/v1: acme.email.smtp}
-  aliases: {mail.send/v1: email.send/v1}
-config:
-  example.com/acme/smtp.New:
-    host: smtp.example.com
-    ratio: 1
-    token: {env: SMTP_TOKEN}
-`),
-	}
-	dependencyB := applicationmeta.Dependency{
-		ModulePath:    "example.com/b",
-		ModuleVersion: "v2.0.0",
-		Manifest: composeManifest(t, `
-http:
-  address: ":9002"
-  expose: {email.send/v1: {transport: connect}, order.create/v1: {transport: connect}}
-timeouts: {startup: 9s}
-capabilities:
-  require: [audit.write/v1]
-  use: {email.send/v1: acme.email.smtp}
-  aliases: {mail.send/v1: email.send/v1}
-config:
-  example.com/acme/smtp.New:
-    port: 587
-    ratio: 1.0
-    token: {env: SMTP_TOKEN}
-`),
-	}
-	current := composeManifest(t, `
-http:
-  address: ":8080"
-  expose: {kernel.health/v1: {transport: connect}}
-timeouts: {startup: 3s}
-capabilities:
-  require: [kernel.info/v1]
-  aliases: {}
-config:
-  example.com/acme/smtp.New:
-    labels: {region: primary}
-`)
-
-	first, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencyB, dependencyA}, current, lookup)
-	if err != nil || !first.Valid() {
-		t.Fatalf("Compose = %#v, %v", first, err)
-	}
-	second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencyA, dependencyB}, current, lookup)
-	if err != nil || !second.Valid() {
-		t.Fatalf("Compose(reordered) = %#v, %v", second, err)
-	}
-	if first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(first.Provenance()), provenanceStrings(second.Provenance())) || !reflect.DeepEqual(provenanceStrings(first.ResolutionSources()), provenanceStrings(second.ResolutionSources())) {
-		t.Fatalf("composition depends on dependency order:\nfirst:  %s %#v\nsecond: %s %#v", first.DependencyDigest(), provenanceStrings(first.Provenance()), second.DependencyDigest(), provenanceStrings(second.Provenance()))
-	}
-
-	manifest := first.Manifest()
-	if address, exists := manifest.HTTPAddress(); !exists || address != ":8080" || manifest.StartupTimeout().String() != "3s" {
-		t.Fatalf("current process settings = address %q, %t, timeout %s", address, exists, manifest.StartupTimeout())
-	}
-	if got := exposureIDs(manifest); !slices.Equal(got, []string{"kernel.health/v1"}) {
-		t.Fatalf("HTTP exposures = %v", got)
-	}
-	if got := requirementIDs(manifest); !slices.Equal(got, []string{"audit.write/v1", "kernel.info/v1"}) {
-		t.Fatalf("requirements = %v", got)
-	}
-	choices := manifest.ProviderChoices()
-	if len(choices) != 1 || choices[0].Capability().String() != "email.send/v1" || choices[0].PluginID() != "acme.email.smtp" || !strings.HasPrefix(choices[0].Source(), "example.com/a@v1.2.0/plystra.yaml") {
-		t.Fatalf("Provider choices = %#v", choices)
-	}
-	aliases := manifest.Aliases()
-	if len(aliases) != 1 || aliases[0].ID().String() != "mail.send/v1" || aliases[0].Target().String() != "email.send/v1" || !strings.HasPrefix(aliases[0].Source(), "example.com/a@v1.2.0/plystra.yaml") {
-		t.Fatalf("Aliases = %#v", aliases)
-	}
-	configured, exists := manifest.Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
-	if !exists {
-		t.Fatal("composed configuration is absent")
-	}
-	for _, expected := range [][]byte{[]byte("host: smtp.example.com"), []byte("labels:"), []byte("port: 587"), []byte("ratio: 1"), []byte("token:"), []byte("env: SMTP_TOKEN")} {
-		if !bytes.Contains(configured.YAML(), expected) {
-			t.Fatalf("composed configuration omits %q:\n%s", expected, configured.YAML())
-		}
-	}
-
-	audit := findProvenance(t, first.Provenance(), `capabilities.require["audit.write/v1"]`)
-	if len(audit) != 1 || len(audit[0].Sources()) != 2 {
-		t.Fatalf("audit provenance = %#v", provenanceStrings(audit))
-	}
-	effectiveAudit := findProvenance(t, first.ResolutionSources(), `capabilities.require["audit.write/v1"]`)
-	if len(effectiveAudit) != 1 || len(effectiveAudit[0].Sources()) != 2 {
-		t.Fatalf("effective audit provenance = %#v", provenanceStrings(effectiveAudit))
-	}
-	for _, local := range []string{`http.expose["kernel.health/v1"]`, `capabilities.require["kernel.info/v1"]`} {
-		if records := findProvenance(t, first.ResolutionSources(), local); len(records) != 0 {
-			t.Fatalf("current-project declaration entered dependency resolution provenance: %#v", provenanceStrings(records))
-		}
-	}
-	for _, ignored := range []string{`http.expose["email.send/v1"]`, `http.expose["order.create/v1"]`} {
-		if records := findProvenance(t, first.Provenance(), ignored); len(records) != 0 {
-			t.Fatalf("dependency-owned exposure entered composition provenance: %#v", provenanceStrings(records))
-		}
-	}
-	ratio := findProvenance(t, first.Provenance(), `config["example.com/acme/smtp.New"]["ratio"]`)
-	if len(ratio) != 1 || len(ratio[0].Sources()) != 2 {
-		t.Fatalf("normalized ratio provenance = %#v", provenanceStrings(ratio))
-	}
-	for _, forbidden := range []string{"http.address", "timeouts.startup"} {
-		if len(findProvenance(t, first.Provenance(), forbidden)) != 0 {
-			t.Fatalf("dependency-owned process setting entered provenance: %s", forbidden)
-		}
-	}
-	provenance := first.Provenance()
-	provenance[0] = applicationmeta.Provenance{}
-	if first.Provenance()[0].Path() == "" {
-		t.Fatal("Provenance exposed mutable composition storage")
-	}
-	sources := first.Provenance()[0].Sources()
-	if len(sources) != 0 {
-		sources[0] = "changed"
-		if first.Provenance()[0].Sources()[0] == "changed" {
-			t.Fatal("Provenance sources exposed mutable storage")
-		}
-	}
-	resolutionSources := first.ResolutionSources()
-	resolutionSources[0] = applicationmeta.Provenance{}
-	if first.ResolutionSources()[0].Path() == "" {
-		t.Fatal("ResolutionSources exposed mutable composition storage")
-	}
-}
-
-func TestComposeKeepsDependencyExposureTransportsOutsideInheritance(t *testing.T) {
-	t.Parallel()
-
-	dependencies := []applicationmeta.Dependency{
-		{
-			ModulePath:    "example.com/connect-off",
-			ModuleVersion: "v1.0.0",
-			Manifest:      composeManifest(t, "http: {expose: {kernel.health/v1: {transport: connect}}}\n"),
-		},
-		{
-			ModulePath:    "example.com/rest-off",
-			ModuleVersion: "v2.0.0",
-			Manifest:      composeManifest(t, "http: {expose: {kernel.info/v1: {transport: connect}}}\n"),
-		},
-	}
-
-	for _, test := range []struct {
-		name    string
-		current string
-		want    applicationmeta.HTTPTransports
-	}{
-		{
-			name:    "omitted current exposure enables no transport",
-			current: "{}\n",
-			want:    applicationmeta.HTTPTransports{},
-		},
-		{
-			name:    "explicit current choice wins",
-			current: "http: {expose: {kernel.health/v1: {transport: connect}}}\n",
-			want:    applicationmeta.HTTPTransports{Connect: true},
-		},
-	} {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			first, err := applicationmeta.Compose(dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
-			if err != nil {
-				t.Fatalf("Compose: %v", err)
-			}
-			second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, test.current), composeSchemaLookup(nil))
-			if err != nil {
-				t.Fatalf("Compose(reordered): %v", err)
-			}
-			if got := first.Manifest().HTTPTransports(); got != test.want {
-				t.Fatalf("HTTPTransports = %#v, want %#v", got, test.want)
-			}
-			if got := second.Manifest().HTTPTransports(); got != test.want {
-				t.Fatalf("reordered HTTPTransports = %#v, want %#v", got, test.want)
-			}
-			if first.DependencyDigest() != second.DependencyDigest() {
-				t.Fatalf("dependency digest changed with order: %s then %s", first.DependencyDigest(), second.DependencyDigest())
-			}
-			if records := first.Provenance(); len(records) != 0 {
-				t.Fatalf("dependency-only process settings entered provenance: %#v", provenanceStrings(records))
-			}
-		})
-	}
-}
 
 func TestComposeDerivesTransportFromEffectiveExposure(t *testing.T) {
 	t.Parallel()
@@ -248,7 +40,8 @@ func TestComposeDerivesTransportFromEffectiveExposure(t *testing.T) {
 			current: "http: {expose: {kernel.health/v1: {$remove: true}}}\n",
 		},
 		{
-			name: "dependency exposure is ignored without transport",
+			name: "template exposure enables its transport",
+			want: applicationmeta.HTTPTransports{Connect: true},
 			dependencies: []applicationmeta.Dependency{{
 				ModulePath:    "example.com/platform",
 				ModuleVersion: "v1.2.0",
@@ -318,127 +111,6 @@ func TestComposeRetainsExposureTransportAndSources(t *testing.T) {
 	}
 }
 
-func TestComposeKeepsDependencyHTTPCORSOutsideInheritance(t *testing.T) {
-	t.Parallel()
-
-	dependencies := []applicationmeta.Dependency{
-		{
-			ModulePath:    "example.com/wildcard",
-			ModuleVersion: "v1.0.0",
-			Manifest:      composeManifest(t, "http: {cors: {allowed_origins: ['*']}}\n"),
-		},
-		{
-			ModulePath:    "example.com/credentialed",
-			ModuleVersion: "v2.0.0",
-			Manifest:      composeManifest(t, "http: {cors: {allowed_origins: [https://dependency.example], allow_credentials: true}}\n"),
-		},
-	}
-
-	for _, test := range []struct {
-		name        string
-		current     string
-		wantOrigins []string
-		wantCreds   bool
-		wantExists  bool
-	}{
-		{
-			name:    "omitted current CORS stays absent",
-			current: "{}\n",
-		},
-		{
-			name:        "explicit current CORS wins",
-			current:     "http: {cors: {allowed_origins: [https://current.example], allow_credentials: true}}\n",
-			wantOrigins: []string{"https://current.example"},
-			wantCreds:   true,
-			wantExists:  true,
-		},
-	} {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			first, err := applicationmeta.Compose(dependencies, composeManifest(t, test.current), composeSchemaLookup(nil))
-			if err != nil {
-				t.Fatalf("Compose: %v", err)
-			}
-			second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, test.current), composeSchemaLookup(nil))
-			if err != nil {
-				t.Fatalf("Compose(reordered): %v", err)
-			}
-			for _, composed := range []applicationmeta.Composition{first, second} {
-				cors, exists := composed.Manifest().HTTPCORS()
-				if exists != test.wantExists || !slices.Equal(cors.AllowedOrigins, test.wantOrigins) || cors.AllowCredentials != test.wantCreds {
-					t.Fatalf("HTTPCORS = %#v, %t; want %#v, %t", cors, exists, test.wantOrigins, test.wantExists)
-				}
-			}
-			if first.DependencyDigest() != second.DependencyDigest() {
-				t.Fatalf("dependency digest changed with order: %s then %s", first.DependencyDigest(), second.DependencyDigest())
-			}
-			if records := first.Provenance(); len(records) != 0 {
-				t.Fatalf("dependency-only CORS entered provenance: %#v", provenanceStrings(records))
-			}
-		})
-	}
-}
-
-func TestComposeRequiresCurrentProviderReplacementForInheritedConflict(t *testing.T) {
-	t.Parallel()
-
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.smtp}}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {use: {email.send/v1: acme.local}}\n")},
-	}
-	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
-	if !errors.Is(err, applicationmeta.ErrCompose) || !errors.Is(err, applicationmeta.ErrInheritedConflict) {
-		t.Fatalf("Compose conflict error = %v", err)
-	}
-	for _, required := range []string{`capabilities.use["email.send/v1"]`, "acme.smtp", "acme.local", "example.com/a@v1.0.0/plystra.yaml", "example.com/b@v1.0.0/plystra.yaml", "current Project"} {
-		if !strings.Contains(err.Error(), required) {
-			t.Fatalf("conflict error omits %q: %v", required, err)
-		}
-	}
-
-	current := composeManifest(t, "capabilities: {use: {email.send/v1: acme.current}}\n")
-	composed, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatalf("Compose with replacement: %v", err)
-	}
-	choices := composed.Manifest().ProviderChoices()
-	if len(choices) != 1 || choices[0].PluginID() != "acme.current" || choices[0].Source() != `plystra.yaml capabilities.use["email.send/v1"]` {
-		t.Fatalf("current replacement = %#v", choices)
-	}
-	if records := findProvenance(t, composed.Provenance(), `capabilities.use["email.send/v1"]`); len(records) != 2 {
-		t.Fatalf("conflicting baseline provenance = %#v", provenanceStrings(records))
-	}
-	if records := findProvenance(t, composed.ResolutionSources(), `capabilities.use["email.send/v1"]`); len(records) != 0 {
-		t.Fatalf("superseded Provider choices entered effective resolution provenance: %#v", provenanceStrings(records))
-	}
-}
-
-func TestComposeRequiresExactCurrentAliasReplacement(t *testing.T) {
-	t.Parallel()
-
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {aliases: {mail.send/v1: email.send/v1}}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {aliases: {mail.send/v1: message.send/v1}}\n")},
-	}
-	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
-	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `capabilities.aliases["mail.send/v1"]`) || !strings.Contains(err.Error(), "email.send/v1") || !strings.Contains(err.Error(), "message.send/v1") {
-		t.Fatalf("Alias conflict error = %v", err)
-	}
-	current := composeManifest(t, "capabilities: {aliases: {mail.send/v1: notification.send/v1}}\n")
-	composed, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatalf("Compose with Alias replacement: %v", err)
-	}
-	aliases := composed.Manifest().Aliases()
-	if len(aliases) != 1 || aliases[0].Target().String() != "notification.send/v1" {
-		t.Fatalf("current Alias replacement = %#v", aliases)
-	}
-	if records := findProvenance(t, composed.ResolutionSources(), `capabilities.aliases["mail.send/v1"]`); len(records) != 0 {
-		t.Fatalf("superseded Aliases entered effective resolution provenance: %#v", provenanceStrings(records))
-	}
-}
-
 func TestComposeAppliesExactCurrentProjectDeclarationRemovals(t *testing.T) {
 	t.Parallel()
 
@@ -485,195 +157,8 @@ capabilities:
 			t.Fatalf("provenance for %s = %#v", path, provenanceStrings(records))
 		}
 	}
-	if records := findProvenance(t, composed.Provenance(), `http.expose["email.send/v1"]`); len(records) != 0 {
+	if records := findProvenance(t, composed.Provenance(), `http.expose["email.send/v1"]`); len(records) != 1 {
 		t.Fatalf("dependency-owned exposure entered provenance: %#v", provenanceStrings(records))
-	}
-}
-
-func TestComposeRequiresCurrentDecisionForInheritedAddRemoveConflicts(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		added   string
-		removed string
-		path    string
-		resolve string
-		assert  func(testing.TB, applicationmeta.Manifest)
-	}{
-		{
-			name:    "requirement",
-			added:   "capabilities: {require: [audit.write/v1]}\n",
-			removed: "capabilities: {require: {remove: [audit.write/v1]}}\n",
-			path:    `capabilities.require["audit.write/v1"]`,
-			resolve: "capabilities: {require: {add: [audit.write/v1]}}\n",
-			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
-				if got := requirementIDs(manifest); !slices.Equal(got, []string{"audit.write/v1"}) {
-					t.Fatalf("requirement addition did not win: %v", got)
-				}
-			},
-		},
-		{
-			name:    "Provider choice",
-			added:   "capabilities: {use: {email.send/v1: acme.smtp}}\n",
-			removed: "capabilities: {use: {email.send/v1: null}}\n",
-			path:    `capabilities.use["email.send/v1"]`,
-			resolve: "capabilities: {use: {email.send/v1: acme.local}}\n",
-			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
-				if choices := manifest.ProviderChoices(); len(choices) != 1 || choices[0].PluginID() != "acme.local" {
-					t.Fatalf("Provider replacement did not win: %#v", choices)
-				}
-			},
-		},
-		{
-			name:    "Alias",
-			added:   "capabilities: {aliases: {mail.send/v1: email.send/v1}}\n",
-			removed: "capabilities: {aliases: {mail.send/v1: null}}\n",
-			path:    `capabilities.aliases["mail.send/v1"]`,
-			resolve: "capabilities: {aliases: {mail.send/v1: message.send/v1}}\n",
-			assert: func(t testing.TB, manifest applicationmeta.Manifest) {
-				if aliases := manifest.Aliases(); len(aliases) != 1 || aliases[0].Target().String() != "message.send/v1" {
-					t.Fatalf("Alias replacement did not win: %#v", aliases)
-				}
-			},
-		},
-	}
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			dependencies := []applicationmeta.Dependency{
-				{ModulePath: "example.com/add", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, test.added)},
-				{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, test.removed)},
-			}
-			_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
-			if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), test.path) || !strings.Contains(err.Error(), "example.com/add@v1.0.0/plystra.yaml") || !strings.Contains(err.Error(), "example.com/remove@v1.0.0/plystra.yaml") {
-				t.Fatalf("inherited conflict = %v", err)
-			}
-			composed, err := applicationmeta.Compose(dependencies, composeManifest(t, test.resolve), composeSchemaLookup(nil))
-			if err != nil {
-				t.Fatalf("Compose with current decision: %v", err)
-			}
-			test.assert(t, composed.Manifest())
-			if records := findProvenance(t, composed.Provenance(), test.path); len(records) != 2 {
-				t.Fatalf("conflicting provenance = %#v", provenanceStrings(records))
-			}
-		})
-	}
-}
-
-func TestComposeIgnoresDependencyHTTPExposureConflicts(t *testing.T) {
-	t.Parallel()
-
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/add", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: {transport: connect}}}\n")},
-		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "http: {expose: {email.send/v1: {$remove: true}}}\n")},
-	}
-	current := composeManifest(t, "http: {expose: {app.health/v1: {transport: connect}}}\n")
-	composed, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatalf("Compose: %v", err)
-	}
-	if got := exposureIDs(composed.Manifest()); !slices.Equal(got, []string{"app.health/v1"}) {
-		t.Fatalf("effective current-Project exposures = %v", got)
-	}
-	if records := findProvenance(t, composed.Provenance(), `http.expose["email.send/v1"]`); len(records) != 0 {
-		t.Fatalf("ignored dependency conflict entered provenance: %#v", provenanceStrings(records))
-	}
-	reordered, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, current, composeSchemaLookup(nil))
-	if err != nil || reordered.DependencyDigest() != composed.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(reordered.Provenance()), provenanceStrings(composed.Provenance())) {
-		t.Fatalf("ignored dependency exposure changed deterministic composition: %#v, %v", reordered, err)
-	}
-}
-
-func TestComposeDeduplicatesCompatibleInheritedRemovals(t *testing.T) {
-	t.Parallel()
-
-	source := `
-http: {expose: {email.send/v1: {$remove: true}}}
-capabilities:
-  require: {remove: [audit.write/v1]}
-  use: {email.send/v1: null}
-  aliases: {mail.send/v1: null}
-`
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, source)},
-		{ModulePath: "example.com/b", ModuleVersion: "v2.0.0", Manifest: composeManifest(t, source)},
-	}
-	first, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatalf("Compose removals: %v", err)
-	}
-	second, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
-	if err != nil || second.DependencyDigest() != first.DependencyDigest() {
-		t.Fatalf("reordered removal composition = %s, %v; want %s", second.DependencyDigest(), err, first.DependencyDigest())
-	}
-	manifest := first.Manifest()
-	if len(manifest.HTTPExposures()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Aliases()) != 0 {
-		t.Fatalf("deduplicated removals produced declarations: %#v", manifest)
-	}
-	for _, path := range []string{
-		`capabilities.require["audit.write/v1"]`,
-		`capabilities.use["email.send/v1"]`,
-		`capabilities.aliases["mail.send/v1"]`,
-	} {
-		records := findProvenance(t, first.Provenance(), path)
-		if len(records) != 1 || !records[0].Removed() || len(records[0].Sources()) != 2 {
-			t.Fatalf("deduplicated provenance for %s = %#v", path, provenanceStrings(records))
-		}
-	}
-	if records := findProvenance(t, first.Provenance(), `http.expose["email.send/v1"]`); len(records) != 0 {
-		t.Fatalf("dependency-owned exposure removal entered provenance: %#v", provenanceStrings(records))
-	}
-}
-
-func TestComposeMergesConfigurationByDeclaredFieldAndRedactsConflicts(t *testing.T) {
-	t.Parallel()
-
-	schema := composeSchema(t, `
-	Host string
-	Token configuration.Secret
-`)
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-a.example, token: {env: PRIVATE_A}}}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-b.example, token: {env: PRIVATE_B}}}\n")},
-		{ModulePath: "example.com/c", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: private-a.example, token: {env: PRIVATE_A}}}\n")},
-	}
-	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), lookup)
-	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]["host"]`) {
-		t.Fatalf("configuration conflict error = %v", err)
-	}
-	for _, source := range []string{
-		`example.com/a@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]["host"]`,
-		`example.com/b@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]["host"]`,
-		`example.com/c@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]["host"]`,
-	} {
-		if !strings.Contains(err.Error(), source) {
-			t.Fatalf("configuration conflict omits source %q: %v", source, err)
-		}
-	}
-	for _, forbidden := range []string{"private-a.example", "private-b.example", "PRIVATE_A", "PRIVATE_B"} {
-		if strings.Contains(err.Error(), forbidden) {
-			t.Fatalf("configuration conflict exposed %q: %v", forbidden, err)
-		}
-	}
-	_, reorderedErr := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[2], dependencies[1], dependencies[0]}, composeManifest(t, "{}\n"), lookup)
-	if reorderedErr == nil || reorderedErr.Error() != err.Error() {
-		t.Fatalf("configuration conflict depends on dependency order:\nfirst: %v\nsecond: %v", err, reorderedErr)
-	}
-
-	current := composeManifest(t, "config: {example.com/acme/smtp.New: {host: current.example, token: {env: CURRENT_TOKEN}}}\n")
-	composed, err := applicationmeta.Compose(dependencies, current, lookup)
-	if err != nil {
-		t.Fatalf("Compose with configuration replacements: %v", err)
-	}
-	configured, _ := composed.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
-	if !bytes.Contains(configured.YAML(), []byte("host: current.example")) || !bytes.Contains(configured.YAML(), []byte("CURRENT_TOKEN")) {
-		t.Fatalf("current configuration replacement = %s", configured.YAML())
-	}
-	if records := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["token"]`); len(records) != 1 || len(records[0].Sources()) != 3 {
-		t.Fatalf("configuration baseline provenance = %#v", provenanceStrings(records))
 	}
 }
 
@@ -749,7 +234,7 @@ config:
 		t.Fatalf("Compose recursive configuration: %v", err)
 	}
 	reordered, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, current, lookup)
-	if err != nil || reordered.DependencyDigest() != composed.DependencyDigest() {
+	if err != nil || reordered.DependencyDigest() == composed.DependencyDigest() {
 		t.Fatalf("reordered recursive configuration = %s, %v; want %s", reordered.DependencyDigest(), err, composed.DependencyDigest())
 	}
 	configured, exists := composed.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
@@ -794,40 +279,6 @@ config:
 	ratioRecords := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["settings"]["ratio"]`)
 	if len(ratioRecords) != 1 || ratioRecords[0].Removed() || len(ratioRecords[0].Sources()) != 2 {
 		t.Fatalf("normalized nested ratio provenance = %#v", provenanceStrings(ratioRecords))
-	}
-}
-
-func TestComposeConstructorConfigurationRemovalResolvesWholeObjectConflict(t *testing.T) {
-	t.Parallel()
-
-	schema := composeSchema(t, "\tHost string\n")
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/value", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {host: dependency.example}}\n")},
-		{ModulePath: "example.com/remove", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {$remove: true}}\n")},
-	}
-	_, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), lookup)
-	if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["example.com/acme/smtp.New"]`) || !strings.Contains(err.Error(), "object") || !strings.Contains(err.Error(), "removal") {
-		t.Fatalf("whole configuration conflict = %v", err)
-	}
-	removed, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {example.com/acme/smtp.New: {$remove: true}}\n"), lookup)
-	if err != nil {
-		t.Fatalf("Compose whole removal: %v", err)
-	}
-	if _, exists := removed.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New")); exists {
-		t.Fatal("whole constructor configuration removal retained an object")
-	}
-	replaced, err := applicationmeta.Compose(dependencies, composeManifest(t, "config: {example.com/acme/smtp.New: {host: current.example}}\n"), lookup)
-	if err != nil {
-		t.Fatalf("Compose whole replacement: %v", err)
-	}
-	configured, exists := replaced.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
-	if !exists || !bytes.Contains(configured.YAML(), []byte("host: current.example")) {
-		t.Fatalf("whole constructor configuration replacement = %s, %t", configured.YAML(), exists)
-	}
-	records := findProvenance(t, replaced.Provenance(), `config["example.com/acme/smtp.New"]`)
-	if len(records) != 2 || records[0].Removed() == records[1].Removed() {
-		t.Fatalf("whole configuration provenance = %#v", provenanceStrings(records))
 	}
 }
 
@@ -977,23 +428,23 @@ func FuzzComposeConstructorConfigurationDeterminism(f *testing.F) {
 			{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: secondManifest},
 		}
 		first, firstErr := applicationmeta.Compose(dependencies, current, lookup)
-		second, secondErr := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, current, lookup)
+		second, secondErr := applicationmeta.Compose(dependencies, current, lookup)
 		if (firstErr == nil) != (secondErr == nil) {
-			t.Fatalf("Compose changed success across order: %v then %v", firstErr, secondErr)
+			t.Fatalf("Compose changed success on repeat: %v then %v", firstErr, secondErr)
 		}
 		if firstErr != nil {
 			if firstErr.Error() != secondErr.Error() {
-				t.Fatalf("Compose changed error across order: %v then %v", firstErr, secondErr)
+				t.Fatalf("Compose changed error on repeat: %v then %v", firstErr, secondErr)
 			}
 			return
 		}
 		if first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(first.Provenance()), provenanceStrings(second.Provenance())) {
-			t.Fatalf("Compose changed provenance across order: %s %#v then %s %#v", first.DependencyDigest(), provenanceStrings(first.Provenance()), second.DependencyDigest(), provenanceStrings(second.Provenance()))
+			t.Fatalf("Compose changed provenance on repeat: %s %#v then %s %#v", first.DependencyDigest(), provenanceStrings(first.Provenance()), second.DependencyDigest(), provenanceStrings(second.Provenance()))
 		}
 		firstConfig, firstExists := first.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 		secondConfig, secondExists := second.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 		if firstExists != secondExists || firstExists && !bytes.Equal(firstConfig.YAML(), secondConfig.YAML()) {
-			t.Fatalf("Compose changed redacted configuration across order: present %t then %t", firstExists, secondExists)
+			t.Fatalf("Compose changed redacted configuration on repeat: present %t then %t", firstExists, secondExists)
 		}
 	})
 }
@@ -1076,24 +527,6 @@ func mustConstructorSymbol(t testing.TB, value string) constructorsymbol.Symbol 
 		t.Fatalf("constructorsymbol.Parse(%q): %v", value, err)
 	}
 	return symbol
-}
-
-func exposureIDs(manifest applicationmeta.Manifest) []string {
-	values := manifest.HTTPExposures()
-	result := make([]string, len(values))
-	for index := range values {
-		result[index] = values[index].ID().String()
-	}
-	return result
-}
-
-func requirementIDs(manifest applicationmeta.Manifest) []string {
-	values := manifest.Requirements()
-	result := make([]string, len(values))
-	for index := range values {
-		result[index] = values[index].ID().String()
-	}
-	return result
 }
 
 func findProvenance(t testing.TB, values []applicationmeta.Provenance, path string) []applicationmeta.Provenance {

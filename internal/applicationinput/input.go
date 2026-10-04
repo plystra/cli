@@ -418,7 +418,7 @@ func configurationProviderChoiceSources(input SourceContext, reference, field st
 		}
 		values := make([]providerresolution.ChoiceSource, 0, len(provenance.Sources))
 		for _, value := range provenance.Sources {
-			source, err := configurationProviderChoiceSource(input, value, field, providerresolution.ChoiceSourceAdoptedExport)
+			source, err := configurationProviderChoiceSource(input, value, field, providerresolution.ChoiceSourceTemplate)
 			if err != nil {
 				return nil, err
 			}
@@ -452,7 +452,7 @@ func configurationProviderChoiceSources(input SourceContext, reference, field st
 }
 
 func configurationProviderChoiceSource(input SourceContext, reference, field string, kind providerresolution.ChoiceSourceKind) (providerresolution.ChoiceSource, error) {
-	source, err := configurationSource(input, reference, field, kind == providerresolution.ChoiceSourceAdoptedExport)
+	source, err := configurationSource(input, reference, field, kind == providerresolution.ChoiceSourceTemplate)
 	if err != nil {
 		return providerresolution.ChoiceSource{}, err
 	}
@@ -466,35 +466,30 @@ func configurationProviderChoiceSource(input SourceContext, reference, field str
 	}, nil
 }
 
-func configurationSource(input SourceContext, reference, field string, adoptedSource bool) (ConfigurationSource, error) {
+func configurationSource(input SourceContext, reference, field string, templateSource bool) (ConfigurationSource, error) {
 	document, err := configurationDocument(reference, field)
 	if err != nil {
 		return ConfigurationSource{}, err
 	}
 	modulePath := input.CurrentModulePath
 	relativePath := document
-	if adoptedSource {
-		currentPrefix := input.CurrentModulePath + "@workspace/"
-		if strings.HasPrefix(document, currentPrefix) {
-			relativePath = strings.TrimPrefix(document, currentPrefix)
-		} else {
-			matched := false
-			for _, dependency := range input.Dependencies {
-				version := dependency.Version
-				if version == "" {
-					version = "workspace"
-				}
-				prefix := dependency.ModulePath + "@" + version + "/"
-				if strings.HasPrefix(document, prefix) {
-					modulePath = dependency.ModulePath
-					relativePath = strings.TrimPrefix(document, prefix)
-					matched = true
-					break
-				}
+	if templateSource {
+		matched := false
+		for _, dependency := range input.Dependencies {
+			version := dependency.Version
+			if version == "" {
+				version = "workspace"
 			}
-			if !matched {
-				return ConfigurationSource{}, fmt.Errorf("adopted-export source %q does not identify the current Project or a discovered dependency Project", reference)
+			prefix := dependency.ModulePath + "@" + version + "/"
+			if dependency.ModulePath != input.CurrentModulePath && strings.HasPrefix(document, prefix) {
+				modulePath = dependency.ModulePath
+				relativePath = strings.TrimPrefix(document, prefix)
+				matched = true
+				break
 			}
+		}
+		if !matched {
+			return ConfigurationSource{}, fmt.Errorf("template source %q does not identify a discovered dependency Project", reference)
 		}
 	}
 	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") || strings.Contains(relativePath, "/../") || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
@@ -518,18 +513,6 @@ func configurationDocument(reference, field string) (string, error) {
 		suffix := " " + candidate
 		if strings.HasSuffix(reference, suffix) && len(reference) > len(suffix) {
 			return strings.TrimSuffix(reference, suffix), nil
-		}
-		exportSuffix := "." + candidate
-		if strings.HasSuffix(reference, exportSuffix) && len(reference) > len(exportSuffix) {
-			prefix := strings.TrimSuffix(reference, exportSuffix)
-			const marker = ` composition.exports["`
-			position := strings.LastIndex(prefix, marker)
-			if position >= 0 && strings.HasSuffix(prefix, `"]`) {
-				name := prefix[position+len(marker) : len(prefix)-2]
-				if applicationmeta.CheckExportName(name) == nil {
-					return prefix[:position], nil
-				}
-			}
 		}
 	}
 	return "", fmt.Errorf("source %q does not identify %s", reference, field)

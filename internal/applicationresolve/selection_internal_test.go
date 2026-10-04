@@ -80,20 +80,20 @@ func TestSelectConfigurationTargetReportsMalformedDocumentSource(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatalf("MkdirAll: %v", err)
 			}
-			if err := os.WriteFile(path, []byte("unknown: true\n"), 0o644); err != nil {
+			if err := os.WriteFile(path, []byte("private_unknown_root_field: true\n"), 0o644); err != nil {
 				t.Fatalf("WriteFile: %v", err)
 			}
 
 			_, err := SelectConfigurationTarget(modulePath, root, test.config, test.environment, nil)
 			var source *ManifestSourceError
-			if !errors.Is(err, ErrConfigurationSelection) || !errors.Is(err, ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+			if !errors.Is(err, ErrConfigurationSelection) || !errors.Is(err, ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), "unknown root field") {
 				t.Fatalf("SelectConfigurationTarget error = %v", err)
 			}
 			if source.ModulePath() != modulePath || source.SourcePath() != test.path || source.SourceKind() != configurationSourceKind || source.Line() != 1 || source.Column() != 1 {
 				t.Fatalf("selected configuration source = %#v", source)
 			}
-			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
-				t.Fatalf("selected configuration error exposed Project root %q: %v", root, err)
+			if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("selected configuration error exposed a private key or root: %v", err)
 			}
 		})
 	}

@@ -727,13 +727,14 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 			constructorConfigurations = append(constructorConfigurations, input)
 		}
 	}
-	dependencyExports, err := resolved.DependencyRuntimeExports()
+	templates, err := resolved.RuntimeTemplates()
 	if err != nil {
 		return preparedGeneration{}, err
 	}
 	output, err := applicationgen.Render(applicationgen.Options{
 		ConstructorInventory:      resolved.Implementations().Implementations(),
-		DependencyExports:         dependencyExports,
+		Template:                  resolved.Template(),
+		Templates:                 templates,
 		ModulePath:                resolved.Module().ModulePath(),
 		JavaScriptPackage:         javaScriptPackage,
 		KernelModuleVersion:       kernelVersion,

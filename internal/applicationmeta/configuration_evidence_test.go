@@ -74,12 +74,8 @@ config:
 	}
 	seen := make(map[string]struct{}, len(first))
 	nonComposable := map[string]struct{}{
-		"http.address":                 {},
-		"http.cors":                    {},
-		"http.cors.allow_credentials":  {},
-		"http.cors.allowed_origins":    {},
-		`http.expose["email.send/v1"]`: {},
-		"timeouts.startup":             {},
+		"http.address":     {},
+		"timeouts.startup": {},
 	}
 	var bounded strings.Builder
 	previous := ""
@@ -128,7 +124,7 @@ func TestConfigurationDecisionsRecordTypedRemovals(t *testing.T) {
 	schema := composeSchema(t, "\tHost string\n\tSettings struct { Mode string }\n")
 	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
 	manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`
-http: {address: null, cors: null}
+http: {address: null, cors: {$remove: true}}
 capabilities:
   require: {remove: [audit.write/v1]}
   use: {email.send/v1: null}

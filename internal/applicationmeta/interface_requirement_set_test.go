@@ -10,25 +10,25 @@ import (
 func TestInterfaceRequirementCompleteSetsReplaceLowerLayers(t *testing.T) {
 	t.Parallel()
 	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ExportName: "defaults", Manifest: composeManifest(t, "interfaces: {require: [audit.write/v1, email.send/v1]}\n")},
-		{ModulePath: "example.com/b", ExportName: "defaults", Manifest: composeManifest(t, "interfaces: {require: [email.send/v1]}\n")},
+		{ModulePath: "example.com/a", Manifest: composeManifest(t, "interfaces: {require: [audit.write/v1, email.send/v1]}\n")},
+		{ModulePath: "example.com/b", Manifest: composeManifest(t, "interfaces: {require: [email.send/v1]}\n")},
 	}
 	for _, test := range []struct {
 		name, root, overlay string
 		want                []string
 	}{
-		{"omitted", "{}", "", []string{"audit.write/v1", "email.send/v1"}},
-		{"sparse empty", "interfaces: {require: {}}", "", []string{"audit.write/v1", "email.send/v1"}},
+		{"omitted", "{}", "", []string{"email.send/v1"}},
+		{"sparse empty", "interfaces: {require: {}}", "", []string{"email.send/v1"}},
 		{"complete empty", "interfaces: {require: []}", "", []string{}},
 		{"complete subset", "interfaces: {require: [email.send/v1]}", "", []string{"email.send/v1"}},
-		{"sparse removal", "interfaces: {require: {remove: [email.send/v1]}}", "", []string{"audit.write/v1"}},
+		{"sparse removal", "interfaces: {require: {remove: [email.send/v1]}}", "", []string{}},
 		{"overlay complete empty", "interfaces: {require: [cache.read/v1]}", "interfaces: {require: []}", []string{}},
 		{"overlay complete replacement", "interfaces: {require: [cache.read/v1]}", "interfaces: {require: [email.send/v1]}", []string{"email.send/v1"}},
 		{"overlay sparse over complete", "interfaces: {require: [cache.read/v1]}", "interfaces: {require: {add: [reports.read/v1], remove: [cache.read/v1]}}", []string{"reports.read/v1"}},
 		{"overlay sparse over empty complete", "interfaces: {require: []}", "interfaces: {require: {add: [reports.read/v1]}}", []string{"reports.read/v1"}},
 		{"overlay omitted", "interfaces: {require: []}", "{}", []string{}},
 		{"overlay complete drops lower removals", "interfaces: {require: {remove: [email.send/v1]}}", "interfaces: {require: [email.send/v1]}", []string{"email.send/v1"}},
-		{"overlay sparse over sparse", "interfaces: {require: {remove: [email.send/v1]}}", "interfaces: {require: {add: [cache.read/v1]}}", []string{"audit.write/v1", "cache.read/v1"}},
+		{"overlay sparse over sparse", "interfaces: {require: {remove: [email.send/v1]}}", "interfaces: {require: {add: [cache.read/v1]}}", []string{"cache.read/v1"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			current := composeManifest(t, test.root+"\n")
@@ -42,7 +42,7 @@ func TestInterfaceRequirementCompleteSetsReplaceLowerLayers(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, order := range [][]applicationmeta.Dependency{dependencies, {dependencies[1], dependencies[0]}} {
+			for _, order := range [][]applicationmeta.Dependency{dependencies} {
 				composed, err := applicationmeta.Compose(order, current, composeSchemaLookup(nil))
 				if err != nil {
 					t.Fatal(err)
@@ -86,7 +86,7 @@ func TestAddExposurePreservesRequirementSetMode(t *testing.T) {
 		}
 		for _, current := range []applicationmeta.Manifest{original, composeManifest(t, string(updated))} {
 			composition, err := applicationmeta.Compose([]applicationmeta.Dependency{{
-				ModulePath: "example.com/a", ExportName: "defaults", Manifest: composeManifest(t, "interfaces: {require: [email.send/v1]}\n"),
+				ModulePath: "example.com/a", Manifest: composeManifest(t, "interfaces: {require: [email.send/v1]}\n"),
 			}}, current, composeSchemaLookup(nil))
 			if err != nil {
 				t.Fatal(err)

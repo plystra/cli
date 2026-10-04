@@ -268,7 +268,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:52212c80b8601c70f6089a2d40dc8effeac4847e1b3de28575ef0005fe51003f",
+      "sha256": "sha256:29f7ef6d62789ed492dfdf5ca9aae2eb1092728f23c4caee0ef9d92993a57cce",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -294,7 +294,7 @@
     },
     {
       "path": "generated/go/internal/constructorconfig/value_gen.go",
-      "sha256": "sha256:691f8bd69b3b6a62aff2d1062f830159482847068fb274f4c41753588ecabfa1",
+      "sha256": "sha256:e89b0d54da9e12e21964aa7a1445ac1e62a42ec3c609054971f5071af429345d",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -502,7 +502,7 @@
     },
     {
       "path": "generated/go/internal/runtimebaseline/baseline_gen.go",
-      "sha256": "sha256:0cf95e914235b6fb66763e09fc0465dc0996ff0149e201c739532127521f2a6b",
+      "sha256": "sha256:0e19cdb1089f2c588c5ae146c4c3a053c7f17230838e78742bf9c69222c516c1",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -528,7 +528,7 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:8d118d10423ba08d7da1697fcf542b383af1009b0dab58ff77e082cb2bc37422",
+      "sha256": "sha256:7c26074e58399bb730edf8ce63d655d7c359806a4edfbd4cd30d51409005fe6b",
       "generator": "plystra.application-manifest/v1",
       "output_kind": "application-manifest",
       "input_record_ids": [
@@ -629,7 +629,7 @@
       ]
     },
     "configuration": {
-      "version": 7,
+      "version": 8,
       "mode": "default",
       "root": {
         "path": "plystra.yaml",

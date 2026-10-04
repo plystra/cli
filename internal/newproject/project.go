@@ -259,6 +259,19 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 		if err := rejectRelativeTemplateReplacements(query, dependencies); err != nil {
 			return err
 		}
+		rootBytes, err := os.ReadFile(filepath.Join(root, "plystra.yaml"))
+		if err != nil {
+			return fmt.Errorf("%w: read staged Project marker: %w", ErrInvalidTemplate, err)
+		}
+		configuration, err := applicationmeta.SetTemplate(rootBytes, template.Path())
+		if err != nil {
+			return fmt.Errorf("%w: record template relationship: %w", ErrInvalidTemplate, err)
+		}
+		if err := atomicfs.WriteFiles(root, []atomicfs.Write{{
+			Path: "plystra.yaml", Data: configuration, ExpectedData: rootBytes,
+		}}, func(string) error { return nil }); err != nil {
+			return fmt.Errorf("%w: install template relationship: %w", ErrInvalidTemplate, err)
+		}
 		if _, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 			Start:            root,
 			GoCommand:        goCommand,

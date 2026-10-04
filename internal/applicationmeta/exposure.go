@@ -78,20 +78,6 @@ func addHTTPExposure(data []byte, id interfaceid.Identifier, parse func([]byte) 
 	return append([]byte(nil), updated...), true, nil
 }
 
-func removeSequenceValue(node *yaml.Node, value string) {
-	if node == nil || node.Kind != yaml.SequenceNode {
-		return
-	}
-	filtered := node.Content[:0]
-	for _, item := range node.Content {
-		if item.Kind == yaml.ScalarNode && item.Tag == "!!str" && item.Value == value {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	node.Content = filtered
-}
-
 func mappingChild(node *yaml.Node, name string) *yaml.Node {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil

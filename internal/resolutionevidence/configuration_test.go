@@ -49,8 +49,8 @@ func TestSecretReferenceProvenanceDoesNotPublishPrivateEquality(t *testing.T) {
 				t.Fatal("private equality changed current-Project ownership or removal")
 			}
 			contributors := field.Contributors()
-			if len(contributors) != 2 || contributors[0].Effective() || len(contributors[0].Sources()) != 2 {
-				t.Fatal("private equality changed suppressed adopted contribution grouping")
+			if len(contributors) != 3 || contributors[0].Effective() || contributors[1].Effective() || len(contributors[0].Sources()) != 1 || len(contributors[1].Sources()) != 1 || contributors[0].TemplateOrder() != 1 || contributors[1].TemplateOrder() != 2 {
+				t.Fatal("private equality changed ordered template ownership")
 			}
 			if first != nil && !bytes.Equal(first, evidence.CanonicalJSON()) {
 				t.Fatal("private reference kind, target, or equality changed public provenance")
@@ -138,22 +138,22 @@ config:
 	}
 
 	requirement := configurationField(t, first, `capabilities.require["email.send/v1"]`)
-	if !requirement.Effective() || requirement.Owner() != resolutionevidence.ConfigurationOwnerAdopted || requirement.Removed() || requirement.Summary() != "redacted" {
+	if !requirement.Effective() || requirement.Owner() != resolutionevidence.ConfigurationOwnerTemplate || requirement.Removed() || requirement.Summary() != "capability" {
 		t.Fatalf("inherited requirement = %#v", requirement)
 	}
 	contributions := requirement.Contributors()
-	if len(contributions) != 1 || !contributions[0].Effective() || contributions[0].Precedence() != 1 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerAdopted {
-		t.Fatalf("deduplicated inherited contribution = %#v", contributions)
+	if len(contributions) != 2 || contributions[0].Effective() || !contributions[1].Effective() || contributions[0].TemplateOrder() != 1 || contributions[1].TemplateOrder() != 2 || contributions[0].Precedence() != 1 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerTemplate {
+		t.Fatalf("ordered inherited contribution = %#v", contributions)
 	}
 	interfaceRequirement := configurationField(t, first, `interfaces.require["audit.write/v1"]`)
-	if !interfaceRequirement.Effective() || interfaceRequirement.Owner() != resolutionevidence.ConfigurationOwnerAdopted || interfaceRequirement.Summary() != "redacted" || len(interfaceRequirement.Contributors()) != 1 || len(interfaceRequirement.Contributors()[0].Sources()) != 2 {
+	if !interfaceRequirement.Effective() || interfaceRequirement.Owner() != resolutionevidence.ConfigurationOwnerTemplate || interfaceRequirement.Summary() != "interface" || len(interfaceRequirement.Contributors()) != 2 || interfaceRequirement.Contributors()[0].Effective() || !interfaceRequirement.Contributors()[1].Effective() {
 		t.Fatalf("inherited Interface requirement = %#v", interfaceRequirement)
 	}
 	implementationChoice := configurationField(t, first, `interfaces.use["email.send/v1"]`)
-	if !implementationChoice.Effective() || implementationChoice.Owner() != resolutionevidence.ConfigurationOwnerRoot || implementationChoice.Summary() != "implementation" || implementationChoice.Removed() || len(implementationChoice.Contributors()) != 2 || implementationChoice.Contributors()[0].Summary() != "redacted" || implementationChoice.Contributors()[1].Summary() != "implementation" {
+	if !implementationChoice.Effective() || implementationChoice.Owner() != resolutionevidence.ConfigurationOwnerRoot || implementationChoice.Summary() != "implementation" || implementationChoice.Removed() || len(implementationChoice.Contributors()) != 3 || implementationChoice.Contributors()[0].Summary() != "implementation" || !implementationChoice.Contributors()[2].Effective() {
 		t.Fatalf("Implementation choice replacement = %#v", implementationChoice)
 	}
-	sources := contributions[0].Sources()
+	sources := append(contributions[0].Sources(), contributions[1].Sources()...)
 	if len(sources) != 2 || sources[0].Module() != "corp.example/platform-a" || sources[0].Path() != "plystra.yaml" || sources[0].Kind() != "configuration-value" || sources[1].Module() != "example.com/platform-b" || sources[1].Path() != "plystra.yaml" {
 		t.Fatalf("replacement-safe dependency sources = %#v", sources)
 	}
@@ -163,7 +163,7 @@ config:
 		t.Fatalf("root replacement = %#v", host)
 	}
 	contributions = host.Contributors()
-	if len(contributions) != 2 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerAdopted || contributions[0].Effective() || contributions[1].Owner() != resolutionevidence.ConfigurationOwnerRoot || !contributions[1].Effective() || contributions[1].Sources()[0].Path() != "plystra.yaml" {
+	if len(contributions) != 3 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerTemplate || contributions[0].Effective() || contributions[1].Effective() || contributions[2].Owner() != resolutionevidence.ConfigurationOwnerRoot || !contributions[2].Effective() || contributions[2].Sources()[0].Path() != "plystra.yaml" {
 		t.Fatalf("root replacement contributions = %#v", contributions)
 	}
 	password := configurationField(t, first, `config["example.com/acme/smtp.New"]["password"]`)
@@ -187,23 +187,27 @@ config:
 	contributions[0] = resolutionevidence.ConfigurationContribution{}
 	sources = host.Contributors()[0].Sources()
 	sources[0] = resolutionevidence.Source{}
-	if configurationField(t, first, host.Path()).Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerAdopted || host.Contributors()[0].Sources()[0].Module() != "corp.example/platform-a" || !first.Valid() {
+	if configurationField(t, first, host.Path()).Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerTemplate || host.Contributors()[0].Sources()[0].Module() != "corp.example/platform-a" || !first.Valid() {
 		t.Fatal("configuration evidence accessors are not defensive")
 	}
 
 	reversedDependencies := append([]applicationmeta.Dependency(nil), dependencies...)
 	slices.Reverse(reversedDependencies)
 	reversedComposition, err := applicationmeta.Compose(reversedDependencies, root, lookup)
-	if err != nil || reversedComposition.DependencyDigest() != composition.DependencyDigest() {
+	if err != nil || reversedComposition.DependencyDigest() == composition.DependencyDigest() {
 		t.Fatalf("reversed Compose = %q, %v", reversedComposition.DependencyDigest(), err)
 	}
 	reversedDecisions := append([]applicationmeta.ConfigurationDecision(nil), rootDecisions...)
 	slices.Reverse(reversedDecisions)
-	reversedInput := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", reversedComposition, []resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: reversedDecisions}}, append([]resolutionevidence.ModuleInput(nil), input.Modules...))
+	reversedInput := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", composition, []resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: reversedDecisions}}, append([]resolutionevidence.ModuleInput(nil), input.Modules...))
 	slices.Reverse(reversedInput.Modules)
 	second, err := resolutionevidence.Build(reversedInput)
 	if err != nil || !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst: %s\nsecond: %s\nerror: %v", first.CanonicalJSON(), second.CanonicalJSON(), err)
+	}
+	slices.Reverse(reversedInput.Configuration.Templates)
+	if _, err := resolutionevidence.Build(reversedInput); err == nil {
+		t.Fatal("template order changed without matching dependency ancestry evidence")
 	}
 }
 
@@ -437,6 +441,7 @@ func configurationEvidenceInput(
 		AliasResolution:    resolveApplicationAliases(t, context),
 		Modules:            append([]resolutionevidence.ModuleInput(nil), modules...),
 		Configuration: &resolutionevidence.ConfigurationInput{
+			Templates:          composition.TemplateLayers(),
 			DependencyBaseline: composition.DependencyBaseline(),
 			Layers:             append([]resolutionevidence.ConfigurationLayerInput(nil), layers...),
 			Effective:          configurationDecisions(t, composition.Manifest(), configurationSchemaLookup(t)),

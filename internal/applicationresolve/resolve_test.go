@@ -846,7 +846,7 @@ replace example.com/platform-a => ../platform-a
 replace example.com/platform-b => ../platform-b
 `)
 	rootConfiguration := "# shared root\nhttp: {address: \":8080\", cors: {allowed_origins: ['https://shared.example'], allow_credentials: true}}\ncapabilities: {require: [kernel.info/v1]}\n"
-	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", cors: {allow_credentials: null}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
+	overlayConfiguration := "# sparse production overlay\nhttp: {address: \":9090\", cors: {allow_credentials: {$remove: true}}}\ncapabilities:\n  require: {add: [kernel.health/v1], remove: [kernel.info/v1]}\n"
 	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), rootConfiguration)
 	writeFile(t, filepath.Join(appRoot, "plystra.production.yaml"), overlayConfiguration)
 	before := snapshotTree(t, appRoot)
@@ -994,7 +994,7 @@ func TestResolveReportsMalformedSelectedConfigurationSource(t *testing.T) {
 			root := t.TempDir()
 			writeModule(t, root, "example.com/application")
 			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-			writeFile(t, filepath.Join(root, filepath.FromSlash(test.path)), "unknown: true\n")
+			writeFile(t, filepath.Join(root, filepath.FromSlash(test.path)), "private_unknown_root_field: true\n")
 			before := snapshotTree(t, root)
 			options := applicationresolve.Options{
 				Start:       root,
@@ -1003,14 +1003,14 @@ func TestResolveReportsMalformedSelectedConfigurationSource(t *testing.T) {
 			test.configure(&options)
 			_, err := applicationresolve.Resolve(t.Context(), options)
 			var source *applicationresolve.ManifestSourceError
-			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConfigurationSelection) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !errors.As(err, &source) || source == nil || !strings.Contains(err.Error(), "unknown root field") {
 				t.Fatalf("Resolve malformed selected configuration = %v", err)
 			}
 			if source.ModulePath() != "example.com/application" || source.SourcePath() != test.path || source.SourceKind() != "configuration-declaration" || source.Line() != 1 || source.Column() != 1 {
 				t.Fatalf("selected configuration source = %#v", source)
 			}
-			if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
-				t.Fatalf("selected configuration error exposed Project root %q: %v", root, err)
+			if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+				t.Fatalf("selected configuration error exposed a private key or root: %v", err)
 			}
 			if after := snapshotTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("malformed selected configuration mutated Project:\nbefore: %#v\nafter:  %#v", before, after)
@@ -1199,7 +1199,8 @@ func TestResolveKeepsDependencyConfigurationInertWhileClosingLocalRequirements(t
 	appRoot := filepath.Join(root, "app")
 	providerRoot := filepath.Join(root, "providers")
 	writeModule(t, providerRoot, "example.com/providers")
-	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), `http:
+	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), `template: example.com/missing-template
+http:
   address: ":9090"
   expose: {email.send/v1: {transport: connect}}
 timeouts: {startup: 1s}
@@ -1326,12 +1327,13 @@ func TestResolveKeepsDirectAndTransitiveDependencyConfigurationInert(t *testing.
 	ordinaryRoot := filepath.Join(root, "ordinary")
 
 	writeModule(t, transitiveRoot, "example.com/transitive")
-	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), "capabilities: {require: [audit.write/v1]}\n")
+	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), "template: [example.com/invalid-template-list]\ncapabilities: {require: [audit.write/v1]}\n")
 	writePlugin(t, transitiveRoot, "audit", "id: example.audit\nprovides: [audit.write/v1]\n")
 	writeCapability(t, transitiveRoot, "audit", "audit.write/v1", "id: audit.write/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 
 	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.4.0\n")
-	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `http:
+	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `template: example.com/direct
+http:
   expose: {email.send/v1: {transport: connect}}
 capabilities:
   use: {email.send/v1: example.smtp}
@@ -1707,20 +1709,20 @@ func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T)
 		appRoot := filepath.Join(root, "app")
 		dependencyRoot := filepath.Join(root, "dependency")
 		writeModule(t, dependencyRoot, "example.com/dependency")
-		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "unknown: true\n")
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "private_unknown_root_field: true\n")
 		writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/dependency v1.2.3\n\nreplace example.com/dependency => ../dependency\n")
-		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "template: example.com/dependency\n")
 
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
-		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency@v1.2.3") || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency@v1.2.3") || !strings.Contains(err.Error(), "unknown root field") {
 			t.Fatalf("Resolve malformed dependency error = %v", err)
 		}
 		var source *applicationresolve.ManifestSourceError
 		if !errors.As(err, &source) || source.ModulePath() != "example.com/dependency" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
 			t.Fatalf("Resolve malformed dependency source = %#v, %v", source, err)
 		}
-		if strings.Contains(err.Error(), dependencyRoot) || strings.Contains(err.Error(), filepath.ToSlash(dependencyRoot)) {
-			t.Fatalf("Resolve malformed dependency exposed root %q: %v", dependencyRoot, err)
+		if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), dependencyRoot) || strings.Contains(err.Error(), filepath.ToSlash(dependencyRoot)) {
+			t.Fatalf("Resolve malformed dependency exposed a private key or root: %v", err)
 		}
 	})
 
@@ -1926,17 +1928,17 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 
 		root := t.TempDir()
 		writeModule(t, root, "example.com/malformed")
-		writeFile(t, filepath.Join(root, "plystra.yaml"), "unknown: true\n")
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "private_unknown_root_field: true\n")
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
-		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), `unknown key "unknown"`) {
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "unknown root field") {
 			t.Fatalf("Resolve error = %v", err)
 		}
 		var source *applicationresolve.ManifestSourceError
 		if !errors.As(err, &source) || source.ModulePath() != "example.com/malformed" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
 			t.Fatalf("Resolve malformed root source = %#v, %v", source, err)
 		}
-		if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
-			t.Fatalf("Resolve malformed root exposed Project root %q: %v", root, err)
+		if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
+			t.Fatalf("Resolve malformed root exposed a private key or root: %v", err)
 		}
 	})
 

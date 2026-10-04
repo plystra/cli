@@ -70,6 +70,26 @@ func loadProjectCandidates(ctx context.Context, application modulelocate.Module,
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return loadedInventory{}, fmt.Errorf("read current Project checksums for discovery")
 	}
+	// Promoted transitive requirements can lack full checksums in the authored
+	// go.sum. Let Go verify the selected modules in the private copy only.
+	arguments := []string{"mod", "download", "-modfile=" + path}
+	for _, dependency := range dependencies.Modules() {
+		modulePath, version := dependency.Path(), dependency.SelectedVersion()
+		if replacement, exists := dependency.Replacement(); exists {
+			if replacement.Local() {
+				continue
+			}
+			modulePath, version = replacement.Path(), replacement.Version()
+		}
+		arguments = append(arguments, modulePath+"@"+version)
+	}
+	if len(arguments) > 3 {
+		if err := gocommand.Run(ctx, gocommand.Options{
+			Command: options.GoCommand, Directory: application.Path(), Environment: options.Environment,
+		}, arguments...); err != nil {
+			return loadedInventory{}, fmt.Errorf("prepare private discovery checksums: %w", err)
+		}
+	}
 	return loadCandidatesAt(ctx, candidates, options, application.Path(), "-modfile="+path)
 }
 

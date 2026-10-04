@@ -17,8 +17,6 @@ const (
 	ProviderMissing                      = Prefix + "PROVIDER_MISSING"
 	ProviderAmbiguous                    = Prefix + "PROVIDER_AMBIGUOUS"
 	ProjectManifestInvalid               = Prefix + "PROJECT_MANIFEST_INVALID"
-	ConfigurationInheritedConflict       = Prefix + "CONFIGURATION_INHERITED_CONFLICT"
-	ConfigurationOwnershipAmbiguous      = Prefix + "CONFIGURATION_OWNERSHIP_AMBIGUOUS"
 	EnvironmentOverlayInvalid            = Prefix + "ENVIRONMENT_OVERLAY_INVALID"
 	ConfigurationInvalid                 = Prefix + "CONFIGURATION_INVALID"
 	PolicyNotEnforced                    = Prefix + "POLICY_NOT_ENFORCED"

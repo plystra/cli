@@ -31,7 +31,8 @@ var (
 // runtime document and never enters generated source.
 type Options struct {
 	ConstructorInventory          []implementationinventory.Implementation
-	DependencyExports             []runtimebaseline.Export
+	Template                      string
+	Templates                     []runtimebaseline.Template
 	ModulePath                    string
 	DefaultStartupTimeout         time.Duration
 	ConfigurationSchemas          []ConfigurationSchema

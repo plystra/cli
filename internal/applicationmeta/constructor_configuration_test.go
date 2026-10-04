@@ -34,15 +34,12 @@ func TestComposeRetainsEveryDependencyConstructorConfigurationSource(t *testing.
 			t.Fatal("composed dependency configuration is absent")
 		}
 		source := configured.DeclarationSource()
-		if source.ModulePath() != "example.com/alpha" || source.Path() != "plystra.yaml" || source.Line() != 1 || source.Column() != 1 {
+		if source.ModulePath() != ordered[len(ordered)-1].ModulePath || source.Path() != "plystra.yaml" || source.Line() != 1 || source.Column() != 1 {
 			t.Fatalf("representative dependency configuration source = %#v", source)
 		}
 		path := fmt.Sprintf("config[%q]", constructorConfigurationSymbol)
 		records := findProvenance(t, composition.ResolutionSources(), path)
-		wantSources := []string{
-			`example.com/alpha@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]`,
-			`example.com/zeta@v1.0.0/plystra.yaml config["example.com/acme/smtp.New"]`,
-		}
+		wantSources := []string{ordered[len(ordered)-1].ModulePath + "@v1.0.0/plystra.yaml " + path}
 		if len(records) != 1 || !reflect.DeepEqual(records[0].Sources(), wantSources) {
 			t.Fatalf("dependency configuration resolution sources = %#v, want %#v", provenanceStrings(records), wantSources)
 		}

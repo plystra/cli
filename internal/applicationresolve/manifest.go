@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -135,13 +136,18 @@ func loadProjectManifestSnapshot(modulePath, moduleRoot string) (ManifestSnapsho
 	return snapshot, nil
 }
 
-func parseProjectManifestSnapshot(modulePath string, snapshot ManifestSnapshot, inventoryOnly bool) (applicationmeta.Manifest, error) {
+func parseProjectManifestSnapshot(modulePath string, snapshot ManifestSnapshot, metadataOnly bool) (applicationmeta.Manifest, error) {
 	parse := applicationmeta.ParseSource
-	if inventoryOnly {
-		parse = applicationmeta.ParseExportInventorySource
+	if metadataOnly {
+		parse = applicationmeta.ParseRootMetadataSource
 	}
 	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
+		var template *applicationmeta.TemplateMetadataError
+		if errors.As(err, &template) {
+			source := template.Source()
+			return applicationmeta.Manifest{}, configurationSourceError(modulePath, snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: %w", ErrManifest, ErrTemplate, err))
+		}
 		return applicationmeta.Manifest{}, manifestSourceError(
 			modulePath,
 			snapshot.path,
@@ -155,6 +161,14 @@ func parseProjectManifestSnapshot(modulePath string, snapshot ManifestSnapshot, 
 
 func loadEnvironmentOverlay(modulePath, moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
 	return loadConfigurationWithParser(modulePath, moduleRoot, relativePath, applicationmeta.ParseOverlaySource)
+}
+
+func validateReplacementMetadata(modulePath string, manifest applicationmeta.Manifest) error {
+	if manifest.Template() == "" {
+		return nil
+	}
+	source := manifest.TemplateSource()
+	return configurationSourceError(modulePath, source.Path(), source.Line(), source.Column(), fmt.Errorf("%w: %w: template cannot be declared in a replacement document", ErrManifest, ErrTemplate))
 }
 
 func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, parse func(string, []byte) (applicationmeta.Manifest, error)) (ManifestSnapshot, applicationmeta.Manifest, error) {
@@ -177,6 +191,11 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 	}
 	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
+		var template *applicationmeta.TemplateMetadataError
+		if errors.As(err, &template) {
+			source := template.Source()
+			return ManifestSnapshot{}, applicationmeta.Manifest{}, configurationSourceError(modulePath, snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: %w", ErrManifest, ErrTemplate, err))
+		}
 		return ManifestSnapshot{}, applicationmeta.Manifest{}, configurationSourceError(
 			modulePath,
 			snapshot.path,
@@ -191,15 +210,33 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 type dependencyManifestSnapshot struct {
 	modulePath string
 	version    string
+	template   string
 	identity   string
 	root       string
 	snapshot   ManifestSnapshot
 }
 
-func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependencyManifestSnapshot, []applicationmeta.Dependency, error) {
-	snapshots := make([]dependencyManifestSnapshot, 0, len(dependencies))
-	manifests := make([]applicationmeta.Dependency, 0, len(dependencies))
-	for _, dependency := range dependencies {
+func loadTemplateManifests(currentModule string, root applicationmeta.Manifest, dependencies moduledependency.Index) ([]dependencyManifestSnapshot, []applicationmeta.Dependency, error) {
+	var snapshots []dependencyManifestSnapshot
+	var manifests []applicationmeta.Dependency
+	seen := map[string]bool{currentModule: true}
+	chain := []string{currentModule}
+	var sources []applicationmeta.ConfigurationDeclarationSource
+	for owner := root; owner.Template() != ""; {
+		target := owner.Template()
+		chain = append(chain, target)
+		sources = append(sources, owner.TemplateSource())
+		if seen[target] {
+			return nil, nil, newTemplateError(ErrTemplateCycle, chain, sources)
+		}
+		seen[target] = true
+		dependency, exists := dependencies.ByPath(target)
+		if !exists {
+			return nil, nil, newTemplateError(ErrTemplateNotFound, chain, sources)
+		}
+		if !dependency.Project() {
+			return nil, nil, newTemplateError(ErrTemplateNotProject, chain, sources)
+		}
 		snapshot, err := ReadManifestSnapshot(dependency.Root())
 		if err != nil {
 			sourceError := manifestSourceError
@@ -214,8 +251,13 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 				fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err),
 			)
 		}
-		manifest, err := applicationmeta.ParseExportInventorySource(snapshot.path, snapshot.data)
+		manifest, err := applicationmeta.ParseTemplateSource(snapshot.path, snapshot.data)
 		if err != nil {
+			var template *applicationmeta.TemplateMetadataError
+			if errors.As(err, &template) {
+				source := template.Source()
+				return nil, nil, configurationSourceError(dependency.Path(), snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: template Project %s: %w", ErrManifest, ErrTemplate, dependencyIdentity(dependency), err))
+			}
 			return nil, nil, manifestSourceError(
 				dependency.Path(),
 				snapshot.path,
@@ -224,9 +266,14 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 				fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err),
 			)
 		}
+		manifest, err = applicationmeta.WithProjectModule(manifest, dependency.Path())
+		if err != nil {
+			return nil, nil, err
+		}
 		snapshots = append(snapshots, dependencyManifestSnapshot{
 			modulePath: dependency.Path(),
 			version:    dependency.SelectedVersion(),
+			template:   manifest.Template(),
 			identity:   dependencyIdentity(dependency),
 			root:       dependency.Root(),
 			snapshot:   snapshot,
@@ -236,7 +283,10 @@ func loadDependencyManifests(dependencies []moduledependency.Module) ([]dependen
 			ModuleVersion: dependency.SelectedVersion(),
 			Manifest:      manifest,
 		})
+		owner = manifest
 	}
+	slices.Reverse(snapshots)
+	slices.Reverse(manifests)
 	return snapshots, manifests, nil
 }
 

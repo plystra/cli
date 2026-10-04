@@ -1,10 +1,8 @@
 package applicationmeta_test
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -75,7 +73,7 @@ func TestConstructorConfigurationComposesOnlyNonPointerStructFields(t *testing.T
 						t.Fatal(err)
 					}
 				} else {
-					composed, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/platform", ExportName: "defaults", Manifest: lower}}, upper, lookup)
+					composed, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/platform", Manifest: lower}}, upper, lookup)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -106,8 +104,8 @@ func TestConstructorPointerConfigurationDeduplicatesNormalizedValues(t *testing.
 		constructorConfigurationSymbol: composeSchema(t, "Settings *struct { First string; Second string }"),
 	})
 	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/alpha", ExportName: "defaults", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {first: one, second: two}}}\n")},
-		{ModulePath: "example.com/beta", ExportName: "defaults", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {second: two, first: one}}}\n")},
+		{ModulePath: "example.com/alpha", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {first: one, second: two}}}\n")},
+		{ModulePath: "example.com/beta", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {second: two, first: one}}}\n")},
 	}
 	for _, ordered := range [][]applicationmeta.Dependency{dependencies, {dependencies[1], dependencies[0]}} {
 		composed, err := applicationmeta.Compose(ordered, composeManifest(t, "{}\n"), lookup)
@@ -121,41 +119,6 @@ func TestConstructorPointerConfigurationDeduplicatesNormalizedValues(t *testing.
 		decisions, err := applicationmeta.ConfigurationDecisions(composed.Manifest(), lookup)
 		if err != nil || len(decisions) != 2 || decisions[1].Summary() != applicationmeta.ConfigurationSummaryValue {
 			t.Fatalf("pointer was decomposed into field decisions: %v, %v", decisions, err)
-		}
-	}
-}
-
-func TestConstructorPointerConfigurationConflictsAtWholeValue(t *testing.T) {
-	t.Parallel()
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-		constructorConfigurationSymbol: composeSchema(t, "Settings *struct { First string; Second string }"),
-	})
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/alpha", ExportName: "defaults", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {first: private-first}}}\n")},
-		{ModulePath: "example.com/beta", ExportName: "defaults", Manifest: composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {second: private-second}}}\n")},
-	}
-	var firstError string
-	for _, ordered := range [][]applicationmeta.Dependency{dependencies, {dependencies[1], dependencies[0]}} {
-		_, err := applicationmeta.Compose(ordered, composeManifest(t, "{}\n"), lookup)
-		if !errors.Is(err, applicationmeta.ErrInheritedConflict) || !strings.Contains(err.Error(), `config["`+constructorConfigurationSymbol+`"]["settings"]`) || strings.Contains(err.Error(), "private-") {
-			t.Fatalf("disjoint pointer values did not produce a redacted whole-value conflict: %v", err)
-		}
-		if firstError != "" && err.Error() != firstError {
-			t.Fatal("conflict depends on dependency order")
-		}
-		firstError = err.Error()
-		current := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {settings: {}}}\n")
-		composed, err := applicationmeta.Compose(ordered, current, lookup)
-		if err != nil {
-			t.Fatal(err)
-		}
-		configured, exists := composed.Manifest().Configuration(mustConstructorSymbol(t, constructorConfigurationSymbol))
-		if !exists || strings.TrimSpace(string(configured.YAML())) != "settings: {}" {
-			t.Fatalf("empty pointer did not replace conflicting lower values: %s", configured.YAML())
-		}
-		decisions, err := applicationmeta.ConfigurationDecisions(current, lookup)
-		if err != nil || len(decisions) != 2 || decisions[1].Removed() {
-			t.Fatalf("pointer must remain one atomic value decision: %v, %v", decisions, err)
 		}
 	}
 }

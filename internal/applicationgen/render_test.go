@@ -179,7 +179,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"id":"health.status/v1"`,
 		`"target":"kernel.health/v1"`,
 		`"kind":"application"`,
-		`"configuration":{"version":7,"mode":"default"`,
+		`"configuration":{"version":8,"mode":"default"`,
 		`"dormant_implementation_selections":[]`,
 		`"dormant_implementation_selections_digest":"sha256:`,
 		`"dormant_constructor_configurations":[]`,
@@ -191,6 +191,7 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"removed":true`,
 		`"path":"config[\"example.com/acme/business.New\"][\"password\"]"`,
 		`"path":"config[\"example.com/acme/business.New\"][\"legacy\"]"`,
+		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
 		`example.com/platform@v1.2.3/plystra.yaml config[\"example.com/acme/business.New\"][\"password\"]`,
 	} {
 		if !strings.Contains(manifest, required) {
@@ -198,7 +199,6 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
-		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
 		"PRIVATE_APPLICATION_TOKEN",
 		"private-runtime-value",
 	} {

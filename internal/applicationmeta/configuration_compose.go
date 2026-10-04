@@ -38,104 +38,9 @@ type constructorConfigDecision struct {
 	kind              constructorConfigDecisionKind
 	valueType         string
 	yaml              []byte
-	digest            string
 	publicDigest      string
 	source            string
 	declarationSource ConfigurationDeclarationSource
-}
-
-type constructorConfigCandidate struct {
-	decision     constructorConfigDecision
-	sources      map[string]struct{}
-	declarations configurationDeclarationSources
-}
-
-func composeConstructorConfigurations(dependencies []Dependency, current Manifest, schemas SchemaLookup, records map[string]*provenanceRecord) ([]ConstructorConfiguration, error) {
-	inherited := make(map[string]map[string]*constructorConfigCandidate)
-	for _, dependency := range dependencies {
-		dependencyManifest := dependency.Manifest
-		dependencyManifest.modulePath = dependency.ModulePath
-		decisions, err := manifestConfigDecisions(dependencyManifest, schemas)
-		if err != nil {
-			return nil, fmt.Errorf("dependency %s: %w", dependencyIdentity(dependency), err)
-		}
-		for _, decision := range decisions {
-			decision.source = dependencySource(dependency, decision.source)
-			decision.declarationSource = dependencyConfigurationDeclarationSource(dependency)
-			path := constructorConfigPath(decision.constructor, decision.segments)
-			addProvenance(records, path, constructorConfigPublicDigest(decision), decision.source, decision.kind == constructorConfigRemoval)
-			byDecision := inherited[path]
-			if byDecision == nil {
-				byDecision = make(map[string]*constructorConfigCandidate)
-				inherited[path] = byDecision
-			}
-			key := constructorConfigCandidateKey(decision)
-			candidate := byDecision[key]
-			if candidate == nil {
-				candidate = &constructorConfigCandidate{
-					decision:     cloneConstructorConfigDecision(decision),
-					sources:      make(map[string]struct{}),
-					declarations: make(configurationDeclarationSources),
-				}
-				byDecision[key] = candidate
-			}
-			candidate.sources[decision.source] = struct{}{}
-			addConfigurationDeclarationSource(candidate.declarations, decision.declarationSource)
-			if decision.source < candidate.decision.source || decision.source == candidate.decision.source && bytes.Compare(decision.yaml, candidate.decision.yaml) < 0 {
-				candidate.decision = cloneConstructorConfigDecision(decision)
-			}
-		}
-	}
-
-	currentDecisions, err := manifestConfigDecisions(current, schemas)
-	if err != nil {
-		return nil, err
-	}
-	currentByPath := make(map[string]constructorConfigDecision, len(currentDecisions))
-	for _, decision := range currentDecisions {
-		currentByPath[constructorConfigPath(decision.constructor, decision.segments)] = decision
-	}
-	paths := make(map[string]struct{}, len(inherited)+len(currentByPath))
-	for path := range inherited {
-		paths[path] = struct{}{}
-	}
-	for path := range currentByPath {
-		paths[path] = struct{}{}
-	}
-	orderedPaths := make([]string, 0, len(paths))
-	for path := range paths {
-		orderedPaths = append(orderedPaths, path)
-	}
-	sort.Strings(orderedPaths)
-
-	selected := make(map[string]constructorConfigDecision, len(orderedPaths))
-	for _, path := range orderedPaths {
-		prototype, ok := currentByPath[path]
-		if !ok {
-			for _, candidate := range inherited[path] {
-				prototype = candidate.decision
-				break
-			}
-		}
-		if suppressedByConstructorConfigAncestor(selected, prototype) {
-			continue
-		}
-		candidates := inherited[path]
-		if local, exists := currentByPath[path]; exists {
-			if err := validateCurrentConstructorConfigDecision(path, local, candidates); err != nil {
-				return nil, err
-			}
-			selected[path] = cloneConstructorConfigDecision(local)
-			continue
-		}
-		if len(candidates) != 1 {
-			return nil, inheritedConstructorConfigConflict(path, candidates)
-		}
-		for _, candidate := range candidates {
-			selected[path] = cloneConstructorConfigDecision(candidate.decision)
-		}
-	}
-	return renderConstructorConfigurations(selected)
 }
 
 func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constructorConfigDecision, error) {
@@ -245,7 +150,6 @@ func normalizeDeclaredConstructorConfigValue(constructor constructorsymbol.Symbo
 		kind:         constructorConfigValue,
 		valueType:    valueType,
 		yaml:         data,
-		digest:       digestStrings("config.value", valueType, string(data)),
 		publicDigest: publicDigest,
 		source:       constructorConfigDecisionSource(baseSource, segments),
 	}}, nil
@@ -547,7 +451,6 @@ func newConstructorConfigDecision(constructor constructorsymbol.Symbol, segments
 		kind:         kind,
 		valueType:    valueType,
 		yaml:         append([]byte(nil), data...),
-		digest:       digestStrings("config."+kindName, path, valueType),
 		publicDigest: digestStrings("config."+kindName, path, valueType),
 		source:       source,
 	}
@@ -595,10 +498,6 @@ func canonicalConstructorConfigUnsignedInteger(value string) bool {
 		}
 	}
 	return true
-}
-
-func constructorConfigCandidateKey(decision constructorConfigDecision) string {
-	return fmt.Sprintf("%d\x00%s\x00%s", decision.kind, decision.valueType, decision.digest)
 }
 
 func constructorConfigPublicDigest(decision constructorConfigDecision) string {
@@ -659,72 +558,6 @@ func cloneConstructorConfigDecision(decision constructorConfigDecision) construc
 	decision.segments = append([]string(nil), decision.segments...)
 	decision.yaml = append([]byte(nil), decision.yaml...)
 	return decision
-}
-
-func suppressedByConstructorConfigAncestor(selected map[string]constructorConfigDecision, decision constructorConfigDecision) bool {
-	for length := 0; length < len(decision.segments); length++ {
-		ancestor, exists := selected[constructorConfigPath(decision.constructor, decision.segments[:length])]
-		if exists && ancestor.kind != constructorConfigObject {
-			return true
-		}
-	}
-	return false
-}
-
-func validateCurrentConstructorConfigDecision(path string, current constructorConfigDecision, inherited map[string]*constructorConfigCandidate) error {
-	if current.kind == constructorConfigRemoval {
-		return nil
-	}
-	for _, candidate := range inherited {
-		lower := candidate.decision
-		if lower.kind == constructorConfigRemoval {
-			continue
-		}
-		if lower.kind != current.kind || lower.kind == constructorConfigValue && lower.valueType != current.valueType {
-			declarations := make(configurationDeclarationSources)
-			mergeConfigurationDeclarationSources(declarations, candidate.declarations)
-			addConfigurationDeclarationSource(declarations, current.declarationSource)
-			return newInheritedConflictError(
-				path,
-				fmt.Sprintf("%s has incompatible lower %s and current %s types from %s and %s", path, constructorConfigDecisionDescription(lower), constructorConfigDecisionDescription(current), strings.Join(sortedSet(candidate.sources), ", "), current.source),
-				declarations,
-			)
-		}
-	}
-	return nil
-}
-
-func inheritedConstructorConfigConflict(path string, candidates map[string]*constructorConfigCandidate) error {
-	keys := make([]string, 0, len(candidates))
-	for key := range candidates {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	declarations := make(configurationDeclarationSources)
-	for _, key := range keys {
-		candidate := candidates[key]
-		parts = append(parts, fmt.Sprintf("%s from %s", constructorConfigDecisionDescription(candidate.decision), strings.Join(sortedSet(candidate.sources), ", ")))
-		mergeConfigurationDeclarationSources(declarations, candidate.declarations)
-	}
-	return newInheritedConflictError(
-		path,
-		fmt.Sprintf("%s has incompatible declarations: %s; set or remove that exact field in the current Project configuration", path, strings.Join(parts, "; ")),
-		declarations,
-	)
-}
-
-func constructorConfigDecisionDescription(decision constructorConfigDecision) string {
-	switch decision.kind {
-	case constructorConfigObject:
-		return "object"
-	case constructorConfigRemoval:
-		return "removal"
-	case constructorConfigValue:
-		return decision.valueType + " value"
-	default:
-		return "invalid value"
-	}
 }
 
 type renderedConstructorConfigNode struct {

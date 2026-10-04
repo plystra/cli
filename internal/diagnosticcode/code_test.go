@@ -18,8 +18,6 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ProviderMissing,
 		diagnosticcode.ProviderAmbiguous,
 		diagnosticcode.ProjectManifestInvalid,
-		diagnosticcode.ConfigurationInheritedConflict,
-		diagnosticcode.ConfigurationOwnershipAmbiguous,
 		diagnosticcode.ConstructorConfigurationSchemaInvalid,
 		diagnosticcode.ConstructorConfigurationValuesInvalid,
 		diagnosticcode.ConstructorConfigurationUnselected,

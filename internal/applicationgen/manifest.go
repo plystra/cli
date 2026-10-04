@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	applicationManifestConfigurationVersion = 7
+	applicationManifestConfigurationVersion = 8
 	// ConfigurationModeDefault identifies the mandatory root plystra.yaml as
 	// the current-project document.
 	ConfigurationModeDefault = "default"

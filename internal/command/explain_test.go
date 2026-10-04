@@ -486,7 +486,7 @@ func TestExplainConfigurationReportsTypedOwnershipReplacementAndRemoval(t *testi
 			arguments:    []string{"explain", "config", `config["example.com/platform/shared.New"]["password"]`, "--format", "json"},
 			mode:         "default",
 			outcome:      "effective",
-			reason:       "adopted-export",
+			reason:       "template",
 			sourceModule: "example.com/platform",
 			sourcePath:   "plystra.yaml",
 			changePath:   "plystra.yaml",
@@ -649,8 +649,8 @@ func TestExplainConfigurationHumanOutputNamesPluginAndVerboseEvidence(t *testing
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "config", `config["example.com/platform/shared.New"]["password"]`, "--verbose"}, root, inspectCommandEnvironment(nil))
 	for _, fragment := range []string{
 		`Configuration: config["example.com/platform/shared.New"]["password"]`,
-		"Decision: effective redacted from adopted-export\n",
-		"Reason: adopted-export\n",
+		"Decision: effective secret-reference from template (template order 1, oldest to nearest)\n",
+		"Reason: template\n",
 		"Source: example.com/platform:plystra.yaml:1:1 (configuration-value)\n",
 		`Change: edit plystra.yaml at config["example.com/platform/shared.New"]["password"]`,
 		"Resolution evidence:\n  {\n",
@@ -1205,17 +1205,14 @@ require github.com/plystra/kernel v0.0.0
 
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot)))
-	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `composition:
-  exports:
-    defaults:
-      interfaces:
-        use: {email.send/v1: example.com/platform/shared.New}
-      config:
-        example.com/platform/shared.New:
-          host: dependency-private.example
-          password: {env: EXPLAIN_PRIVATE_PASSWORD}
-          settings:
-            nested: dependency-private
+	writeCommandFile(t, filepath.Join(platformRoot, "plystra.yaml"), `interfaces:
+  use: {email.send/v1: example.com/platform/shared.New}
+config:
+  example.com/platform/shared.New:
+    host: dependency-private.example
+    password: {env: EXPLAIN_PRIVATE_PASSWORD}
+    settings:
+      nested: dependency-private
 `)
 	writeCommandFile(t, filepath.Join(platformRoot, "interfaces", "email", "send", "v1", "interface.go"), `package sendv1
 
@@ -1282,10 +1279,7 @@ require (
 replace example.com/platform => %s
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(platformRoot), filepath.ToSlash(kernelRoot)))
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `composition:
-  adopt:
-    - module: example.com/platform
-      export: defaults
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `template: example.com/platform
 capabilities:
   require: [email.send/v1, reports.read/v1]
   use: {email.send/v1: example.shared}
@@ -1305,11 +1299,7 @@ config:
 	writeCommandFile(t, filepath.Join(appRoot, "plystra.suppressed.yaml"), `config:
   example.com/platform/shared.New: {$remove: true}
 `)
-	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), `composition:
-  adopt:
-    - module: example.com/platform
-      export: defaults
-capabilities:
+	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), `capabilities:
   require: [email.send/v1, reports.read/v1]
   use: {email.send/v1: example.alternative}
 config:

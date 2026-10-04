@@ -128,11 +128,11 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code: diagnosticProviderContractConflict,
 		},
 		{
-			name:    "inherited configuration conflict",
-			err:     fmt.Errorf("compose dependencies: %w", applicationmeta.ErrInheritedConflict),
+			name:    "template ancestry",
+			err:     fmt.Errorf("resolve template: %w", applicationresolve.ErrTemplate),
 			context: commandRecoveryContext("", "test", nil),
-			want:    "Set or remove the conflicting field explicitly in plystra.test.yaml, then rerun the command.",
-			code:    diagnosticConfigurationInheritedConflict,
+			want:    "Correct the root template relationship and its Go Module dependency graph; every ancestor must be a Project and the chain must not repeat a module, then rerun the command.",
+			code:    diagnosticTemplateInvalid,
 		},
 		{
 			name:    "constructor configuration schema",
@@ -152,7 +152,7 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			name:    "missing required constructor configuration",
 			err:     fmt.Errorf("validate configuration: %w: %w", applicationmeta.ErrConfigurationValues, applicationmeta.ErrConfigurationRequired),
 			context: commandRecoveryContext("deploy/customer.yaml", "", nil),
-			want:    "Supply the missing required field in deploy/customer.yaml or an adopted export, or correct the tombstone that removed it, then rerun the command.",
+			want:    "Supply the missing required field in deploy/customer.yaml or a template root, or correct the tombstone that removed it, then rerun the command.",
 			code:    diagnosticConstructorConfigurationValuesInvalid,
 		},
 		{
@@ -335,40 +335,15 @@ func TestWriteCommandFailureReportsProviderContractMismatchSources(t *testing.T)
 	}
 }
 
-func TestWriteCommandFailureReportsInheritedConfigurationConflictSources(t *testing.T) {
+func TestWriteCommandFailureReportsTemplateFailureWithoutInventingSources(t *testing.T) {
 	t.Parallel()
-
-	parseManifest := func(source string) applicationmeta.Manifest {
-		t.Helper()
-		manifest, err := applicationmeta.Parse([]byte(source))
-		if err != nil {
-			t.Fatalf("Parse: %v", err)
+	for _, cause := range []error{applicationresolve.ErrTemplateCycle, applicationresolve.ErrTemplateNotFound, applicationresolve.ErrTemplateNotProject} {
+		var output strings.Builder
+		writeCommandFailure(&output, "check Plystra Project", fmt.Errorf("%w: %w", applicationresolve.ErrTemplate, cause), recoveryContext{})
+		got := output.String()
+		if !strings.HasSuffix(got, "Diagnostic: "+diagnosticTemplateInvalid+"\n") || strings.Contains(got, "Source: ") || !strings.Contains(got, "Correct the root template relationship") {
+			t.Fatalf("template failure = %q", got)
 		}
-		return manifest
-	}
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/c", ModuleVersion: "v1.2.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/secondary.New}}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.1.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
-	}
-	_, conflict := applicationmeta.Compose(dependencies, parseManifest("{}\n"), func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
-		return implementationinventory.Configuration{}, false
-	})
-	if !errors.Is(conflict, applicationmeta.ErrInheritedConflict) {
-		t.Fatalf("Compose error = %v, want ErrInheritedConflict", conflict)
-	}
-
-	var output strings.Builder
-	writeCommandFailure(&output, "check Plystra Project", fmt.Errorf("resolve application: %w", conflict), recoveryContext{})
-	got := output.String()
-	wantSuffix := "\n\n" +
-		"Source: example.com/a:plystra.yaml:1:1 (configuration-declaration)\n" +
-		"Source: example.com/b:plystra.yaml:1:1 (configuration-declaration)\n" +
-		"Source: example.com/c:plystra.yaml:1:1 (configuration-declaration)\n\n" +
-		"Recovery:\nSet or remove the conflicting field explicitly in plystra.yaml, then rerun the command.\n\n" +
-		"Diagnostic: " + diagnosticConfigurationInheritedConflict + "\n"
-	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 3 {
-		t.Fatalf("inherited configuration conflict output = %q, want suffix %q", got, wantSuffix)
 	}
 }
 
@@ -649,53 +624,41 @@ func TestWriteCommandFailureCanonicalizesConflictingActivationSources(t *testing
 	}
 }
 
-func TestWriteCommandFailureReportsAmbiguousConfigurationOwnershipSources(t *testing.T) {
+func TestTemplateDiagnosticPrecedesCreationAndManifestWrappers(t *testing.T) {
 	t.Parallel()
-
-	parseManifest := func(source string) applicationmeta.Manifest {
-		t.Helper()
-		manifest, err := applicationmeta.Parse([]byte(source))
-		if err != nil {
-			t.Fatalf("Parse: %v", err)
+	for _, wrapper := range []error{newproject.ErrCreate, newproject.ErrInvalidTemplate, applicationresolve.ErrManifest, applicationmeta.ErrInvalidManifest} {
+		err := fmt.Errorf("%w: %w: %w", wrapper, applicationresolve.ErrTemplate, applicationresolve.ErrTemplateCycle)
+		var output strings.Builder
+		writeCommandFailure(&output, "resolve application", err, recoveryContext{})
+		got := output.String()
+		if !strings.HasSuffix(got, "Diagnostic: "+diagnosticTemplateInvalid+"\n") || strings.Count(got, "Recovery:") != 1 || !strings.Contains(got, "Correct the root template relationship") {
+			t.Fatalf("wrapped template diagnostic = %s", got)
 		}
-		return manifest
 	}
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/c", ModuleVersion: "v1.2.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.1.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: parseManifest("interfaces: {use: {email.send/v1: example.com/primary.New}}\n")},
-	}
-	lookup := func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
-		return implementationinventory.Configuration{}, false
-	}
-	initial, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, nil, dependencies, lookup)
-	if err != nil {
-		t.Fatalf("MaintainDependencyConfiguration initial: %v", err)
-	}
-	composition, err := applicationmeta.Compose(dependencies, parseManifest("{}\n"), lookup)
-	if err != nil {
-		t.Fatalf("Compose: %v", err)
-	}
-	withoutChoice := strings.Replace(string(initial.Data()), "email.send/v1: example.com/primary.New", "", 1)
-	if withoutChoice == string(initial.Data()) {
-		t.Fatalf("test did not remove inherited choice: %s", initial.Data())
-	}
-	_, conflict := applicationmeta.MaintainDependencyConfiguration([]byte(withoutChoice), composition.DependencyBaseline(), initial.LocalPaths(), dependencies, lookup)
-	if !errors.Is(conflict, applicationmeta.ErrAmbiguousConfigurationOwnership) {
-		t.Fatalf("MaintainDependencyConfiguration error = %v, want ErrAmbiguousConfigurationOwnership", conflict)
-	}
+}
 
-	var output strings.Builder
-	writeCommandFailure(&output, "check Plystra Project", fmt.Errorf("resolve application: %w", conflict), recoveryContext{})
-	got := output.String()
-	wantSuffix := "\n\n" +
-		"Source: example.com/a:plystra.yaml:1:1 (configuration-declaration)\n" +
-		"Source: example.com/b:plystra.yaml:1:1 (configuration-declaration)\n" +
-		"Source: example.com/c:plystra.yaml:1:1 (configuration-declaration)\n\n" +
-		"Recovery:\nMake the inherited field intent explicit in plystra.yaml by restoring it or writing its typed removal.\n\n" +
-		"Diagnostic: " + diagnosticConfigurationOwnershipAmbiguous + "\n"
-	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 3 {
-		t.Fatalf("ambiguous configuration ownership output = %q, want suffix %q", got, wantSuffix)
+func TestImplementationAmbiguityDiagnosticPrecedesCreationWrapper(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{
+		fmt.Errorf("%w: %w", newproject.ErrCreate, interfaceresolution.ErrAmbiguousImplementation),
+		errors.Join(newproject.ErrCreate, interfaceresolution.ErrAmbiguousImplementation),
+	} {
+		var output strings.Builder
+		writeCommandFailure(&output, "create project", err, recoveryContext{operation: "new"})
+		got := output.String()
+		if !strings.HasSuffix(got, "Diagnostic: "+diagnosticResolveMultipleImplementations+"\n") || strings.Contains(got, diagnosticProjectCreateFailed) || strings.Count(got, "Recovery:") != 1 || strings.Count(got, "Diagnostic:") != 1 || !strings.Contains(got, "plystra use <interface-id> <constructor-symbol>") {
+			t.Fatalf("creation wrapper masked Implementation ambiguity: %s", got)
+		}
+	}
+	for _, cause := range []error{newproject.ErrCreate, fmt.Errorf("%w: %w: %w", newproject.ErrCreate, newproject.ErrInvalidTemplate, interfaceresolution.ErrAmbiguousImplementation)} {
+		diagnostic, ok := primaryActionableDiagnostic(cause, recoveryContext{operation: "new"})
+		want := diagnosticProjectCreateFailed
+		if errors.Is(cause, newproject.ErrInvalidTemplate) {
+			want = diagnosticTemplateInvalid
+		}
+		if !ok || diagnostic.code != want {
+			t.Fatalf("other creation failure changed classification: %#v, %t; want %s", diagnostic, ok, want)
+		}
 	}
 }
 
@@ -980,8 +943,7 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		code string
 	}{
 		{name: "Project manifest", err: applicationresolve.ErrManifest, code: diagnosticcode.ProjectManifestInvalid},
-		{name: "inherited configuration conflict", err: applicationmeta.ErrInheritedConflict, code: diagnosticcode.ConfigurationInheritedConflict},
-		{name: "configuration ownership", err: applicationmeta.ErrAmbiguousConfigurationOwnership, code: diagnosticcode.ConfigurationOwnershipAmbiguous},
+		{name: "template ancestry", err: applicationresolve.ErrTemplate, code: diagnosticcode.TemplateInvalid},
 		{name: "constructor configuration schema", err: applicationmeta.ErrConfigurationSchema, code: diagnosticcode.ConstructorConfigurationSchemaInvalid},
 		{name: "constructor configuration values", err: applicationmeta.ErrConfigurationValues, code: diagnosticcode.ConstructorConfigurationValuesInvalid},
 		{name: "unselected constructor configuration", err: applicationresolve.ErrUnownedConstructorConfiguration, code: diagnosticcode.ConstructorConfigurationUnselected},

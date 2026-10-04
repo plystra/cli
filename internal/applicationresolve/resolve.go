@@ -145,6 +145,7 @@ type Options struct {
 // resolution assembled from the same application snapshot.
 type Result struct {
 	module              modulelocate.Module
+	template            string
 	currentManifest     applicationmeta.Manifest
 	composition         applicationmeta.Composition
 	dependencies        moduledependency.Index
@@ -174,7 +175,7 @@ func (r Result) Module() modulelocate.Module { return r.module }
 func (r Result) Manifest() applicationmeta.Manifest { return r.composition.Manifest() }
 
 // CurrentManifest returns the normalized selected current-project layer before
-// adopted-export composition. Environment mode includes root plus its overlay.
+// template composition. Environment mode includes root plus its overlay.
 func (r Result) CurrentManifest() applicationmeta.Manifest { return r.currentManifest }
 
 // Composition returns dependency baseline provenance and the effective
@@ -240,23 +241,26 @@ func (r Result) SelectedConfigurationData() []byte {
 	return r.ConfigurationSource()
 }
 
-// DependencyRuntimeExports returns private, build-bound dependency documents.
-// Only their inert export inventories may be used during runtime composition.
-func (r Result) DependencyRuntimeExports() ([]runtimebaseline.Export, error) {
-	result := make([]runtimebaseline.Export, 0, len(r.dependencySnapshots))
+// Template returns the root relationship, independently of the selected layer.
+func (r Result) Template() string { return r.template }
+
+// RuntimeTemplates returns private normalized reusable layers in oldest-to-
+// nearest order, together with their build-bound ancestry identities.
+func (r Result) RuntimeTemplates() ([]runtimebaseline.Template, error) {
+	result := make([]runtimebaseline.Template, 0, len(r.dependencySnapshots))
 	for _, dependency := range r.dependencySnapshots {
-		inventory, err := applicationmeta.PrivateExportInventoryYAML(dependency.snapshot.data)
+		inventory, err := applicationmeta.PrivateTemplateYAML(dependency.snapshot.data)
 		if err != nil {
 			return nil, runtimebaseline.ErrBaseline
 		}
-		result = append(result, runtimebaseline.Export{Module: dependency.modulePath, Version: dependency.version, YAML: string(inventory)})
+		result = append(result, runtimebaseline.Template{Module: dependency.modulePath, Version: dependency.version, Template: dependency.template, YAML: string(inventory)})
 	}
 	return result, nil
 }
 
 // ChangedDependencyConfigurationModules compares the private dependency inputs
 // of two resolutions and returns only the sorted module identities that changed.
-// Public provenance hashes cannot detect edits to private export values.
+// Public provenance hashes cannot detect edits to private template values.
 func (r Result) ChangedDependencyConfigurationModules(other Result) []string {
 	before := make(map[string]ManifestSnapshot, len(r.dependencySnapshots))
 	for _, dependency := range r.dependencySnapshots {
@@ -348,6 +352,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			return Result{}, fmt.Errorf("%w: associate selected configuration with Project module: %w", ErrResolve, err)
 		}
 	}
+	if selector.mode == configurationModeExplicit {
+		if err := validateReplacementMetadata(module.ModulePath(), selectedManifest); err != nil {
+			return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
+		}
+	}
 	dependencies, err := moduledependency.Discover(ctx, module, moduledependency.Options{
 		GoCommand:   options.GoCommand,
 		Environment: append([]string(nil), options.Environment...),
@@ -358,6 +367,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		if errors.Is(err, projectlocate.ErrInvalidManifest) {
 			err = fmt.Errorf("%w: %w", ErrManifest, err)
 		}
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	dependencySnapshots, dependencyManifests, err := loadTemplateManifests(module.ModulePath(), rootManifest, dependencies)
+	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	declarations, err := interfaceinventory.DiscoverApplication(ctx, module, dependencies, interfaceinventory.Options{
@@ -371,10 +384,6 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	interfaces := declarations.Interfaces()
 	implementations := declarations.Implementations()
 	if err := interfaceinventory.ValidateUniqueIDs(interfaces); err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	dependencySnapshots, dependencyManifests, err := loadDependencyManifests(dependencies.Projects())
-	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	inventory, err := plugininventory.Build(module, dependencies)
@@ -398,9 +407,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	var maintenance applicationmeta.ConfigurationMaintenance
 	if selector.mode == configurationModeEnvironment {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationSourceWithOverlay(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, selectedManifest, applicationmeta.DependencyBaseline{}, nil, nil, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationSourceWithOverlay(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, selectedManifest, applicationmeta.DependencyBaseline{}, nil, dependencyManifests, schemaLookup)
 	} else {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationSource(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, applicationmeta.DependencyBaseline{}, nil, nil, schemaLookup)
+		maintenance, err = applicationmeta.MaintainDependencyConfigurationSource(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, applicationmeta.DependencyBaseline{}, nil, dependencyManifests, schemaLookup)
 	}
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
@@ -420,15 +429,8 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			return Result{}, fmt.Errorf("%w: environment %q: %w", ErrResolve, selector.environment, err)
 		}
 	}
-	exportInventory := rootManifest
-	if maintenanceSnapshot.path == applicationManifestName {
-		exportInventory = maintainedManifest
-	}
-	adoptedExports, err := applicationmeta.ResolveAdoptedExports(module.ModulePath(), exportInventory, currentManifest, dependencyManifests)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	composition, err := applicationmeta.Compose(adoptedExports, currentManifest, schemaLookup)
+	currentManifest = applicationmeta.WithRootMetadata(currentManifest, rootManifest)
+	composition, err := applicationmeta.Compose(dependencyManifests, currentManifest, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -508,7 +510,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
-	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, maintainedManifest, selectedManifest, maintenance, schemaLookup)
+	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, maintainedManifest, selectedManifest, maintenance, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
@@ -572,6 +574,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	return Result{
 		module:              module,
+		template:            rootManifest.Template(),
 		currentManifest:     currentManifest,
 		composition:         composition,
 		dependencies:        dependencies,
@@ -723,6 +726,7 @@ func resolutionEvidencePluginCandidates(inventory plugininventory.Index) []resol
 func resolutionEvidenceConfigurationInput(
 	selector configurationSelector,
 	composition applicationmeta.Composition,
+	root applicationmeta.Manifest,
 	maintained applicationmeta.Manifest,
 	selected applicationmeta.Manifest,
 	maintenance applicationmeta.ConfigurationMaintenance,
@@ -772,6 +776,19 @@ func resolutionEvidenceConfigurationInput(
 		)
 	case configurationModeExplicit:
 		layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerExplicit, Decisions: base})
+		metadata, err := applicationmeta.ConfigurationDecisions(root, schemas)
+		if err != nil {
+			return resolutionevidence.ConfigurationInput{}, err
+		}
+		var declarations []applicationmeta.ConfigurationDecision
+		for _, decision := range metadata {
+			if decision.Path() == "template" {
+				declarations = append(declarations, decision)
+			}
+		}
+		if len(declarations) != 0 {
+			layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: declarations})
+		}
 	default:
 		return resolutionevidence.ConfigurationInput{}, fmt.Errorf("unsupported configuration selection mode %q", selector.mode)
 	}
@@ -780,6 +797,7 @@ func resolutionEvidenceConfigurationInput(
 		return resolutionevidence.ConfigurationInput{}, err
 	}
 	return resolutionevidence.ConfigurationInput{
+		Templates:          composition.TemplateLayers(),
 		DependencyBaseline: composition.DependencyBaseline(),
 		Layers:             layers,
 		Effective:          effective,

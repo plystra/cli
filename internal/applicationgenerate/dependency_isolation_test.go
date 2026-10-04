@@ -17,7 +17,7 @@ import (
 	"github.com/plystra/cli/internal/runtimebaseline"
 )
 
-func TestGeneratedBinaryIgnoresDependencyApplicationAdoptionChains(t *testing.T) {
+func TestGeneratedBinaryActivatesOnlyTheRootTemplateAncestry(t *testing.T) {
 	const direct = "example.com/isolation-direct"
 	const transitive = "example.com/isolation-transitive"
 	sources := filepath.Join(t.TempDir(), "sources")
@@ -81,30 +81,26 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response, error) { re
 			}
 		}
 	}
-	const directExports = `  exports:
-    safe:
-      interfaces:
-        require: [safe.run/v1]
-        use: {safe.run/v1: example.com/isolation-direct/service.New}
-        policies: {safe.run/v1: {timeout: 1s}}
-      config:
-        example.com/isolation-direct/service.New: {value: private-safe}
+	const directConfiguration = `interfaces:
+  require: {add: [safe.run/v1]}
+  use: {safe.run/v1: example.com/isolation-direct/service.New}
+  policies: {safe.run/v1: {timeout: 1s}}
+config:
+  example.com/isolation-direct/service.New: {value: private-safe}
 `
-	const transitiveExports = `  exports:
-    standalone:
-      interfaces:
-        require: [hidden.run/v1]
-        use: {hidden.run/v1: example.com/isolation-transitive/service.New}
-      config:
-        example.com/isolation-transitive/service.New:
-          value: private-activated
-          password: {env: PLYSTRA_ISOLATION_SECRET}
+	const transitiveConfiguration = `interfaces:
+  require: [hidden.run/v1]
+  use: {hidden.run/v1: example.com/isolation-transitive/service.New}
+config:
+  example.com/isolation-transitive/service.New:
+    value: private-activated
+    password: {env: PLYSTRA_ISOLATION_SECRET}
 `
-	writeDependencies := func(t testing.TB, suffix string) {
+	writeDependencies := func(t testing.TB, suffix string, activate bool) {
 		t.Helper()
-		for _, dependency := range []struct{ root, exports, adopt string }{
-			{directRoot, directExports, "{module: " + transitive + ", export: standalone}"},
-			{transitiveRoot, transitiveExports, "{module: " + direct + ", export: safe}"},
+		for _, dependency := range []struct{ root, configuration, template string }{
+			{directRoot, directConfiguration, transitive},
+			{transitiveRoot, transitiveConfiguration, direct},
 		} {
 			ignored := fmt.Sprintf(`interfaces:
   require: [missing.ignored/v1]
@@ -121,31 +117,47 @@ resources:
   instances: {ignored.database: {use: example.com/absent/database.New, config: {private: ignored}}}
   bind: {implementations: {example.com/isolation-direct/service.New: {database: ignored.database}}}
 `, suffix, suffix)
-			adopt := dependency.adopt
-			if suffix == "changed" {
-				adopt += ", {module: example.com/missing, export: ignored}"
+			relationship := "template: " + dependency.template + "\n"
+			document := relationship + ignored
+			if activate {
+				if dependency.root == transitiveRoot {
+					relationship = ""
+				}
+				document = relationship + dependency.configuration + "http: {address: private-ignored-" + suffix + "}\ntimeouts: {startup: 1ns}\n"
+			} else if suffix == "changed" {
+				document = "template: example.com/missing\n" + ignored
 			}
-			writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), "composition:\n  adopt: ["+adopt+"]\n"+dependency.exports+ignored)
+			writeFile(t, filepath.Join(dependency.root, "plystra.yaml"), document)
 			writeFile(t, filepath.Join(dependency.root, "plystra.test.yaml"), "ignored dependency overlay: ["+suffix)
 			writeFile(t, filepath.Join(dependency.root, "selected.yaml"), "ignored dependency replacement: ["+suffix)
 		}
 	}
 	consumerDocuments := func(t testing.TB, directory, mode string, activate bool) []string {
 		t.Helper()
-		adoptions := "{module: " + direct + ", export: safe}"
+		relationship := ""
+		selected := directConfiguration
 		if activate {
-			adoptions += ", {module: " + transitive + ", export: standalone}"
+			relationship = "template: " + direct + "\n"
+			selected = ""
 		}
-		selected := "composition: {adopt: [" + adoptions + "]}\n"
-		rootDocument, overlay, replacement := selected, "{}\n", "{}\n"
+		rootDocument, overlay, replacement := relationship+selected, "{}\n", "{}\n"
 		var selector []string
 		switch mode {
 		case "environment":
-			rootDocument, overlay = "{}\n", selected
+			rootDocument, overlay = relationship, selected
 			selector = []string{"--env", "test"}
 		case "replacement":
-			rootDocument, replacement = "interfaces: {require: [missing.root/v1]}\n", selected
+			rootDocument, replacement = relationship+"interfaces: {require: [missing.root/v1]}\n", selected
 			selector = []string{"--config", "selected.yaml"}
+		}
+		if rootDocument == "" {
+			rootDocument = "{}\n"
+		}
+		if overlay == "" {
+			overlay = "{}\n"
+		}
+		if replacement == "" {
+			replacement = "{}\n"
 		}
 		writeFile(t, filepath.Join(directory, "plystra.yaml"), rootDocument)
 		writeFile(t, filepath.Join(directory, "plystra.test.yaml"), overlay)
@@ -171,7 +183,7 @@ resources:
 				writeFile(t, filepath.Join(root, "go.mod"), initialGoMod)
 				writeFile(t, filepath.Join(root, "go.sum"), initialGoSum)
 				selector := consumerDocuments(t, root, mode, activate)
-				writeDependencies(t, "original")
+				writeDependencies(t, "original", activate)
 				assertTransitiveGraph(t)
 				directBefore, transitiveBefore := snapshotTree(t, directRoot), snapshotTree(t, transitiveRoot)
 				runCLI(t, append([]string{"generate"}, selector...)...)
@@ -182,12 +194,16 @@ resources:
 				baselinePath := filepath.Join(root, "dist/runtime-baseline.json")
 				baselineBytes := readAbsoluteFile(t, baselinePath)
 				baseline, err := runtimebaseline.Decode(baselineBytes)
-				if err != nil || len(baseline.Exports) != 2 {
-					t.Fatalf("dependency inventories = %d, %v", len(baseline.Exports), err)
+				wantTemplates := 0
+				if activate {
+					wantTemplates = 2
 				}
-				for _, inventory := range baseline.Exports {
-					if inventory.Module != direct && inventory.Module != transitive || strings.Contains(inventory.YAML, "adopt:") || strings.Contains(inventory.YAML, "ignored") {
-						t.Fatal("baseline included dependency application declarations")
+				if err != nil || len(baseline.Templates) != wantTemplates {
+					t.Fatalf("template inventories = %d, want %d, %v", len(baseline.Templates), wantTemplates, err)
+				}
+				for _, inventory := range baseline.Templates {
+					if inventory.Module != direct && inventory.Module != transitive || strings.Contains(inventory.YAML, "ignored") {
+						t.Fatal("baseline included dependency deployment declarations")
 					}
 				}
 				provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, root, "generated/manifest.json"))
@@ -215,7 +231,7 @@ resources:
 				if !reflect.DeepEqual(directBefore, snapshotTree(t, directRoot)) || !reflect.DeepEqual(transitiveBefore, snapshotTree(t, transitiveRoot)) {
 					t.Fatal("generation changed a dependency Project")
 				}
-				writeDependencies(t, "changed")
+				writeDependencies(t, "changed", activate)
 				before := snapshotTree(t, sources)
 				runCLI(t, append([]string{"generate", "--check"}, selector...)...)
 				runCLI(t, append([]string{"check"}, selector...)...)
@@ -235,7 +251,7 @@ resources:
 			return
 		}
 		// Prepare deployment independently of which generation subtests were selected.
-		writeDependencies(t, "changed")
+		writeDependencies(t, "changed", activate)
 		selector := consumerDocuments(t, root, "replacement", activate)
 		runCLI(t, append([]string{"generate"}, selector...)...)
 		binary := filepath.Join(deployment, fmt.Sprintf("application-%t", activate))
@@ -289,7 +305,7 @@ resources:
 					}
 					if app.activate && !supplySecret {
 						if err == nil || !bytes.Contains(output, []byte("resolve constructor Secret")) {
-							t.Fatalf("adopted missing Secret = %v\n%s", err, output)
+							t.Fatalf("inherited missing Secret = %v\n%s", err, output)
 						}
 						assertFileMissing(t, markers, "direct")
 						assertFileMissing(t, markers, "transitive")
@@ -299,12 +315,12 @@ resources:
 						t.Fatalf("startup = %v\n%s", err, output)
 					}
 					if string(readAbsoluteFile(t, directMarker)) != "private-safe" {
-						t.Fatal("dependency application configuration replaced the selected export")
+						t.Fatal("the selected direct configuration was not delivered")
 					}
 					if !app.activate {
 						assertFileMissing(t, markers, "transitive")
 					} else if string(readAbsoluteFile(t, transitiveMarker)) != "private-activated:private-resolved" {
-						t.Fatal("explicit transitive adoption was not delivered")
+						t.Fatal("transitive template configuration was not delivered")
 					}
 				})
 			}

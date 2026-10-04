@@ -88,7 +88,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 	applicationManifest := readFile(t, root, "generated/manifest.json")
 	for _, required := range []string{
 		`"capability_aliases":[]`,
-		`"configuration":{"version":7,"mode":"default"`,
+		`"configuration":{"version":8,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
 		`"dependency_baselines":[{"mode":"default","path":"plystra.yaml"`,
 		`"dependency_composition_digest":"sha256:`,
@@ -148,7 +148,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 		[]byte(`case "--env":`),
 		[]byte(`case "--config":`),
 		[]byte("runtimeRootRelativeConfigurationPath"),
-		[]byte("composeRuntimeAdoptedDocument"),
+		[]byte("composeRuntimeTemplateDocument"),
 	} {
 		if !bytes.Contains(bootstrap, required) {
 			t.Fatalf("generated bootstrap omits default configuration selection %q:\n%s", required, bootstrap)
@@ -785,12 +785,12 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		applicationRoot := filepath.Join(root, "application")
 		writeApplicationModule(t, dependencyRoot, dependencyModule)
 		constructor := writeConstructorConfigurationOwner(t, dependencyRoot, dependencyModule, false)
-		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("composition: {exports: {defaults: {interfaces: {use: {configuration.owner/v1: %s}}, config: {%s: {endpoint: dependency.internal}}}}}\n", constructor, constructor))
+		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: dependency.internal}}\n", constructor, constructor))
 		writeApplicationModule(t, applicationRoot, "example.com/acme/dormant-dependency")
 		goModPath := filepath.Join(applicationRoot, "go.mod")
 		goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire %s v1.0.0\n\nreplace %s => %s\n", dependencyModule, dependencyModule, filepath.ToSlash(dependencyRoot))
 		writeFile(t, goModPath, goMod)
-		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), fmt.Sprintf("composition: {adopt: [{module: %s, export: defaults}]}\nconfig: {%s: {endpoint: application.internal}}\n", dependencyModule, constructor))
+		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), fmt.Sprintf("template: %s\nconfig: {%s: {endpoint: application.internal}}\n", dependencyModule, constructor))
 
 		result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: applicationRoot, Environment: environment, Validate: validate,
@@ -802,8 +802,8 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		if err != nil {
 			t.Fatalf("DecodeManifestProvenance(dependency): %v", err)
 		}
-		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", constructor, dependencyModule, "v1.0.0", string(resolutionevidence.ConfigurationOwnerAdopted),
-			[]string{string(resolutionevidence.ConfigurationOwnerAdopted)},
+		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", constructor, dependencyModule, "v1.0.0", string(resolutionevidence.ConfigurationOwnerTemplate),
+			[]string{string(resolutionevidence.ConfigurationOwnerTemplate)},
 			[]string{dependencyModule},
 			[]string{"plystra.yaml"})
 		configurationRoot := fmt.Sprintf("config[%q]", constructor)
@@ -813,7 +813,7 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 		configuration := onlyDormantConstructorConfiguration(t, provenance, constructor)
 		endpoint := dormantConfigurationField(t, configuration, configurationRoot+`["endpoint"]`)
 		assertDormantConfigurationContributionOwners(t, endpoint, string(resolutionevidence.ConfigurationOwnerRoot), []string{
-			string(resolutionevidence.ConfigurationOwnerAdopted),
+			string(resolutionevidence.ConfigurationOwnerTemplate),
 			string(resolutionevidence.ConfigurationOwnerRoot),
 		})
 	})
@@ -3809,7 +3809,7 @@ func assertDormantSelectionRecord(
 		t.Fatalf("dormant selection contributions = %#v, expectations = %v/%v/%v", contributions, contributionOwners, sourceModules, sourcePaths)
 	}
 	precedence := map[string]int{
-		string(resolutionevidence.ConfigurationOwnerAdopted):     1,
+		string(resolutionevidence.ConfigurationOwnerTemplate):    1,
 		string(resolutionevidence.ConfigurationOwnerRoot):        2,
 		string(resolutionevidence.ConfigurationOwnerExplicit):    2,
 		string(resolutionevidence.ConfigurationOwnerEnvironment): 3,
@@ -3817,9 +3817,6 @@ func assertDormantSelectionRecord(
 	for index, contribution := range contributions {
 		wantOwner := contributionOwners[index]
 		wantSummary := "implementation"
-		if wantOwner == string(resolutionevidence.ConfigurationOwnerAdopted) {
-			wantSummary = "redacted"
-		}
 		if contribution.Owner() != wantOwner ||
 			contribution.Precedence() != precedence[wantOwner] ||
 			contribution.Summary() != wantSummary ||

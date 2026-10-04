@@ -69,7 +69,8 @@ var (
 // Options carries application-owned generated package identities.
 type Options struct {
 	ConstructorInventory      []implementationinventory.Implementation
-	DependencyExports         []runtimebaseline.Export
+	Template                  string
+	Templates                 []runtimebaseline.Template
 	ModulePath                string
 	JavaScriptPackage         string
 	KernelModuleVersion       string
@@ -389,7 +390,8 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (R
 	}
 	bootstrapOptions := bootstrapgen.Options{
 		ConstructorInventory:          options.ConstructorInventory,
-		DependencyExports:             options.DependencyExports,
+		Template:                      options.Template,
+		Templates:                     options.Templates,
 		ModulePath:                    options.ModulePath,
 		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
 		ConfigurationSchemas:          runtimeConfigurationSchemas,
