@@ -483,6 +483,7 @@ func (b *graphBuilder) visitInterface(identifier interfaceid.Identifier, path de
 		symbol:         constructor.symbol,
 		source:         constructor.source,
 		dependencies:   dependencies,
+		path:           path.clone(),
 	})
 	return nil
 }
