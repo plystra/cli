@@ -195,8 +195,10 @@ const (
 )
 
 const (
-	diagnosticUseInterfaceInvalid   = diagnosticcode.UseInterfaceInvalid
-	diagnosticUseConstructorInvalid = diagnosticcode.UseConstructorInvalid
+	diagnosticUseTargetInvalid        = diagnosticcode.UseTargetInvalid
+	diagnosticUseTargetNotFound       = diagnosticcode.UseTargetNotFound
+	diagnosticUseProviderIncompatible = diagnosticcode.UseProviderIncompatible
+	diagnosticUseConstructorInvalid   = diagnosticcode.UseConstructorInvalid
 )
 
 const (
@@ -1241,6 +1243,14 @@ func primaryFailureMessage(err error) string {
 }
 
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
+	switch {
+	case errors.Is(err, implementationselect.ErrInvalidTarget):
+		return recoveryDiagnostic(diagnosticUseTargetInvalid, "Rerun `plystra use <target> <constructor-symbol>"+context.selectorSuffix()+"` with one canonical Interface ID including /vN or one existing named Resource instance.")
+	case errors.Is(err, implementationselect.ErrTargetNotFound):
+		return recoveryDiagnostic(diagnosticUseTargetNotFound, "Choose one visible Interface from `plystra inspect interfaces"+context.selectorSuffix()+"` or one existing named instance from `plystra inspect resources"+context.selectorSuffix()+"`, then rerun `plystra use <target> <constructor-symbol>"+context.selectorSuffix()+"`; use does not create Resource instances.")
+	case errors.Is(err, implementationselect.ErrProviderIncompatible):
+		return recoveryDiagnostic(diagnosticUseProviderIncompatible, "Select one visible Resource provider compatible with the existing instance and its surviving dependencies using `plystra use <target> <constructor-symbol>"+context.selectorSuffix()+"`; correct unresolved bindings or required configuration in "+context.configurationTarget()+" without retargeting unrelated consumers.")
+	}
 	if errors.Is(err, applicationresolve.ErrTemplate) {
 		return recoveryDiagnostic(diagnosticTemplateInvalid, "Correct the root template relationship and its Go Module dependency graph; every ancestor must be a Project and the chain must not repeat a module, then rerun the command.")
 	}
@@ -1439,10 +1449,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticCapabilityImplementNotVisible, "Rerun `plystra capability create <capability-name>/vN [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]` to author the missing exact contract.")
 	case errors.Is(err, capabilityexpose.ErrExpose) && errors.Is(err, capabilityexpose.ErrInvalidReference):
 		return recoveryDiagnostic(diagnosticCapabilityExposeReferenceInvalid, "Rerun `plystra capability expose <capability-name>/vN"+context.selectorSuffix()+"` with one canonical lower-case Capability ID containing at least two dot-separated segments and a positive major.")
-	case errors.Is(err, implementationselect.ErrInvalidInterfaceID):
-		return recoveryDiagnostic(diagnosticUseInterfaceInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one canonical versioned Interface ID.")
 	case errors.Is(err, implementationselect.ErrInvalidConstructor):
-		return recoveryDiagnostic(diagnosticUseConstructorInvalid, "Rerun `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"` with one visible fully qualified exported constructor symbol.")
+		return recoveryDiagnostic(diagnosticUseConstructorInvalid, "Rerun `plystra use <target> <constructor-symbol>"+context.selectorSuffix()+"` with one visible fully qualified exported constructor symbol.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
 		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):

@@ -32,7 +32,7 @@ plystra new <project-name> [--module <go-module-path>] [--template <go-module-qu
 plystra add <go-module-query>
 plystra remove <go-module-path>
 plystra update <go-module-query>
-plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]
+plystra use <target> <constructor-symbol> [--env <environment>|--config <yaml-path>]
 plystra plugin create <name>
 plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]
@@ -1567,9 +1567,12 @@ Use the targeted command for the same explicit current-Project decision:
 plystra use email.send/v1 example.com/acme/email/smtp.New
 plystra use email.send/v1 example.com/acme/email/production.New --env production
 plystra use email.send/v1 example.com/acme/email/customer.New --config deploy/customer-a.yaml
+plystra use database.primary example.com/acme/postgres.New --env production
 ```
 
-The default form writes root `plystra.yaml`; `--env` writes only the selected
+The target is a canonical Interface ID including `/vN` or an existing named
+Resource instance. The command infers its kind without a flag and never creates
+a Resource instance. The default form writes root `plystra.yaml`; `--env` writes only the selected
 sparse project-root overlay; and `--config` writes only the selected complete
 replacement document. `PLYSTRA_ENV` and `PLYSTRA_CONFIG` provide the same
 selection when no flag is present, while an explicit flag overrides both
@@ -1584,6 +1587,25 @@ regenerates and validates with the same selection, and restores the selected
 YAML, generated output, `go.mod`, and `go.sum` if any later step fails. It
 rejects intrinsic Interfaces, unknown Interfaces, unknown constructors, and
 constructors that do not implement the exact canonical Interface.
+
+For a Resource instance, the command selects an exact compatible provider under
+`resources.instances.<name>.use`. Replacing a nonempty previous provider discards
+that instance's old Config; other instances and same-provider Config stay intact.
+An existing instance without a provider can receive its first selection. This
+retains unbound Config authored in the selected document, not inherited unbound
+values, and still validates the final typed configuration.
+Selection removes configuration whose last explicit or reachable owner
+disappears and only consumer binding parameters proven obsolete. It preserves
+still-owned configuration, revalidates surviving bindings, and never retargets
+a dependency or invents newly required values. Inherited cleanup writes only
+the needed tombstone or sparse delta in the selected current-Project layer;
+template sources and unselected documents remain unchanged.
+
+The starting graph or required values may be invalid when this selection repairs
+them; validation applies to the candidate final state. Any unresolved final
+dependency or required value still fails without installing the selection.
+This primitive transaction does not implement compound change requests, plan
+digests, `--dry-run`, or complete Gate 13 acceptance.
 
 There is no constructor priority, discovery-order winner, or runtime selection
 fallback.
@@ -2200,11 +2222,15 @@ integration evidence only, not proof that the dependency resolves remotely or
 that the CLI/Kernel pair has completed acceptance. Check the final dependency pin and
 integrated validation before relying on a published distribution.
 
-Resource declarations and providers are ordinary authored Go. This slice has no
-Resource mutation form of `plystra use` or `plystra implement`; both remain
-Interface-only. Author instance selection and binding in the selected YAML, then
-run `plystra generate`, `plystra generate --check`, and `plystra check` with the
-same selector. Never supply the missing binding by editing generated files.
+Resource declarations and providers are ordinary authored Go. Replace a
+compatible provider on an existing instance with
+`plystra use <instance-name> <provider-constructor>` and the intended selector.
+Installed `resource.provider.selection` reports this transaction separately
+from full Resource acceptance. Resource `plystra implement` and instance
+creation commands remain unsupported. After manually authoring an instance or
+binding in selected YAML, run `plystra generate`, `plystra generate --check`,
+and `plystra check` with the same selector. Never supply a missing binding by
+editing generated files.
 
 For example, given visible compatible providers and the exact authored dependency
 parameter names below:
@@ -2359,8 +2385,9 @@ Known resolution diagnostics retain their stable codes and module-relative
 locations. Every result includes all four effect arrays and a typed
 `plystra.recovery/v1` action with independent verification. Provider choices
 identify the selected `capabilities.use` field and finite allowed Plugin IDs;
-they have no executable command because installed `plystra use` accepts only
-Interface Implementation constructors. Implementation choices carry sorted,
+they have no executable command because installed `plystra use` accepts
+Interface Implementations and named Resource providers, not legacy Capability
+Plugin IDs. Implementation choices carry sorted,
 fully bound `argv` and the exact selector. Execute only the selected supported
 action from its Project-relative working directory, then run its verification.
 Never execute placeholders or infer shell commands from human display text.
@@ -2874,12 +2901,20 @@ create boundary for classification, and fail before any Project mutation.
 
 ### Invalid `plystra use` input
 
-`PLYSTRA_USE_INTERFACE_INVALID` identifies a malformed canonical versioned
-Interface ID. `PLYSTRA_USE_CONSTRUCTOR_INVALID` identifies a malformed fully
-qualified exported constructor symbol. Run the emitted corrected
-`plystra use <interface-id> <constructor-symbol>` command; it retains the active
-default, `--env`, or `--config` mode. These input failures occur before Project
-discovery or mutation.
+`PLYSTRA_USE_TARGET_INVALID` identifies a target that is neither a canonical
+Interface ID including `/vN` nor a valid Resource instance name.
+`PLYSTRA_USE_CONSTRUCTOR_INVALID` identifies a malformed fully qualified
+exported constructor symbol. These syntax failures occur before discovery.
+`PLYSTRA_USE_TARGET_NOT_FOUND` identifies a well-formed target absent from the
+selected model. Inspect Interfaces or named Resources with the same selector;
+`use` never creates an instance. `PLYSTRA_USE_PROVIDER_INCOMPATIBLE` identifies
+an incompatible Resource provider choice. Select a visible compatible provider
+and explicitly correct surviving bindings or required configuration.
+
+The emitted `plystra use <target> <constructor-symbol>` recovery retains the
+active default, `--env`, or `--config` mode without echoing unsafe input.
+Rejected selection leaves the Project unchanged. Provider mismatch diagnostics
+contain no private configuration or Secret-reference targets.
 
 ### Plugin creation
 

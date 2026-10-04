@@ -52,7 +52,7 @@ func installedCommands() []commandschema.CapabilityCommandInput {
 		installedCommand("remove", []commandschema.CapabilityArgumentInput{positional("go-module-path", 1)}, nil, nil, false, false),
 		installedCommand("update", []commandschema.CapabilityArgumentInput{positional("go-module-query", 1)}, nil, nil, false, false),
 		installedCommand("use", append([]commandschema.CapabilityArgumentInput{
-			positional("interface-id", 1),
+			positional("target", 1),
 			positional("constructor-symbol", 2),
 		}, configurationArguments()...), []string{configurationSelectorID}, nil, false, false),
 		installedCommand("plugin.create", []commandschema.CapabilityArgumentInput{positional("plugin-name", 1)}, nil, nil, false, false),

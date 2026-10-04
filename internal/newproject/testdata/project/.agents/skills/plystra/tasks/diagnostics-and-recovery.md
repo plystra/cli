@@ -1,5 +1,7 @@
 # Diagnostics and recovery
 
+Unified plystra use input failures report PLYSTRA_USE_TARGET_INVALID for malformed Interface or instance targets and PLYSTRA_USE_CONSTRUCTOR_INVALID for malformed constructor symbols before Project discovery. PLYSTRA_USE_TARGET_NOT_FOUND means the selected model has no such Interface or named instance; inspect interfaces or resources with the same selector. PLYSTRA_USE_PROVIDER_INCOMPATIBLE means the Resource provider choice is incompatible. Recovery retains the selector, uses safe placeholders, and exposes no private configuration or Secret-reference targets. Resource selection never creates an instance or guesses a surviving dependency binding.
+
 Use read-only inspection before changing authored inputs:
 
     plystra inspect capabilities --format json
@@ -27,7 +29,7 @@ Inspect versioned Agent guidance before refreshing it:
 
 Reuse the same `--env` or `--config` selector for Project-bound inspection and explanation. `--format json` returns `plystra.result/v1` for creation, installed capability discovery, and all five explanation commands. Explanation nests `plystra.explain/v1` with diagnostics and `plystra.recovery/v1` actions; JSON stderr stays empty after initialization. Project inspect retains its current top-level schemas.
 
-Explanation exits 2 for invalid invocation or subject, 3 for invalid Project state or missing targets, 4 for required decisions or missing prerequisites, and 8 for internal failures. Unknown failures use redacted `PLYSTRA_EXPLAIN_FAILED`. Recovery preserves the selector and names the exact source edit or finite choices. Provider choices edit `capabilities.use`; installed `plystra use` accepts only Interface Implementation constructors. Only executable actions and supported choice options carry a working directory and fully bound `argv`. Never execute unresolved placeholders or parse human display text as a shell command; run the action's independent verification afterward.
+Explanation exits 2 for invalid invocation or subject, 3 for invalid Project state or missing targets, 4 for required decisions or missing prerequisites, and 8 for internal failures. Unknown failures use redacted `PLYSTRA_EXPLAIN_FAILED`. Recovery preserves the selector and names the exact source edit or finite choices. Provider choices edit `capabilities.use`; installed `plystra use` accepts Interface Implementations and named Resource providers, not legacy Capability Plugin IDs. Only executable actions and supported choice options carry a working directory and fully bound `argv`. Never execute unresolved placeholders or parse human display text as a shell command; run the action's independent verification afterward.
 
 Actionable human failures end with one `Recovery:` block and one stable `Diagnostic: PLYSTRA_<AREA>_<CONDITION>` code. Source-bearing failures add deterministic module-relative `Source:` lines. Use the code as the automation identity, apply the recovery to the reported authored source, and rerun the same selected command.
 

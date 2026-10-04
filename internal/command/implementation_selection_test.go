@@ -258,9 +258,9 @@ func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.
 		constructor string
 		want        string
 	}{
-		{name: "invalid Interface", interfaceID: "email.send", constructor: "example.com/acme/implementation-use/smtp.New", want: "parse exact Interface ID"},
-		{name: "absent Interface", interfaceID: "missing.operation/v1", constructor: "example.com/acme/implementation-use/smtp.New", want: "unknown Interface"},
-		{name: "invalid constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/smtp.new", want: "parse fully qualified Implementation constructor"},
+		{name: "invalid target", interfaceID: "email.send/v0", constructor: "example.com/acme/implementation-use/smtp.New", want: diagnosticcode.UseTargetInvalid},
+		{name: "absent Interface", interfaceID: "missing.operation/v1", constructor: "example.com/acme/implementation-use/smtp.New", want: diagnosticcode.UseTargetNotFound},
+		{name: "invalid constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/smtp.new", want: diagnosticcode.UseConstructorInvalid},
 		{name: "unknown constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/missing.New", want: "unknown Implementation constructor"},
 		{name: "incompatible constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/reports.New", want: "incompatible Implementation choice"},
 	}
@@ -279,6 +279,39 @@ func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 				t.Fatalf("rejected plystra use changed the Project:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func TestRunUsePreservesUnrelatedUnknownInterfaceDiagnosticWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name, selectedPath string
+		selectors          []string
+	}{
+		{name: "default", selectedPath: "plystra.yaml"},
+		{name: "environment", selectedPath: "plystra.production.yaml", selectors: []string{"--env", "production"}},
+		{name: "complete replacement", selectedPath: "deploy/customer.yaml", selectors: []string{"--config", "deploy/customer.yaml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, test.selectedPath), "# PRIVATE_REQUIREMENT_COMMENT\ninterfaces:\n  require: [email.send/v1, missing.operation/v1]\n")
+			before := commandTree(t, root)
+			arguments := append([]string{"use", "email.send/v1", "example.com/acme/implementation-use/local.New"}, test.selectors...)
+			code, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "local"), implementationSelectionCommandEnvironment(nil))
+			wantSource := "Source: example.com/acme/implementation-use:" + test.selectedPath + ":1:1 (declaration)"
+			wantSuffix := "\n\n" + wantSource + "\n\nRecovery:\nCorrect the reported Interface ID in " + test.selectedPath + " to one canonical Interface visible in the selected Go Module graph, then rerun the command.\n\nDiagnostic: " + diagnosticcode.ResolveUnknownInterface + "\n"
+			if code != 1 || stdout != "" || !strings.Contains(stderr, "missing.operation/v1") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(stderr, diagnosticcode.UseTargetNotFound) {
+				t.Fatalf("unrelated missing Interface during use = %d, %q, %q", code, stdout, stderr)
+			}
+			for _, private := range []string{root, filepath.ToSlash(root), "PRIVATE_REQUIREMENT_COMMENT"} {
+				if strings.Contains(stderr, private) {
+					t.Fatalf("unrelated missing Interface diagnostic exposed %q", private)
+				}
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("unrelated missing Interface selection mutated the Project")
 			}
 			assertNoCommandTransactions(t, root)
 		})
@@ -350,17 +383,17 @@ func TestRunUseClassifiesMalformedInputsWithoutMutation(t *testing.T) {
 		reject      string
 	}{
 		{
-			name:        "invalid Interface preserves explicit environment",
-			interfaceID: "email.send",
+			name:        "invalid target preserves explicit environment",
+			interfaceID: "email.send/v0",
 			constructor: "example.com/acme/implementation-use/smtp.New",
 			selectors:   []string{"--env", "production"},
 			environment: map[string]string{
 				"PLYSTRA_CONFIG": "deploy/ignored.yaml",
 				"PLYSTRA_ENV":    "ignored",
 			},
-			problem:    "parse exact Interface ID",
-			recovery:   "Rerun `plystra use <interface-id> <constructor-symbol> --env \"production\"` with one canonical versioned Interface ID.",
-			diagnostic: diagnosticcode.UseInterfaceInvalid,
+			problem:    diagnosticcode.UseTargetInvalid,
+			recovery:   "Rerun `plystra use <target> <constructor-symbol> --env \"production\"` with one canonical Interface ID including /vN or one existing named Resource instance.",
+			diagnostic: diagnosticcode.UseTargetInvalid,
 			reject:     "ignored",
 		},
 		{
@@ -368,8 +401,8 @@ func TestRunUseClassifiesMalformedInputsWithoutMutation(t *testing.T) {
 			interfaceID: "email.send/v1",
 			constructor: "example.com/acme/implementation-use/smtp.new",
 			environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"},
-			problem:     "parse fully qualified Implementation constructor",
-			recovery:    "Rerun `plystra use <interface-id> <constructor-symbol> --config \"deploy/customer.yaml\"` with one visible fully qualified exported constructor symbol.",
+			problem:     diagnosticcode.UseConstructorInvalid,
+			recovery:    "Rerun `plystra use <target> <constructor-symbol> --config \"deploy/customer.yaml\"` with one visible fully qualified exported constructor symbol.",
 			diagnostic:  diagnosticcode.UseConstructorInvalid,
 		},
 	}

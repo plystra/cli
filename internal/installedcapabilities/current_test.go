@@ -125,7 +125,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 	if !reflect.DeepEqual(capabilities.EffectClasses(), wantEffects) {
 		t.Fatalf("effect classes = %#v, want %#v", capabilities.EffectClasses(), wantEffects)
 	}
-	for _, planned := range []string{"build", "capability.require", "data.migration.apply", "data.migration.plan", "data.migration.status", "dev", "doctor", "fix", "release", "sdk.link", "sdk.pack", "sdk.publish", "test"} {
+	for _, planned := range []string{"build", "capability.require", "change.apply", "change.plan", "data.migration.apply", "data.migration.plan", "data.migration.status", "dev", "doctor", "fix", "release", "sdk.link", "sdk.pack", "sdk.publish", "test"} {
 		if _, exists := commandsByID[planned]; exists {
 			t.Fatalf("planned command %q reported as installed", planned)
 		}
@@ -144,6 +144,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"resource.consumer.discovery|yes|yes|not_applicable|not_applicable|yes",
 		"resource.contract|yes|yes|not_applicable|not_applicable|yes",
 		"resource.provider.discovery|yes|yes|not_applicable|not_applicable|yes",
+		"resource.provider.selection|yes|yes|yes|yes|no",
 		"template.interface-inheritance|yes|yes|yes|yes|yes",
 		"template.resource-inheritance|yes|yes|yes|yes|no",
 		"transport.connect|yes|yes|yes|yes|yes",

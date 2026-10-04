@@ -62,6 +62,32 @@ import (
 	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
+func TestUseRecoveryPreservesOnlySafeSelectors(t *testing.T) {
+	t.Parallel()
+	for _, cause := range []error{
+		implementationselect.ErrInvalidTarget,
+		implementationselect.ErrTargetNotFound,
+		implementationselect.ErrProviderIncompatible,
+		implementationselect.ErrInvalidConstructor,
+	} {
+		for _, selection := range []struct {
+			context recoveryContext
+			want    string
+			reject  string
+		}{
+			{context: commandRecoveryContext("", "production", nil), want: `--env "production"`},
+			{context: commandRecoveryContext("", "", []string{"PLYSTRA_CONFIG=deploy/customer.yaml"}), want: `--config "deploy/customer.yaml"`},
+			{context: commandRecoveryContext("", "production\nPRIVATE_SELECTOR", nil), want: "--env <environment>", reject: "PRIVATE_SELECTOR"},
+			{context: commandRecoveryContext("../PRIVATE_SELECTOR.yaml", "", nil), want: "--config <yaml-path>", reject: "PRIVATE_SELECTOR"},
+		} {
+			diagnostic, ok := primaryActionableDiagnostic(cause, selection.context)
+			if !ok || !strings.Contains(diagnostic.recovery, selection.want) || selection.reject != "" && strings.Contains(diagnostic.recovery, selection.reject) {
+				t.Fatalf("selection recovery for %v = %#v, %t", cause, diagnostic, ok)
+			}
+		}
+	}
+}
+
 func TestPrimaryActionableDiagnosticScopesCancellationToNew(t *testing.T) {
 	t.Parallel()
 
@@ -1063,7 +1089,10 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		{name: "missing Capability implement target", err: errors.Join(capabilitycreate.ErrImplement, capabilitycreate.ErrActionMismatch, capabilitycreate.ErrImplementNotVisible), code: diagnosticcode.CapabilityImplementNotVisible},
 		{name: "invalid Capability expose reference", err: fmt.Errorf("%w: %w", capabilityexpose.ErrExpose, capabilityexpose.ErrInvalidReference), code: diagnosticcode.CapabilityExposeReferenceInvalid},
 		{name: "missing Capability expose target", err: errors.Join(capabilityexpose.ErrExpose, capabilityexpose.ErrNotVisible, interfaceresolution.ErrUnknownInterface), code: diagnosticcode.CapabilityExposeNotVisible},
-		{name: "invalid use Interface", err: implementationselect.ErrInvalidInterfaceID, code: diagnosticcode.UseInterfaceInvalid},
+		{name: "invalid use target", err: implementationselect.ErrInvalidTarget, code: diagnosticcode.UseTargetInvalid},
+		{name: "unknown use target", err: implementationselect.ErrTargetNotFound, code: diagnosticcode.UseTargetNotFound},
+		{name: "unrelated unknown Interface during use", err: errors.Join(implementationselect.ErrSelect, interfaceresolution.ErrUnknownInterface), code: diagnosticcode.ResolveUnknownInterface},
+		{name: "incompatible Resource provider", err: implementationselect.ErrProviderIncompatible, code: diagnosticcode.UseProviderIncompatible},
 		{name: "invalid use constructor", err: implementationselect.ErrInvalidConstructor, code: diagnosticcode.UseConstructorInvalid},
 	}
 	for _, test := range tests {

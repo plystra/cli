@@ -34,7 +34,7 @@ const (
   plystra add <go-module-query>
   plystra remove <go-module-path>
   plystra update <go-module-query>
-  plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]
+  plystra use <target> <constructor-symbol> [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
   plystra interface create <interface-name>
   plystra implement <interface-id> --package <project-relative-package>
@@ -427,8 +427,10 @@ names is not deduplicated. A provider change discards the old instance config.
 Missing, ambiguous, or invalid bindings fail before generation with
 PLYSTRA_RESOURCE_BINDING_MISSING, PLYSTRA_RESOURCE_BINDING_AMBIGUOUS, or
 PLYSTRA_RESOURCE_BINDING_INVALID. Resources never become Interface roots,
-catalog entries, governed proxies, or transports. Resource mutation forms of
-use and implement are not installed; Data remains unsupported.
+catalog entries, governed proxies, or transports. Use selects a compatible
+provider for an existing named instance without a kind flag. Resource implement
+and Data remain unsupported; Resource acceptance and compound change plans
+remain incomplete.
 The configuration view retains the selected current-Project layer, selected
 template ancestry, redacted field summaries, ownership and precedence, effective
 and overridden contributions, explicit removals, and ancestor suppression.

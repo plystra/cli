@@ -182,6 +182,9 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	}
 	diagnostics := byPath[Root+"/tasks/diagnostics-and-recovery.md"]
 	for _, phrase := range []string{
+		"PLYSTRA_USE_TARGET_INVALID", "PLYSTRA_USE_CONSTRUCTOR_INVALID",
+		"PLYSTRA_USE_TARGET_NOT_FOUND", "PLYSTRA_USE_PROVIDER_INCOMPATIBLE",
+		"Recovery retains the selector, uses safe placeholders",
 		"plystra inspect capabilities --format json",
 		"all five explanation commands",
 		"plystra.explain/v1",
@@ -234,14 +237,20 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Providers depend only on Resources", "Resources do not create Interface roots, catalog entries, governed proxies",
 		"non-nil partial constructor results and never-started lifecycle values",
 		"source-independent private runtime baseline", "Runtime compatibility version 12 and frozen model version 19",
-		"Resource mutation forms of plystra use and plystra implement are not installed",
-		"implemented stages do not establish accepted=yes", "Gate 5 is incomplete",
+		"plystra use <target> <constructor-symbol>", "with no kind flag",
+		"It never creates an instance", "only provably obsolete consumer binding parameters",
+		"selected-layer tombstones or sparse deltas", "Still-owned configuration remains intact",
+		"never guesses a binding or retargets unrelated consumers",
+		"even when the starting graph is invalid", "resource.provider.selection",
+		"Resource plystra implement and instance creation commands remain unsupported",
+		"Compound change plans, plan digests, and --dry-run are not installed",
+		"implemented stages do not establish accepted=yes", "Gates 5 and 13 remain incomplete",
 	} {
 		if !bytes.Contains(resources, []byte(phrase)) {
 			t.Fatalf("Resource guidance omits %q", phrase)
 		}
 	}
-	for _, forbidden := range []string{"TODO", "create a feature branch", "open a pull request", "push the change", "PLYSTRA_RESOURCE_BINDING_UNSUPPORTED", "Resource instance configuration and runtime binding remain unsupported", "Resource and Data inheritance remain unsupported", "inspect resources remains contract-only"} {
+	for _, forbidden := range []string{"Resource mutation forms of plystra use and plystra implement are not installed", "PLYSTRA_USE_INTERFACE_INVALID", "accepts only Interface Implementation constructors", "TODO", "create a feature branch", "open a pull request", "push the change", "PLYSTRA_RESOURCE_BINDING_UNSUPPORTED", "Resource instance configuration and runtime binding remain unsupported", "Resource and Data inheritance remain unsupported", "inspect resources remains contract-only"} {
 		for name, data := range byPath {
 			if strings.Contains(strings.ToLower(string(data)), strings.ToLower(forbidden)) {
 				t.Fatalf("%s contains process guidance %q", name, forbidden)

@@ -150,6 +150,12 @@ func Current() (commandschema.Capabilities, error) {
 				Accepted: commandschema.SupportYes,
 			},
 			{
+				ID:        "resource.provider.selection",
+				Specified: commandschema.SupportYes, Parsed: commandschema.SupportYes,
+				Generated: commandschema.SupportYes, Executed: commandschema.SupportYes,
+				Accepted: commandschema.SupportNo,
+			},
+			{
 				ID:        "data",
 				Specified: commandschema.SupportYes,
 				Parsed:    commandschema.SupportNo,

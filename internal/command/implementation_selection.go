@@ -10,18 +10,34 @@ import (
 )
 
 const (
-	useSynopsis = "plystra use <interface-id> <constructor-symbol> [--env <environment>|--config <yaml-path>]"
+	useSynopsis = "plystra use <target> <constructor-symbol> [--env <environment>|--config <yaml-path>]"
 	useUsage    = `Usage:
   ` + useSynopsis + `
 
 Options:
-  --env <environment>    Write the Implementation choice to plystra.<environment>.yaml.
-  --config <yaml-path>   Write the Implementation choice to one complete replacement configuration.
+  --env <environment>    Write the choice to plystra.<environment>.yaml.
+  --config <yaml-path>   Write the choice to one complete replacement configuration.
+
+The target is a canonical Interface ID with /vN or an existing named Resource
+instance. No kind flag is needed. Resource selection replaces a compatible
+provider; it never creates an instance. Unknown targets and incompatible
+providers fail without mutation.
+
+Malformed targets or constructor symbols report PLYSTRA_USE_TARGET_INVALID or
+PLYSTRA_USE_CONSTRUCTOR_INVALID. Missing targets report PLYSTRA_USE_TARGET_NOT_FOUND;
+incompatible Resource providers report PLYSTRA_USE_PROVIDER_INCOMPATIBLE.
 
 An exact compatible choice may be recorded before its Interface is required. It
 remains dormant without creating a root, binding, constructor, or generated
 Interface runtime until that Interface becomes reachable; invalid choices are
 rejected immediately.
+
+Changing a Resource provider discards that instance's old Config, not another
+instance's values. Selection removes only provably obsolete configuration and
+binding parameters, preserving still-owned configuration. Surviving dependencies
+must remain valid; the command never guesses a replacement binding or missing
+required value. It regenerates and validates the selected final state, with
+rollback on failure. Compound change plans and --dry-run are not installed.
 
 An effective choice for an intrinsic kernel.* Interface emits
 PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing
@@ -41,7 +57,7 @@ report none.
 )
 
 type useArguments struct {
-	interfaceID string
+	target      string
 	constructor string
 	config      string
 	environment string
@@ -64,7 +80,7 @@ func runUse(arguments []string, stdout, stderr io.Writer, workingDirectory strin
 	defer cancel()
 	result, err := implementationselect.Select(ctx, implementationselect.Options{
 		Start:             workingDirectory,
-		InterfaceID:       parsed.interfaceID,
+		Target:            parsed.target,
 		Constructor:       parsed.constructor,
 		ConfigurationPath: parsed.config,
 		EnvironmentName:   parsed.environment,
@@ -74,10 +90,14 @@ func runUse(arguments []string, stdout, stderr io.Writer, workingDirectory strin
 		writeCommandFailure(stderr, "", err, commandRecoveryContext(parsed.config, parsed.environment, environment))
 		return 1
 	}
+	kind := "Implementation"
+	if result.Kind() == "resource" {
+		kind = "Resource provider"
+	}
 	if result.Changed() {
-		_, _ = fmt.Fprintf(stdout, "selected Implementation %s for %s in %s\n", result.Constructor(), result.InterfaceID(), result.ManifestPath())
+		_, _ = fmt.Fprintf(stdout, "selected %s %s for %s in %s\n", kind, result.Constructor(), result.Target(), result.ManifestPath())
 	} else {
-		_, _ = fmt.Fprintf(stdout, "Implementation %s is already selected for %s in %s\n", result.Constructor(), result.InterfaceID(), result.ManifestPath())
+		_, _ = fmt.Fprintf(stdout, "%s %s is already selected for %s in %s\n", kind, result.Constructor(), result.Target(), result.ManifestPath())
 	}
 	return 0
 }
@@ -86,7 +106,7 @@ func parseUseArguments(arguments []string) (useArguments, bool) {
 	if len(arguments) < 3 || arguments[0] != "use" || arguments[1] == "" || arguments[2] == "" || strings.HasPrefix(arguments[1], "--") || strings.HasPrefix(arguments[2], "--") {
 		return useArguments{}, false
 	}
-	result := useArguments{interfaceID: arguments[1], constructor: arguments[2]}
+	result := useArguments{target: arguments[1], constructor: arguments[2]}
 	configurationSet := false
 	environmentSet := false
 	for index := 3; index < len(arguments); index++ {
