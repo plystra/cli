@@ -153,7 +153,7 @@ func TestPrivateTemplateIncludesReusableValuesButNoProcessInputs(t *testing.T) {
 }
 
 func TestUnsupportedBaselineAndRemovedCompositionFailExplicitly(t *testing.T) {
-	for _, field := range []string{"resources", "data"} {
+	for _, field := range []string{"data"} {
 		for _, parse := range []func(string, []byte) (applicationmeta.Manifest, error){applicationmeta.ParseSource, applicationmeta.ParseTemplateSource, applicationmeta.ParseOverlaySource} {
 			_, err := parse("plystra.yaml", []byte(field+": {}"))
 			if err == nil || !strings.Contains(err.Error(), field+" configuration is not supported") {
@@ -162,6 +162,16 @@ func TestUnsupportedBaselineAndRemovedCompositionFailExplicitly(t *testing.T) {
 		}
 		if _, err := applicationmeta.PrivateTemplateYAML([]byte(field + ": {}")); err == nil {
 			t.Fatal("unsupported baseline silently normalized")
+		}
+	}
+	for _, text := range []string{"resources: []", "resources: {unknown: {}}", "resources: {instances: {primary: {provider: example.com/db.New}}}", "resources: {bind: {example.com/service.New: {database: primary}}}"} {
+		for _, parse := range []func(string, []byte) (applicationmeta.Manifest, error){applicationmeta.ParseSource, applicationmeta.ParseTemplateSource, applicationmeta.ParseOverlaySource} {
+			if _, err := parse("plystra.yaml", []byte(text)); err == nil {
+				t.Fatal("invalid Resource schema accepted")
+			}
+		}
+		if _, err := applicationmeta.PrivateTemplateYAML([]byte(text)); err == nil {
+			t.Fatal("invalid Resource baseline silently normalized")
 		}
 	}
 	for _, text := range []string{"composition: {}", "composition: {exports: {defaults: {}}}", "composition: {adopt: []}"} {

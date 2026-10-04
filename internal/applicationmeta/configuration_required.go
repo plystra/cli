@@ -10,7 +10,8 @@ import (
 )
 
 // ValidateRequiredConfiguration checks the final composed objects and implicit
-// empty configuration of active constructors. Partial template layers must
+// empty configuration of active Implementation constructors and every selected
+// Resource instance. active contains Implementation symbols only. Partial layers must
 // remain composable without this check. Missing values belong to the selected
 // current document, not to any one contributing template.
 func (c Composition) ValidateRequiredConfiguration(schemas SchemaLookup, active []constructorsymbol.Symbol, selectedPath string) error {
@@ -49,7 +50,7 @@ func (c Composition) ValidateRequiredConfiguration(schemas SchemaLookup, active 
 			return constructorConfigValueError(constructor, selectedPath, source, segments, err)
 		}
 	}
-	return nil
+	return c.validateRequiredResourceConfiguration(schemas, source)
 }
 
 func requiredConstructorConfigFields(fields []implementationinventory.ConfigurationField, node *yaml.Node, state *constructorConfigNormalizeState, depth int) ([]string, error) {
