@@ -263,6 +263,10 @@ type Manifest struct {
 	removedAliases                []capabilityRemoval
 	configurations                []ConstructorConfiguration
 	removedConfigurations         []constructorConfigurationRemoval
+	resourceInstances             []ResourceInstance
+	removedResourceInstances      []ResourceInstance
+	resourceBindings              []ResourceBinding
+	removedResourceBindings       []ResourceBinding
 	startupTimeout                time.Duration
 	hasStartupTimeout             bool
 	removeStartupTimeout          bool
@@ -275,6 +279,7 @@ func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error
 		return Manifest{}, fmt.Errorf("%w: Project module %q is invalid: %v", ErrInvalidManifest, projectModule, err)
 	}
 	manifest.modulePath = projectModule
+	manifest = withResourceModule(manifest, projectModule)
 	if manifest.template != "" {
 		manifest.templateSource.modulePath = projectModule
 	}
@@ -450,10 +455,8 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 	if err != nil {
 		return Manifest{}, err
 	}
-	for _, key := range []string{"resources", "data"} {
-		if values[key] != nil {
-			return Manifest{}, invalid("%s configuration is not supported by this installed CLI", key)
-		}
+	if values["data"] != nil {
+		return Manifest{}, invalid("data configuration is not supported by this installed CLI")
 	}
 	address, hasAddress, removeAddress, cors, exposures, removedExposures, err := parseHTTP(values["http"])
 	if err != nil {
@@ -503,6 +506,9 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 		startupTimeout:                startupTimeout,
 		hasStartupTimeout:             hasStartupTimeout,
 		removeStartupTimeout:          removeStartupTimeout,
+	}
+	if err := parseResources(&manifest, values["resources"]); err != nil {
+		return Manifest{}, err
 	}
 	rewriteManifestSource(&manifest, source)
 	return manifest, nil
