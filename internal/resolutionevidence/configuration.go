@@ -3,6 +3,7 @@ package resolutionevidence
 import (
 	"errors"
 	"fmt"
+	"go/token"
 	pathpkg "path"
 	"sort"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/resourcename"
 )
 
 type configurationCandidate struct {
@@ -107,7 +109,13 @@ func configurationEvidenceFromInput(input *ConfigurationInput, context generatio
 				owner:      layer.Owner,
 				precedence: precedence,
 			}
-			source, err := configurationSource(decision.Source(), layer.Owner, decision.Removed(), modules)
+			reference := decision.Source()
+			if strings.HasPrefix(decision.Path(), "resources.") {
+				if index := strings.LastIndex(reference, " resources."); index >= 0 && validConfigurationFieldPath(reference[index+1:]) {
+					reference = reference[:index]
+				}
+			}
+			source, err := configurationSource(reference, layer.Owner, decision.Removed(), modules)
 			if err != nil {
 				return nil, fmt.Errorf("current field %s: %w", decision.Path(), err)
 			}
@@ -301,6 +309,19 @@ func selectConfigurationFields(groups map[string][]configurationCandidate) ([]Co
 			continue
 		}
 		minimumPrecedence := int64(0)
+		if instance, suffix, ok := resourceConfigurationPath(path); ok && strings.HasPrefix(suffix, ".config") {
+			// A changed provider owns a new configuration object, even when
+			// its fields do not overlap the previous provider's fields.
+			providers := append([]configurationCandidate(nil), groups[instance+".use"]...)
+			sort.Slice(providers, func(i, j int) bool { return configurationRank(providers[i]) < configurationRank(providers[j]) })
+			previous := ""
+			for _, provider := range providers {
+				if provider.digest != previous {
+					minimumPrecedence = configurationRank(provider)
+				}
+				previous = provider.digest
+			}
+		}
 		// A later object can revive an ancestor removed at an earlier layer,
 		// but it cannot revive that ancestor's still-omitted older children.
 		for _, ancestor := range configurationPathAncestors(path) {
@@ -417,7 +438,7 @@ func suppressedByConfigurationAncestor(path string, groups map[string][]configur
 }
 
 func configurationCandidateIsObject(value configurationCandidate, groups map[string][]configurationCandidate, path string) bool {
-	if value.summary == string(applicationmeta.ConfigurationSummaryObject) {
+	if value.summary == string(applicationmeta.ConfigurationSummaryObject) || value.summary == string(applicationmeta.ConfigurationSummaryCompleteSet) {
 		return true
 	}
 	if value.summary != "redacted" {
@@ -556,6 +577,24 @@ func validConfigurationFieldPath(value string) bool {
 	case "template", "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup", "interfaces.require":
 		return true
 	}
+	if _, suffix, ok := resourceConfigurationPath(value); ok {
+		if suffix == "" || suffix == ".use" || suffix == ".config" {
+			return true
+		}
+		_, ok := configurationPathKeys(suffix, ".config")
+		return ok
+	}
+	for _, namespace := range []string{"implementations", "instances"} {
+		keys, ok := configurationPathKeys(value, "resources.bind."+namespace)
+		if !ok || len(keys) != 2 || keys[1] == "_" || !token.IsIdentifier(keys[1]) {
+			continue
+		}
+		if namespace == "instances" {
+			return resourcename.Check(keys[0]) == nil
+		}
+		_, err := constructorsymbol.Parse(keys[0])
+		return err == nil
+	}
 	if keys, ok := configurationPathKeys(value, "http.expose"); ok && len(keys) == 1 {
 		_, err := interfaceid.Parse(keys[0])
 		return err == nil
@@ -612,35 +651,44 @@ func validConfigurationSummary(value string) bool {
 }
 
 func configurationPathDepth(value string) int {
-	return strings.Count(value, "[") + strings.Count(value, ".")
+	return len(configurationPathAncestors(value))
 }
 
 func configurationPathAncestors(value string) []string {
 	result := make([]string, 0)
-	if strings.HasPrefix(value, "config[") {
-		for index := strings.IndexByte(value, '['); index >= 0; {
-			close := strings.IndexByte(value[index:], ']')
-			if close < 0 {
-				break
+	for index := 0; index < len(value); index++ {
+		switch value[index] {
+		case '.', '[':
+			result = append(result, value[:index])
+		case '"':
+			quoted, err := strconv.QuotedPrefix(value[index:])
+			if err != nil {
+				return nil
 			}
-			close += index
-			result = append(result, value[:close+1])
-			next := close + 1
-			if next >= len(value) || value[next] != '[' {
-				break
-			}
-			index = next
+			index += len(quoted) - 1
 		}
-		if len(result) > 0 {
-			result = result[:len(result)-1]
-		}
-		return result
-	}
-	parts := strings.Split(value, ".")
-	for index := 1; index < len(parts); index++ {
-		result = append(result, strings.Join(parts[:index], "."))
 	}
 	return result
+}
+
+func resourceConfigurationPath(value string) (instance, suffix string, ok bool) {
+	const prefix = "resources.instances["
+	if !strings.HasPrefix(value, prefix) {
+		return "", "", false
+	}
+	quoted, err := strconv.QuotedPrefix(value[len(prefix):])
+	if err != nil {
+		return "", "", false
+	}
+	end := len(prefix) + len(quoted)
+	if end >= len(value) || value[end] != ']' {
+		return "", "", false
+	}
+	name, err := strconv.Unquote(quoted)
+	if err != nil || resourcename.Check(name) != nil || strconv.Quote(name) != quoted {
+		return "", "", false
+	}
+	return value[:end+1], value[end+1:], true
 }
 
 func validateConfigurationFields(fields []ConfigurationField, modules []Module, selection ConfigurationSelection, hasSelection bool) error {
@@ -824,6 +872,9 @@ func configurationContributionKey(value ConfigurationContribution) string {
 }
 
 func configurationPathDependencyComposable(value string) bool {
+	if strings.HasPrefix(value, "resources.") {
+		return validConfigurationFieldPath(value)
+	}
 	return value == "interfaces.require" || strings.HasPrefix(value, "http.cors") || strings.HasPrefix(value, "http.expose[") || strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "interfaces.require[") || strings.HasPrefix(value, "interfaces.use[") || strings.HasPrefix(value, "interfaces.policies[") || strings.HasPrefix(value, "config[")
 }
 

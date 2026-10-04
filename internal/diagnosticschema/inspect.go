@@ -14,6 +14,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/diagnosticjson"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/resolutionevidence"
 )
 
@@ -520,6 +521,24 @@ func collectSources(evidence resolutionevidence.Evidence, additional []diagnosti
 	}
 	for _, source := range additional {
 		addDiagnostic(source)
+	}
+	for _, resource := range evidence.Resources() {
+		addDiagnostic(diagnosticjson.Source(resource.DeclarationSource))
+		addDiagnostic(diagnosticjson.Source(resource.ContractSource))
+		for _, source := range resource.ConfigurationSources {
+			addDiagnostic(diagnosticjson.Source(source))
+		}
+		for _, source := range resource.SelectionSources {
+			addDiagnostic(diagnosticjson.Source(source))
+		}
+	}
+	for _, binding := range evidence.ResourceBindings() {
+		addDiagnostic(diagnosticjson.Source(binding.DeclarationSource))
+		for _, values := range [][]interfaceprovenance.ResourceSource{binding.BindingSources, binding.SelectionSources, binding.ConsumerSelectionSources} {
+			for _, source := range values {
+				addDiagnostic(diagnosticjson.Source(source))
+			}
+		}
 	}
 	currentModule := ""
 	for _, module := range evidence.Modules() {
