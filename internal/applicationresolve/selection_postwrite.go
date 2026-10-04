@@ -37,10 +37,11 @@ func (SelectionTidySnapshot) LogValue() slog.Value {
 // mutation callback, immediately after normalization and BEFORE invoking the
 // generation validation/confirmation operation. It permits formatting/comments,
 // indirect-to-direct promotion, materialized requirements from the original
-// graph, and newly introduced ordinary modules. Existing requirements, other
-// go.mod directives (allowing equivalent Go version spelling), preexisting
-// selected sources/versions/replacements, and workspace inputs cannot change;
-// new Project or workspace modules are rejected.
+// graph (including captured workspace members), and newly introduced
+// ordinary modules. Existing requirements, other go.mod directives (allowing
+// equivalent Go version spelling and removal of its exactly implied toolchain),
+// preexisting selected sources/versions/replacements, and workspace inputs
+// cannot change; new Project or workspace modules are rejected.
 // It does not establish candidate validity or refresh cleanup declarations.
 func (s SelectionInputs) CaptureTidySnapshot(ctx context.Context) (SelectionTidySnapshot, error) {
 	if err := s.validateSnapshotContext(ctx); err != nil {
@@ -55,7 +56,7 @@ func (s SelectionInputs) CaptureTidySnapshot(ctx context.Context) (SelectionTidy
 		return SelectionTidySnapshot{}, fmt.Errorf("%w: %w", ErrResolve, moduleSnapshotError(s.module.ModulePath(), "module metadata path changed"))
 	}
 	current, err := moduledependency.Discover(ctx, s.module, s.dependencyOptions)
-	if err != nil || !sameModuleGraph(s.dependencies, current, true) || !permittedTidy(before.snapshot.data, after.snapshot.data, current) {
+	if err != nil || !sameModuleGraph(s.dependencies, current, true) || !permittedTidy(before.snapshot.data, after.snapshot.data, s.dependencies, current) {
 		if ctx.Err() != nil {
 			return SelectionTidySnapshot{}, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 		}
@@ -146,13 +147,22 @@ func samePostwritePath(before, after ManifestSnapshot) bool {
 	return true
 }
 
-func permittedTidy(before, after []byte, dependencies moduledependency.Index) bool {
+func permittedTidy(before, after []byte, original, dependencies moduledependency.Index) bool {
 	a, err := modfile.Parse("go.mod", before, nil)
 	if err != nil {
 		return false
 	}
 	b, err := modfile.Parse("go.mod", after, nil)
-	if err != nil || !reflect.DeepEqual(nonRequirementDirectives(a), nonRequirementDirectives(b)) {
+	if err != nil {
+		return false
+	}
+	// Go removes a toolchain directive exactly implied by the go directive.
+	// Omit only that old directive when it was removed, leaving additions,
+	// replacements, and removal of a meaningful toolchain selection visible.
+	if a.Go != nil && a.Toolchain != nil && b.Toolchain == nil && a.Toolchain.Name == "go"+a.Go.Version {
+		a.DropToolchainStmt()
+	}
+	if !reflect.DeepEqual(nonRequirementDirectives(a), nonRequirementDirectives(b)) {
 		return false
 	}
 	remaining := make(map[string]*modfile.Require, len(b.Require))
@@ -171,7 +181,19 @@ func permittedTidy(before, after []byte, dependencies moduledependency.Index) bo
 	}
 	for path, added := range remaining {
 		selected, exists := dependencies.ByPath(path)
-		if !exists || selected.SelectedVersion() == "" || selected.SelectedVersion() != added.Mod.Version {
+		if !exists {
+			return false
+		}
+		if selected.Workspace() {
+			// Workspace members have no selected version. The surrounding graph
+			// and metadata checks still bind their original source and identity.
+			previous, captured := original.ByPath(path)
+			if !captured || !previous.Workspace() || previous.Direct() {
+				return false
+			}
+			continue
+		}
+		if selected.SelectedVersion() == "" || selected.SelectedVersion() != added.Mod.Version {
 			return false
 		}
 	}
