@@ -13,59 +13,36 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationselect"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/testkernel"
 )
 
-func TestSelectedConfigurationWriteTargetsOnlyTheSelectedCurrentProjectLayer(t *testing.T) {
+func TestSelectRejectsInvalidSelectorsWithoutMutation(t *testing.T) {
 	t.Parallel()
-
-	const modulePath = "example.com/application"
-	root := t.TempDir()
-	writeImplementationFile(t, filepath.Join(root, "plystra.yaml"), "# Root choices.\ninterfaces: {use: {email.send/v1: example.com/email/root.New}}\n")
-	writeImplementationFile(t, filepath.Join(root, "plystra.production.yaml"), "# Production choices.\n{}\n")
-	writeImplementationFile(t, filepath.Join(root, "deploy", "customer.yaml"), "# Customer choices.\ninterfaces: {require: [email.send/v1]}\n")
-	id := mustInterfaceID(t, "email.send/v1")
-	constructor := mustConstructor(t, "example.com/email/selected.New")
-
-	tests := []struct {
-		name        string
-		config      string
-		environment string
-		ambient     []string
-		wantPath    string
-		wantComment string
+	root := writeTransactionalImplementationProject(t)
+	before := implementationProjectTree(t, root)
+	for _, test := range []struct {
+		name, configuration, environment string
 	}{
-		{name: "root", wantPath: "plystra.yaml", wantComment: "# Root choices."},
-		{name: "environment", environment: "production", ambient: []string{"PLYSTRA_CONFIG=ignored.yaml"}, wantPath: "plystra.production.yaml", wantComment: "# Production choices."},
-		{name: "configuration", config: "deploy/customer.yaml", ambient: []string{"PLYSTRA_ENV=ignored"}, wantPath: "deploy/customer.yaml", wantComment: "# Customer choices."},
-	}
-	for _, test := range tests {
+		{"conflicting", "deploy/customer.yaml", "production"},
+		{"missing overlay", "", "missing"},
+		{"missing replacement", "deploy/missing.yaml", ""},
+	} {
 		t.Run(test.name, func(t *testing.T) {
-			write, changed, selection, err := implementationselect.SelectedConfigurationWrite(modulePath, root, id, constructor, test.config, test.environment, test.ambient)
-			if err != nil || !changed || write.Path != test.wantPath || selection.Path() != test.wantPath || !strings.Contains(string(write.Data), test.wantComment) {
-				t.Fatalf("SelectedConfigurationWrite = path %q/%q, changed %t, data %q, %v", write.Path, selection.Path(), changed, write.Data, err)
+			_, err := implementationselect.Select(t.Context(), implementationselect.Options{
+				Start: root, Target: "email.send/v1", Constructor: "example.com/acme/implementation-rollback/local.New",
+				ConfigurationPath: test.configuration, EnvironmentName: test.environment, Environment: implementationTestEnvironment(),
+			})
+			if !errors.Is(err, implementationselect.ErrSelect) || !errors.Is(err, applicationresolve.ErrConfigurationSelection) {
+				t.Fatalf("invalid selector = %v", err)
 			}
-			parser := applicationmeta.Parse
-			if test.environment != "" {
-				parser = func(data []byte) (applicationmeta.Manifest, error) {
-					return applicationmeta.ParseOverlaySource(test.wantPath, data)
-				}
-			}
-			manifest, err := parser(write.Data)
-			if err != nil || !hasImplementationChoice(manifest, id, constructor) {
-				t.Fatalf("updated selected configuration = %#v, %v", manifest.ImplementationChoices(), err)
+			if !equalImplementationTrees(before, implementationProjectTree(t, root)) {
+				t.Fatal("invalid selector changed Project files")
 			}
 		})
-	}
-
-	if _, _, _, err := implementationselect.SelectedConfigurationWrite(modulePath, root, id, constructor, "deploy/customer.yaml", "production", nil); !errors.Is(err, implementationselect.ErrConfigurationWrite) || !strings.Contains(err.Error(), "cannot be used together") {
-		t.Fatalf("selector conflict = %v", err)
-	}
-	if _, _, _, err := implementationselect.SelectedConfigurationWrite(modulePath, root, id, constructor, "", "missing", nil); !errors.Is(err, implementationselect.ErrConfigurationWrite) || !strings.Contains(err.Error(), "plystra.missing.yaml") {
-		t.Fatalf("missing environment = %v", err)
 	}
 }
 
@@ -83,13 +60,13 @@ func TestSelectRejectsInvalidIdentityBeforeProjectMutation(t *testing.T) {
 		want    error
 	}{
 		{
-			name:    "Interface ID",
-			options: implementationselect.Options{Start: root, InterfaceID: "email.send", Constructor: "example.com/email/smtp.New"},
-			want:    implementationselect.ErrInvalidInterfaceID,
+			name:    "target",
+			options: implementationselect.Options{Start: root, Target: "email.send/v0", Constructor: "example.com/email/smtp.New"},
+			want:    implementationselect.ErrInvalidTarget,
 		},
 		{
 			name:    "constructor",
-			options: implementationselect.Options{Start: root, InterfaceID: "email.send/v1", Constructor: "example.com/email/smtp.new"},
+			options: implementationselect.Options{Start: root, Target: "email.send/v1", Constructor: "example.com/email/smtp.new"},
 			want:    implementationselect.ErrInvalidConstructor,
 		},
 	}
@@ -112,7 +89,7 @@ func TestSelectRestoresConfigurationModuleMetadataAndGeneratedOutputAfterValidat
 	environment := implementationTestEnvironment()
 	if _, err := implementationselect.Select(t.Context(), implementationselect.Options{
 		Start:       root,
-		InterfaceID: "email.send/v1",
+		Target:      "email.send/v1",
 		Constructor: "example.com/acme/implementation-rollback/smtp.New",
 		Environment: environment,
 	}); err != nil {
@@ -149,7 +126,7 @@ func TestSelectRestoresConfigurationModuleMetadataAndGeneratedOutputAfterValidat
 	var sawNormalizedModuleMetadata bool
 	_, err = implementationselect.Select(t.Context(), implementationselect.Options{
 		Start:       filepath.Join(root, "local"),
-		InterfaceID: "email.send/v1",
+		Target:      "email.send/v1",
 		Constructor: "example.com/acme/implementation-rollback/local.New",
 		Environment: environment,
 		Validate: func(_ context.Context, updatedRoot string) error {
