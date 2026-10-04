@@ -83,7 +83,7 @@ func testPrivateDiscoveryChecksums(t *testing.T, replacement bool) {
 		proxyPath = "/" + proxyPath
 	}
 	proxyURL := (&url.URL{Scheme: "file", Path: proxyPath}).String()
-	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": proxyURL, "GOSUMDB": "off", "GOMODCACHE": t.TempDir()})
+	environment := goEnvironment(map[string]string{"GOFLAGS": "-modcacherw", "GOWORK": "off", "GOPROXY": proxyURL, "GOSUMDB": "off", "GOMODCACHE": t.TempDir()})
 	root := t.TempDir()
 	writeProject(t, root, "example.com/app")
 	if replacement {

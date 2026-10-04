@@ -2778,6 +2778,9 @@ func prepareRuntimeConstructorConfiguration(document []byte) (*runtimePreparedCo
 		}
 		publicDigest := sha256.Sum256(public)
 		if hex.EncodeToString(publicDigest[:]) != binding.expected {
+			if binding.resource == "" {
+				return nil, fmt.Errorf("%w: build-visible constructor configuration changed for %s; rebuild with the same selector", ErrRuntimeCompatibility, binding.symbol)
+			}
 			return nil, fmt.Errorf("%w: build-visible configuration changed for %s; rebuild with the same selector", ErrRuntimeCompatibility, binding.owner())
 		}
 		if binding.resource == "" {

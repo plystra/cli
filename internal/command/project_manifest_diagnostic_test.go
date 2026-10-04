@@ -22,6 +22,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 		name       string
 		setup      func(*testing.T, string) string
 		wantSource string
+		wantCode   string
 	}
 	tests := []manifestCase{
 		{
@@ -33,6 +34,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				return applicationRoot
 			},
 			wantSource: "Source: example.com/application:plystra.yaml:1:1 (project-marker)",
+			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		},
 		{
 			name: "malformed-dependency-manifest",
@@ -40,6 +42,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				return writeManifestDiagnosticDependencyProject(t, parent, "unknown: true\n", false)
 			},
 			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
+			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		},
 		{
 			name: "malformed-current-template-relationship",
@@ -50,6 +53,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				return applicationRoot
 			},
 			wantSource: "Source: example.com/application:plystra.yaml:1:1 (configuration-declaration)",
+			wantCode:   diagnosticcode.TemplateInvalid,
 		},
 		{
 			name: "malformed-template-ancestor-relationship",
@@ -57,6 +61,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				return writeManifestDiagnosticDependencyProject(t, parent, "template: {private-key: private-value}\n", false)
 			},
 			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (configuration-declaration)",
+			wantCode:   diagnosticcode.TemplateInvalid,
 		},
 		{
 			name: "unsupported-current-resource",
@@ -66,14 +71,16 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "resources: {instances: {database: {config: {private-key: 1, private-key: 2}}}}\n")
 				return applicationRoot
 			},
-			wantSource: "Source: example.com/application:plystra.yaml:1:1 (project-marker)",
+			wantSource: "Source: example.com/application:plystra.yaml:1:44 (configuration-declaration)",
+			wantCode:   diagnosticcode.ResourceMetadataInvalid,
 		},
 		{
 			name: "unsupported-template-resource",
 			setup: func(t *testing.T, parent string) string {
 				return writeManifestDiagnosticDependencyProject(t, parent, "resources: {bind: {private-key: private-value}}\n", false)
 			},
-			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
+			wantSource: "Source: example.com/dependency:plystra.yaml:1:20 (configuration-declaration)",
+			wantCode:   diagnosticcode.ResourceMetadataInvalid,
 		},
 		{
 			name: "unsafe-current-marker",
@@ -84,6 +91,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				return applicationRoot
 			},
 			wantSource: "Source: example.com/application:plystra.yaml (project-marker)",
+			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		},
 		{
 			name: "unsafe-dependency-marker",
@@ -91,6 +99,7 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				return writeManifestDiagnosticDependencyProject(t, parent, "", true)
 			},
 			wantSource: "Source: example.com/dependency:plystra.yaml (project-marker)",
+			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		},
 	}
 
@@ -110,13 +119,15 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), manifest)
 				return root
 			},
-			wantSource: "Source: example.com/application:plystra.yaml:1:1 (project-marker)",
+			wantSource: "Source: example.com/application:plystra.yaml:1:44 (configuration-declaration)",
+			wantCode:   diagnosticcode.ResourceMetadataInvalid,
 		}, manifestCase{
 			name: "invalid-dependency-resource-value/" + value,
 			setup: func(t *testing.T, parent string) string {
 				return writeManifestDiagnosticDependencyProject(t, parent, manifest, false)
 			},
 			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
+			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		})
 	}
 	for _, test := range tests {
@@ -135,8 +146,8 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 						t.Fatalf("%v source output = %q, want exactly %q", command.arguments, stderr, test.wantSource)
 					}
 					code := diagnosticcode.ProjectManifestInvalid
-					if strings.Contains(test.name, "relationship") {
-						code = diagnosticcode.TemplateInvalid
+					if test.wantCode != "" {
+						code = test.wantCode
 					}
 					if !strings.HasSuffix(stderr, "Diagnostic: "+code+"\n") || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 {
 						t.Fatalf("%v diagnostic envelope = %q", command.arguments, stderr)
