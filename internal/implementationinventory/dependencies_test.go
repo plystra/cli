@@ -15,6 +15,7 @@ func TestBuildRequiresExactDependencyParameterIdentifiers(t *testing.T) {
 	t.Parallel()
 	canonical := canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")
 	contract := canonical.Types.Scope().Lookup("Interface").Type()
+	resource := canonicalResource(t, "data.database/v1", "example.com/resources/database")
 	kernel := types.NewPackage("github.com/plystra/kernel", "plystra")
 	optional := types.NewNamed(types.NewTypeName(token.NoPos, kernel, "Optional", nil), types.NewStruct(nil, nil), nil)
 	optional.SetTypeParams([]*types.TypeParam{types.NewTypeParam(types.NewTypeName(token.NoPos, kernel, "T", nil), types.Universe.Lookup("any").Type())})
@@ -29,6 +30,7 @@ func TestBuildRequiresExactDependencyParameterIdentifiers(t *testing.T) {
 	}{
 		{name: "required", kind: contract, err: implementationinventory.ErrInvalidRequiredInterface},
 		{name: "optional", kind: optionalContract, err: implementationinventory.ErrInvalidOptionalInterface},
+		{name: "resource", kind: resource.Types.Scope().Lookup("Resource").Type(), err: implementationinventory.ErrInvalidRequiredResource},
 	} {
 		for _, hasConfig := range []bool{false, true} {
 			for _, name := range []string{"", "_", "bad-name", "dependency", "Dependency", "_dependency", "\u03b4"} {
@@ -47,7 +49,7 @@ func TestBuildRequiresExactDependencyParameterIdentifiers(t *testing.T) {
 					index, err := implementationinventory.Build([]implementationinventory.Input{{
 						ModulePath: "example.com/app", PackagePath: compiled.Path(), Types: compiled,
 						Declaration: declaration(t, "service/new.go", "service", "New", canonical.ID.String()),
-					}}, []implementationinventory.InterfaceInput{canonical})
+					}}, []implementationinventory.InterfaceInput{canonical}, []implementationinventory.ResourceInput{resource})
 					if name == "_" || !token.IsIdentifier(name) {
 						if !errors.Is(err, dependency.err) || !strings.Contains(err.Error(), "explicit nonblank Go identifier") || len(index.Implementations()) != 0 {
 							t.Fatalf("Build = %#v, %v", index, err)
@@ -67,8 +69,11 @@ func TestBuildRequiresExactDependencyParameterIdentifiers(t *testing.T) {
 					if dependency.name == "required" {
 						got := implementation.RequiredInterfaces()[0]
 						gotName, gotPosition = got.ParameterName(), got.ParameterPosition()
-					} else {
+					} else if dependency.name == "optional" {
 						got := implementation.OptionalInterfaces()[0]
+						gotName, gotPosition = got.ParameterName(), got.ParameterPosition()
+					} else {
+						got := implementation.RequiredResources()[0]
 						gotName, gotPosition = got.ParameterName(), got.ParameterPosition()
 					}
 					if gotName != name || gotPosition != len(parameters) {
