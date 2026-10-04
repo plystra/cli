@@ -258,9 +258,9 @@ func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.
 		constructor string
 		want        string
 	}{
-		{name: "invalid Interface", interfaceID: "email.send", constructor: "example.com/acme/implementation-use/smtp.New", want: "parse exact Interface ID"},
-		{name: "absent Interface", interfaceID: "missing.operation/v1", constructor: "example.com/acme/implementation-use/smtp.New", want: "unknown Interface"},
-		{name: "invalid constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/smtp.new", want: "parse fully qualified Implementation constructor"},
+		{name: "invalid target", interfaceID: "email.send/v0", constructor: "example.com/acme/implementation-use/smtp.New", want: diagnosticcode.UseTargetInvalid},
+		{name: "absent Interface", interfaceID: "missing.operation/v1", constructor: "example.com/acme/implementation-use/smtp.New", want: diagnosticcode.UseTargetNotFound},
+		{name: "invalid constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/smtp.new", want: diagnosticcode.UseConstructorInvalid},
 		{name: "unknown constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/missing.New", want: "unknown Implementation constructor"},
 		{name: "incompatible constructor", interfaceID: "email.send/v1", constructor: "example.com/acme/implementation-use/reports.New", want: "incompatible Implementation choice"},
 	}
@@ -350,17 +350,17 @@ func TestRunUseClassifiesMalformedInputsWithoutMutation(t *testing.T) {
 		reject      string
 	}{
 		{
-			name:        "invalid Interface preserves explicit environment",
-			interfaceID: "email.send",
+			name:        "invalid target preserves explicit environment",
+			interfaceID: "email.send/v0",
 			constructor: "example.com/acme/implementation-use/smtp.New",
 			selectors:   []string{"--env", "production"},
 			environment: map[string]string{
 				"PLYSTRA_CONFIG": "deploy/ignored.yaml",
 				"PLYSTRA_ENV":    "ignored",
 			},
-			problem:    "parse exact Interface ID",
-			recovery:   "Rerun `plystra use <interface-id> <constructor-symbol> --env \"production\"` with one canonical versioned Interface ID.",
-			diagnostic: diagnosticcode.UseInterfaceInvalid,
+			problem:    diagnosticcode.UseTargetInvalid,
+			recovery:   "Rerun `plystra use <target> <constructor-symbol> --env \"production\"` with one canonical Interface ID including /vN or one existing named Resource instance.",
+			diagnostic: diagnosticcode.UseTargetInvalid,
 			reject:     "ignored",
 		},
 		{
@@ -368,8 +368,8 @@ func TestRunUseClassifiesMalformedInputsWithoutMutation(t *testing.T) {
 			interfaceID: "email.send/v1",
 			constructor: "example.com/acme/implementation-use/smtp.new",
 			environment: map[string]string{"PLYSTRA_CONFIG": "deploy/customer.yaml"},
-			problem:     "parse fully qualified Implementation constructor",
-			recovery:    "Rerun `plystra use <interface-id> <constructor-symbol> --config \"deploy/customer.yaml\"` with one visible fully qualified exported constructor symbol.",
+			problem:     diagnosticcode.UseConstructorInvalid,
+			recovery:    "Rerun `plystra use <target> <constructor-symbol> --config \"deploy/customer.yaml\"` with one visible fully qualified exported constructor symbol.",
 			diagnostic:  diagnosticcode.UseConstructorInvalid,
 		},
 	}

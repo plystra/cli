@@ -44,7 +44,7 @@ func TestInstalledCapabilityCatalogAgreesWithCommandParsers(t *testing.T) {
 		{id: "plugin.create", invocations: [][]string{{"plugin", "create", "records"}}},
 		{id: "remove", invocations: [][]string{{"remove", "example.com/acme/platform"}}},
 		{id: "update", invocations: [][]string{{"update", "example.com/acme/platform@v1.1.0"}}},
-		{id: "use", invocations: [][]string{{"use", "records.list/v1", "example.com/acme/recordlist.New", "--env", "production"}, {"use", "records.list/v1", "example.com/acme/recordlist.New", "--config", "deploy/customer.yaml"}}},
+		{id: "use", invocations: [][]string{{"use", "records.list/v1", "example.com/acme/recordlist.New", "--env", "production"}, {"use", "database.primary", "example.com/acme/postgres.New", "--config", "deploy/customer.yaml"}}},
 		{id: "version", invocations: [][]string{{"version"}}},
 	}
 
@@ -131,7 +131,7 @@ func installedParserAccepts(t testing.TB, commandID string, arguments []string) 
 	}
 }
 
-func TestInstalledResourceSupportDoesNotAdvertiseMutationCommands(t *testing.T) {
+func TestInstalledResourceSelectionAdvertisesOnlyUnifiedUse(t *testing.T) {
 	t.Parallel()
 
 	capabilities, err := installedcapabilities.Current()
@@ -145,17 +145,21 @@ func TestInstalledResourceSupportDoesNotAdvertiseMutationCommands(t *testing.T) 
 		if command.ID() != "use" && command.ID() != "implement" {
 			continue
 		}
-		foundInterface := false
+		wantTarget := "interface-id"
+		if command.ID() == "use" {
+			wantTarget = "target"
+		}
+		foundTarget := false
 		for _, argument := range command.Arguments() {
-			if argument.Name() == "interface-id" {
-				foundInterface = true
+			if argument.Name() == wantTarget {
+				foundTarget = true
 			}
-			if strings.Contains(argument.Name(), "resource") || argument.Name() == "target" {
-				t.Fatalf("%s advertises a Resource mutation argument: %s", command.ID(), argument.Name())
+			if strings.Contains(argument.Name(), "resource") || argument.Name() == "--kind" || argument.Name() == "--dry-run" || argument.Name() == "--format" {
+				t.Fatalf("%s advertises an unsupported argument: %s", command.ID(), argument.Name())
 			}
 		}
-		if !foundInterface {
-			t.Fatalf("%s must retain its Interface-only argument", command.ID())
+		if !foundTarget {
+			t.Fatalf("%s must advertise %s", command.ID(), wantTarget)
 		}
 	}
 }
