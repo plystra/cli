@@ -50,11 +50,14 @@ func (e *ResourceInstanceError) Error() string {
 
 // ResourceBindingError identifies an invalid explicit address or an unresolved
 // active dependency, retaining candidates and safe source-bearing evidence.
+// An unresolved Implementation dependency also retains its Interface activation
+// path; Resource instances and explicit binding validation do not create roots.
 type ResourceBindingError struct {
 	condition  error
 	dependency ResourceDependency
 	candidates []ResourceNode
 	detail     string
+	path       dependencyPath
 }
 
 func (e *ResourceBindingError) Unwrap() error { return e.condition }
@@ -76,6 +79,33 @@ func (e *ResourceBindingError) SourcePath() string                 { return e.so
 func (e *ResourceBindingError) Line() int                          { return e.source().Line }
 func (e *ResourceBindingError) Column() int                        { return e.source().Column }
 func (e *ResourceBindingError) Candidates() []ResourceNode         { return cloneResourceNodes(e.candidates) }
+
+// Root returns the first deterministic Interface root reaching an unresolved
+// Implementation consumer, or zero for Resource instances and explicit errors.
+func (e *ResourceBindingError) Root() Root {
+	if e == nil {
+		return Root{}
+	}
+	return e.path.clone().root
+}
+
+// RequirementSources returns the complete typed provenance of that root.
+func (e *ResourceBindingError) RequirementSources() []RequirementSource {
+	if e == nil {
+		return nil
+	}
+	return append([]RequirementSource(nil), e.path.root.sources...)
+}
+
+// Steps returns the ordered Interface dependencies reaching the consumer,
+// preserving optional edges and their selection evidence.
+func (e *ResourceBindingError) Steps() []PathStep {
+	if e == nil {
+		return nil
+	}
+	return clonePathSteps(e.path.steps)
+}
+
 func (e *ResourceBindingError) source() ResourceSource {
 	if e.dependency.declaration.Reference != "" {
 		return e.dependency.declaration
@@ -102,6 +132,19 @@ func (e *ResourceBindingError) Error() string {
 	fmt.Fprintf(&message, "; %s from [%s]", e.detail, resourceSourceSummary(e.Sources()))
 	if len(e.dependency.consumerSelectionSources) > 0 {
 		fmt.Fprintf(&message, "; consumer selected from [%s]", resourceSourceSummary(e.dependency.consumerSelectionSources))
+	}
+	if e.path.root.interfaceID.String() != "" {
+		fmt.Fprintf(&message, "; reached from %s required from [%s]", e.path.root.interfaceID, strings.Join(e.path.root.Sources(), ", "))
+		for _, step := range e.path.steps {
+			kind := "requires"
+			if step.optional {
+				kind = "optionally uses"
+			}
+			fmt.Fprintf(&message, "; %s at %s %s %s through parameter %d (%s) -> %s selected by %s from [%s]",
+				step.requiringConstructor, step.requiringSource, kind, step.interfaceID,
+				step.parameterPosition, step.parameterName, step.selectedConstructor,
+				step.selectionReason, strings.Join(step.selectionSources, ", "))
+		}
 	}
 	for _, candidate := range e.candidates {
 		fmt.Fprintf(&message, "; instance %s provides %s using %s at %s selected from [%s]", candidate.name, candidate.resourceID, candidate.provider.Symbol(), candidate.provider.Source(), resourceSourceSummary(candidate.sources))
