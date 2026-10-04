@@ -1,23 +1,23 @@
 // Package constructorgraph builds the deterministic synchronous constructor
-// graph from already selected Interface bindings.
+// graph from already selected Interface bindings and named Resource instances.
 package constructorgraph
 
 import (
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
-// SelectionReason identifies why one Implementation constructor is selected
-// for an Interface. Selection itself is owned by the resolver; this package
-// validates and consumes the frozen result.
+// SelectionReason identifies an explicit or unique-compatible Interface
+// selection or Resource dependency binding.
 type SelectionReason string
 
 const (
-	// SelectionExplicit records a current effective interfaces.use decision.
+	// SelectionExplicit records an effective Interface choice or Resource binding.
 	SelectionExplicit SelectionReason = "explicit"
 	// SelectionUnique records automatic selection of the sole compatible
-	// visible Implementation.
+	// visible Implementation or compatible selected Resource instance.
 	SelectionUnique SelectionReason = "unique-compatible"
 )
 
@@ -73,19 +73,25 @@ type Selection struct {
 	Sources     []string
 }
 
-// Input contains the discovered constructor inventory, root requirements, and
-// already resolved Interface selections used to build one graph.
+// Input contains discovered inventories from the same application snapshot,
+// root requirements, resolved Interface selections, and effective Resource
+// instance selections and bindings. Configuration composition precedes Build.
 type Input struct {
-	Implementations implementationinventory.Index
-	Requirements    []Requirement
-	Selections      []Selection
+	Implementations   implementationinventory.Index
+	Requirements      []Requirement
+	Selections        []Selection
+	ResourceProviders resourceproviderinventory.Index
+	ResourceInstances []ResourceInstanceInput
+	ResourceBindings  []ResourceBindingInput
 }
 
 // Graph is an immutable deterministic constructor dependency graph.
 type Graph struct {
-	roots        []Root
-	bindings     []Binding
-	construction []Node
+	roots                []Root
+	bindings             []Binding
+	construction         []Node
+	resourceConstruction []ResourceNode
+	resourceDependencies map[constructorsymbol.Symbol][]ResourceDependency
 }
 
 // Roots returns the normalized Interface roots in canonical ID order.
@@ -94,8 +100,9 @@ func (g Graph) Roots() []Root { return cloneRoots(g.roots) }
 // Bindings returns every reachable Interface binding in canonical ID order.
 func (g Graph) Bindings() []Binding { return cloneBindings(g.bindings) }
 
-// ConstructionOrder returns each reachable constructor exactly once after all
-// of its available dependencies. The order is suitable for static assembly.
+// ConstructionOrder returns each reachable Implementation constructor exactly
+// once after its Interface dependencies. Construct ResourceConstructionOrder
+// first, then this order, for a complete dependency-ordered static assembly.
 func (g Graph) ConstructionOrder() []Node { return cloneNodes(g.construction) }
 
 // Root is one normalized required Interface with all stable requirement
