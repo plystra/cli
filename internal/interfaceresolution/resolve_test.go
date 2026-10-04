@@ -571,7 +571,7 @@ func TestResolveRejectsInvalidTypedChoiceSources(t *testing.T) {
 	}
 }
 
-func discoverResolutionFixture(t testing.TB) interfaceinventory.Discovery {
+func discoverResolutionFixture(t testing.TB, prepare ...func(string)) interfaceinventory.Discovery {
 	t.Helper()
 	parent := t.TempDir()
 	kernelRoot := filepath.Join(parent, "kernel")
@@ -680,6 +680,9 @@ func (*Service) B(context.Context, bv1.Request) (bv1.Response, error) {
 }
 `)
 
+	for _, edit := range prepare {
+		edit(root)
+	}
 	project, err := projectlocate.Find(root)
 	if err != nil {
 		t.Fatal(err)

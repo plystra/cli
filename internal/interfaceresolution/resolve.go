@@ -84,23 +84,29 @@ func Resolve(input Input) (Result, error) {
 // SelectedConstructors returns explicit and reachable Implementation owners
 // without validating Resource bindings, constructor cycles, or configuration.
 // It is an ownership-planning input, not acceptance of an executable model.
-// On an incomplete reachable closure, the returned owners are only the exact
-// positive selections established before the error. They never establish that
-// an omitted constructor is unowned.
+// On invalid input or an incomplete reachable closure, it retains the ordinary
+// selection error and collects independently provable positive owners from all
+// valid branches. Invalid explicit choices block their Interface, never falling
+// back to implicit selection. An error means omitted constructors cannot be
+// considered unowned; final ownership requires a complete, error-free result.
 func SelectedConstructors(input Input) ([]constructorsymbol.Symbol, error) {
 	resolver, _, _, missing, err := selectConstructors(input)
-	if err != nil && resolver.choices == nil {
-		return nil, err
-	}
 	if missing {
 		err = fmt.Errorf("%w: %w", ErrResolve, constructorgraph.ErrMissingBinding)
 	}
 	owners := make(map[string]constructorsymbol.Symbol)
-	for _, choice := range resolver.choices {
-		owners[choice.constructor.String()] = choice.constructor
-	}
-	for _, selection := range resolver.selections {
-		owners[selection.Constructor.String()] = selection.Constructor
+	if err != nil {
+		owners = collectPositiveOwners(input)
+		if owners == nil {
+			return nil, err
+		}
+	} else {
+		for _, choice := range resolver.choices {
+			owners[choice.constructor.String()] = choice.constructor
+		}
+		for _, selection := range resolver.selections {
+			owners[selection.Constructor.String()] = selection.Constructor
+		}
 	}
 	result := make([]constructorsymbol.Symbol, 0, len(owners))
 	for _, symbol := range owners {
