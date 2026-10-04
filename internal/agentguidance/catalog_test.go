@@ -87,6 +87,8 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	}
 	interfaces := byPath[Root+"/tasks/interfaces-and-implementations.md"]
 	for _, phrase := range []string{
+		"entries compose from template roots and the selected current-Project delta",
+		"Inherited requirements and exposure create roots immediately without repeated current-Project declarations",
 		"plystra capability create records.read --query --plugin records",
 		"Capability creation and implementation never prompt by default",
 		"Add `--interactive` only to request a terminal choice",
