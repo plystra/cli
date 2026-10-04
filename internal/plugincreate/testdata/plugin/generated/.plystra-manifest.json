@@ -268,7 +268,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:383e969cb62cdcaba7351389c3b21827bfef032055b9dceca14157b056b3a118",
+      "sha256": "sha256:8b1b758bb87f1b9a2b1821878d9908ae9d0d91087c22df0b595d48c572b81aa1",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
