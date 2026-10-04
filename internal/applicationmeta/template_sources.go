@@ -1,6 +1,7 @@
 package applicationmeta
 
 func qualifyTemplateSources(layer Manifest, owner Dependency) Manifest {
+	layer = qualifyResourceSources(layer, owner)
 	layer.httpExposures = append([]HTTPExposure(nil), layer.httpExposures...)
 	for index := range layer.httpExposures {
 		layer.httpExposures[index].source = dependencySource(owner, layer.httpExposures[index].source)

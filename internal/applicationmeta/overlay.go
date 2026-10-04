@@ -16,6 +16,9 @@ var ErrApplyOverlay = errors.New("apply current-project configuration overlay")
 // ApplyOverlay applies one sparse higher-precedence current-project Manifest
 // over a lower current-project Manifest. It preserves explicit removals so the
 // result can still suppress dependency-derived declarations during Compose.
+// Resource deltas without a local provider retain their sparse layers until
+// Compose supplies template schema context. Use Composition.Manifest for the
+// effective Resource state and Composition.CurrentLayers for its authored evidence.
 func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, applyErr error) {
 	defer func() {
 		if errors.Is(applyErr, ErrApplyOverlay) {
@@ -82,6 +85,10 @@ func applyManifestLayer(base, overlay Manifest, schemas SchemaLookup) (Manifest,
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
 	}
+	resourceInstances, removedResourceInstances, resourceBindings, removedResourceBindings, err := overlayResources(base, overlay, schemas)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
+	}
 
 	return Manifest{
 		modulePath:                    overlay.modulePath,
@@ -109,6 +116,10 @@ func applyManifestLayer(base, overlay Manifest, schemas SchemaLookup) (Manifest,
 		removedAliases:                removedAliases,
 		configurations:                configurations,
 		removedConfigurations:         removedConfigurations,
+		resourceInstances:             resourceInstances,
+		removedResourceInstances:      removedResourceInstances,
+		resourceBindings:              resourceBindings,
+		removedResourceBindings:       removedResourceBindings,
 		startupTimeout:                startupTimeout,
 		hasStartupTimeout:             hasStartupTimeout,
 		removeStartupTimeout:          removeStartupTimeout,
