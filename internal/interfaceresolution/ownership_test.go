@@ -58,7 +58,7 @@ func TestSelectedConstructorsIncludesDormantOwnersWithoutRequiringResourceBindin
 	input.Requirements = []interfaceresolution.Requirement{resolutionRequirement(
 		mustResolutionID(t, "job.run/v1"), "plystra.yaml interfaces.require[job.run/v1]", interfaceresolution.RequirementDeclaration,
 	)}
-	if owners, err := interfaceresolution.SelectedConstructors(input); !errors.Is(err, constructorgraph.ErrMissingBinding) || owners != nil {
+	if owners, err := interfaceresolution.SelectedConstructors(input); !errors.Is(err, constructorgraph.ErrMissingBinding) || !reflect.DeepEqual(owners, []constructorsymbol.Symbol{mustResolutionSymbol(t, "example.com/application/job.New")}) {
 		t.Fatalf("incomplete closure owners = %v, %v", owners, err)
 	}
 }

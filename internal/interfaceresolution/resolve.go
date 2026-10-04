@@ -84,14 +84,16 @@ func Resolve(input Input) (Result, error) {
 // SelectedConstructors returns explicit and reachable Implementation owners
 // without validating Resource bindings, constructor cycles, or configuration.
 // It is an ownership-planning input, not acceptance of an executable model.
-// Missing or ambiguous Interface decisions cannot establish a complete owner set.
+// On an incomplete reachable closure, the returned owners are only the exact
+// positive selections established before the error. They never establish that
+// an omitted constructor is unowned.
 func SelectedConstructors(input Input) ([]constructorsymbol.Symbol, error) {
 	resolver, _, _, missing, err := selectConstructors(input)
-	if err != nil {
+	if err != nil && resolver.choices == nil {
 		return nil, err
 	}
 	if missing {
-		return nil, fmt.Errorf("%w: %w", ErrResolve, constructorgraph.ErrMissingBinding)
+		err = fmt.Errorf("%w: %w", ErrResolve, constructorgraph.ErrMissingBinding)
 	}
 	owners := make(map[string]constructorsymbol.Symbol)
 	for _, choice := range resolver.choices {
@@ -105,7 +107,7 @@ func SelectedConstructors(input Input) ([]constructorsymbol.Symbol, error) {
 		result = append(result, symbol)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].String() < result[j].String() })
-	return result, nil
+	return result, err
 }
 
 func selectConstructors(input Input) (selector, []Requirement, []IntrinsicRequirement, bool, error) {
@@ -131,7 +133,7 @@ func selectConstructors(input Input) (selector, []Requirement, []IntrinsicRequir
 	for _, requirement := range requirements {
 		missing, selectErr := resolver.selectInterface(requirement.InterfaceID)
 		if selectErr != nil {
-			return selector{}, nil, nil, false, fmt.Errorf("%w: %w", ErrResolve, selectErr)
+			return resolver, requirements, intrinsicRequirements, false, fmt.Errorf("%w: %w", ErrResolve, selectErr)
 		}
 		if missing {
 			return resolver, requirements, intrinsicRequirements, true, nil
