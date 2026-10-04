@@ -128,8 +128,10 @@ const (
 )
 
 const (
-	UseInterfaceInvalid   = Prefix + "USE_INTERFACE_INVALID"
-	UseConstructorInvalid = Prefix + "USE_CONSTRUCTOR_INVALID"
+	UseTargetInvalid        = Prefix + "USE_TARGET_INVALID"
+	UseTargetNotFound       = Prefix + "USE_TARGET_NOT_FOUND"
+	UseProviderIncompatible = Prefix + "USE_PROVIDER_INCOMPATIBLE"
+	UseConstructorInvalid   = Prefix + "USE_CONSTRUCTOR_INVALID"
 )
 
 const (
