@@ -26,6 +26,7 @@ import (
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/resolutionevidence"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 	"github.com/plystra/cli/internal/runtimebaseline"
 	"golang.org/x/mod/modfile"
 )
@@ -152,6 +153,7 @@ type Result struct {
 	dependencySnapshots []dependencyManifestSnapshot
 	interfaces          interfaceinventory.Index
 	resources           interfaceinventory.ResourceIndex
+	resourceProviders   resourceproviderinventory.Index
 	implementations     implementationinventory.Index
 	interfaceResolution interfaceresolution.Result
 	inventory           plugininventory.Index
@@ -192,6 +194,9 @@ func (r Result) Interfaces() interfaceinventory.Index { return r.interfaces }
 
 // Resources returns visible consumer contracts without activating instances.
 func (r Result) Resources() interfaceinventory.ResourceIndex { return r.resources }
+
+// ResourceProviders returns visible validated providers, independently of selection.
+func (r Result) ResourceProviders() resourceproviderinventory.Index { return r.resourceProviders }
 
 // Implementations returns every active local and dependency-Project
 // constructor declaration discovered through the same ordinary Go package
@@ -390,12 +395,18 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	schemaLookup := func(symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
-		implementation, exists := implementations.BySymbol(symbol)
-		if !exists {
-			return implementationinventory.Configuration{}, false
+	schemaLookup := func(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		switch namespace {
+		case applicationmeta.ConfigurationNamespaceImplementation:
+			if implementation, exists := implementations.BySymbol(symbol); exists {
+				return implementation.Configuration()
+			}
+		case applicationmeta.ConfigurationNamespaceResource:
+			if provider, exists := declarations.ResourceProviders().BySymbol(symbol); exists {
+				return provider.Configuration()
+			}
 		}
-		return implementation.Configuration()
+		return implementationinventory.Configuration{}, false
 	}
 	_, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
 	if err != nil {
@@ -435,12 +446,28 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	manifest := composition.Manifest()
+	currentLayers := composition.CurrentLayers()
+	if len(currentLayers) == 0 {
+		return Result{}, fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)
+	}
+	// Composition enriches Resource schema context but root template metadata
+	// must retain its authored owner, never the replacement or overlay document.
+	maintainedLayer := applicationmeta.WithRootMetadata(currentLayers[0], maintainedManifest)
+	selectedLayer := applicationmeta.WithRootMetadata(currentLayers[len(currentLayers)-1], selectedManifest)
 	currentProjectPaths := maintenance.LocalPaths()
 	if selector.mode == configurationModeEnvironment {
-		currentProjectPaths = append(currentProjectPaths, resolutionDeclarationPaths(selectedManifest)...)
+		decisions, err := applicationmeta.ConfigurationDecisions(selectedLayer, schemaLookup)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
+		}
+		for _, decision := range decisions {
+			if decision.DependencyComposable() {
+				currentProjectPaths = append(currentProjectPaths, decision.Path())
+			}
+		}
 	}
 	sourceContext := applicationInputSourceContext(module, dependencies, composition, currentProjectPaths)
-	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, inventory, sourceContext)
+	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -456,11 +483,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	rootLayerManifest := rootManifest
 	if maintenanceSnapshot.path == applicationManifestName {
-		rootLayerManifest = maintainedManifest
+		rootLayerManifest = maintainedLayer
 	}
-	selectedLayerManifest := maintainedManifest
+	selectedLayerManifest := maintainedLayer
 	if selector.mode == configurationModeEnvironment {
-		selectedLayerManifest = selectedManifest
+		selectedLayerManifest = selectedLayer
 	}
 	selectedDigest, err := applicationmeta.ConfigurationLayerDigest(selectedLayerManifest, schemaLookup)
 	if err != nil {
@@ -510,7 +537,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
-	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, maintainedManifest, selectedManifest, maintenance, schemaLookup)
+	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, maintainedLayer, selectedLayer, maintenance, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
@@ -528,6 +555,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+	}
+	evidence, err = resolutionevidence.WithResources(evidence, interfaceResolution.Graph(), declarations.Resources())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: construct Resource resolution evidence: %w", ErrResolve, err)
 	}
 	after, err := ReadManifestSnapshot(module.Path())
 	if err != nil {
@@ -581,6 +612,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		dependencySnapshots: dependencySnapshots,
 		interfaces:          interfaces,
 		resources:           declarations.Resources(),
+		resourceProviders:   declarations.ResourceProviders(),
 		implementations:     implementations,
 		interfaceResolution: interfaceResolution,
 		inventory:           inventory,
@@ -626,35 +658,6 @@ func applicationInputSourceContext(module modulelocate.Module, dependencies modu
 		DependencyProvenance: configurationSources,
 		CurrentProjectPaths:  uniqueSortedStrings(currentProjectPaths),
 	}
-}
-
-func resolutionDeclarationPaths(manifest applicationmeta.Manifest) []string {
-	paths := make([]string, 0, len(manifest.HTTPExposures())+len(manifest.Requirements())+len(manifest.ProviderChoices())+len(manifest.Aliases())+len(manifest.InterfaceRequirements())+len(manifest.ImplementationChoices())+len(manifest.Configurations()))
-	for _, exposure := range manifest.HTTPExposures() {
-		paths = append(paths, fmt.Sprintf("http.expose[%q]", exposure.ID().String()))
-	}
-	for _, requirement := range manifest.Requirements() {
-		paths = append(paths, fmt.Sprintf("capabilities.require[%q]", requirement.ID().String()))
-	}
-	for _, choice := range manifest.ProviderChoices() {
-		paths = append(paths, fmt.Sprintf("capabilities.use[%q]", choice.Capability().String()))
-	}
-	for _, alias := range manifest.Aliases() {
-		paths = append(paths, fmt.Sprintf("capabilities.aliases[%q]", alias.ID().String()))
-	}
-	for _, requirement := range manifest.InterfaceRequirements() {
-		paths = append(paths, fmt.Sprintf("interfaces.require[%q]", requirement.ID().String()))
-	}
-	for _, choice := range manifest.ImplementationChoices() {
-		paths = append(paths, fmt.Sprintf("interfaces.use[%q]", choice.InterfaceID().String()))
-	}
-	for _, policy := range manifest.InterfacePolicies() {
-		paths = append(paths, fmt.Sprintf("interfaces.policies[%q]", policy.InterfaceID().String()))
-	}
-	for _, configured := range manifest.Configurations() {
-		paths = append(paths, fmt.Sprintf("config[%q]", configured.Constructor().String()))
-	}
-	return paths
 }
 
 func uniqueSortedStrings(values []string) []string {

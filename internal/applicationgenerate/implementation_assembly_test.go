@@ -428,7 +428,7 @@ func TestStaticShutdownHookRetainsLateDependencyUntilRetry(t *testing.T) {
 		go func() { done <- application.Stop(ctx) }()
 		<-entered
 		err = <-done
-		if !errors.Is(err, kernelinvocation.ErrDrain) || !errors.Is(err, bootstrap.ErrApplicationStop) { t.Fatalf("shutdown hook drain = %v", err) }
+		if !errors.Is(err, kernellifecycle.ErrStop) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, bootstrap.ErrApplicationStop) { t.Fatalf("shutdown hook cleanup = %v", err) }
 		before := probe.Events()
 		for _, event := range before { if event == "stop:audit" { t.Fatalf("early dependency cleanup: %v", before) } }
 		close(release); release = nil; synctest.Wait()
@@ -464,14 +464,14 @@ func TestConstructorResults(t *testing.T) {
 			if !errors.As(dependencyErr, &boundary) || boundary.Code() != kernelinvocation.ErrorUnavailable {
 				t.Fatalf("failed assembly published captured dependency: %v", dependencyErr)
 			}
+			needsRetry := mode == "partial-retry" || mode == "partial-panic-stop" || mode == "partial-timeout" || mode == "partial-cancel-success"
 			want := []string{"construct:audit", "construct:app"}
 			if strings.HasPrefix(mode, "partial-") { want = append(want, "stop:app") }
-			if mode != "partial-timeout" && mode != "partial-cancel-success" { want = append(want, "stop:audit") }
+			if !needsRetry { want = append(want, "stop:audit") }
 			if events := probe.Events(); !reflect.DeepEqual(events, want) {
 				t.Fatalf("construction rollback = %v, want %v", events, want)
 			}
 			var cleanup *assembly.InterfaceAssemblyError
-			needsRetry := mode == "partial-retry" || mode == "partial-panic-stop" || mode == "partial-timeout" || mode == "partial-cancel-success"
 			if errors.As(err, &cleanup) != needsRetry || errors.Is(err, kernellifecycle.ErrStop) != needsRetry {
 				t.Fatalf("cleanup failure identity = %v", err)
 			}
@@ -484,7 +484,7 @@ func TestConstructorResults(t *testing.T) {
 				if err := cleanup.RetryCleanup(cancelled); !errors.Is(err, context.Canceled) || !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("cancelled retry: %v, %v", err, probe.Events()) }
 				if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatalf("RetryCleanup: %v", err) }
 				if mode != "partial-cancel-success" { want = append(want, "stop:app") }
-				if mode == "partial-timeout" || mode == "partial-cancel-success" { want = append(want, "stop:audit") }
+				want = append(want, "stop:audit")
 				if err := cleanup.RetryCleanup(context.Background()); err != nil || !reflect.DeepEqual(probe.Events(), want) {
 					t.Fatalf("retry duplicated successful cleanup: %v, %v, want %v", err, probe.Events(), want)
 				}
@@ -525,7 +525,7 @@ func TestCleanupRetryRetainsTimeoutBounds(t *testing.T) {
 		}
 		if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatal(err) }
 		if err := cleanup.RetryCleanup(context.Background()); err != nil { t.Fatal(err) }
-		want := []string{"construct:audit", "construct:app", "stop:app", "stop:audit", "stop:app", "stop:app", "stop:app"}
+		want := []string{"construct:audit", "construct:app", "stop:app", "stop:app", "stop:app", "stop:app", "stop:audit"}
 		if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("bounded retries = %v, want %v", probe.Events(), want) }
 	})
 }
@@ -542,7 +542,7 @@ func TestBootstrapPreservesCleanupRetry(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := cleanup.RetryCleanup(ctx); err != nil { t.Fatal(err) }
-	want := []string{"construct:audit", "construct:app", "stop:app", "stop:audit", "stop:app"}
+	want := []string{"construct:audit", "construct:app", "stop:app", "stop:app", "stop:audit"}
 	if !reflect.DeepEqual(probe.Events(), want) { t.Fatalf("bootstrap cleanup = %v, want %v", probe.Events(), want) }
 }
 

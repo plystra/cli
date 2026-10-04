@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/testkernel"
 )
 
@@ -65,23 +66,25 @@ type inspectGraphCommandEnvelope struct {
 }
 
 type inspectGraphNode struct {
-	ID             string               `json:"id"`
-	Kind           string               `json:"kind"`
-	Label          string               `json:"label"`
-	Sources        []inspectGraphSource `json:"sources"`
-	ContractDigest string               `json:"contract_digest"`
-	ResourceID     string               `json:"resource_id"`
+	ID               string                             `json:"id"`
+	Kind             string                             `json:"kind"`
+	Label            string                             `json:"label"`
+	Sources          []inspectGraphSource               `json:"sources"`
+	ContractDigest   string                             `json:"contract_digest"`
+	ResourceID       string                             `json:"resource_id"`
+	ResourceInstance *interfaceprovenance.ResourceInput `json:"resource_instance"`
 }
 
 type inspectGraphEdge struct {
-	ID                string               `json:"id"`
-	Kind              string               `json:"kind"`
-	From              string               `json:"from"`
-	To                string               `json:"to"`
-	Reason            string               `json:"reason"`
-	Sources           []inspectGraphSource `json:"sources"`
-	ParameterName     string               `json:"parameter_name"`
-	ParameterPosition int                  `json:"parameter_position"`
+	ID                string                                    `json:"id"`
+	Kind              string                                    `json:"kind"`
+	From              string                                    `json:"from"`
+	To                string                                    `json:"to"`
+	Reason            string                                    `json:"reason"`
+	Sources           []inspectGraphSource                      `json:"sources"`
+	ParameterName     string                                    `json:"parameter_name"`
+	ParameterPosition int                                       `json:"parameter_position"`
+	ResourceBinding   *interfaceprovenance.ResourceBindingInput `json:"resource_binding"`
 }
 
 type inspectGraphSource struct {

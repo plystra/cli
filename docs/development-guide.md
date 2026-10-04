@@ -274,7 +274,12 @@ cannot derive one canonical Plugin ID emit
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It accepts one standard Go Module
 query. Go resolves the query, the selected module must contain regular root
 `plystra.yaml`, and the new Project retains it as a direct `go.mod`
-requirement. Creation records the resolved module path as root template metadata; go.mod alone selects the version. The supported Interface application baseline is inherited immediately through linear ancestry, without a separate activation step or copied configuration. Resource and Data inheritance are explicitly unsupported and fail before installation. Template origin does not rank Implementation candidates. The CLI regenerates the complete
+requirement. Creation records the resolved module path as root template metadata;
+go.mod alone selects the version. The supported Interface and named Resource
+application baseline is inherited immediately through linear ancestry, without
+a separate activation step or copied configuration. Data inheritance remains
+unsupported and fails before installation. Template origin does not rank
+Implementation candidates. The CLI regenerates the complete
 application and validates the staged Project without cloning a source
 repository, copying Plugin directories, inspecting dependency environment
 overlays, modifying Module Cache source, generating `go.work`, or assigning the
@@ -783,8 +788,8 @@ transaction target changes after inspection, the operation reports
 guidance path. Correct the reported path or stop the concurrent editor, then
 rerun `plystra guidance check` before synchronizing again.
 
-The current CLI does not scaffold or run Data migrations. Resource contracts,
-the official Data compiler, PostgreSQL/D1 generation, and explicit
+The current CLI supports named Resources but does not scaffold or run Data
+migrations. The official Data compiler, PostgreSQL/D1 generation, and explicit
 `data migration plan|apply|status` operations remain deferred to Gates 16-18.
 Do not work around that boundary by placing database or migration behavior in a
 legacy Plugin or in `generated/`.
@@ -860,7 +865,7 @@ template: github.com/acme/base-app
 
 `go.mod` selects its version. Each template may name one ancestor. Resolve all relationships in the current application's effective graph, reject missing/non-Project targets and cycles, then compose oldest to nearest before the selected current-Project delta. No additional activation step is required, and commands never copy template configuration or sources.
 
-The supported baseline includes Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, and CORS. Resource and Data inheritance remain explicitly unsupported; a template containing either fails before partial activation. This support does not complete Gate 5.
+The supported baseline includes Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, and CORS. Named Resource instances, typed configuration, and bindings are inherited; Data inheritance remains unsupported and fails before partial activation. This support does not complete Gate 5.
 
 Only reusable root declarations are inherited. Ancestor overlays, replacement documents, selector state, resolved Secrets, process settings, and deployment material remain excluded. `http.address` and `timeouts.startup` belong to the current Project. Ordinary dependency relationships are not followed unless reached through the selected root chain.
 
@@ -939,7 +944,8 @@ To publish the Interface instead, add it to selected current-Project
 Implementation reachable by relying on its package location or discovery
 order.
 
-A Project with zero non-intrinsic roots remains valid. Generation emits
+A Project with zero non-intrinsic roots remains valid. Without selected Resource
+instances, generation emits
 intrinsic-only static assembly and bootstrap with an empty ordinary constructor
 and lifecycle plan. The generated application can start, invoke
 `kernel.health/v1` through its smoke path, and stop cleanly without ordinary
@@ -994,7 +1000,7 @@ field, keyed objects merge by declared field path, set fields use their sparse
 Null, empty values, malformed markers, and markers with siblings are invalid in
 those entries. Exclusions remain current-Project intent even with no lower value,
 so later dependency additions cannot restore them. Generated runtime compatibility
-version 11 uses the same rules; regenerate and rebuild older Projects. CORS
+version 12 uses the same rules; regenerate and rebuild older Projects. CORS
 objects and fields also use `{$remove: true}`; null is invalid.
 Unknown fields and type mismatches remain errors. A dependency Project's own
 environment files are never inherited.
@@ -1048,7 +1054,7 @@ that root excluded. Exposure, required constructor parameters, and intrinsic
 Kernel requirements remain independent. `inspect configuration` and `explain
 config` retain the complete-set boundary and suppressed sources. New
 Projects use `require: {}` to preserve inherited template requirements. Generated
-runtime compatibility version 11 applies these set rules above template roots
+runtime compatibility version 12 applies these set rules above template roots
 from the private baseline, retaining current exclusions until composition ends.
 The runtime contract binds ordered template module/version ancestry and the live root relationship. Equivalent effective declarations preserve executable-model identity; different ancestry requires a matching runtime contract and private baseline. Startup rejects invalid ancestry and changed build-affecting declarations before Secrets or constructors.
 
@@ -1699,8 +1705,11 @@ Startup reconstructs active constructor configuration and Interface declarations
 from the ordered private template baseline. Exact module/version membership and the live root relationship are bound to the public runtime contract; private values and hashes are excluded. Startup rejects missing, repeated, cyclic, malformed, or mismatched ancestry before Secrets or constructors. Template roots use the same typed replacements and removals as current layers. Regenerate and rebuild older output.
 Current layers retain exact-path replacement, removals, and complete-set authority.
 Deploy only the binary, baseline, selected configuration documents, and external
-Secret inputs. Resource configuration and complete frozen-model compatibility
-remain separate unfinished work.
+Secret inputs. Named Resource instances receive separately owned typed Config
+and Secrets through the same private runtime baseline. Runtime compatibility
+version 12 binds exact instance names, provider contracts, and resolved bindings;
+frozen model version 19 includes their construction identity. Regenerate and
+rebuild older output. Complete Gate 5 and Gate 9 acceptance remain unfinished.
 
 Bootstrap validates composed active Config objects using generated typed
 bindings and shared support under `generated/go/internal/constructorconfig`.
@@ -1725,9 +1734,9 @@ Absent dormant objects do not require values. Dormant-only choice and value
 changes preserve executable output; changing the validation inventory requires
 regeneration and rebuilding. Regenerate older baseline/binary pairs to include
 this inventory. Active configurable constructors receive template roots below
-the selected current-project layers. Resource configuration and complete
-frozen-model compatibility remain incomplete, so this path does not complete
-Gate 9.
+the selected current-project layers. Selected Resource instances use their own
+configuration owners even when several instances select the same provider.
+This support does not by itself complete Gate 9 acceptance.
 
 The first command loads only root `plystra.yaml`. The second requires
 `plystra.production.yaml` and applies it as one typed sparse overlay above the
@@ -2111,14 +2120,15 @@ selected template roots, redacted field summaries, ownership and precedence,
 effective and overridden contributions, explicit removals, and ancestor
 suppression. Use `plystra inspect resources` for visible consumer contract IDs,
 defining packages, owning sources and exact `resource_id` and `contract_digest` values on
-`resource-contract` nodes. This inventory does not activate providers or instances.
+`resource-contract` nodes, selected named instances, and resolved bindings.
+This read-only view does not change selections or construct values.
 All five are deterministic `plystra.graph` v1 views whose source
 references stay project-relative and whose structured results omit resolved
 Secrets and unrestricted configuration values.
 
 These public view envelopes remain version 1. Their embedded resolution evidence
 uses schema 3; generated manifest configuration uses schema 8, and runtime
-compatibility uses version 11. Template contributions retain one-based
+compatibility uses version 12. Template contributions retain one-based
 `template_order` from oldest to nearest, separately from fixed precedence
 template=1, current root or replacement=2, overlay=3. Equal private values retain
 separate contributions without publishing their equality. Older schema versions
@@ -2136,18 +2146,17 @@ Resource parameters. `inspect implementations` shows their exact contracts as
 declaration sources. Each `declares-dependency` edge with reason `resource`
 retains its exact parameter name and position, including repeated parameters
 for the same contract. These declarations do not become Interface requirements,
-exposures, active bindings, or runtime instances. `inspect resources` remains a
-contract-only inventory without constructor dependency edges.
+exposures, active bindings, or runtime instances. Resolved Resource bindings
+separately identify selected instances and their exact consumers.
 
 Installed `resource.consumer.discovery` support covers discovery and inspection
 of these dependencies, including dormant explicit and unselected candidates.
 Malformed Resource-shaped parameters report
 `PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID` with the owning constructor
-source. Reachable Resource-consuming constructors report
-`PLYSTRA_RESOURCE_BINDING_UNSUPPORTED` before assembly or generation: named
-Resource instance configuration and binding are not implemented. Keep these
-candidates dormant until that support is available; no handwritten generated
-binding or Interface selection can supply the missing runtime instance.
+source. Reachable consumers need one compatible named instance per Resource
+parameter. Explicit bindings select exact targets; without one, exactly one
+compatible selected instance must exist. Dormant Implementations stay inactive,
+but explicit binding addresses are still validated.
 
 Resource declarations are checked even when no instance uses them. A single
 `//plystra:resource <resource-id>` directive must document a non-generic defined
@@ -2178,9 +2187,112 @@ packages do not cause edits to authored module files or checksums. Rejected Go
 configuration defaults report field/type context without their literal values.
 `PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID` and
 `PLYSTRA_RESOURCE_PROVIDER_INVALID` identify declaration and typed-constructor
-failures with module-relative sources. `resource.provider.discovery` means
-validation only: provider inspection, instance configuration, selection,
-binding, construction, and lifecycle execution remain unsupported.
+failures with module-relative sources. `resource.provider.discovery` describes
+validation, separately from named-instance configuration, binding, generated
+construction, and lifecycle. Read installed support stages independently;
+implemented stages do not establish `accepted: yes` or complete a roadmap gate.
+
+### Configure named Resources
+
+The named-Resource lifecycle dependency is the CLI's exact Kernel pin, which
+remains local rather than published. Temporary local dependency resolution is
+integration evidence only, not proof that the dependency resolves remotely or
+that the CLI/Kernel pair has completed acceptance. Check the final dependency pin and
+integrated validation before relying on a published distribution.
+
+Resource declarations and providers are ordinary authored Go. This slice has no
+Resource mutation form of `plystra use` or `plystra implement`; both remain
+Interface-only. Author instance selection and binding in the selected YAML, then
+run `plystra generate`, `plystra generate --check`, and `plystra check` with the
+same selector. Never supply the missing binding by editing generated files.
+
+For example, given visible compatible providers and the exact authored dependency
+parameter names below:
+
+```yaml
+resources:
+  instances:
+    connection.primary:
+      use: example.com/acme/platform/connection.New
+      config:
+        url:
+          env: DATABASE_URL
+    database.primary:
+      use: example.com/acme/platform/database.New
+    database.reporting:
+      use: example.com/acme/platform/database.New
+  bind:
+    instances:
+      database.primary:
+        connection: connection.primary
+      database.reporting:
+        connection: connection.primary
+    implementations:
+      example.com/acme/application/orders.New:
+        database: database.primary
+```
+
+The example presumes `connection.New` owns a Config with a Secret `url` field,
+both database providers require the Resource parameter `connection`, and the
+Implementation requires `database`. It is not a bundled database or Data backend.
+Each instance name is exact, 1 through 128 ASCII bytes, and matches
+`[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*`.
+Neither case folding nor trimming creates a valid name. Provider Config belongs
+under its instance, not in top-level `config`.
+
+Template roots compose oldest to nearest, then the selected current-Project
+delta. A higher layer may supply only `config` and inherit `use`. With the same
+provider, fixed non-pointer structs merge by typed field, while pointers,
+slices, arrays, and dynamic maps replace atomically. Changing `use` replaces the
+whole instance and discards old provider configuration, even for identically
+named fields. Requiredness and defaults apply after composition. Remove an
+instance or exact consumer/parameter binding leaf with `{$remove: true}`;
+structural namespace maps are not removal units, and null or `{}` is not removal.
+
+Binding addresses are `resources.bind.implementations.<constructor>.<parameter>`
+and `resources.bind.instances.<consumer-instance>.<parameter>`. Constructors,
+instance names, and case-sensitive Go parameter names are exact. The old flat
+binding form is invalid. Explicit target names must exist and conform to the
+required Resource contract. Without an explicit binding, exactly one compatible
+selected instance supplies the dependency; zero is missing and multiple matches
+are ambiguous. Provider identity, ordering, and template depth never break ties.
+All explicit addresses are checked, including dormant Implementation consumers.
+Removal does not cascade into unrelated entries or silently retarget a binding;
+correct dangling addresses before generation. Resource cycles fail before output.
+
+Malformed configuration reports `PLYSTRA_RESOURCE_METADATA_INVALID`,
+`PLYSTRA_RESOURCE_CONFIGURATION_SCHEMA_INVALID`, or
+`PLYSTRA_RESOURCE_CONFIGURATION_VALUES_INVALID` without private values. Invalid
+instance selections report `PLYSTRA_RESOURCE_INSTANCE_INVALID`. Missing,
+ambiguous, and invalid targets report `PLYSTRA_RESOURCE_BINDING_MISSING`,
+`PLYSTRA_RESOURCE_BINDING_AMBIGUOUS`, and `PLYSTRA_RESOURCE_BINDING_INVALID` with
+owning sources. Correct the selected instance, exact consumer/parameter address,
+or required typed field, then rerun with the same selector.
+
+Every selected instance is active, even unconsumed. The example constructs two
+distinct database values and lifecycle members from the same provider, with one
+shared connection value. Each named instance is constructed once and shared by
+all bound consumers. Providers depend only on Resources; Implementations may
+mix Resource and Interface dependencies. Resources never create Interface roots,
+catalog entries, proxies, exposure, or transport output.
+
+Constructors only validate/store configuration and dependencies; connection
+acquisition and background work belong in `Start`. Dependencies construct and
+start first, and consumers stop first. Construction and startup failure clean
+every returned lifecycle value in reverse order, including non-nil partial
+results and never-started values. A nil pointer with nil error fails construction;
+a panic does not imply a returned value. Stop must tolerate partial and
+never-started states, and failed bounded cleanup remains retryable.
+
+Generated startup composes and validates all selected instance Config objects
+before resolving Secrets or entering constructors, using the source-independent
+private baseline. Instance names, providers, bindings, and build-visible Config
+changes require regeneration and rebuilding. Valid runtime-only values and
+Secret references may change without public generated drift; private values,
+reference targets, and private hashes stay out of public artifacts. Data schema,
+query, migration, and complete Gate 5 acceptance remain unsupported or incomplete.
+
+### Explain resolution
 
 Use `plystra explain capability <capability-name>/vN` when a particular
 Capability's selection is unexpected. A required Capability reports the

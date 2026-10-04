@@ -6,15 +6,17 @@ import (
 
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/intrinsiccatalog"
 	"github.com/plystra/cli/internal/intrinsicinterface"
 	"github.com/plystra/cli/internal/plugininventory"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
-func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Result, error) {
+func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Result, error) {
 	requirements := manifest.InterfaceRequirements()
 	exposures := manifest.HTTPExposures()
 	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures))
@@ -95,12 +97,51 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 			Sources:     choiceSources,
 		}
 	}
+	resourceInstances := make([]constructorgraph.ResourceInstanceInput, 0, len(manifest.ResourceInstances()))
+	for _, instance := range manifest.ResourceInstances() {
+		sources, err := resourceConfigurationSources(sourceContext, instance.ProviderSource(), fmt.Sprintf("resources.instances[%q].use", instance.Name()), instance.ProviderDeclarationSource())
+		if err != nil {
+			return interfaceresolution.Result{}, err
+		}
+		resourceInstances = append(resourceInstances, constructorgraph.ResourceInstanceInput{Name: instance.Name(), Provider: instance.Provider(), Sources: sources})
+	}
+	resourceBindings := make([]constructorgraph.ResourceBindingInput, 0, len(manifest.ResourceBindings()))
+	for _, binding := range manifest.ResourceBindings() {
+		field := fmt.Sprintf("resources.bind.%s[%q][%q]", binding.Namespace(), binding.Consumer(), binding.ParameterName())
+		sources, err := resourceConfigurationSources(sourceContext, binding.Source(), field, binding.DeclarationSource())
+		if err != nil {
+			return interfaceresolution.Result{}, err
+		}
+		resourceBindings = append(resourceBindings, constructorgraph.ResourceBindingInput{
+			Namespace: constructorgraph.ResourceConsumerNamespace(binding.Namespace()), Consumer: binding.Consumer(), Parameter: binding.ParameterName(), Target: binding.Target(), Sources: sources,
+		})
+	}
 	return interfaceresolution.Resolve(interfaceresolution.Input{
-		Interfaces:      interfaces,
-		Implementations: implementations,
-		Requirements:    rootRequirements,
-		Choices:         explicitChoices,
+		Interfaces:        interfaces,
+		Implementations:   implementations,
+		Requirements:      rootRequirements,
+		Choices:           explicitChoices,
+		ResourceProviders: resourceProviders,
+		ResourceInstances: resourceInstances,
+		ResourceBindings:  resourceBindings,
 	})
+}
+
+func resourceConfigurationSources(context applicationinput.SourceContext, reference, field string, declaration applicationmeta.ConfigurationDeclarationSource) ([]constructorgraph.ResourceSource, error) {
+	sources, err := applicationinput.ConfigurationSources(context, reference, field)
+	if err != nil {
+		return nil, fmt.Errorf("resource configuration provenance: %w", err)
+	}
+	result := make([]constructorgraph.ResourceSource, len(sources))
+	for index, source := range sources {
+		if source.ModulePath == declaration.ModulePath() && source.Path == declaration.Path() && declaration.Line() > 0 && declaration.Column() > 0 {
+			source.Line, source.Column = declaration.Line(), declaration.Column()
+		}
+		result[index] = constructorgraph.ResourceSource{
+			Reference: source.Reference, ModulePath: source.ModulePath, Path: source.Path, Line: source.Line, Column: source.Column,
+		}
+	}
+	return result, nil
 }
 
 func validateConstructorConfigurationOwners(manifest applicationmeta.Manifest, resolution interfaceresolution.Result, sourceContext applicationinput.SourceContext) error {

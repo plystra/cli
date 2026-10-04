@@ -18,6 +18,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/assemblygen"
+	"github.com/plystra/cli/internal/bootstrapgen"
 	"github.com/plystra/cli/internal/configurationgen"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationadaptergen"
@@ -531,6 +532,7 @@ type ApplicationModelOptions struct {
 	HTTPTransports         applicationmeta.HTTPTransports
 	HTTPCORS               *applicationmeta.HTTPCORS
 	Configurations         []configurationgen.Input
+	ResourceConfigurations []bootstrapgen.ResourceConfigurationInput
 	Providers              []assemblygen.ProviderInput
 	InterfaceProxies       []interfaceproxygen.Input
 	ImplementationAdapters []implementationadaptergen.Input
@@ -624,6 +626,7 @@ type applicationModelImplementationAssembly struct {
 	Bindings          []applicationModelAssemblyBinding          `json:"bindings"`
 	IntrinsicBindings []applicationModelAssemblyIntrinsicBinding `json:"intrinsic_bindings"`
 	Constructors      []applicationModelAssemblyConstructor      `json:"constructors"`
+	Resources         []applicationModelAssemblyResource         `json:"resources"`
 }
 
 type applicationModelAssemblyBinding struct {
@@ -643,11 +646,44 @@ type applicationModelAssemblyIntrinsicBinding struct {
 }
 
 type applicationModelAssemblyConstructor struct {
-	Symbol           string                               `json:"symbol"`
-	ModulePath       string                               `json:"module_path"`
-	ModuleVersion    string                               `json:"module_version,omitempty"`
-	HasConfiguration bool                                 `json:"has_configuration"`
-	Dependencies     []applicationModelAssemblyDependency `json:"dependencies"`
+	Symbol               string                               `json:"symbol"`
+	ModulePath           string                               `json:"module_path"`
+	ModuleVersion        string                               `json:"module_version,omitempty"`
+	HasConfiguration     bool                                 `json:"has_configuration"`
+	Dependencies         []applicationModelAssemblyDependency `json:"dependencies"`
+	ResourceDependencies []applicationModelResourceDependency `json:"resource_dependencies"`
+}
+
+type applicationModelAssemblyResource struct {
+	Name                string                               `json:"name"`
+	ResourceID          string                               `json:"resource_id"`
+	PackagePath         string                               `json:"package_path"`
+	ContractDigest      string                               `json:"contract_digest"`
+	Provider            string                               `json:"provider"`
+	ModulePath          string                               `json:"module_path"`
+	ModuleVersion       string                               `json:"module_version,omitempty"`
+	HasConfiguration    bool                                 `json:"has_configuration"`
+	Dependencies        []applicationModelResourceDependency `json:"dependencies"`
+	ConfigurationDigest string                               `json:"configuration_digest,omitempty"`
+}
+
+type applicationModelResourceDependency struct {
+	ResourceID        string `json:"resource_id"`
+	PackagePath       string `json:"package_path"`
+	InstanceName      string `json:"instance_name"`
+	ParameterName     string `json:"parameter_name"`
+	ParameterPosition int    `json:"parameter_position"`
+}
+
+func resourceDependencyRecords(inputs []implementationassemblygen.ResourceDependencyInput) []applicationModelResourceDependency {
+	records := make([]applicationModelResourceDependency, len(inputs))
+	for index, input := range inputs {
+		records[index] = applicationModelResourceDependency{
+			ResourceID: input.ResourceID.String(), PackagePath: input.PackagePath, InstanceName: input.InstanceName,
+			ParameterName: input.ParameterName, ParameterPosition: input.ParameterPosition,
+		}
+	}
+	return records
 }
 
 type applicationModelAssemblyDependency struct {
@@ -838,12 +874,46 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 			}
 		}
 		constructorRecords[index] = applicationModelAssemblyConstructor{
-			Symbol:           constructor.Symbol.String(),
-			ModulePath:       constructor.ModulePath,
-			ModuleVersion:    constructor.ModuleVersion,
-			HasConfiguration: constructor.HasConfiguration,
-			Dependencies:     dependencies,
+			Symbol:               constructor.Symbol.String(),
+			ModulePath:           constructor.ModulePath,
+			ModuleVersion:        constructor.ModuleVersion,
+			HasConfiguration:     constructor.HasConfiguration,
+			Dependencies:         dependencies,
+			ResourceDependencies: resourceDependencyRecords(constructor.ResourceDependencies),
 		}
+	}
+	assemblyResources := assemblyFile.Resources()
+	resourceConfigurations := make(map[string]bootstrapgen.ResourceConfigurationInput, len(options.ResourceConfigurations))
+	for _, input := range options.ResourceConfigurations {
+		if _, duplicate := resourceConfigurations[input.Name]; duplicate {
+			return "", fmt.Errorf("%w: duplicate Resource configuration", ErrResolution)
+		}
+		resourceConfigurations[input.Name] = input
+	}
+	resourceRecords := make([]applicationModelAssemblyResource, len(assemblyResources))
+	for index, resource := range assemblyResources {
+		configurationDigest := ""
+		input, configured := resourceConfigurations[resource.Name]
+		if configured != resource.HasConfiguration || configured && input.Provider != resource.Provider.String() {
+			return "", fmt.Errorf("%w: Resource instance %s configuration does not match its assembly owner", ErrResolution, resource.Name)
+		}
+		if configured {
+			configurationDigest, err = bootstrapgen.ResourceConfigurationDigest(input)
+			if err != nil {
+				return "", fmt.Errorf("%w: Resource instance %s configuration: %w", ErrResolution, resource.Name, err)
+			}
+			delete(resourceConfigurations, resource.Name)
+		}
+		resourceRecords[index] = applicationModelAssemblyResource{
+			Name: resource.Name, ResourceID: resource.ResourceID.String(), PackagePath: resource.PackagePath,
+			ContractDigest: "sha256:" + hex.EncodeToString(resource.ContractDigest[:]),
+			Provider:       resource.Provider.String(), ModulePath: resource.ModulePath, ModuleVersion: resource.ModuleVersion,
+			HasConfiguration: resource.HasConfiguration, Dependencies: resourceDependencyRecords(resource.Dependencies),
+			ConfigurationDigest: configurationDigest,
+		}
+	}
+	if len(resourceConfigurations) != 0 {
+		return "", fmt.Errorf("%w: Resource configuration has no selected assembly owner", ErrResolution)
 	}
 	assemblySum := sha256.Sum256(assemblyFile.Data())
 	assemblyRecord := applicationModelImplementationAssembly{
@@ -852,6 +922,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 		Bindings:          bindingRecords,
 		IntrinsicBindings: intrinsicBindingRecords,
 		Constructors:      constructorRecords,
+		Resources:         resourceRecords,
 	}
 	policies := append([]applicationmeta.InterfacePolicy(nil), options.InterfacePolicies...)
 	sort.Slice(policies, func(left, right int) bool {
@@ -918,7 +989,7 @@ func ApplicationModelDigest(options ApplicationModelOptions) (string, error) {
 	}
 	document := applicationModelDocument{
 		PolicyDefaults:      invocationpolicy.Default(),
-		Version:             18,
+		Version:             19,
 		ModulePath:          options.ModulePath,
 		JavaScriptPackage:   options.JavaScriptPackage,
 		KernelModuleVersion: options.KernelModuleVersion,

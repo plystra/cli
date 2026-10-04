@@ -796,7 +796,7 @@ func testConfigurationLayerDigest(t testing.TB, data []byte, overlay bool) strin
 	if err != nil {
 		t.Fatalf("parse typed configuration layer: %v", err)
 	}
-	digest, err := applicationmeta.ConfigurationLayerDigest(configuration, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	digest, err := applicationmeta.ConfigurationLayerDigest(configuration, func(applicationmeta.ConfigurationNamespace, constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
 		return implementationinventory.Configuration{}, false
 	})
 	if err != nil {
@@ -886,7 +886,7 @@ func applicationModelDigest(t testing.TB, options applicationgen.ApplicationMode
 }
 
 func testComposition() applicationmeta.Composition {
-	composition, err := applicationmeta.Compose(nil, applicationmeta.Manifest{}, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	composition, err := applicationmeta.Compose(nil, applicationmeta.Manifest{}, func(applicationmeta.ConfigurationNamespace, constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
 		return implementationinventory.Configuration{}, false
 	})
 	if err != nil {
@@ -906,8 +906,8 @@ func dependencyComposition(t testing.TB) applicationmeta.Composition {
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v1.2.3",
 		Manifest:      dependency,
-	}}, applicationmeta.Manifest{}, func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
-		return schema, constructor.String() == businessModulePath+".New"
+	}}, applicationmeta.Manifest{}, func(namespace applicationmeta.ConfigurationNamespace, constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return schema, namespace == applicationmeta.ConfigurationNamespaceImplementation && constructor.String() == businessModulePath+".New"
 	})
 	if err != nil {
 		t.Fatalf("applicationmeta.Compose: %v", err)

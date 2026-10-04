@@ -18,6 +18,7 @@ import (
 	"github.com/plystra/cli/internal/aliasresolution"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/capabilityid"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/pluginid"
 	"github.com/plystra/cli/internal/pluginscan"
@@ -256,6 +257,8 @@ type Evidence struct {
 	hasStaticAssembly         bool
 	httpTransports            applicationmeta.HTTPTransports
 	hasHTTPTransports         bool
+	resources                 []interfaceprovenance.ResourceInput
+	resourceBindings          []interfaceprovenance.ResourceBindingInput
 	canonicalJSON             []byte
 	digest                    string
 	prepared                  bool
@@ -1320,25 +1323,27 @@ type canonicalSource struct {
 }
 
 type canonicalEvidence struct {
-	Version                int                              `json:"version"`
-	GenerationAPI          string                           `json:"generation_api"`
-	SelectedModelDigest    string                           `json:"selected_model_digest"`
-	BuildModelDigest       string                           `json:"build_model_digest"`
-	Modules                []canonicalModule                `json:"modules"`
-	PluginCandidates       []canonicalPluginCandidate       `json:"plugin_candidates"`
-	SelectedPlugins        []canonicalSelectedPlugin        `json:"selected_plugins"`
-	Requirements           []canonicalCapabilityRequirement `json:"requirements"`
-	ProviderCandidates     []canonicalProviderCandidate     `json:"provider_candidates"`
-	SelectedProviders      []canonicalSelectedProvider      `json:"selected_providers"`
-	GenerationActivations  []canonicalGenerationActivation  `json:"generation_activations"`
-	GeneratedRequirements  []canonicalGeneratedRequirement  `json:"generated_requirements"`
-	CapabilityAliases      []canonicalCapabilityAlias       `json:"capability_aliases"`
-	PublicExposures        []canonicalPublicExposure        `json:"public_exposures"`
-	ConfigurationSelection *canonicalConfigurationSelection `json:"configuration_selection,omitempty"`
-	ConfigurationFields    []canonicalConfigurationField    `json:"configuration_fields"`
-	StaticAssembly         *canonicalStaticAssembly         `json:"static_assembly,omitempty"`
-	HTTPTransports         *canonicalHTTPTransports         `json:"http_transports,omitempty"`
-	Counts                 canonicalCounts                  `json:"counts"`
+	Version                int                                        `json:"version"`
+	GenerationAPI          string                                     `json:"generation_api"`
+	SelectedModelDigest    string                                     `json:"selected_model_digest"`
+	BuildModelDigest       string                                     `json:"build_model_digest"`
+	Modules                []canonicalModule                          `json:"modules"`
+	PluginCandidates       []canonicalPluginCandidate                 `json:"plugin_candidates"`
+	SelectedPlugins        []canonicalSelectedPlugin                  `json:"selected_plugins"`
+	Requirements           []canonicalCapabilityRequirement           `json:"requirements"`
+	ProviderCandidates     []canonicalProviderCandidate               `json:"provider_candidates"`
+	SelectedProviders      []canonicalSelectedProvider                `json:"selected_providers"`
+	GenerationActivations  []canonicalGenerationActivation            `json:"generation_activations"`
+	GeneratedRequirements  []canonicalGeneratedRequirement            `json:"generated_requirements"`
+	CapabilityAliases      []canonicalCapabilityAlias                 `json:"capability_aliases"`
+	PublicExposures        []canonicalPublicExposure                  `json:"public_exposures"`
+	ConfigurationSelection *canonicalConfigurationSelection           `json:"configuration_selection,omitempty"`
+	ConfigurationFields    []canonicalConfigurationField              `json:"configuration_fields"`
+	StaticAssembly         *canonicalStaticAssembly                   `json:"static_assembly,omitempty"`
+	HTTPTransports         *canonicalHTTPTransports                   `json:"http_transports,omitempty"`
+	Resources              []interfaceprovenance.ResourceInput        `json:"resources,omitempty"`
+	ResourceBindings       []interfaceprovenance.ResourceBindingInput `json:"resource_bindings,omitempty"`
+	Counts                 canonicalCounts                            `json:"counts"`
 }
 
 // Build validates one constructor-produced generation context and derives its
@@ -1774,6 +1779,9 @@ func validate(e Evidence) error {
 	if !e.hasHTTPTransports && e.httpTransports != (applicationmeta.HTTPTransports{}) {
 		return errors.New("absent HTTP transport evidence must use the zero value")
 	}
+	if err := interfaceprovenance.ValidateResources(e.resources, e.resourceBindings); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2138,6 +2146,8 @@ func encode(e Evidence) ([]byte, error) {
 		ConfigurationFields:    configurationFields,
 		StaticAssembly:         staticAssembly,
 		HTTPTransports:         httpTransports,
+		Resources:              e.resources,
+		ResourceBindings:       e.resourceBindings,
 		Counts: canonicalCounts{
 			ParticipatingModules:  len(e.modules),
 			DiscoveredPlugins:     len(e.pluginCandidates),

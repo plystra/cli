@@ -664,6 +664,19 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, err
 	}
+	resourceConfigurations := make([]bootstrapgen.ResourceConfigurationInput, 0)
+	configuredResources := make(map[string]applicationmeta.ResourceInstance)
+	for _, instance := range resolved.Manifest().ResourceInstances() {
+		configuredResources[instance.Name()] = instance
+	}
+	for _, node := range resolved.InterfaceResolution().Graph().ResourceConstructionOrder() {
+		if schema, exists := node.Provider().Configuration(); exists {
+			resourceConfigurations = append(resourceConfigurations, bootstrapgen.ResourceConfigurationInput{
+				Name: node.Name(), Provider: node.Provider().Symbol().String(), Schema: schema,
+				YAML: configuredResources[node.Name()].ConfigurationYAML(),
+			})
+		}
+	}
 	modelDigest, err := applicationgen.ApplicationModelDigest(applicationgen.ApplicationModelOptions{
 		ModulePath:             resolved.Module().ModulePath(),
 		JavaScriptPackage:      javaScriptPackage,
@@ -672,6 +685,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		HTTPTransports:         httpTransports,
 		HTTPCORS:               httpCORS,
 		Configurations:         configurations,
+		ResourceConfigurations: resourceConfigurations,
 		Providers:              providers,
 		InterfaceProxies:       interfaceProxies,
 		ImplementationAdapters: implementationAdapters,
@@ -733,6 +747,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	}
 	output, err := applicationgen.Render(applicationgen.Options{
 		ConstructorInventory:      resolved.Implementations().Implementations(),
+		ResourceInventory:         resolved.ResourceProviders().Providers(),
 		Template:                  resolved.Template(),
 		Templates:                 templates,
 		ModulePath:                resolved.Module().ModulePath(),
@@ -745,6 +760,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ManifestProvenance:        provenance,
 		Configurations:            configurations,
 		ConstructorConfigurations: constructorConfigurations,
+		ResourceConfigurations:    resourceConfigurations,
 		Providers:                 providers,
 		InterfaceProxies:          interfaceProxies,
 		ImplementationAdapters:    implementationAdapters,
@@ -1237,11 +1253,35 @@ func implementationAssemblyInput(resolved applicationresolve.Result, interfaceMo
 			}
 		}
 		constructors[index] = implementationassemblygen.ConstructorInput{
-			Symbol:           node.Symbol(),
-			ModulePath:       implementation.ModulePath(),
-			ModuleVersion:    implementation.ModuleVersion(),
-			HasConfiguration: hasConfiguration,
-			Dependencies:     inputs,
+			Symbol:               node.Symbol(),
+			ModulePath:           implementation.ModulePath(),
+			ModuleVersion:        implementation.ModuleVersion(),
+			HasConfiguration:     hasConfiguration,
+			Dependencies:         inputs,
+			ResourceDependencies: resourceAssemblyDependencies(graph.ResourceDependencies(node.Symbol())),
+		}
+	}
+	resourceContracts := make(map[string]interfaceinventory.Resource)
+	for _, resource := range resolved.Resources().Resources() {
+		resourceContracts[resource.ID()] = resource
+	}
+	resourceNodes := graph.ResourceConstructionOrder()
+	resources := make([]implementationassemblygen.ResourceInput, len(resourceNodes))
+	for index, node := range resourceNodes {
+		contract, exists := resourceContracts[node.ResourceID().String()]
+		if !exists {
+			return implementationassemblygen.Options{}, fmt.Errorf("resource instance %s has no canonical contract", node.Name())
+		}
+		digest, err := decodeSemanticDigest(contract.ContractDigest())
+		if err != nil {
+			return implementationassemblygen.Options{}, fmt.Errorf("resource instance %s contract digest: %w", node.Name(), err)
+		}
+		provider := node.Provider()
+		_, hasConfiguration := provider.Configuration()
+		resources[index] = implementationassemblygen.ResourceInput{
+			Name: node.Name(), ResourceID: node.ResourceID(), PackagePath: contract.PackagePath(), ContractDigest: digest,
+			Provider: provider.Symbol(), ModulePath: provider.ModulePath(), ModuleVersion: provider.ModuleVersion(),
+			HasConfiguration: hasConfiguration, Dependencies: resourceAssemblyDependencies(node.Dependencies()),
 		}
 	}
 	intrinsics := make([]implementationassemblygen.IntrinsicBindingInput, 0, len(interfaceModel.Operations()))
@@ -1264,7 +1304,19 @@ func implementationAssemblyInput(resolved applicationresolve.Result, interfaceMo
 		Bindings:                 bindings,
 		IntrinsicBindings:        intrinsics,
 		Constructors:             constructors,
+		Resources:                resources,
 	}, nil
+}
+
+func resourceAssemblyDependencies(dependencies []constructorgraph.ResourceDependency) []implementationassemblygen.ResourceDependencyInput {
+	inputs := make([]implementationassemblygen.ResourceDependencyInput, len(dependencies))
+	for index, dependency := range dependencies {
+		inputs[index] = implementationassemblygen.ResourceDependencyInput{
+			ResourceID: dependency.ResourceID(), PackagePath: dependency.PackagePath(), InstanceName: dependency.InstanceName(),
+			ParameterName: dependency.ParameterName(), ParameterPosition: dependency.ParameterPosition(),
+		}
+	}
+	return inputs
 }
 
 func buildInterfaceProvenance(
@@ -1561,10 +1613,12 @@ func buildInterfaceProvenance(
 	}
 
 	return interfaceprovenance.New(interfaceprovenance.Input{
-		Interfaces:   interfaceInputs,
-		Bindings:     bindingInputs,
-		Constructors: constructorInputs,
-		Intrinsics:   intrinsicInputs,
+		Interfaces:       interfaceInputs,
+		Bindings:         bindingInputs,
+		Constructors:     constructorInputs,
+		Intrinsics:       intrinsicInputs,
+		Resources:        resolved.ResolutionEvidence().Resources(),
+		ResourceBindings: resolved.ResolutionEvidence().ResourceBindings(),
 	})
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/connectgen"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/gocommand"
@@ -631,28 +632,31 @@ func TestPublicCreateInheritsLinearTemplateBaselineWithoutCopyingOrSourceMutatio
 	}
 }
 
-func TestCreateRejectsUnsupportedTemplateResourceAndDataBeforeInstallation(t *testing.T) {
-	for _, configuration := range []string{
-		"resources: {instances: {primary: {use: example.com/acme/resource-platform/postgres.New}}}\n",
-		"data: {members: {primary: {use: private.member}}}\n",
+func TestCreateRejectsInvalidTemplateResourceAndUnsupportedDataBeforeInstallation(t *testing.T) {
+	for _, test := range []struct {
+		configuration string
+		failure       error
+	}{
+		{"resources: {instances: {primary: {use: example.com/acme/resource-platform/postgres.New}}}\n", constructorgraph.ErrInvalidResourceInstance},
+		{"data: {members: {primary: {use: private.member}}}\n", applicationmeta.ErrInvalidManifest},
 	} {
-		t.Run(strings.Split(configuration, ":")[0], func(t *testing.T) {
+		t.Run(strings.Split(test.configuration, ":")[0], func(t *testing.T) {
 			proxy := createKernelProxy(t)
 			const templatePath = "example.com/acme/resource-platform"
 			writeProxyModule(t, proxy, templatePath, "v1.0.0", map[string][]byte{
 				"template.go":  []byte("package platform\n"),
-				"plystra.yaml": []byte(configuration),
+				"plystra.yaml": []byte(test.configuration),
 			})
 			parent := t.TempDir()
 			_, err := newproject.Create(t.Context(), newproject.Options{
 				Parent: parent, ProjectName: "my-app", ModulePath: "example.com/acme/my-app",
 				Template: templatePath + "@v1.0.0", Environment: isolatedGoEnvironment(t, proxy),
 			})
-			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || strings.Contains(err.Error(), "private.member") {
-				t.Fatalf("Create unsupported template = %v", err)
+			if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, test.failure) || strings.Contains(err.Error(), "private.member") {
+				t.Fatalf("Create invalid template = %v", err)
 			}
 			if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("target exists after unsupported template: %v", err)
+				t.Fatalf("target exists after invalid template: %v", err)
 			}
 			assertNoTransactionFiles(t, parent)
 		})

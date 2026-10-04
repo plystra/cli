@@ -47,6 +47,9 @@ const (
 	interfaceInputPrefix              = "interface:"
 	interfaceContractInputPrefix      = "interface-contract:"
 	constructorInputPrefix            = "constructor:"
+	resourceInputPrefix               = "resource-instance:"
+	resourceContractInputPrefix       = "resource-contract:"
+	resourceBindingInputPrefix        = "resource-binding:"
 	compatibilityInputPrefix          = "compatibility:"
 	protobufWireMapInputPrefix        = "protobuf-wire-map:"
 )
@@ -64,6 +67,7 @@ type artifactEvidence struct {
 type artifactEvidenceIndex struct {
 	base          artifactEvidence
 	configuration artifactEvidence
+	resources     artifactEvidence
 	all           artifactEvidence
 	byPath        map[string]artifactEvidence
 }
@@ -131,6 +135,23 @@ func newArtifactEvidenceIndex(provenance ManifestProvenance) (artifactEvidenceIn
 		index.all = mergeArtifactEvidence(index.all, evidence)
 		index.addMappings(intrinsic.Mappings(), evidence)
 	}
+	for _, resource := range provenance.InterfaceProvenance().Resources() {
+		sources := append([]interfaceprovenance.ResourceSource{resource.ContractSource, resource.DeclarationSource}, resource.SelectionSources...)
+		sources = append(sources, resource.ConfigurationSources...)
+		index.resources = mergeArtifactEvidence(index.resources, artifactEvidence{
+			inputs:  []string{resourceInputPrefix + resource.Name, resourceContractInputPrefix + resource.ResourceID + ":" + resource.ContractDigest, constructorInputPrefix + resource.Provider},
+			sources: resourceArtifactSources(sources),
+		})
+	}
+	for _, binding := range provenance.InterfaceProvenance().ResourceBindings() {
+		sources := append([]interfaceprovenance.ResourceSource{binding.DeclarationSource}, binding.BindingSources...)
+		sources = append(sources, binding.SelectionSources...)
+		sources = append(sources, binding.ConsumerSelectionSources...)
+		index.resources = mergeArtifactEvidence(index.resources, artifactEvidence{
+			inputs:  []string{resourceBindingInputPrefix + binding.ConsumerKind + ":" + binding.Consumer + ":" + binding.ParameterName, resourceInputPrefix + binding.InstanceName},
+			sources: resourceArtifactSources(sources),
+		})
+	}
 	index.all = canonicalArtifactEvidence(index.all)
 	return index, nil
 }
@@ -168,6 +189,9 @@ func (i artifactEvidenceIndex) input(filePath string) (generatedfiles.ArtifactIn
 	if filePath == aliasManifestPath {
 		evidence = mergeArtifactEvidence(evidence, i.configuration)
 	}
+	if filePath == aliasManifestPath || filePath == "generated/go/assembly/interfaces_gen.go" || filePath == "generated/go/bootstrap/bootstrap_gen.go" || filePath == "generated/go/application/main_gen.go" {
+		evidence = mergeArtifactEvidence(evidence, i.resources)
+	}
 	evidence = mergeArtifactEvidence(i.base, evidence)
 	return generatedfiles.ArtifactInput{
 		Generator:      identity.generator,
@@ -175,6 +199,14 @@ func (i artifactEvidenceIndex) input(filePath string) (generatedfiles.ArtifactIn
 		InputRecordIDs: evidence.inputs,
 		Sources:        evidence.sources,
 	}, nil
+}
+
+func resourceArtifactSources(sources []interfaceprovenance.ResourceSource) []string {
+	result := make([]string, 0, len(sources))
+	for _, source := range sources {
+		result = append(result, fmt.Sprintf("%s/%s:%d:%d", source.Module, source.Path, source.Line, source.Column))
+	}
+	return result
 }
 
 func artifactUsesGlobalEvidence(filePath string) bool {

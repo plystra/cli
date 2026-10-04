@@ -498,7 +498,14 @@ func New(Config) {}
 }
 
 func composeSchemaLookup(schemas map[string]implementationinventory.Configuration) applicationmeta.SchemaLookup {
-	return func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	return namespacedSchemaLookup(applicationmeta.ConfigurationNamespaceImplementation, schemas)
+}
+
+func namespacedSchemaLookup(namespace applicationmeta.ConfigurationNamespace, schemas map[string]implementationinventory.Configuration) applicationmeta.SchemaLookup {
+	return func(requested applicationmeta.ConfigurationNamespace, constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		if requested != namespace {
+			return implementationinventory.Configuration{}, false
+		}
 		schema, exists := schemas[constructor.String()]
 		return schema, exists
 	}

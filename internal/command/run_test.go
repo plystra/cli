@@ -19,11 +19,11 @@ var (
 		"  plystra inspect implementations [--verbose]",
 		"  plystra inspect resources [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra inspect implementations [--verbose]",
 		"  implementations        Show visible constructors",
-		"  resources              Show visible Resource contracts, exact digests, and owning sources.\n  implementations        Show visible constructors",
+		"  resources              Show Resource contracts, named instances, bindings, and owning sources.\n  implementations        Show visible constructors",
 		"The configuration view retains",
-		"The resources view retains consumer contracts only, with contract_digest on\nresource-contract nodes. Resource instance construction and binding remain\nunsupported. Invalid Resource declarations, contracts, or duplicate identities\nreport RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or\nRESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.\nThe configuration view retains",
+		"The resources view retains contract_digest on resource-contract nodes, selected\nresource-instance nodes, and depends-on-resource edges with exact parameter\nnames, positions, and explicit or unique-compatible reasons. Inspection never\nconstructs values. Invalid Resource declarations, contracts, or duplicate identities\nreport RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or\nRESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.\nNamed instances use resources.instances.<name>.use and typed per-instance config.\nNames are 1..128 ASCII bytes in dot-separated lower-kebab segments. Bindings use\nresources.bind.implementations.<constructor>.<parameter> or\nresources.bind.instances.<consumer-instance>.<parameter> with an exact target name.\nEvery selected instance is active, even unconsumed; one provider under different\nnames is not deduplicated. A provider change discards the old instance config.\nMissing, ambiguous, or invalid bindings fail before generation with\nPLYSTRA_RESOURCE_BINDING_MISSING, PLYSTRA_RESOURCE_BINDING_AMBIGUOUS, or\nPLYSTRA_RESOURCE_BINDING_INVALID. Resources never become Interface roots,\ncatalog entries, governed proxies, or transports. Resource mutation forms of\nuse and implement are not installed; Data remains unsupported.\nThe configuration view retains",
 		"configuration provenance, and reachable assembly membership.\n",
-		"configuration provenance, and reachable assembly membership.\nDependency edges retain exact parameter_name and one-based parameter_position;\nother edges omit these fields. Repeated parameters remain distinct, and human\noutput includes each dependency name and position.\nResource parameters appear as declared dependencies with reason resource and\nexact resource-contract identity and digest, never as Interface requirements.\nMalformed Resource parameters report PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID.\nReachable Resource consumers report PLYSTRA_RESOURCE_BINDING_UNSUPPORTED before\nassembly or generation; dormant candidates remain discoverable and inspectable.\n",
+		"configuration provenance, and reachable assembly membership.\nDependency edges retain exact parameter_name and one-based parameter_position;\nother edges omit these fields. Repeated parameters remain distinct, and human\noutput includes each dependency name and position.\nResource parameters appear as declared dependencies with reason resource and\nexact resource-contract identity and digest, never as Interface requirements.\nMalformed Resource parameters report PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID.\nReachable consumers bind to an exact compatible named instance, or implicitly\nto the uniquely compatible selected instance. Dormant Implementations stay\ninactive, but explicit binding addresses are still validated.\n",
 		"Usage:\n",
 		"Usage:\n  plystra inspect capabilities [--format human|json]\n",
 		"\n\nViews:\n",
@@ -89,9 +89,9 @@ path and relative created directory. Enter payload.directory and run
 plystra check independently before treating creation as complete.
 
 Creation records --template as a direct dependency and root template relationship.
-Its linear ancestry immediately supplies the supported Interface baseline,
-including CORS, without copying source or configuration or ranking candidates.
-Resource and Data inheritance remain unsupported.
+Its linear ancestry immediately supplies the supported Interface and named
+Resource baseline, including CORS, without copying source or configuration or
+ranking candidates. Data inheritance remains unsupported.
 
 Invalid inherited declarations retain their owning source and specific
 diagnostic with exit 3. Ambiguous Implementation choices require a decision

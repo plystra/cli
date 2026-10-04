@@ -589,7 +589,7 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, agen
 	if err != nil {
 		return fmt.Errorf("parse initial Project configuration: %w", err)
 	}
-	schemaLookup := func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	schemaLookup := func(applicationmeta.ConfigurationNamespace, constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
 		return implementationinventory.Configuration{}, false
 	}
 	composition, err := applicationmeta.Compose(nil, currentManifest, schemaLookup)

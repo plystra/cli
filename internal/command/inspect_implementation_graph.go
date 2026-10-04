@@ -231,6 +231,11 @@ func inspectImplementationsGraph(resolved applicationresolve.Result) (diagnostic
 		}
 	}
 
+	var err error
+	nodes, err = appendResourceInstancesGraph(resolved, nodes, edges)
+	if err != nil {
+		return diagnosticschema.GraphResult{}, err
+	}
 	return diagnosticschema.NewGraph(diagnosticschema.GraphInput{
 		Evidence: evidence,
 		Type:     diagnosticschema.GraphTypeImplementations,
@@ -345,8 +350,8 @@ func writeHumanImplementationGraph(writer io.Writer, result diagnosticschema.Gra
 				fmt.Fprintf(&content, "  Source: %s\n", explainSourceSummary(source))
 			}
 		}
-		content.WriteString("Resource dependencies are declarations only; instance construction and binding are not supported.\n")
 	}
+	writeHumanResourceInstances(&content, result)
 	writeHumanInterfaceRelationships(&content, "Implemented Interfaces", edges, "implements-interface")
 	writeHumanInterfaceRelationships(&content, "Active selections", edges, "selects-constructor")
 	writeHumanInterfaceRelationships(&content, "Dormant explicit selections", edges, "dormant-selects-constructor")

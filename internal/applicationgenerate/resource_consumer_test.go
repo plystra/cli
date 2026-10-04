@@ -61,16 +61,15 @@ func TestDormantResourceConsumerGeneratesAndRunsWithoutResourceAssembly(t *testi
 					t.Fatal("dormant Resource consumer entered executable provenance")
 				}
 				for _, file := range snapshotGenerated(t, root) {
-					for _, forbidden := range []string{"PRIVATE_RESOURCE_SECRET", "PRIVATE_RESOURCE_CONSTRUCTOR_ENTRY", "storage.database/v1"} {
+					for _, forbidden := range []string{"PRIVATE_RESOURCE_SECRET", "PRIVATE_RESOURCE_CONSTRUCTOR_ENTRY"} {
 						if bytes.Contains(file.data, []byte(forbidden)) {
 							t.Fatalf("%s contains dormant Resource or private data", file.path)
 						}
 					}
 				}
-				for _, path := range []string{"generated/go/bootstrap/bootstrap_gen.go", "generated/go/assembly/interfaces_gen.go"} {
-					if bytes.Contains(readFile(t, root, path), []byte(constructor)) {
-						t.Fatal("dormant consumer entered bootstrap or assembly")
-					}
+				if bytes.Contains(readFile(t, root, "generated/go/assembly/interfaces_gen.go"), []byte(constructor)) ||
+					bytes.Contains(readFile(t, root, "generated/go/bootstrap/bootstrap_gen.go"), []byte("\""+module+"/configowner\"")) {
+					t.Fatal("dormant consumer entered active bootstrap imports or assembly")
 				}
 				before := snapshotTree(t, root)
 				for _, arguments := range [][]string{{"generate", "--check"}, {"check"}} {
@@ -100,11 +99,11 @@ func TestDormantResourceConsumerGeneratesAndRunsWithoutResourceAssembly(t *testi
 			writeFile(t, filepath.Join(root, filepath.FromSlash(document)), "interfaces: {require: [configuration.owner/v1]}\n")
 			before := snapshotTree(t, root)
 			for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
-				if exit, stdout, stderr := run(arguments...); exit != 1 || !strings.Contains(stderr, diagnosticcode.ResourceBindingUnsupported) {
+				if exit, stdout, stderr := run(arguments...); exit != 1 || !strings.Contains(stderr, diagnosticcode.ResourceBindingMissing) {
 					t.Fatalf("activated consumer %v = %d: %s %s", arguments, exit, stdout, stderr)
 				}
 				if !reflect.DeepEqual(before, snapshotTree(t, root)) {
-					t.Fatal("unsupported activation changed Project files")
+					t.Fatal("missing Resource binding changed Project files")
 				}
 			}
 		})

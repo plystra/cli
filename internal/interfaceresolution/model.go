@@ -9,6 +9,7 @@ import (
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
 // RequirementSource is one typed stable source for a root Interface edge.
@@ -53,13 +54,16 @@ type ChoiceSource struct {
 // String returns the bounded stable configuration reference.
 func (s ChoiceSource) String() string { return s.Reference }
 
-// Input contains the complete validated visible inventories plus selected
-// current-application requirements and explicit Implementation choices.
+// Input contains validated inventories from one application snapshot, effective
+// Interface requirements and choices, and named Resource selections and bindings.
 type Input struct {
-	Interfaces      interfaceinventory.Index
-	Implementations implementationinventory.Index
-	Requirements    []Requirement
-	Choices         []Choice
+	Interfaces        interfaceinventory.Index
+	Implementations   implementationinventory.Index
+	Requirements      []Requirement
+	Choices           []Choice
+	ResourceProviders resourceproviderinventory.Index
+	ResourceInstances []constructorgraph.ResourceInstanceInput
+	ResourceBindings  []constructorgraph.ResourceBindingInput
 }
 
 // IntrinsicRequirement is one always-present reserved Kernel Interface with

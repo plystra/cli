@@ -58,10 +58,12 @@ const (
 // ordinary bindings, dependency-first constructor graph, and required
 // intrinsic Kernel Interfaces.
 type Input struct {
-	Interfaces   []InterfaceInput
-	Bindings     []BindingInput
-	Constructors []ConstructorInput
-	Intrinsics   []IntrinsicInput
+	Interfaces       []InterfaceInput
+	Bindings         []BindingInput
+	Constructors     []ConstructorInput
+	Intrinsics       []IntrinsicInput
+	Resources        []ResourceInput
+	ResourceBindings []ResourceBindingInput
 }
 
 // InterfaceInput is one visible authored Interface and its exact non-secret
@@ -378,12 +380,18 @@ func (i Intrinsic) Mappings() Mapping { return Mapping{record: i.record.Mappings
 // New validates and canonicalizes complete Interface and constructor
 // provenance independently of discovery, filesystem, and map order.
 func New(input Input) (Provenance, error) {
+	resources, resourceBindings, err := NormalizeResources(input.Resources, input.ResourceBindings)
+	if err != nil {
+		return Provenance{}, err
+	}
 	record := wireRecord{
-		Schema:       Schema,
-		Interfaces:   make([]wireInterface, len(input.Interfaces)),
-		Bindings:     make([]wireBinding, len(input.Bindings)),
-		Constructors: make([]wireConstructor, len(input.Constructors)),
-		Intrinsics:   make([]wireIntrinsic, len(input.Intrinsics)),
+		Schema:           Schema,
+		Interfaces:       make([]wireInterface, len(input.Interfaces)),
+		Bindings:         make([]wireBinding, len(input.Bindings)),
+		Constructors:     make([]wireConstructor, len(input.Constructors)),
+		Intrinsics:       make([]wireIntrinsic, len(input.Intrinsics)),
+		Resources:        resources,
+		ResourceBindings: resourceBindings,
 	}
 	for index, value := range input.Interfaces {
 		record.Interfaces[index] = wireInterface(value)
@@ -493,20 +501,24 @@ func Decode(data []byte) (Provenance, error) {
 }
 
 type wireRecord struct {
-	Schema       string            `json:"schema"`
-	Interfaces   []wireInterface   `json:"interfaces"`
-	Bindings     []wireBinding     `json:"bindings"`
-	Constructors []wireConstructor `json:"constructors"`
-	Intrinsics   []wireIntrinsic   `json:"intrinsics"`
-	Digest       string            `json:"digest"`
+	Schema           string                 `json:"schema"`
+	Interfaces       []wireInterface        `json:"interfaces"`
+	Bindings         []wireBinding          `json:"bindings"`
+	Constructors     []wireConstructor      `json:"constructors"`
+	Intrinsics       []wireIntrinsic        `json:"intrinsics"`
+	Resources        []ResourceInput        `json:"resources,omitempty"`
+	ResourceBindings []ResourceBindingInput `json:"resource_bindings,omitempty"`
+	Digest           string                 `json:"digest"`
 }
 
 type canonicalRecord struct {
-	Schema       string            `json:"schema"`
-	Interfaces   []wireInterface   `json:"interfaces"`
-	Bindings     []wireBinding     `json:"bindings"`
-	Constructors []wireConstructor `json:"constructors"`
-	Intrinsics   []wireIntrinsic   `json:"intrinsics"`
+	Schema           string                 `json:"schema"`
+	Interfaces       []wireInterface        `json:"interfaces"`
+	Bindings         []wireBinding          `json:"bindings"`
+	Constructors     []wireConstructor      `json:"constructors"`
+	Intrinsics       []wireIntrinsic        `json:"intrinsics"`
+	Resources        []ResourceInput        `json:"resources,omitempty"`
+	ResourceBindings []ResourceBindingInput `json:"resource_bindings,omitempty"`
 }
 
 type wireInterface struct {
@@ -629,11 +641,13 @@ func buildWithEncoding(record wireRecord, canonical, encoded []byte, identity st
 
 func encodeCanonical(record wireRecord) ([]byte, error) {
 	return json.Marshal(canonicalRecord{
-		Schema:       record.Schema,
-		Interfaces:   record.Interfaces,
-		Bindings:     record.Bindings,
-		Constructors: record.Constructors,
-		Intrinsics:   record.Intrinsics,
+		Schema:           record.Schema,
+		Interfaces:       record.Interfaces,
+		Bindings:         record.Bindings,
+		Constructors:     record.Constructors,
+		Intrinsics:       record.Intrinsics,
+		Resources:        record.Resources,
+		ResourceBindings: record.ResourceBindings,
 	})
 }
 
@@ -682,6 +696,9 @@ func validateRecord(record wireRecord, requireOrdered bool) error {
 			return fmt.Errorf("constructors[%d] duplicates symbol %q", index, value.Symbol)
 		}
 		constructors[value.Symbol] = value
+	}
+	if err := validateResourceRecords(record.Resources, record.ResourceBindings, constructors); err != nil {
+		return err
 	}
 
 	bindings := make(map[string]wireBinding, len(record.Bindings))
@@ -1202,6 +1219,8 @@ func digest(data []byte) string {
 
 func cloneWireRecord(value wireRecord) wireRecord {
 	result := value
+	result.Resources = cloneResources(value.Resources)
+	result.ResourceBindings = cloneResourceBindings(value.ResourceBindings)
 	result.Interfaces = cloneSlice(value.Interfaces)
 	result.Bindings = make([]wireBinding, len(value.Bindings))
 	for index, binding := range value.Bindings {

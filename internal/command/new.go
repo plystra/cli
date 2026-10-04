@@ -11,7 +11,6 @@ import (
 
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
-	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/interfaceresolution"
@@ -40,9 +39,9 @@ path and relative created directory. Enter payload.directory and run
 plystra check independently before treating creation as complete.
 
 Creation records --template as a direct dependency and root template relationship.
-Its linear ancestry immediately supplies the supported Interface baseline,
-including CORS, without copying source or configuration or ranking candidates.
-Resource and Data inheritance remain unsupported.
+Its linear ancestry immediately supplies the supported Interface and named
+Resource baseline, including CORS, without copying source or configuration or
+ranking candidates. Data inheritance remains unsupported.
 
 Invalid inherited declarations retain their owning source and specific
 diagnostic with exit 3. Ambiguous Implementation choices require a decision
@@ -497,8 +496,6 @@ func classifyNewFailure(err error) (commandschema.Status, string, string) {
 		return commandschema.StatusValidationFailed, diagnosticcode.TemplateInvalid, "The resolved Project template is invalid."
 	case errors.Is(err, interfaceresolution.ErrAmbiguousImplementation):
 		return commandschema.StatusDecisionRequired, diagnosticcode.ResolveMultipleImplementations, "The Project template requires an explicit Interface implementation choice."
-	case errors.Is(err, constructorgraph.ErrResourceBindingUnsupported):
-		return commandschema.StatusValidationFailed, diagnosticcode.ResourceBindingUnsupported, "The Project template requires unsupported Resource instance binding."
 	case errors.Is(err, newproject.ErrInvalidPluginName):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreatePluginNameInvalid, "The initial Plugin name is invalid."
 	case errors.Is(err, newproject.ErrInvalidPluginID):
@@ -531,7 +528,10 @@ func newTemplateValidationCode(code string) bool {
 		diagnosticInterfaceIDDuplicate, diagnosticAuthoredPackageInvalid,
 		diagnosticcode.ResourceDeclarationInvalid, diagnosticcode.ResourceProviderDeclarationInvalid,
 		diagnosticcode.ResourceProviderInvalid, diagnosticcode.ResourceContractInvalid,
-		diagnosticcode.ResourceIDDuplicate, diagnosticcode.ResourceBindingUnsupported:
+		diagnosticcode.ResourceIDDuplicate, diagnosticcode.ResourceInstanceInvalid,
+		diagnosticcode.ResourceBindingInvalid, diagnosticcode.ResourceBindingMissing,
+		diagnosticcode.ResourceBindingAmbiguous, diagnosticcode.ResourceMetadataInvalid,
+		diagnosticcode.ResourceConfigurationSchemaInvalid, diagnosticcode.ResourceConfigurationValuesInvalid:
 		return true
 	default:
 		return false

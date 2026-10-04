@@ -130,3 +130,32 @@ func installedParserAccepts(t testing.TB, commandID string, arguments []string) 
 		return runIn(arguments, &stdout, &stderr, t.TempDir(), nil, nil, nil) != 2
 	}
 }
+
+func TestInstalledResourceSupportDoesNotAdvertiseMutationCommands(t *testing.T) {
+	t.Parallel()
+
+	capabilities, err := installedcapabilities.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range capabilities.Commands() {
+		if strings.HasPrefix(command.ID(), "resource.") || strings.HasPrefix(command.ID(), "data.") {
+			t.Fatalf("unsupported Resource or Data command advertised: %s", command.ID())
+		}
+		if command.ID() != "use" && command.ID() != "implement" {
+			continue
+		}
+		foundInterface := false
+		for _, argument := range command.Arguments() {
+			if argument.Name() == "interface-id" {
+				foundInterface = true
+			}
+			if strings.Contains(argument.Name(), "resource") || argument.Name() == "target" {
+				t.Fatalf("%s advertises a Resource mutation argument: %s", command.ID(), argument.Name())
+			}
+		}
+		if !foundInterface {
+			t.Fatalf("%s must retain its Interface-only argument", command.ID())
+		}
+	}
+}

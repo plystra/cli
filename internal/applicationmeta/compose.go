@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -20,7 +21,7 @@ var (
 	// ErrCompose reports that typed Project configuration composition failed.
 	ErrCompose = errors.New("compose Project configuration")
 	// ErrConfigurationSchema reports configuration for a constructor without
-	// one compiled same-package Config schema.
+	// one compiled same-package Config schema in the owning namespace.
 	ErrConfigurationSchema = errors.New("constructor configuration schema unavailable")
 	// ErrConfigurationValues reports constructor configuration that does not
 	// conform to its compiled Go Config schema. Values never enter this error.
@@ -42,9 +43,20 @@ type Dependency struct {
 	Manifest      Manifest
 }
 
+// ConfigurationNamespace identifies the constructor kind allowed to own a
+// configuration path, including a removed entry.
+type ConfigurationNamespace string
+
+const (
+	ConfigurationNamespaceImplementation ConfigurationNamespace = "implementation"
+	ConfigurationNamespaceResource       ConfigurationNamespace = "resource"
+)
+
 // SchemaLookup returns the compiled same-package Config schema for one exact
-// visible Implementation constructor.
-type SchemaLookup func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool)
+// visible constructor in the requested namespace. A constructor of another kind,
+// an unknown constructor, or a constructor without Config must return false.
+// Implementations own top-level config; Resource providers own instance config.
+type SchemaLookup func(namespace ConfigurationNamespace, constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool)
 
 // Provenance records public-safe typed decisions and declaration ownership.
 // Private values never influence contributor selection or grouping.
@@ -73,12 +85,29 @@ func (p Provenance) Sources() []string { return append([]string(nil), p.sources.
 // dependency-derived non-secret provenance.
 type Composition struct {
 	current           Manifest
+	currentLayers     []Manifest
 	manifest          Manifest
 	templateLayers    []TemplateLayer
 	provenance        []Provenance
 	resolutionSources []Provenance
 	dependencyDigest  string
 	prepared          bool
+}
+
+// String redacts private configuration in nested manifests and layers.
+func (Composition) String() string { return "<redacted-application-composition>" }
+
+// GoString prevents Go-syntax formatting from exposing private configuration.
+func (Composition) GoString() string { return "<redacted-application-composition>" }
+
+// Format redacts private configuration for every fmt verb.
+func (Composition) Format(state fmt.State, _ rune) {
+	_, _ = state.Write([]byte("<redacted-application-composition>"))
+}
+
+// LogValue redacts the composition for structured standard-library logging.
+func (Composition) LogValue() slog.Value {
+	return slog.StringValue("<redacted-application-composition>")
 }
 
 // TemplateLayer is one public-safe authored template layer. Its position in
@@ -178,17 +207,22 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	}
 	records := make(map[string]*provenanceRecord)
 	var templateLayers []TemplateLayer
+	var currentLayers []Manifest
 	active := make(map[string]Provenance)
 	effective := Manifest{startupTimeout: DefaultStartupTimeout}
 	var corsSources httpCORSCompositionSources
 	apply := func(layer Manifest, owner *Dependency, environmentOverlay bool) error {
+		layer = bindResourceProviders(layer, effective)
 		decisions, err := ConfigurationDecisions(layer, schemas)
 		if err != nil {
 			return err
 		}
 		if owner != nil {
 			templateLayers = append(templateLayers, TemplateLayer{ModulePath: owner.ModulePath, ModuleVersion: owner.ModuleVersion, Source: layer.source, Decisions: append([]ConfigurationDecision(nil), decisions...)})
+		} else {
+			currentLayers = append(currentLayers, layer)
 		}
+		clearReplacedResourceSources(active, effective, layer)
 		for _, decision := range decisions {
 			if !decision.dependencyComposable {
 				continue
@@ -262,6 +296,10 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
+	effective, err = finalizeResources(effective, schemas)
+	if err != nil {
+		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	}
 	effective.modulePath, effective.source = current.modulePath, current.source
 	effective.template, effective.templateSource = current.template, current.templateSource
 	effective.layers = nil
@@ -271,7 +309,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
 	return Composition{
-		current: current, manifest: effective, provenance: provenance,
+		current: current, currentLayers: currentLayers, manifest: effective, provenance: provenance,
 		templateLayers:    templateLayers,
 		resolutionSources: activeResolutionSources(active), dependencyDigest: digest, prepared: true,
 	}, nil

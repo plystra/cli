@@ -479,8 +479,8 @@ func configurationSchemaLookup(t testing.TB) applicationmeta.SchemaLookup {
 	if err != nil || !exists {
 		t.Fatalf("CompileConfiguration = %#v, %t, %v", schema, exists, err)
 	}
-	return func(symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
-		return schema, symbol.String() == "example.com/acme/smtp.New"
+	return func(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return schema, namespace == applicationmeta.ConfigurationNamespaceImplementation && symbol.String() == "example.com/acme/smtp.New"
 	}
 }
 
