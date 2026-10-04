@@ -309,13 +309,13 @@ The Interface-resolution path derives one static constructor graph from effectiv
 
 An effective `config.<constructor-symbol>` object is valid only when that exact constructor is named by an effective explicit `interfaces.use` choice or is already selected into the reachable constructor graph. The CLI immediately validates the object against the constructor's exported same-package `Config` schema, including Secret-reference syntax, without reading an environment variable or Secret file. While the owning choice remains dormant, the object remains authored configuration only: it creates no runtime delivery, generated assembly or bootstrap membership, Secret lookup, or Kernel state. Configuration for any other constructor fails without exposing its values under `PLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED`.
 
-A Project with zero non-intrinsic roots is valid. Generation still emits the intrinsic Kernel catalog, an empty ordinary constructor and lifecycle plan, static assembly, and bootstrap. The generated application starts, invokes `kernel.health/v1` through its smoke path, and shuts down cleanly without creating ordinary bindings, runtime-configuration membership, or public transport surfaces.
+A Project with zero non-intrinsic roots is valid. With no selected Resource instances, generation emits the intrinsic Kernel catalog, an empty ordinary constructor and lifecycle plan, static assembly, and bootstrap. The generated application starts, invokes `kernel.health/v1` through its smoke path, and shuts down cleanly without creating ordinary bindings, runtime-configuration membership, or public transport surfaces.
 
 Generation emits one managed typed proxy for every reachable authored Interface under `generated/go/proxies/<interface-id>/vN/proxy_gen.go`. Each proxy has a compile-time assignment to the authored `Interface`, preserves its exact request and response method signature, and delegates the call to a typed `github.com/plystra/kernel/invocation.Handle`; it does not copy or redefine the canonical contract. Generation also emits one managed endpoint adapter for every reachable selected Interface binding under `generated/go/adapters/implementations/<interface-id>/vN/adapter_gen.go`. The adapter owns the exact opaque Kernel contract token for that binding, including the Interface's declared semantic-error codes, accepts the authored `Interface` rather than naming the constructor's concrete pointer type, and delegates to the exact authored method. It records the selected constructor symbol and inferred concrete pointer type as deterministic provenance, so a constructor returning an unexported type remains usable and one constructor selected for several Interfaces receives one adapter per binding. Unreachable dependency Interfaces produce neither proxy nor adapter.
 
 Each supported `http.expose` entry backed by a canonical pointer-free Interface package emits one deterministic schema at `generated/proto/plystra/generated/<interface-id>/interface.proto` and contributes it to the existing self-contained descriptor set. Authored non-intrinsic packages come from the visible Project graph; intrinsic `kernel.*` packages are loaded only by their exact Kernel-owned inventory paths from the selected Kernel module. The canonical Go request, response, and nested message graph supplies the exact scalar widths, collection and map shapes, well-known types, effective JSON names, required markers, and authored `plystra` field numbers. The same Interface schema owns exactly one deterministic unary service and `Invoke` method whose Connect path is derived from the exact Interface ID and retained in wire history. Generated handlers map declared Interface semantic failures to `failed_precondition`, map every closed Kernel runtime class to its fixed Connect code, and normalize unknown failures, panics, malformed requests, and invalid responses without copying private error text. During the pre-Gate-14 transport transition, an overlapping legacy schema becomes an import-only bridge and declares no competing message, enum, service, or procedure.
 
-Generation also owns `generated/go/assembly/interfaces_gen.go`. Its `NewInterfaceRuntime` creates each selected constructor exactly once in dependency-first order, injects required proxies plus available or unavailable `plystra.Optional[T]` values, shares one concrete instance across every Interface declared by that constructor, creates exact Implementation bindings with constructor, module, selection-reason, and contract-digest provenance, and publishes one complete immutable Kernel catalog before returning typed root Interface accessors. Exposed intrinsic Kernel Interfaces receive typed root accessors backed by that same catalog without entering ordinary Implementation selection. It binds lifecycle-aware instances by exact constructor symbol as each is constructed; startup is bounded, a failed or panicking start rolls back every constructed lifecycle value in reverse order, including never-started values, and normal shutdown also runs in reverse order. Internal calls remain ordinary typed in-process method calls through the governed proxies. Proxy, adapter, static-assembly, lifecycle, normalized Interface timeout-policy, canonical Interface Protobuf projection identity and source digests, stable unary procedure identity, governed Connect adapter mapping, exposed intrinsic proxy mapping, and active Interface wire history participate in application-model schema version 18; `plystra generate --check` reports a missing or modified file without changing the Project. Generated bootstrap constructs this `InterfaceRuntime`, includes it in application validity, exposes it through `Application.Interfaces`, and coordinates startup and shutdown with the temporary legacy lifecycle boundary.
+Generation also owns `generated/go/assembly/interfaces_gen.go`. Its `NewInterfaceRuntime` creates each selected Implementation constructor exactly once in dependency-first order, injects required proxies plus available or unavailable `plystra.Optional[T]` values, shares one concrete instance across every Interface declared by that constructor, creates exact Implementation bindings with constructor, module, selection-reason, and contract-digest provenance, and publishes one complete immutable Kernel catalog before returning typed root Interface accessors. Exposed intrinsic Kernel Interfaces receive typed root accessors backed by that same catalog without entering ordinary Implementation selection. It constructs named Resources before Implementations, binding Resource lifecycle by exact instance name and Implementation lifecycle by exact constructor symbol; startup is bounded, a failed or panicking start rolls back every constructed lifecycle value in reverse order, including never-started values, and normal shutdown also runs in reverse order. Internal calls remain ordinary typed in-process method calls through the governed proxies. Proxy, adapter, static-assembly, lifecycle, normalized Interface timeout-policy, canonical Interface Protobuf projection identity and source digests, stable unary procedure identity, governed Connect adapter mapping, exposed intrinsic proxy mapping, and active Interface wire history participate in application-model schema version 19; `plystra generate --check` reports a missing or modified file without changing the Project. Generated bootstrap constructs this `InterfaceRuntime`, includes it in application validity, exposes it through `Application.Interfaces`, and coordinates startup and shutdown with the temporary legacy lifecycle boundary.
 
 Constructors only assemble values; acquisition and background work belong in
 lifecycle `Start`. Assembly rejects nil success values, redacts constructor
@@ -407,7 +407,7 @@ Root `plystra.yaml` may declare one exact `template` module path. Resolve each r
 
 Template roots immediately contribute Interface requirements, choices, invocation policies, typed constructor configuration, exposure, and CORS. Later exact-key replacements and removals have precedence. Ancestry is configuration precedence, never Implementation candidate priority. Ordinary dependencies remain discoverable but their application configuration stays inactive.
 
-Only reusable root configuration is inherited. Ancestor overlays, replacement documents, selector state, process-local `http.address` and `timeouts.startup`, resolved Secrets, and deployment material are excluded. The root relationship persists under every selector; overlays and replacements cannot declare it. Resource and Data inheritance remain unsupported: templates containing either fail before any partial activation. Complete Gate 5 acceptance remains unfinished.
+Only reusable root configuration is inherited. Ancestor overlays, replacement documents, selector state, process-local `http.address` and `timeouts.startup`, resolved Secrets, and deployment material are excluded. The root relationship persists under every selector; overlays and replacements cannot declare it. Named Resource instances, typed configuration, and bindings participate in this baseline. Data inheritance remains unsupported and fails before partial activation. Complete Gate 5 acceptance remains unfinished.
 
 Malformed ancestry reports `PLYSTRA_TEMPLATE_INVALID`, exact owning relationship sources, and module identities without private configuration values. Fix authored roots or their ordinary module graph, never the Module Cache copy.
 
@@ -417,7 +417,7 @@ Exact entries in `interfaces.use`, `interfaces.policies`, and `http.expose`
 are removed only by `{$remove: true}`. Null, empty values, false or string-valued
 markers, and markers with sibling fields are invalid. Exclusions remain authored
 intent even when no lower entry exists and survive later dependency additions.
-Generated runtime compatibility version 11 applies the same rule before
+Generated runtime compatibility version 12 applies the same rule before
 construction; regenerate and rebuild older Projects. Remove `http.cors` or either
 of its fields with `{$remove: true}`; null is invalid. Removing credentials uses
 the default `false`; an effective CORS object must still contain origins.
@@ -469,12 +469,12 @@ This does not remove requirements from exposure, constructor parameters, or
 intrinsic Kernel entries. Inspection retains suppressed sources under the
 `interfaces.require` complete-set boundary. New Projects use `require: {}` so
 inherited template requirements remain effective. Generated runtime compatibility
-version 11 applies these set semantics above template roots reconstructed from
+version 12 applies these set semantics above template roots reconstructed from
 the private baseline, preserving complete-set boundaries and sparse removals.
 
 The public runtime contract links ordered template module/version identities and the live root relationship. Startup reconstructs normalized ancestry solely from the owner-private baseline. Equivalent effective declarations preserve executable-model identity; ancestry changes still require a matching runtime contract and baseline. No dependency source tree or Module Cache is required at startup.
 
-The public inspect and graph envelopes remain version 1; embedded resolution evidence is schema 3, generated manifest configuration is schema 8, and runtime compatibility is version 11. Template contributions carry one-based `template_order` from oldest to nearest, independently of fixed precedence template=1, current root or replacement=2, overlay=3. Equal private values retain separate layer histories. Older schemas fail strict decoding; regenerate with the matching CLI, without migration or compatibility aliases.
+The public inspect and graph envelopes remain version 1; embedded resolution evidence is schema 3, generated manifest configuration is schema 8, and runtime compatibility is version 12. Template contributions carry one-based `template_order` from oldest to nearest, independently of fixed precedence template=1, current root or replacement=2, overlay=3. Equal private values retain separate layer histories. Older schemas fail strict decoding; regenerate with the matching CLI, without migration or compatibility aliases.
 
 Root `plystra.yaml` is the mandatory Project marker, shared current-Project layer, and default configuration for every invocation. `plystra generate --env production` adds exactly one sparse project-root `plystra.production.yaml` overlay above that root; the overlay must exist, omitted fields inherit, and typed scalar, keyed-object, set, and tombstone semantics determine each field rather than a generic YAML deep merge. Within `http.expose`, omitted Interface entries inherit, a supplied complete entry replaces that exact choice, and `{$remove: true}` removes that entry. An empty mapping preserves inherited entries; the complete exposure field cannot be null. A supplied `http.cors.allowed_origins` list replaces the complete normalized root list while omitted origins inherit and credentials replace independently; `http.cors: {$remove: true}` disables inherited CORS. Null is invalid at the object and field boundaries. The overlay cannot declare or replace the root template relationship. Dependency environment files are never loaded, unselected overlays are ignored, and generation preserves both authored current-Project documents byte-for-byte.
 
@@ -567,7 +567,7 @@ Startup rejects invalid recompiled field metadata, including duplicate tags,
 metadata on ignored or unexported fields, and invalid defaults hidden by runtime
 overrides. Regenerate and rebuild after correcting the authored Go declaration.
 Template roots compose oldest to nearest, followed by the selected current-Project delta. Later exact-key choices and values replace or remove earlier declarations. Equivalent private values do not collapse distinct layer ownership.
-Compatibility version 11 compares effective requirements, selections, and policies
+Compatibility version 12 compares effective requirements, selections, and policies
 including inherited declarations. Regenerate and rebuild older generated output.
 
 Every generated-binary invocation requires `--configuration-root <directory>`
@@ -596,10 +596,14 @@ or publicly readable baselines fail with redacted recovery. `generate --check`
 checks public generated output without creating or refreshing private output.
 Template roots are reconstructed solely from the owner-private baseline. Its ordered module/version membership and the live root relationship must match the public runtime contract. Missing, repeated, cyclic, or mismatched ancestry fails before Secret lookup or constructor entry.
 
-No dependency source tree or Module Cache is read at startup. Resource configuration
-and complete frozen-model compatibility remain separate unfinished work.
+No dependency source tree or Module Cache is read at startup. Named Resource
+instances receive their own typed configuration and Secrets through this same
+private-baseline boundary. Runtime compatibility version 12 binds instance
+names, providers, contracts, and resolved bindings; frozen model version 19
+records their assembly identity. Regenerate and rebuild older output. This
+support does not establish complete Gate 5 or Gate 9 acceptance.
 
-`Application.Interfaces` exposes the frozen governed typed Interface runtime after successful construction, while `Application.Invocations` retains the existing canonical invocation handles during the migration. `Application.Start` starts lifecycle-aware static Implementations in constructor dependency order within `timeouts.startup`; failure is redacted and rolls back the full constructed lifecycle set, including never-started instances. `Application.Stop` coordinates reverse-order shutdown, remains retryable after a bounded failure, and reports the combined application state. The CLI-owned `generated/go/application` process entrypoint delegates configuration selection to bootstrap, waits for `SIGINT` or `SIGTERM` during normal execution, and owns bounded shutdown. No runtime value or Secret reference target is embedded in generated source.
+`Application.Interfaces` exposes the frozen governed typed Interface runtime after successful construction, while `Application.Invocations` retains the existing canonical invocation handles during the migration. `Application.Start` starts lifecycle-aware named Resources and static Implementations in dependency order within `timeouts.startup`; failure is redacted and rolls back the full constructed lifecycle set, including never-started instances. `Application.Stop` coordinates reverse-order shutdown, remains retryable after a bounded failure, and reports the combined application state. The CLI-owned `generated/go/application` process entrypoint delegates configuration selection to bootstrap, waits for `SIGINT` or `SIGTERM` during normal execution, and owns bounded shutdown. No runtime value or Secret reference target is embedded in generated source.
 
 ## Generated application invocation
 
@@ -724,9 +728,10 @@ Plugin command or echoing rejected input.
 query, requires that selected module to contain regular root `plystra.yaml`,
 and retains it as an ordinary direct dependency. Creation records the resolved
 module path as root template metadata; go.mod alone selects the version. The
-supported Interface baseline is inherited immediately through linear ancestry,
-without a separate activation step or copied configuration. Resource and Data
-inheritance remain unsupported and fail before installation. Template origin
+supported Interface and named Resource baseline is inherited immediately through linear ancestry,
+without a separate activation step or copied configuration. Named Resource
+instances and bindings are inherited too; Data inheritance remains unsupported
+and fails before installation. Template origin
 does not rank Implementation candidates.
 The CLI does not clone or copy dependency source, inspect dependency
 environment overlays, modify the Go Module Cache, create `go.work`, or grant
@@ -1161,7 +1166,8 @@ configuration` shows selected layers, redacted field summaries, ownership and
 precedence, effective and overridden contributions, explicit removals, and
 ancestor suppression. `plystra inspect resources` shows every visible consumer
 Resource contract, its defining package and sources, exact `resource_id` and `contract_digest`
-on `resource-contract` nodes. It does not select or construct Resource instances.
+on `resource-contract` nodes, plus selected named instances and resolved bindings.
+Inspection is read-only: it neither changes selection nor constructs values.
 All five graph views use the versioned
 `plystra.graph` v1 schema with project-relative source references and omit
 resolved Secrets and unrestricted configuration values. The command accepts the same `--env`, `--config`,
@@ -1182,10 +1188,10 @@ Resource parameters alongside required and optional Interface dependencies.
 Discovery validates unselected and dormant candidates, and inspection retains
 their Resource dependencies without activating them. Malformed Resource-shaped
 parameters fail with `PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID` and the
-owning constructor source. Reachable Resource-consuming constructors fail with
-`PLYSTRA_RESOURCE_BINDING_UNSUPPORTED` before assembly or generation until named
-Resource binding is implemented. Keep such candidates dormant; selecting one
-for an active Interface does not provide a Resource instance.
+owning constructor source. Each reachable consumer needs an explicit compatible
+named instance or exactly one compatible selected instance for implicit binding.
+A dormant Implementation is not constructed, but its explicit binding addresses
+must still name valid consumers, parameters, and targets.
 
 Resource-only packages are discovered in the current and dependency Projects
 through the same Go-selected source boundary as Interfaces. Declare one
@@ -1215,10 +1221,55 @@ files. Invalid configuration defaults retain field context but never their value
 Mixed Interface/Resource-provider directives, invalid signatures and failed
 assignability produce `PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID` or
 `PLYSTRA_RESOURCE_PROVIDER_INVALID` with owning source locations.
-Installed capability facts report `resource.contract`,
-`resource.consumer.discovery`, and `resource.provider.discovery` separately
-from unsupported Resource instance configuration, provider construction and
-binding. Contract inspection does not yet display provider candidates.
+Installed capability facts distinguish contract and constructor discovery from
+named-instance configuration, binding, generation, and execution. Read each
+support stage independently; implemented stages do not imply `accepted: yes`.
+Data schema/query generation and migration commands remain unsupported.
+
+### Named Resource instances
+
+Author `resources.instances.<name>` in the selected configuration document.
+Names are exact, case-sensitive, 1 through 128 ASCII bytes, matching
+`[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*`.
+Each entry selects one exact provider constructor with `use` and owns its typed
+`config`. Resource provider Config belongs here, not under top-level `config`.
+The same provider under two names creates two values, configuration owners, and
+lifecycle members; every selected instance is active even when unconsumed.
+
+Template roots compose oldest to nearest before the selected current-Project
+layer. An unchanged provider composes non-pointer fixed Config structs by field;
+pointers and collections replace atomically. A config-only higher layer may
+inherit `use`. Changing `use` replaces the whole instance and discards the old
+configuration, even when field names match. Requiredness and defaults apply
+after composition. Use the exact `{$remove: true}` tombstone to remove an
+instance or binding leaf; null and empty mappings are not removal.
+
+Bind exact case-sensitive Go parameter names through
+`resources.bind.implementations.<constructor>.<parameter>` or
+`resources.bind.instances.<consumer-instance>.<parameter>`. Each leaf names one
+exact instance. Explicit targets must exist and implement the required Resource
+contract. Without a leaf, exactly one compatible selected instance binds
+implicitly; zero or multiple matches fail. Providers depend only on Resources;
+Implementations may mix Resource and Interface dependencies. Removal never
+silently retargets an explicit binding, and dangling addresses and cycles fail
+before generation.
+
+Generated assembly constructs each named instance once, shares it across bound
+consumers, and starts dependencies before consumers. Shutdown and failure cleanup
+reverse that order, including non-nil partial constructor results and values
+whose Start never ran. Constructors only assemble values; acquisition belongs in
+Start, and Stop must tolerate partial and never-started states. Resource calls
+are ordinary typed Go calls, outside Interface roots, catalogs, governed proxies,
+and transports. Runtime-only Config and Secrets stay out of public artifacts;
+structural or build-visible edits require regeneration and rebuilding.
+
+Use `plystra generate` and `plystra generate --check` with the same selector after
+authored edits. Resource mutation forms of `plystra use` and `plystra implement`
+are not installed in this slice; those commands remain Interface-only. Do not
+hand-edit generated assembly. Named Resource support is not Data or Gate 5
+acceptance.
+
+### Explain resolution
 
 `plystra explain capability <capability-name>/vN` is the corresponding causal
 read-only view. For a required Capability it reports the selected ordinary

@@ -56,8 +56,8 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	project := byPath[Root+"/tasks/project-and-dependencies.md"]
 	for _, phrase := range []string{
 		"records a direct dependency and its exact module path in root plystra.yaml",
-		"Creation immediately inherits the supported Interface baseline without copying source or configuration",
-		"Resource and Data inheritance remain unsupported",
+		"Creation immediately inherits the supported Interface and named Resource baseline without copying source or configuration",
+		"Named Resource instances and bindings are inherited; Data inheritance remains unsupported",
 	} {
 		if !bytes.Contains(project, []byte(phrase)) {
 			t.Fatalf("Project guidance omits %q", phrase)
@@ -133,7 +133,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	configuration := byPath[Root+"/tasks/configuration-and-secrets.md"]
 	for _, phrase := range []string{
 		"Remove exact interfaces.use, interfaces.policies, and http.expose entries only with {$remove: true}",
-		"runtime compatibility version 11",
+		"runtime compatibility version 12",
 		"Remove http.cors or either of its fields with {$remove: true}; null is invalid",
 		"Selected template roots contribute CORS, while ordinary dependencies remain inactive",
 		"Remove a whole config.<constructor-symbol> entry only with {$remove: true}",
@@ -156,7 +156,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Root template ancestry composes oldest to nearest",
 		"overlays and replacements cannot change it",
 		"Replacement excludes root application values but retains the root relationship",
-		"Resource and Data inheritance remain explicitly unsupported",
+		"Named Resource instances and bindings are inherited; Data inheritance remains unsupported",
 		"The public runtime contract binds ordered template module/version identities",
 		"An interfaces.require sequence replaces the complete lower explicit requirement set; [] clears it",
 		"Omission and {} inherit",
@@ -215,12 +215,33 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	if !bytes.Contains(resources, []byte("plystra inspect capabilities --format json")) {
 		t.Fatalf("Resource and Data guidance omits installed capability discovery:\n%s", resources)
 	}
-	for _, phrase := range []string{"plystra inspect resources --format json", "contract_digest", "Resource instance configuration, provider construction, binding", "64 type-reference levels and 65,536 public shape nodes", "PLYSTRA_RESOURCE_ID_DUPLICATE", "resource.provider.discovery", "PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID", "PLYSTRA_RESOURCE_PROVIDER_INVALID", "does not select, construct, execute, or display provider candidates", "resource.consumer.discovery", "plystra inspect implementations --format json", "declares-dependency edges with reason resource", "exact parameter_name and one-based parameter_position", "PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID", "PLYSTRA_RESOURCE_BINDING_UNSUPPORTED", "Resource instance configuration and runtime binding remain unsupported"} {
+	for _, phrase := range []string{
+		"plystra inspect resources --format json", "contract_digest",
+		"64 type-reference levels and 65,536 public shape nodes", "PLYSTRA_RESOURCE_ID_DUPLICATE",
+		"resource.provider.discovery", "PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID", "PLYSTRA_RESOURCE_PROVIDER_INVALID",
+		"Discovery alone does not select or execute providers", "resource.consumer.discovery",
+		"plystra inspect implementations --format json", "declares-dependency edges with reason resource",
+		"exact parameter_name and one-based parameter_position", "PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID",
+		"resources.instances.<name>", "1 through 128 ASCII bytes",
+		`[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*`,
+		"A config-only higher layer may inherit use", "Changing use replaces the whole instance and discards old configuration",
+		"resources.bind.implementations.<constructor>.<parameter>", "resources.bind.instances.<consumer-instance>.<parameter>",
+		"zero is missing and multiple matches are ambiguous", "including dormant Implementation consumers",
+		"PLYSTRA_RESOURCE_METADATA_INVALID", "PLYSTRA_RESOURCE_CONFIGURATION_SCHEMA_INVALID",
+		"PLYSTRA_RESOURCE_CONFIGURATION_VALUES_INVALID", "PLYSTRA_RESOURCE_INSTANCE_INVALID",
+		"PLYSTRA_RESOURCE_BINDING_MISSING", "PLYSTRA_RESOURCE_BINDING_AMBIGUOUS", "PLYSTRA_RESOURCE_BINDING_INVALID",
+		"Every selected instance is active even when unconsumed", "distinct values, Config owners, and lifecycle members",
+		"Providers depend only on Resources", "Resources do not create Interface roots, catalog entries, governed proxies",
+		"non-nil partial constructor results and never-started lifecycle values",
+		"source-independent private runtime baseline", "Runtime compatibility version 12 and frozen model version 19",
+		"Resource mutation forms of plystra use and plystra implement are not installed",
+		"implemented stages do not establish accepted=yes", "Gate 5 is incomplete",
+	} {
 		if !bytes.Contains(resources, []byte(phrase)) {
 			t.Fatalf("Resource guidance omits %q", phrase)
 		}
 	}
-	for _, forbidden := range []string{"TODO", "create a feature branch", "open a pull request", "push the change"} {
+	for _, forbidden := range []string{"TODO", "create a feature branch", "open a pull request", "push the change", "PLYSTRA_RESOURCE_BINDING_UNSUPPORTED", "Resource instance configuration and runtime binding remain unsupported", "Resource and Data inheritance remain unsupported", "inspect resources remains contract-only"} {
 		for name, data := range byPath {
 			if strings.Contains(strings.ToLower(string(data)), strings.ToLower(forbidden)) {
 				t.Fatalf("%s contains process guidance %q", name, forbidden)
