@@ -1283,7 +1283,7 @@ structural or build-visible edits require regeneration and rebuilding.
 Use `plystra use <instance-name> <provider-constructor>` to replace a compatible
 provider on an existing named instance. It applies deterministic ownership
 cleanup, regenerates, and validates with the same selector. Resource
-`plystra implement <resource-id> --package ./<package>` creates an unfinished,
+`plystra implement <contract> --package ./<package>` creates an unfinished,
 inactive ordinary Resource provider scaffold. It does not create a named
 instance, select a provider, infer configuration, or provide runtime behavior:
 implement `New`, provider methods, configuration, dependencies, and lifecycle

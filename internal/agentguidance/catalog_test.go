@@ -242,7 +242,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"selected-layer tombstones or sparse deltas", "Still-owned configuration remains intact",
 		"never guesses a binding or retargets unrelated consumers",
 		"even when the starting graph is invalid", "resource.provider.selection",
-		"plystra implement <resource-id> --package ./<package>", "unfinished, inactive ordinary Resource provider scaffold",
+		"plystra implement <contract> --package ./<package>", "unfinished, inactive ordinary Resource provider scaffold",
 		"resource.provider.scaffold", "no guessed Config, dependency, or hook is added",
 		"Compound change plans, plan digests, and `--dry-run` are not installed",
 		"implemented stages do not establish `accepted=yes`", "Gates 5 and 13 remain incomplete",

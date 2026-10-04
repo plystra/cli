@@ -2227,7 +2227,7 @@ Resource declarations and providers are ordinary authored Go. Replace a
 compatible provider on an existing instance with
 `plystra use <instance-name> <provider-constructor>` and the intended selector.
 Installed `resource.provider.selection` reports this transaction separately
-from full Resource acceptance. `plystra implement <resource-id> --package
+from full Resource acceptance. `plystra implement <contract> --package
 ./<package>` creates an unfinished, inactive ordinary Resource provider
 scaffold. It does not create a named instance, select a provider, infer
 configuration, or provide runtime behavior; implement `New`, provider methods,
