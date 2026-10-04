@@ -33,7 +33,7 @@ func (c Composition) ValidateRequiredConfiguration(schemas SchemaLookup, active 
 	source := ConfigurationDeclarationSource{modulePath: c.current.modulePath, path: selectedPath, line: 1, column: 1}
 	for _, name := range ordered {
 		constructor := constructors[name]
-		schema, exists := schemas(constructor)
+		schema, exists := schemas(ConfigurationNamespaceImplementation, constructor)
 		if !exists {
 			continue // Active constructors without a Config parameter need no object.
 		}

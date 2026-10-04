@@ -21,7 +21,7 @@ var (
 	// ErrCompose reports that typed Project configuration composition failed.
 	ErrCompose = errors.New("compose Project configuration")
 	// ErrConfigurationSchema reports configuration for a constructor without
-	// one compiled same-package Config schema.
+	// one compiled same-package Config schema in the owning namespace.
 	ErrConfigurationSchema = errors.New("constructor configuration schema unavailable")
 	// ErrConfigurationValues reports constructor configuration that does not
 	// conform to its compiled Go Config schema. Values never enter this error.
@@ -43,9 +43,20 @@ type Dependency struct {
 	Manifest      Manifest
 }
 
+// ConfigurationNamespace identifies the constructor kind allowed to own a
+// configuration path, including a removed entry.
+type ConfigurationNamespace string
+
+const (
+	ConfigurationNamespaceImplementation ConfigurationNamespace = "implementation"
+	ConfigurationNamespaceResource       ConfigurationNamespace = "resource"
+)
+
 // SchemaLookup returns the compiled same-package Config schema for one exact
-// visible Implementation or Resource-provider constructor.
-type SchemaLookup func(constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool)
+// visible constructor in the requested namespace. A constructor of another kind,
+// an unknown constructor, or a constructor without Config must return false.
+// Implementations own top-level config; Resource providers own instance config.
+type SchemaLookup func(namespace ConfigurationNamespace, constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool)
 
 // Provenance records public-safe typed decisions and declaration ownership.
 // Private values never influence contributor selection or grouping.

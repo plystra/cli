@@ -9,8 +9,8 @@ import (
 const constructorConfigurationSourceKind = "configuration-declaration"
 
 // ConstructorConfigurationSchemaError reports constructor-keyed configuration
-// whose constructor has no compiled same-package Config schema, together with
-// the Project document that owns the invalid declaration.
+// whose constructor has no compiled ordinary Implementation Config schema,
+// together with the Project document that owns the invalid declaration.
 type ConstructorConfigurationSchemaError struct {
 	constructor constructorsymbol.Symbol
 	reference   string

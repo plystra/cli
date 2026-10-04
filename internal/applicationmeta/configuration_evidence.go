@@ -198,7 +198,7 @@ func configurationLayerDigestDecisions(manifest Manifest, schemas SchemaLookup) 
 		return nil, err
 	}
 	for _, configured := range manifest.configurations {
-		decisions, normalizeErr := normalizeConstructorConfigDecisions(configured, schemas)
+		decisions, normalizeErr := normalizeConstructorConfigDecisions(configured, schemas, ConfigurationNamespaceImplementation)
 		if normalizeErr == nil {
 			for _, decision := range decisions {
 				result = append(result, constructorConfigurationDecision(decision))

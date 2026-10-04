@@ -47,7 +47,7 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 	var result []constructorConfigDecision
 	for _, configured := range manifest.Configurations() {
 		configured.declarationSource = completeConfigurationDeclarationSource(manifest, configured.declarationSource)
-		decisions, err := normalizeConstructorConfigDecisions(configured, schemas)
+		decisions, err := normalizeConstructorConfigDecisions(configured, schemas, ConfigurationNamespaceImplementation)
 		if err != nil {
 			return nil, err
 		}
@@ -58,7 +58,7 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 	}
 	for _, removal := range manifest.removedConfigurations {
 		removal.declarationSource = completeConfigurationDeclarationSource(manifest, removal.declarationSource)
-		if _, exists := schemas(removal.constructor); !exists {
+		if _, exists := schemas(ConfigurationNamespaceImplementation, removal.constructor); !exists {
 			return nil, newConstructorConfigurationSchemaError(removal.constructor, removal.source, removal.declarationSource)
 		}
 		decision := newConstructorConfigDecision(removal.constructor, nil, constructorConfigRemoval, "", nil, removal.source)
@@ -71,8 +71,8 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 	return result, nil
 }
 
-func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, schemas SchemaLookup) ([]constructorConfigDecision, error) {
-	schema, exists := schemas(configured.constructor)
+func normalizeConstructorConfigDecisions(configured ConstructorConfiguration, schemas SchemaLookup, namespace ConfigurationNamespace) ([]constructorConfigDecision, error) {
+	schema, exists := schemas(namespace, configured.constructor)
 	if !exists {
 		return nil, newConstructorConfigurationSchemaError(configured.constructor, configured.source, configured.declarationSource)
 	}
