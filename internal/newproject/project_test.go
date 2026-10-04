@@ -177,7 +177,7 @@ func runTemplateDriftGoHelper() int {
 			_, _ = fmt.Fprintf(os.Stderr, "write template drift count: %v\n", err)
 			return 125
 		}
-		if count == 4 && os.Getenv(templateCheckFailEnvironment) != "1" && os.Getenv(templateBuildFailEnvironment) != "1" && os.Getenv(templateSmokeFailEnvironment) != "1" {
+		if count == 6 && os.Getenv(templateCheckFailEnvironment) != "1" && os.Getenv(templateBuildFailEnvironment) != "1" && os.Getenv(templateSmokeFailEnvironment) != "1" {
 			if os.Getenv(templateDriftFailEnvironment) == "1" {
 				_, _ = fmt.Fprintln(os.Stderr, "injected generated stability check failure")
 				return 124
@@ -206,7 +206,7 @@ func runTemplateDriftGoHelper() int {
 			_, _ = fmt.Fprintf(os.Stderr, "read template check count: %v\n", err)
 			return 125
 		}
-		if string(data) == "5" {
+		if string(data) == "9" {
 			_, _ = fmt.Fprintln(os.Stderr, "injected qualified-template plystra check failure")
 			return 123
 		}
@@ -217,7 +217,7 @@ func runTemplateDriftGoHelper() int {
 			_, _ = fmt.Fprintf(os.Stderr, "read template build count: %v\n", err)
 			return 125
 		}
-		if string(data) == "5" {
+		if string(data) == "9" {
 			_, _ = fmt.Fprintln(os.Stderr, "injected qualified-template build failure")
 			return 122
 		}
@@ -1024,7 +1024,7 @@ func TestCreateRejectsImmediateGeneratedDriftAndRollsBack(t *testing.T) {
 			t.Fatalf("Create error omits %q: %v", detail, err)
 		}
 	}
-	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "4" {
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "7" {
 		t.Fatalf("module discovery count = %q, %v; immediate check did not run exactly once", data, readErr)
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
@@ -1077,7 +1077,7 @@ func TestCreateClassifiesImmediateGeneratedCheckFailureAndRollsBack(t *testing.T
 			t.Fatalf("Create error omits %q: %v", detail, err)
 		}
 	}
-	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "4" {
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "6" {
 		t.Fatalf("module discovery count = %q, %v; immediate check did not run exactly once", data, readErr)
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
@@ -1129,7 +1129,7 @@ func TestCreateRunsPlystraCheckAndRollsBackItsFailure(t *testing.T) {
 			t.Fatalf("Create error omits %q: %v", detail, err)
 		}
 	}
-	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "5" {
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "9" {
 		t.Fatalf("module discovery count = %q, %v; qualified-template check did not run at the expected boundary", data, readErr)
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
@@ -1181,7 +1181,7 @@ func TestCreateBuildsTemplateProjectAndRollsBackFailure(t *testing.T) {
 			t.Fatalf("Create error omits %q: %v", detail, err)
 		}
 	}
-	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "5" {
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "9" {
 		t.Fatalf("module discovery count = %q, %v; qualified-template build did not run at the expected boundary", data, readErr)
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
@@ -1235,7 +1235,7 @@ func TestCreateRunsTemplateLifecycleSmokeAndRollsBackFailure(t *testing.T) {
 			t.Fatalf("Create error omits %q: %v", detail, err)
 		}
 	}
-	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "5" {
+	if data, readErr := os.ReadFile(countFile); readErr != nil || string(data) != "9" {
 		t.Fatalf("module discovery count = %q, %v; qualified-template smoke did not run at the expected boundary", data, readErr)
 	}
 	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
