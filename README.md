@@ -884,6 +884,19 @@ New project trees, template dependency metadata and composition, optional CI and
 
 Commands below a module root use the nearest real enclosing `go.mod`; nested modules do not leak mutations into an outer module. The Module Cache remains read-only.
 
+The internal `changerequest` package parses `plystra.change/v1` intent for
+Interface and Implementation creation, dependencies, configuration, Interface
+roots, and Implementation and Resource selections. Parsing is independent of
+Project I/O: it validates closed fields and target identities, normalizes exact
+decimal values and operation order, and returns private canonical JSON and a
+SHA-256 request digest. Bounds are 1 MiB for input and normalized JSON, 1,024
+operations, 64 JSON levels, 65,536 value nodes, 4,096 decoded bytes per string or
+key, and 1,024 bytes per Implementation package path. Duplicate keys and
+conflicting targets fail without exposing submitted configuration values.
+This parser does not establish typed final-state validation or install changes;
+public `change plan`, `change apply`, and primitive-command lowering remain
+unavailable.
+
 ## Authoring behavior
 
 `PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS` reports an occupied target as a
