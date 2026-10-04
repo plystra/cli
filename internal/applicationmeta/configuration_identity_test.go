@@ -12,6 +12,54 @@ import (
 	"github.com/plystra/cli/internal/implementationinventory"
 )
 
+func TestResourceSelectionIdentitiesPreserveUnboundEntriesAndExactRemovals(t *testing.T) {
+	t.Parallel()
+	lower := resourceManifest(t, "base.yaml", `resources:
+  instances:
+    primary: {use: example.com/database.New, config: {unknown: PRIVATE_OLD}}
+    removed: {use: example.com/database.New}
+  bind:
+    instances:
+      primary: {old: removed, retained: primary}
+`)
+	root := resourceManifest(t, "plystra.yaml", `resources:
+  instances:
+    primary: {$remove: true}
+    unbound: {config: {unknown: PRIVATE_UNBOUND}}
+    removed: {$remove: true}
+  bind:
+    instances:
+      primary: {old: {$remove: true}}
+`)
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.test.yaml", []byte(`resources:
+  instances:
+    primary: {}
+    unbound: {config: {unknown: PRIVATE_OVERLAY}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layered, err := applicationmeta.ApplyOverlay(root, overlay, resourceLookup(t, "Value string"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instances, bindings, err := applicationmeta.ResourceSelectionIdentities([]applicationmeta.Manifest{lower, layered})
+	if err != nil || len(instances) != 2 || instances[0].Name() != "primary" || instances[1].Name() != "unbound" {
+		t.Fatalf("selection identities = %v, %v", instances, err)
+	}
+	for _, instance := range instances {
+		if instance.Provider().String() != "" || instance.HasConfiguration() || len(instance.ConfigurationYAML()) != 0 {
+			t.Fatal("a removed provider reappeared or planning retained private Config")
+		}
+	}
+	if len(bindings) != 1 || bindings[0].Consumer() != "primary" || bindings[0].ParameterName() != "retained" || bindings[0].Target() != "primary" {
+		t.Fatal("identity planning changed unrelated bindings or ignored an exact tombstone")
+	}
+	if instances[0].DeclarationSource().Path() != "plystra.test.yaml" || len(lower.ResourceInstances()[0].ConfigurationYAML()) == 0 {
+		t.Fatal("identity planning lost source or mutated captured layers")
+	}
+}
+
 func TestWithoutConstructorConfigurationPreservesIdentityAndAllSources(t *testing.T) {
 	t.Parallel()
 	lookup := resourceLookup(t, "Value string")
