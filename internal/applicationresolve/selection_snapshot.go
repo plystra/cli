@@ -67,14 +67,8 @@ func readModuleMetadata(modulePath, root, version string, required bool) (Module
 // snapshot of function bodies/generated artifacts; the enclosing transaction
 // must protect and validate its complete read/write set before committing.
 func (s SelectionInputs) ValidateSnapshot(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("%w: context is nil", ErrResolve)
-	}
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	if s.module.Path() == "" {
-		return fmt.Errorf("%w: selection inputs are empty", ErrResolve)
+	if err := s.validateSnapshotContext(ctx); err != nil {
+		return err
 	}
 	if err := s.recheckSnapshots(); err != nil {
 		return fmt.Errorf("%w: %w", ErrResolve, err)
@@ -86,7 +80,7 @@ func (s SelectionInputs) ValidateSnapshot(ctx context.Context) error {
 		}
 		return fmt.Errorf("%w: %w", ErrResolve, moduleSnapshotError(s.module.ModulePath(), "cannot revalidate effective module graph"))
 	}
-	if !sameModuleGraph(s.dependencies, current) {
+	if !sameModuleGraph(s.dependencies, current, false) {
 		return fmt.Errorf("%w: %w", ErrResolve, moduleSnapshotError(s.module.ModulePath(), "effective module graph changed"))
 	}
 	if err := s.recheckDeclarations(ctx); err != nil {
@@ -103,7 +97,23 @@ func (s SelectionInputs) ValidateSnapshot(ctx context.Context) error {
 	return nil
 }
 
+func (s SelectionInputs) validateSnapshotContext(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("%w: context is nil", ErrResolve)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	if s.module.Path() == "" {
+		return fmt.Errorf("%w: selection inputs are empty", ErrResolve)
+	}
+	return nil
+}
+
 func (s SelectionInputs) recheckSnapshots() error {
+	if err := s.recheckWorkspace(); err != nil {
+		return err
+	}
 	for _, before := range []ManifestSnapshot{s.rootSnapshot, s.selectedSnapshot} {
 		after, err := readManifestSnapshot(s.module.Path(), before.path)
 		if err != nil || !sameManifestSnapshot(before, after) {
@@ -114,6 +124,10 @@ func (s SelectionInputs) recheckSnapshots() error {
 	if err := recheckDependencyManifests(s.dependencySnapshots); err != nil {
 		return err
 	}
+	return s.recheckModuleMetadata()
+}
+
+func (s SelectionInputs) recheckModuleMetadata() error {
 	for _, before := range s.moduleMetadata {
 		after, err := readModuleMetadata(before.modulePath, before.root, before.version, before.required)
 		if err != nil {
@@ -135,19 +149,32 @@ func moduleSnapshotError(modulePath, reason string) error {
 		fmt.Errorf("%w: %w: %s", ErrConcurrentChange, moduledependency.ErrConcurrentChange, reason))
 }
 
-func sameModuleGraph(left, right moduledependency.Index) bool {
+func sameModuleGraph(left, right moduledependency.Index, allowTidy bool) bool {
 	l, r := left.Modules(), right.Modules()
-	if len(l) != len(r) {
+	if !allowTidy && len(l) != len(r) {
 		return false
 	}
-	for index, a := range l {
-		b := r[index]
+	for _, a := range l {
+		b, exists := right.ByPath(a.Path())
+		if !exists {
+			return false
+		}
 		aReplacement, aReplaced := a.Replacement()
 		bReplacement, bReplaced := b.Replacement()
-		if a.Path() != b.Path() || a.Root() != b.Root() || a.RequiredVersion() != b.RequiredVersion() || a.SelectedVersion() != b.SelectedVersion() ||
-			a.Direct() != b.Direct() || a.Indirect() != b.Indirect() || a.Workspace() != b.Workspace() || a.Project() != b.Project() ||
+		if a.Path() != b.Path() || a.Root() != b.Root() || a.SelectedVersion() != b.SelectedVersion() ||
+			a.Workspace() != b.Workspace() || a.Project() != b.Project() ||
 			aReplaced != bReplaced || aReplacement != bReplacement {
 			return false
+		}
+		if !allowTidy && (a.RequiredVersion() != b.RequiredVersion() || a.Direct() != b.Direct() || a.Indirect() != b.Indirect()) {
+			return false
+		}
+	}
+	if allowTidy {
+		for _, added := range r {
+			if _, exists := left.ByPath(added.Path()); !exists && (added.Project() || added.Workspace()) {
+				return false
+			}
 		}
 	}
 	return true
