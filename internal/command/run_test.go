@@ -89,9 +89,9 @@ path and relative created directory. Enter payload.directory and run
 plystra check independently before treating creation as complete.
 
 Creation records --template as a direct dependency and root template relationship.
-Its linear ancestry immediately supplies the supported Interface baseline,
-including CORS, without copying source or configuration or ranking candidates.
-Resource and Data inheritance remain unsupported.
+Its linear ancestry immediately supplies the supported Interface and named
+Resource baseline, including CORS, without copying source or configuration or
+ranking candidates. Data inheritance remains unsupported.
 
 Invalid inherited declarations retain their owning source and specific
 diagnostic with exit 3. Ambiguous Implementation choices require a decision

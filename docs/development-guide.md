@@ -274,7 +274,12 @@ cannot derive one canonical Plugin ID emit
 `PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID`. It accepts one standard Go Module
 query. Go resolves the query, the selected module must contain regular root
 `plystra.yaml`, and the new Project retains it as a direct `go.mod`
-requirement. Creation records the resolved module path as root template metadata; go.mod alone selects the version. The supported Interface and named Resource application baseline is inherited immediately through linear ancestry, without a separate activation step or copied configuration. Named Resource instances and bindings are inherited; Data inheritance remains unsupported and fails before installation. Template origin does not rank Implementation candidates. The CLI regenerates the complete
+requirement. Creation records the resolved module path as root template metadata;
+go.mod alone selects the version. The supported Interface and named Resource
+application baseline is inherited immediately through linear ancestry, without
+a separate activation step or copied configuration. Data inheritance remains
+unsupported and fails before installation. Template origin does not rank
+Implementation candidates. The CLI regenerates the complete
 application and validates the staged Project without cloning a source
 repository, copying Plugin directories, inspecting dependency environment
 overlays, modifying Module Cache source, generating `go.work`, or assigning the
@@ -2189,11 +2194,10 @@ implemented stages do not establish `accepted: yes` or complete a roadmap gate.
 
 ### Configure named Resources
 
-The named-Resource lifecycle baseline is local Kernel commit `28a800f`; it has
-not been published as this feature's dependency. Follow-up cleanup fixes may
-advance the exact CLI pin. Temporary local dependency resolution is integration
-evidence only, not proof that the dependency resolves remotely or that the
-CLI/Kernel pair has completed acceptance. Check the final dependency pin and
+The named-Resource lifecycle dependency is the CLI's exact Kernel pin, which
+remains local rather than published. Temporary local dependency resolution is
+integration evidence only, not proof that the dependency resolves remotely or
+that the CLI/Kernel pair has completed acceptance. Check the final dependency pin and
 integrated validation before relying on a published distribution.
 
 Resource declarations and providers are ordinary authored Go. This slice has no

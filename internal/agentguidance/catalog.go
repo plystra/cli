@@ -359,7 +359,7 @@ Use this task for Project creation, module identity, templates, and ordinary Go 
 
 The positional name is one safe child directory; ` + "`" + `--module` + "`" + ` sets its independent Go Module identity. A new Project contains root ` + "`" + `plystra.yaml` + "`" + `, module files, and committed generated source, but no environment overlay, example configuration, or ` + "`" + `go.work` + "`" + `.
 
-` + "`" + `--template` + "`" + ` records a direct dependency and its exact module path in root plystra.yaml. Creation immediately inherits the supported Interface and named Resource baseline without copying source or configuration. Named Resource instances and bindings are inherited; Data inheritance remains unsupported. Template origin never ranks candidates.
+` + "`" + `--template` + "`" + ` records a direct dependency and its exact module path in root plystra.yaml. Creation immediately inherits the supported Interface and named Resource baseline without copying source or configuration. Data inheritance remains unsupported. Template origin never ranks candidates.
 
 ` + "`" + `--format json` + "`" + ` returns one ` + "`" + `plystra.result/v1` + "`" + ` document. Success nests ` + "`" + `plystra.project-created/v1` + "`" + `; enter ` + "`" + `payload.directory` + "`" + ` and run ` + "`" + `plystra check` + "`" + ` independently.
 
