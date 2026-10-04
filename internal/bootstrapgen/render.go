@@ -12,6 +12,7 @@ import (
 
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/modulepath"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/transportprovenance"
 )
@@ -31,6 +32,11 @@ var (
 // runtime document and never enters generated source.
 type Options struct {
 	ConstructorInventory          []implementationinventory.Implementation
+	ResourceInventory             []resourceproviderinventory.Provider
+	ResourceInstances             []ResourceInstanceInput
+	ResourceOrder                 []string
+	ResourceConfigurations        []ResourceConfigurationInput
+	ResourceBindings              []ResourceBindingInput
 	Template                      string
 	Templates                     []runtimebaseline.Template
 	ModulePath                    string
@@ -79,7 +85,7 @@ func Render(options Options) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w: %v", ErrRender, ErrInvalidOptions, err)
 	}
-	constructorSupport, err := renderConstructorConfiguration(options.ConstructorConfigurations, options.ConstructorOrder)
+	constructorSupport, err := renderConstructorConfiguration(options.ConstructorConfigurations, options.ConstructorOrder, options.ResourceConfigurations, options.ResourceInstances, options.ResourceOrder)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrRender, err)
 	}
@@ -109,7 +115,7 @@ func Render(options Options) ([]byte, error) {
 	fmt.Fprintln(&source, "\t\"net/url\"")
 	fmt.Fprintln(&source, "\t\"os\"")
 	fmt.Fprintln(&source, "\t\"path/filepath\"")
-	if len(options.ConstructorConfigurations) != 0 {
+	if len(options.ConstructorConfigurations)+len(options.ResourceConfigurations) != 0 {
 		fmt.Fprintln(&source, "\t\"reflect\"")
 	}
 	fmt.Fprintln(&source, "\t\"sort\"")

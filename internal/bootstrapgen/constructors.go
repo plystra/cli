@@ -75,7 +75,7 @@ func compileConstructorConfiguration(input ConstructorConfigurationInput) (const
 	return schema, hex.EncodeToString(digest[:]), nil
 }
 
-func renderConstructorConfiguration(inputs []ConstructorConfigurationInput, order []string) (string, error) {
+func renderConstructorConfiguration(inputs []ConstructorConfigurationInput, order []string, resources []ResourceConfigurationInput, instances []ResourceInstanceInput, resourceOrder []string) (string, error) {
 	indices := make(map[string]int, len(order))
 	for i, symbol := range order {
 		indices[symbol] = i
@@ -86,10 +86,16 @@ func renderConstructorConfiguration(inputs []ConstructorConfigurationInput, orde
 	source.WriteString(`
 type runtimeConstructorBinding struct {
 	symbol string
+	resource string
 	schema constructorconfig.Schema
 	expected string
 	target any
 	node *yaml.Node
+}
+
+func (binding runtimeConstructorBinding) owner() string {
+	if binding.resource != "" { return "Resource " + binding.resource }
+	return "constructor " + binding.symbol
 }
 
 func runtimeConstructorBindings(configuration *applicationassembly.ConstructorConfiguration) ([]runtimeConstructorBinding, error) {
@@ -117,6 +123,38 @@ func runtimeConstructorBindings(configuration *applicationassembly.ConstructorCo
 	}
 `, strconv.Quote(string(encoded)), index, strconv.Quote(input.Symbol), strconv.Quote(publicDigest), index)
 	}
+	resourceIndices, err := planResourceOrder(instances, resourceOrder)
+	if err != nil {
+		return "", err
+	}
+	providers := make(map[string]string, len(instances))
+	for _, instance := range instances {
+		providers[instance.Name] = instance.Provider
+	}
+	resources = append([]ResourceConfigurationInput(nil), resources...)
+	sort.Slice(resources, func(i, j int) bool { return resources[i].Name < resources[j].Name })
+	for i, input := range resources {
+		index, exists := resourceIndices[input.Name]
+		if !exists || providers[input.Name] != input.Provider || i > 0 && resources[i-1].Name == input.Name {
+			return "", ErrInvalidOptions
+		}
+		schema, digest, err := compileConstructorConfiguration(ConstructorConfigurationInput{Symbol: input.Provider, Schema: input.Schema, YAML: input.YAML})
+		if err != nil {
+			return "", err
+		}
+		encoded, err := json.Marshal(schema)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&source, `
+	{
+		var schema constructorconfig.Schema
+		if err := json.Unmarshal([]byte(%s), &schema); err != nil { return nil, ErrRuntimeConfiguration }
+		if err := constructorconfig.BindDefaults(&schema, reflect.TypeOf(configuration.ResourceConfig%d)); err != nil { return nil, fmt.Errorf("%%w: compiled Resource Config schema changed; regenerate and rebuild", ErrRuntimeCompatibility) }
+		bindings = append(bindings, runtimeConstructorBinding{symbol: %s, resource: %s, schema: schema, expected: %s, target: &configuration.ResourceConfig%d})
+	}
+`, strconv.Quote(string(encoded)), index, strconv.Quote(input.Provider), strconv.Quote(input.Name), strconv.Quote(digest), index)
+	}
 	source.WriteString(`
 	return bindings, nil
 }
@@ -126,7 +164,7 @@ func runtimeConstructorSchema(symbol string) (constructorconfig.Schema, bool, er
 	bindings, err := runtimeConstructorBindings(&configuration)
 	if err != nil { return constructorconfig.Schema{}, false, err }
 	for _, binding := range bindings {
-		if binding.symbol == symbol { return binding.schema, true, nil }
+		if binding.resource == "" && binding.symbol == symbol { return binding.schema, true, nil }
 	}
 	return constructorconfig.Schema{}, false, nil
 }
@@ -147,19 +185,32 @@ func prepareRuntimeConstructorConfiguration(document []byte) (*runtimePreparedCo
 	if err != nil { return nil, err }
 	objects, err := runtimeOptionalMapping(fields["config"], "config", nil)
 	if err != nil { return nil, err }
+	resources, err := runtimeOptionalMapping(fields["resources"], "resources", runtimeKeySet("instances", "bind"))
+	if err != nil { return nil, err }
+	instances, err := runtimeOptionalMapping(resources["instances"], "resources.instances", nil)
+	if err != nil { return nil, err }
 	for i := range bindings {
 		binding := &bindings[i]
-		binding.node, err = constructorconfig.Normalize(binding.schema, objects[binding.symbol])
-		if err != nil { return nil, fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, binding.symbol, err) }
+		node := objects[binding.symbol]
+		if binding.resource != "" {
+			instance, err := runtimeMapping(instances[binding.resource], "Resource instance", runtimeKeySet("use", "config"))
+			if err != nil { return nil, err }
+			provider, err := runtimeString(instance["use"])
+			if err != nil || provider != binding.symbol { return nil, ErrRuntimeCompatibility }
+			node = instance["config"]
+		}
+		binding.node, err = constructorconfig.Normalize(binding.schema, node)
+		if err != nil { return nil, fmt.Errorf("%w: %s: %w", ErrRuntimeConfiguration, binding.owner(), err) }
 		public, err := constructorconfig.PublicJSON(binding.schema, binding.node)
 		if err != nil { return nil, ErrRuntimeConfiguration }
 		publicDigest := sha256.Sum256(public)
 		if hex.EncodeToString(publicDigest[:]) != binding.expected {
-			return nil, fmt.Errorf("%w: build-visible constructor configuration changed for %s; rebuild with the same selector", ErrRuntimeCompatibility, binding.symbol)
+			return nil, fmt.Errorf("%w: build-visible configuration changed for %s; rebuild with the same selector", ErrRuntimeCompatibility, binding.owner())
 		}
-		delete(objects, binding.symbol)
+		if binding.resource == "" { delete(objects, binding.symbol) }
 	}
 	fields["config"] = runtimeMappingNode(objects)
+	delete(fields, "resources")
 	prepared.legacyDocument, err = encodeRuntimeDocument(runtimeMappingNode(fields))
 	if err != nil { return nil, err }
 	prepared.bindings = bindings
@@ -169,7 +220,7 @@ func prepareRuntimeConstructorConfiguration(document []byte) (*runtimePreparedCo
 func (p *runtimePreparedConfiguration) resolve(ctx context.Context, resolver *kernelconfiguration.Resolver) error {
 	for _, binding := range p.bindings {
 		if err := constructorconfig.Bind(ctx, resolver, binding.schema, binding.node, binding.target); err != nil {
-			return fmt.Errorf("%w: constructor %s: %w", ErrRuntimeConfiguration, binding.symbol, err)
+			return fmt.Errorf("%w: %s: %w", ErrRuntimeConfiguration, binding.owner(), err)
 		}
 	}
 	return nil
