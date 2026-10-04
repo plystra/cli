@@ -255,6 +255,9 @@ func (b *resourceGraphBuilder) resolve(graph *Graph) error {
 		for _, declared := range b.consumers[consumer].dependencies {
 			dependency, err := b.bind(declared)
 			if err != nil {
+				if failure, ok := err.(*ResourceBindingError); ok {
+					failure.path = node.path.clone()
+				}
 				return err
 			}
 			graph.resourceDependencies[node.symbol] = append(graph.resourceDependencies[node.symbol], dependency)

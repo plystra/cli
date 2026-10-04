@@ -155,6 +155,7 @@ type Node struct {
 	symbol         constructorsymbol.Symbol
 	source         string
 	dependencies   []Dependency
+	path           dependencyPath
 }
 
 // Implementation returns the validated discovered constructor declaration.
@@ -219,6 +220,7 @@ func cloneNodes(values []Node) []Node {
 	result := append([]Node(nil), values...)
 	for index := range result {
 		result[index].dependencies = append([]Dependency(nil), result[index].dependencies...)
+		result[index].path = result[index].path.clone()
 	}
 	return result
 }

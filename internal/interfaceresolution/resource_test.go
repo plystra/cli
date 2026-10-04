@@ -122,10 +122,39 @@ func resourceResolutionInput(t testing.TB) interfaceresolution.Input {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"go.mod":                      "module example.com/application\n\ngo 1.26\n",
-		"plystra.yaml":                "{}\n",
-		"contracts/store/resource.go": "package store\n//plystra:resource store.value/v1\ntype Resource interface { Value() string }\n",
-		"interfaces/run/interface.go": resolutionInterfaceSource("run", "app.run/v1", "Run"),
+		"go.mod":                         "module example.com/application\n\ngo 1.26\n\nrequire github.com/plystra/kernel v0.0.0\nreplace github.com/plystra/kernel => ./kernel\n",
+		"plystra.yaml":                   "{}\n",
+		"kernel/go.mod":                  "module github.com/plystra/kernel\n\ngo 1.26\n",
+		"kernel/optional.go":             "package plystra\ntype Optional[T any] struct{}\n",
+		"contracts/store/resource.go":    "package store\n//plystra:resource store.value/v1\ntype Resource interface { Value() string }\n",
+		"interfaces/run/interface.go":    resolutionInterfaceSource("run", "app.run/v1", "Run"),
+		"interfaces/entry/interface.go":  resolutionInterfaceSource("entry", "app.entry/v1", "Enter"),
+		"interfaces/middle/interface.go": resolutionInterfaceSource("middle", "app.middle/v1", "Handle"),
+		"entry/new.go": `package entry
+import (
+ "context"
+ plystra "github.com/plystra/kernel"
+ "example.com/application/interfaces/entry"
+ "example.com/application/interfaces/middle"
+)
+type Service struct{}
+//plystra:implements app.entry/v1
+func New(next middle.Interface) (*Service, error) { panic("constructor executed") }
+//plystra:implements app.entry/v1
+func Optional(next plystra.Optional[middle.Interface]) (*Service, error) { panic("constructor executed") }
+func (*Service) Enter(context.Context, entry.Request) (entry.Response, error) { return entry.Response{}, nil }
+`,
+		"middle/new.go": `package middle
+import (
+ "context"
+ "example.com/application/interfaces/middle"
+ "example.com/application/interfaces/run"
+)
+type Service struct{}
+//plystra:implements app.middle/v1
+func New(worker run.Interface) (*Service, error) { panic("constructor executed") }
+func (*Service) Handle(context.Context, middle.Request) (middle.Response, error) { return middle.Response{}, nil }
+`,
 		"store/new.go": `package store
 import "example.com/application/contracts/store"
 type Value struct{}
