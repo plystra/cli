@@ -37,7 +37,7 @@ func (SelectionTidySnapshot) LogValue() slog.Value {
 // mutation callback, immediately after normalization and BEFORE invoking the
 // generation validation/confirmation operation. It permits formatting/comments,
 // indirect-to-direct promotion, materialized requirements from the original
-// graph (including captured ordinary workspace members), and newly introduced
+// graph (including captured workspace members), and newly introduced
 // ordinary modules. Existing requirements, other go.mod directives (allowing
 // equivalent Go version spelling and removal of its exactly implied toolchain),
 // preexisting selected sources/versions/replacements, and workspace inputs
@@ -188,7 +188,7 @@ func permittedTidy(before, after []byte, original, dependencies moduledependency
 			// Workspace members have no selected version. The surrounding graph
 			// and metadata checks still bind their original source and identity.
 			previous, captured := original.ByPath(path)
-			if !captured || !previous.Workspace() || previous.Direct() || previous.Project() {
+			if !captured || !previous.Workspace() || previous.Direct() {
 				return false
 			}
 			continue

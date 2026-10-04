@@ -14,47 +14,55 @@ import (
 
 func TestSelectionTidyAcceptsExistingWorkspaceRequirement(t *testing.T) {
 	t.Parallel()
-	parent := t.TempDir()
-	root := filepath.Join(parent, "app")
-	writeModule(t, root, "example.com/app")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	writeModule(t, filepath.Join(parent, "runtime"), "example.com/runtime")
-	writeFile(t, filepath.Join(parent, "runtime/runtime.go"), "package runtime\n")
-	replaceSelectionFile(t, root, "go.mod", "go 1.26", "go 1.26\nreplace example.com/runtime => ../runtime")
-	work := filepath.Join(parent, "go.work")
-	writeFile(t, work, "go 1.26.0\nuse (\n./app\n./runtime\n)\n")
-	options := applicationresolve.Options{Start: root, Environment: goEnvironment(map[string]string{"GOWORK": work, "GOPROXY": "off"})}
-	inputs, err := applicationresolve.DiscoverSelectionInputs(t.Context(), options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	member, exists := inputs.Dependencies().ByPath("example.com/runtime")
-	if !exists || !member.Workspace() || member.Project() || member.Direct() || member.SelectedVersion() != "" {
-		t.Fatal("fixture must start with an unrequired ordinary workspace member")
-	}
-	writeFile(t, filepath.Join(root, "generated/runtime.go"), "package generated\nimport _ \"example.com/runtime\"\n")
-	err = modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
-		return mutate(t.Context(), root, nil, func() error {
-			requirement, exists, err := modulemutation.FindRequirement(root, "example.com/runtime")
-			if err != nil || !exists || requirement.Version() == "" {
-				t.Fatalf("real Tidy did not materialize the workspace requirement: %v, %v", exists, err)
+	for _, kind := range []string{"ordinary", "project"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			parent := t.TempDir()
+			root := filepath.Join(parent, "app")
+			writeModule(t, root, "example.com/app")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			writeModule(t, filepath.Join(parent, "runtime"), "example.com/runtime")
+			writeFile(t, filepath.Join(parent, "runtime/runtime.go"), "package runtime\n")
+			if kind == "project" {
+				writeFile(t, filepath.Join(parent, "runtime/plystra.yaml"), "{}\n")
 			}
-			before := snapshotTree(t, parent)
-			tidy, err := inputs.CaptureTidySnapshot(t.Context())
+			replaceSelectionFile(t, root, "go.mod", "go 1.26", "go 1.26\nreplace example.com/runtime => ../runtime")
+			work := filepath.Join(parent, "go.work")
+			writeFile(t, work, "go 1.26.0\nuse (\n./app\n./runtime\n)\n")
+			options := applicationresolve.Options{Start: root, Environment: goEnvironment(map[string]string{"GOWORK": work, "GOPROXY": "off"})}
+			inputs, err := applicationresolve.DiscoverSelectionInputs(t.Context(), options)
 			if err != nil {
-				return err
+				t.Fatal(err)
 			}
-			if err := inputs.ValidatePostwriteSnapshot(t.Context(), inputs.SelectedSnapshot().Data(), tidy); err != nil {
-				return err
+			member, exists := inputs.Dependencies().ByPath("example.com/runtime")
+			if !exists || !member.Workspace() || member.Project() != (kind == "project") || member.Direct() || member.SelectedVersion() != "" {
+				t.Fatal("fixture must start with an unrequired workspace member of the expected kind")
 			}
-			if !reflect.DeepEqual(before, snapshotTree(t, parent)) {
-				t.Fatal("snapshot validation changed workspace inputs")
+			writeFile(t, filepath.Join(root, "generated/runtime.go"), "package generated\nimport _ \"example.com/runtime\"\n")
+			err = modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+				return mutate(t.Context(), root, nil, func() error {
+					requirement, exists, err := modulemutation.FindRequirement(root, "example.com/runtime")
+					if err != nil || !exists || requirement.Version() == "" {
+						t.Fatalf("real Tidy did not materialize the workspace requirement: %v, %v", exists, err)
+					}
+					before := snapshotTree(t, parent)
+					tidy, err := inputs.CaptureTidySnapshot(t.Context())
+					if err != nil {
+						return err
+					}
+					if err := inputs.ValidatePostwriteSnapshot(t.Context(), inputs.SelectedSnapshot().Data(), tidy); err != nil {
+						return err
+					}
+					if !reflect.DeepEqual(before, snapshotTree(t, parent)) {
+						t.Fatal("snapshot validation changed workspace inputs")
+					}
+					return nil
+				})
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
-			return nil
 		})
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -97,7 +105,7 @@ func TestSelectionTidyAcceptsRemovalOfImpliedToolchain(t *testing.T) {
 
 func TestSelectionTidyWorkspaceRequirementRetainsOriginalEvidence(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"member-metadata", "member-source", "new-member", "existing-requirement-version"} {
+	for _, scenario := range []string{"member-metadata", "member-source", "member-becomes-project", "new-member", "new-project-member", "existing-requirement-version"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			parent := t.TempDir()
@@ -129,8 +137,13 @@ func TestSelectionTidyWorkspaceRequirementRetainsOriginalEvidence(t *testing.T) 
 						}
 						writeModule(t, filepath.Join(parent, "runtime"), "example.com/runtime")
 						writeFile(t, filepath.Join(parent, "runtime/runtime.go"), "package runtime\n")
-					case "new-member":
+					case "member-becomes-project":
+						writeFile(t, filepath.Join(parent, "runtime/plystra.yaml"), "{}\n")
+					case "new-member", "new-project-member":
 						writeModule(t, filepath.Join(parent, "added"), "example.com/added")
+						if scenario == "new-project-member" {
+							writeFile(t, filepath.Join(parent, "added/plystra.yaml"), "{}\n")
+						}
 						replaceSelectionFile(t, parent, "go.work", "./runtime", "./runtime\n./added")
 					case "existing-requirement-version":
 						replaceSelectionFile(t, root, "go.mod", "v1.0.0", "v1.0.1")
