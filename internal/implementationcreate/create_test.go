@@ -37,14 +37,14 @@ replace example.com/contracts => ../contracts
 
 	result, err := implementationcreate.Create(context.Background(), implementationcreate.Options{
 		Start:       start,
-		InterfaceID: "email.send/v1",
+		ContractID:  "email.send/v1",
 		Package:     "./smtp",
 		Environment: goEnvironment(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.InterfaceID().String() != "email.send/v1" || !samePhysicalDirectory(t, result.ModuleRoot(), root) || !samePhysicalDirectory(t, result.PackagePath(), filepath.Join(root, "smtp")) || result.ImportPath() != "example.com/shop/smtp" || result.SourcePath() != "smtp/implementation.go" || result.Constructor().String() != "example.com/shop/smtp.New" {
+	if result.ContractID().String() != "email.send/v1" || !samePhysicalDirectory(t, result.ModuleRoot(), root) || !samePhysicalDirectory(t, result.PackagePath(), filepath.Join(root, "smtp")) || result.ImportPath() != "example.com/shop/smtp" || result.SourcePath() != "smtp/implementation.go" || result.Constructor().String() != "example.com/shop/smtp.New" {
 		t.Fatalf("Result = %#v", result)
 	}
 	want := `package smtp
@@ -95,7 +95,7 @@ func TestCreateSupportsNestedImplementationPackage(t *testing.T) {
 	writeFile(t, filepath.Join(root, "interfaces", "order", "create", "v1", "interface.go"), interfaceSource("createv1", "order.create/v1", "Create"))
 	result, err := implementationcreate.Create(context.Background(), implementationcreate.Options{
 		Start:       root,
-		InterfaceID: "order.create/v1",
+		ContractID:  "order.create/v1",
 		Package:     "./internal/orders/postgres",
 		Environment: goEnvironment(),
 	})
@@ -122,7 +122,7 @@ func TestCreateRejectsInvalidInputsBeforeMutation(t *testing.T) {
 		packagePath string
 		want        error
 	}{
-		{name: "invalid Interface", interfaceID: "email.send", packagePath: "./smtp", want: implementationcreate.ErrInvalidInterface},
+		{name: "invalid Interface", interfaceID: "email.send", packagePath: "./smtp", want: implementationcreate.ErrInvalidContract},
 		{name: "empty package", interfaceID: "email.send/v1", want: implementationcreate.ErrInvalidPackage},
 		{name: "root package", interfaceID: "email.send/v1", packagePath: ".", want: implementationcreate.ErrInvalidPackage},
 		{name: "missing relative prefix", interfaceID: "email.send/v1", packagePath: "smtp", want: implementationcreate.ErrInvalidPackage},
@@ -144,7 +144,7 @@ func TestCreateRejectsInvalidInputsBeforeMutation(t *testing.T) {
 			before := snapshotTree(t, root)
 			_, err := implementationcreate.Create(context.Background(), implementationcreate.Options{
 				Start:       root,
-				InterfaceID: test.interfaceID,
+				ContractID:  test.interfaceID,
 				Package:     test.packagePath,
 				Environment: goEnvironment(),
 			})
@@ -165,8 +165,8 @@ func TestCreateRejectsUnknownInterfaceAndExistingTarget(t *testing.T) {
 		t.Parallel()
 		root := newProject(t, "example.com/acme/unknown")
 		before := snapshotTree(t, root)
-		_, err := implementationcreate.Create(context.Background(), implementationcreate.Options{Start: root, InterfaceID: "email.send/v1", Package: "./smtp", Environment: goEnvironment()})
-		if !errors.Is(err, implementationcreate.ErrCreate) || !errors.Is(err, implementationcreate.ErrInterfaceNotFound) || !strings.Contains(err.Error(), "email.send/v1") {
+		_, err := implementationcreate.Create(context.Background(), implementationcreate.Options{Start: root, ContractID: "email.send/v1", Package: "./smtp", Environment: goEnvironment()})
+		if !errors.Is(err, implementationcreate.ErrCreate) || !errors.Is(err, implementationcreate.ErrContractNotFound) || !strings.Contains(err.Error(), "email.send/v1") {
 			t.Fatalf("Create error = %v", err)
 		}
 		if after := snapshotTree(t, root); !equalSnapshot(after, before) {
@@ -181,7 +181,7 @@ func TestCreateRejectsUnknownInterfaceAndExistingTarget(t *testing.T) {
 		keep := filepath.Join(root, "smtp", "keep.go")
 		writeFile(t, keep, "package smtp\n\nconst Keep = true\n")
 		before := snapshotTree(t, root)
-		_, err := implementationcreate.Create(context.Background(), implementationcreate.Options{Start: root, InterfaceID: "email.send/v1", Package: "./smtp", Environment: goEnvironment()})
+		_, err := implementationcreate.Create(context.Background(), implementationcreate.Options{Start: root, ContractID: "email.send/v1", Package: "./smtp", Environment: goEnvironment()})
 		if !errors.Is(err, implementationcreate.ErrCreate) || !errors.Is(err, implementationcreate.ErrTargetExists) {
 			t.Fatalf("Create error = %v", err)
 		}
@@ -200,7 +200,7 @@ func TestCreateRejectsDuplicateVisibleInterfaceDefinitionsBeforeMutation(t *test
 	before := snapshotTree(t, root)
 	_, err := implementationcreate.Create(context.Background(), implementationcreate.Options{
 		Start:       root,
-		InterfaceID: "email.send/v1",
+		ContractID:  "email.send/v1",
 		Package:     "./smtp",
 		Environment: goEnvironment(),
 	})
@@ -215,7 +215,8 @@ func TestCreateRejectsDuplicateVisibleInterfaceDefinitionsBeforeMutation(t *test
 func TestCreateRequiresContext(t *testing.T) {
 	t.Parallel()
 
-	_, err := implementationcreate.Create(nil, implementationcreate.Options{InterfaceID: "email.send/v1", Package: "./smtp"})
+	var nilContext context.Context
+	_, err := implementationcreate.Create(nilContext, implementationcreate.Options{ContractID: "email.send/v1", Package: "./smtp"})
 	if !errors.Is(err, implementationcreate.ErrCreate) || !strings.Contains(err.Error(), "context is nil") {
 		t.Fatalf("Create error = %v", err)
 	}
