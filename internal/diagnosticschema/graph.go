@@ -16,6 +16,7 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceprovenance"
 	"github.com/plystra/cli/internal/resolutionevidence"
 )
 
@@ -58,12 +59,13 @@ type GraphEdgeKind string
 // GraphNode is one typed graph vertex. ID is namespaced by Kind, Label is the
 // bounded human identity, and Sources contain stable declaration provenance.
 type GraphNode struct {
-	ID             string
-	Kind           GraphNodeKind
-	Label          string
-	Sources        []diagnosticjson.Source
-	ContractDigest string
-	ResourceID     string
+	ID               string
+	Kind             GraphNodeKind
+	Label            string
+	Sources          []diagnosticjson.Source
+	ContractDigest   string
+	ResourceID       string
+	ResourceInstance *interfaceprovenance.ResourceInput
 }
 
 // GraphEdge is one directed typed relationship between existing node IDs.
@@ -78,6 +80,7 @@ type GraphEdge struct {
 	Sources           []diagnosticjson.Source
 	ParameterName     string
 	ParameterPosition int
+	ResourceBinding   *interfaceprovenance.ResourceBindingInput
 }
 
 // GraphInput is the construction-only input for one plystra.graph v1 result.
@@ -110,23 +113,25 @@ type graphDocument struct {
 }
 
 type graphNode struct {
-	ID             string        `json:"id"`
-	Kind           GraphNodeKind `json:"kind"`
-	Label          string        `json:"label"`
-	Sources        []graphSource `json:"sources"`
-	ContractDigest string        `json:"contract_digest,omitempty"`
-	ResourceID     string        `json:"resource_id,omitempty"`
+	ID               string                             `json:"id"`
+	Kind             GraphNodeKind                      `json:"kind"`
+	Label            string                             `json:"label"`
+	Sources          []graphSource                      `json:"sources"`
+	ContractDigest   string                             `json:"contract_digest,omitempty"`
+	ResourceID       string                             `json:"resource_id,omitempty"`
+	ResourceInstance *interfaceprovenance.ResourceInput `json:"resource_instance,omitempty"`
 }
 
 type graphEdge struct {
-	ID                string        `json:"id"`
-	Kind              GraphEdgeKind `json:"kind"`
-	From              string        `json:"from"`
-	To                string        `json:"to"`
-	Reason            string        `json:"reason"`
-	Sources           []graphSource `json:"sources"`
-	ParameterName     string        `json:"parameter_name,omitempty"`
-	ParameterPosition int           `json:"parameter_position,omitempty"`
+	ID                string                                    `json:"id"`
+	Kind              GraphEdgeKind                             `json:"kind"`
+	From              string                                    `json:"from"`
+	To                string                                    `json:"to"`
+	Reason            string                                    `json:"reason"`
+	Sources           []graphSource                             `json:"sources"`
+	ParameterName     string                                    `json:"parameter_name,omitempty"`
+	ParameterPosition int                                       `json:"parameter_position,omitempty"`
+	ResourceBinding   *interfaceprovenance.ResourceBindingInput `json:"resource_binding,omitempty"`
 }
 
 type graphSource struct {
@@ -348,15 +353,23 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 		} else if input.ContractDigest != "" || input.ResourceID != "" {
 			return nil, nil, fmt.Errorf("nodes[%d] is not a Resource contract", index)
 		}
-		if graphType == GraphTypeResources && input.Kind != "module" && input.Kind != "resource-contract" {
-			return nil, nil, fmt.Errorf("nodes[%d] is not a Resource contract or its owning module", index)
+		if graphType == GraphTypeResources && input.Kind != "module" && input.Kind != "resource-contract" && input.Kind != "resource-instance" && input.Kind != "constructor" {
+			return nil, nil, fmt.Errorf("nodes[%d] is not a Resource contract, instance, consumer or owning module", index)
+		}
+		if input.Kind == "resource-instance" {
+			if (graphType != GraphTypeResources && graphType != GraphTypeImplementations) || input.ResourceInstance == nil || input.ID != GraphNodeID(input.Kind, input.ResourceInstance.Name) || input.Label != input.ResourceInstance.Name {
+				return nil, nil, fmt.Errorf("nodes[%d] requires an exact Resource instance identity", index)
+			}
+		} else if input.ResourceInstance != nil {
+			return nil, nil, fmt.Errorf("nodes[%d] is not a Resource instance", index)
 		}
 		sources, err := normalizeGraphSources(mode, digest, input.Sources)
 		if err != nil {
 			return nil, nil, fmt.Errorf("nodes[%d].sources: %v", index, err)
 		}
 		nodeIDs[input.ID] = input.Kind
-		nodes[index] = GraphNode{ID: input.ID, Kind: input.Kind, Label: input.Label, Sources: sources, ContractDigest: input.ContractDigest, ResourceID: input.ResourceID}
+		nodes[index] = input
+		nodes[index].Sources = sources
 	}
 	sort.Slice(nodes, func(left, right int) bool { return nodes[left].ID < nodes[right].ID })
 
@@ -385,19 +398,36 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 		if input.Reason != "" && !validExplanationCode(input.Reason) {
 			return nil, nil, fmt.Errorf("edges[%d].reason %q is not canonical lower kebab case", index, input.Reason)
 		}
-		if graphType == GraphTypeResources || input.Kind == "defines-resource" || input.Reason == "resource" || nodeIDs[input.From] == "resource-contract" || nodeIDs[input.To] == "resource-contract" {
+		if graphType == GraphTypeResources || input.Kind == "defines-resource" || input.Reason == "resource" || nodeIDs[input.From] == "resource-contract" || nodeIDs[input.To] == "resource-contract" || nodeIDs[input.From] == "resource-instance" || nodeIDs[input.To] == "resource-instance" {
 			definition := input.Kind == "defines-resource" && nodeIDs[input.From] == "module" && nodeIDs[input.To] == "resource-contract" && input.Reason == "authored"
 			dependency := graphType == GraphTypeImplementations && input.Kind == "declares-dependency" && nodeIDs[input.From] == "constructor" && nodeIDs[input.To] == "resource-contract" && input.Reason == "resource"
-			if !definition && !dependency {
+			instance := input.Kind == "instantiates-resource" && nodeIDs[input.From] == "resource-instance" && nodeIDs[input.To] == "resource-contract" && input.Reason == "explicit"
+			binding := input.Kind == "depends-on-resource" && (nodeIDs[input.From] == "resource-instance" || nodeIDs[input.From] == "constructor") && nodeIDs[input.To] == "resource-instance"
+			if !definition && !dependency && !instance && !binding {
 				return nil, nil, fmt.Errorf("edges[%d] is not a Resource contract definition or declared Implementation dependency", index)
 			}
 		}
-		if input.Kind == "declares-dependency" || input.Kind == "depends-on-interface" {
+		if input.Kind == "declares-dependency" || input.Kind == "depends-on-interface" || input.Kind == "depends-on-resource" {
 			if input.ParameterName == "_" || !token.IsIdentifier(input.ParameterName) || input.ParameterPosition <= 0 || input.ParameterPosition > 65535 {
 				return nil, nil, fmt.Errorf("edges[%d] requires an explicit nonblank dependency identifier and valid parameter position", index)
 			}
 		} else if input.ParameterName != "" || input.ParameterPosition != 0 {
 			return nil, nil, fmt.Errorf("edges[%d] is not a constructor dependency", index)
+		}
+		if input.Kind == "depends-on-resource" {
+			if input.ResourceBinding == nil {
+				return nil, nil, fmt.Errorf("edges[%d] omits resolved Resource binding", index)
+			}
+			binding := input.ResourceBinding
+			consumerKind := GraphNodeKind("constructor")
+			if binding.ConsumerKind == "instances" {
+				consumerKind = "resource-instance"
+			}
+			if input.From != GraphNodeID(consumerKind, binding.Consumer) || input.To != GraphNodeID("resource-instance", binding.InstanceName) || input.Reason != string(binding.Reason) || input.ParameterName != binding.ParameterName || input.ParameterPosition != binding.ParameterPosition {
+				return nil, nil, fmt.Errorf("edges[%d] disagrees with its Resource binding", index)
+			}
+		} else if input.ResourceBinding != nil {
+			return nil, nil, fmt.Errorf("edges[%d] is not a Resource dependency", index)
 		}
 		sources, err := normalizeGraphSources(mode, digest, input.Sources)
 		if err != nil {
@@ -414,6 +444,10 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 		edges[index] = normalized
 	}
 	sort.Slice(edges, func(left, right int) bool { return edges[left].ID < edges[right].ID })
+	if err := validateResourceGraph(nodes, edges); err != nil {
+		return nil, nil, err
+	}
+	nodes, edges = cloneGraphNodes(nodes), cloneGraphEdges(edges)
 	return nodes, edges, nil
 }
 
@@ -461,7 +495,7 @@ func graphEdgeSemanticKey(edge GraphEdge) string {
 func graphNodes(values []GraphNode) []graphNode {
 	result := make([]graphNode, len(values))
 	for index, node := range values {
-		result[index] = graphNode{ID: node.ID, Kind: node.Kind, Label: node.Label, Sources: graphSources(node.Sources), ContractDigest: node.ContractDigest, ResourceID: node.ResourceID}
+		result[index] = graphNode{ID: node.ID, Kind: node.Kind, Label: node.Label, Sources: graphSources(node.Sources), ContractDigest: node.ContractDigest, ResourceID: node.ResourceID, ResourceInstance: node.ResourceInstance}
 	}
 	return result
 }
@@ -469,7 +503,7 @@ func graphNodes(values []GraphNode) []graphNode {
 func graphEdges(values []GraphEdge) []graphEdge {
 	result := make([]graphEdge, len(values))
 	for index, edge := range values {
-		result[index] = graphEdge{ID: edge.ID, Kind: edge.Kind, From: edge.From, To: edge.To, Reason: edge.Reason, Sources: graphSources(edge.Sources), ParameterName: edge.ParameterName, ParameterPosition: edge.ParameterPosition}
+		result[index] = graphEdge{ID: edge.ID, Kind: edge.Kind, From: edge.From, To: edge.To, Reason: edge.Reason, Sources: graphSources(edge.Sources), ParameterName: edge.ParameterName, ParameterPosition: edge.ParameterPosition, ResourceBinding: edge.ResourceBinding}
 	}
 	return result
 }
@@ -487,6 +521,12 @@ func cloneGraphNodes(values []GraphNode) []GraphNode {
 	for index, node := range values {
 		result[index] = node
 		result[index].Sources = append([]diagnosticjson.Source(nil), node.Sources...)
+		if node.ResourceInstance != nil {
+			value := *node.ResourceInstance
+			value.SelectionSources = append([]interfaceprovenance.ResourceSource{}, value.SelectionSources...)
+			value.ConfigurationSources = append([]interfaceprovenance.ResourceSource{}, value.ConfigurationSources...)
+			result[index].ResourceInstance = &value
+		}
 	}
 	return result
 }
@@ -496,6 +536,13 @@ func cloneGraphEdges(values []GraphEdge) []GraphEdge {
 	for index, edge := range values {
 		result[index] = edge
 		result[index].Sources = append([]diagnosticjson.Source(nil), edge.Sources...)
+		if edge.ResourceBinding != nil {
+			value := *edge.ResourceBinding
+			value.BindingSources = append([]interfaceprovenance.ResourceSource{}, value.BindingSources...)
+			value.SelectionSources = append([]interfaceprovenance.ResourceSource{}, value.SelectionSources...)
+			value.ConsumerSelectionSources = append([]interfaceprovenance.ResourceSource{}, value.ConsumerSelectionSources...)
+			result[index].ResourceBinding = &value
+		}
 	}
 	return result
 }
@@ -505,7 +552,7 @@ func equalGraphNodes(left, right []GraphNode) bool {
 		return false
 	}
 	for index := range left {
-		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].Label != right[index].Label || left[index].ContractDigest != right[index].ContractDigest || left[index].ResourceID != right[index].ResourceID || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
+		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].Label != right[index].Label || left[index].ContractDigest != right[index].ContractDigest || left[index].ResourceID != right[index].ResourceID || !equalResourceGraphRecord(left[index].ResourceInstance, right[index].ResourceInstance) || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
 			return false
 		}
 	}
@@ -517,7 +564,7 @@ func equalGraphEdges(left, right []GraphEdge) bool {
 		return false
 	}
 	for index := range left {
-		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].From != right[index].From || left[index].To != right[index].To || left[index].Reason != right[index].Reason || left[index].ParameterName != right[index].ParameterName || left[index].ParameterPosition != right[index].ParameterPosition || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
+		if left[index].ID != right[index].ID || left[index].Kind != right[index].Kind || left[index].From != right[index].From || left[index].To != right[index].To || left[index].Reason != right[index].Reason || left[index].ParameterName != right[index].ParameterName || left[index].ParameterPosition != right[index].ParameterPosition || !equalResourceGraphRecord(left[index].ResourceBinding, right[index].ResourceBinding) || !equalDiagnosticSources(left[index].Sources, right[index].Sources) {
 			return false
 		}
 	}

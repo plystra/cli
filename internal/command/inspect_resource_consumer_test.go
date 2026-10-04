@@ -82,7 +82,7 @@ func TestInspectImplementationResourceConsumers(t *testing.T) {
 			if code != 0 || stderr != "" {
 				t.Fatalf("human inspection = %d, %s, %s", code, human, stderr)
 			}
-			for _, phrase := range []string{"Resource contracts: 3 visible", "Resource: data.local/v1", "-> data.local/v1 (resource)", "parameter 3 database", "parameter 4 Database", "parameter 5 _database", "parameter 6 \u03b4", "(dormant-explicit)", "(unselected-candidate)", "instance construction and binding are not supported", "Resolution evidence:"} {
+			for _, phrase := range []string{"Resource contracts: 3 visible", "Resource: data.local/v1", "-> data.local/v1 (resource)", "parameter 3 database", "parameter 4 Database", "parameter 5 _database", "parameter 6 \u03b4", "(dormant-explicit)", "(unselected-candidate)", "Resource instances: 0 selected", "Resolution evidence:"} {
 				if !strings.Contains(human, phrase) {
 					t.Fatalf("human inspection omits %q", phrase)
 				}
