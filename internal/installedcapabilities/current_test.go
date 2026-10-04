@@ -144,6 +144,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"resource.consumer.discovery|yes|yes|not_applicable|not_applicable|yes",
 		"resource.contract|yes|yes|not_applicable|not_applicable|yes",
 		"resource.provider.discovery|yes|yes|not_applicable|not_applicable|yes",
+		"resource.provider.scaffold|yes|yes|yes|yes|no",
 		"resource.provider.selection|yes|yes|yes|yes|no",
 		"template.interface-inheritance|yes|yes|yes|yes|yes",
 		"template.resource-inheritance|yes|yes|yes|yes|no",
@@ -195,8 +196,8 @@ func assertInstalledCommandFacts(t testing.TB, commands map[string]commandschema
 		t.Fatalf("capability.create facts = %#v", capabilityCreate)
 	}
 	implementArguments := installedArgumentsByName(commands["implement"])
-	if !implementArguments["--package"].Required() {
-		t.Fatalf("implement --package is not required: %#v", commands["implement"])
+	if !implementArguments["--package"].Required() || !implementArguments["contract"].Required() {
+		t.Fatalf("implement contract or --package is not required: %#v", commands["implement"])
 	}
 	for _, id := range []string{"inspect", "inspect.configuration", "inspect.implementations", "inspect.interfaces", "inspect.modules", "inspect.resources", "explain.alias", "explain.capability", "explain.config", "explain.exposure", "explain.plugin"} {
 		command := commands[id]

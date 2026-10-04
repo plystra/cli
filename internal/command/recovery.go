@@ -172,26 +172,28 @@ const (
 )
 
 const (
-	diagnosticProjectCreateInvocationInvalid        = diagnosticcode.ProjectCreateInvocationInvalid
-	diagnosticProjectCreateNameInvalid              = diagnosticcode.ProjectCreateNameInvalid
-	diagnosticProjectCreateModuleInvalid            = diagnosticcode.ProjectCreateModuleInvalid
-	diagnosticProjectCreateTemplateInvalid          = diagnosticcode.ProjectCreateTemplateInvalid
-	diagnosticProjectCreatePluginNameInvalid        = diagnosticcode.ProjectCreatePluginNameInvalid
-	diagnosticProjectCreatePluginIDInvalid          = diagnosticcode.ProjectCreatePluginIDInvalid
-	diagnosticProjectCreateTargetExists             = diagnosticcode.ProjectCreateTargetExists
-	diagnosticProjectCreateGitUnavailable           = diagnosticcode.ProjectCreateGitUnavailable
-	diagnosticProjectCreateGitInitializationFailed  = diagnosticcode.ProjectCreateGitInitializationFailed
-	diagnosticProjectCreateCancelled                = diagnosticcode.ProjectCreateCancelled
-	diagnosticProjectCreateFailed                   = diagnosticcode.ProjectCreateFailed
-	diagnosticPluginCreateNameInvalid               = diagnosticcode.PluginCreateNameInvalid
-	diagnosticPluginCreateIDInvalid                 = diagnosticcode.PluginCreateIDInvalid
-	diagnosticPluginCreateTargetExists              = diagnosticcode.PluginCreateTargetExists
-	diagnosticInterfaceCreateNameInvalid            = diagnosticcode.InterfaceCreateNameInvalid
-	diagnosticInterfaceCreateTargetExists           = diagnosticcode.InterfaceCreateTargetExists
-	diagnosticImplementationCreateInterfaceInvalid  = diagnosticcode.ImplementationCreateInterfaceInvalid
-	diagnosticImplementationCreatePackageInvalid    = diagnosticcode.ImplementationCreatePackageInvalid
-	diagnosticImplementationCreateInterfaceNotFound = diagnosticcode.ImplementationCreateInterfaceNotFound
-	diagnosticImplementationCreateTargetExists      = diagnosticcode.ImplementationCreateTargetExists
+	diagnosticProjectCreateInvocationInvalid              = diagnosticcode.ProjectCreateInvocationInvalid
+	diagnosticProjectCreateNameInvalid                    = diagnosticcode.ProjectCreateNameInvalid
+	diagnosticProjectCreateModuleInvalid                  = diagnosticcode.ProjectCreateModuleInvalid
+	diagnosticProjectCreateTemplateInvalid                = diagnosticcode.ProjectCreateTemplateInvalid
+	diagnosticProjectCreatePluginNameInvalid              = diagnosticcode.ProjectCreatePluginNameInvalid
+	diagnosticProjectCreatePluginIDInvalid                = diagnosticcode.ProjectCreatePluginIDInvalid
+	diagnosticProjectCreateTargetExists                   = diagnosticcode.ProjectCreateTargetExists
+	diagnosticProjectCreateGitUnavailable                 = diagnosticcode.ProjectCreateGitUnavailable
+	diagnosticProjectCreateGitInitializationFailed        = diagnosticcode.ProjectCreateGitInitializationFailed
+	diagnosticProjectCreateCancelled                      = diagnosticcode.ProjectCreateCancelled
+	diagnosticProjectCreateFailed                         = diagnosticcode.ProjectCreateFailed
+	diagnosticPluginCreateNameInvalid                     = diagnosticcode.PluginCreateNameInvalid
+	diagnosticPluginCreateIDInvalid                       = diagnosticcode.PluginCreateIDInvalid
+	diagnosticPluginCreateTargetExists                    = diagnosticcode.PluginCreateTargetExists
+	diagnosticInterfaceCreateNameInvalid                  = diagnosticcode.InterfaceCreateNameInvalid
+	diagnosticInterfaceCreateTargetExists                 = diagnosticcode.InterfaceCreateTargetExists
+	diagnosticImplementationCreateContractInvalid         = diagnosticcode.ImplementationCreateContractInvalid
+	diagnosticImplementationCreatePackageInvalid          = diagnosticcode.ImplementationCreatePackageInvalid
+	diagnosticImplementationCreateContractNotFound        = diagnosticcode.ImplementationCreateContractNotFound
+	diagnosticImplementationCreateContractAmbiguous       = diagnosticcode.ImplementationCreateContractAmbiguous
+	diagnosticImplementationCreateContractUnimplementable = diagnosticcode.ImplementationCreateContractUnimplementable
+	diagnosticImplementationCreateTargetExists            = diagnosticcode.ImplementationCreateTargetExists
 )
 
 const (
@@ -1362,7 +1364,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, interfaceresolution.ErrAmbiguousImplementation):
 		return recoveryDiagnostic(diagnosticResolveMultipleImplementations, "Select one compatible Implementation by running `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"`.")
 	case errors.Is(err, constructorgraph.ErrMissingBinding):
-		return recoveryDiagnostic(diagnosticResolveMissingImplementation, "Create one compatible local Implementation by running `plystra implement <interface-id> --package <project-relative-package>`.")
+		return recoveryDiagnostic(diagnosticResolveMissingImplementation, "Create one compatible local Implementation by running `plystra implement <contract> --package <project-relative-package>`.")
 	case errors.Is(err, constructorgraph.ErrCycle):
 		return recoveryDiagnostic(diagnosticResolveConstructorCycle, "Remove one required Interface parameter from the reported constructor cycle, then rerun the command.")
 	case errors.Is(err, interfaceresolution.ErrReservedInterface):
@@ -1413,12 +1415,16 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticInterfaceCreateNameInvalid, "Run `plystra interface create <domain.operation>` with one unversioned canonical lower-case name containing at least two dot-separated segments.")
 	case errors.Is(err, interfacecreate.ErrTargetExists):
 		return recoveryDiagnostic(diagnosticInterfaceCreateTargetExists, "Choose a different unversioned Interface name whose v1 package and visible ID do not already exist.")
-	case errors.Is(err, implementationcreate.ErrInvalidInterface):
-		return recoveryDiagnostic(diagnosticImplementationCreateInterfaceInvalid, "Rerun `plystra implement <interface-name>/vN --package <project-relative-package>` with one canonical versioned Interface ID.")
+	case errors.Is(err, implementationcreate.ErrInvalidContract):
+		return recoveryDiagnostic(diagnosticImplementationCreateContractInvalid, "Rerun `plystra implement <contract> --package <project-relative-package>` with one canonical versioned Interface or Resource ID.")
 	case errors.Is(err, implementationcreate.ErrInvalidPackage):
 		return recoveryDiagnostic(diagnosticImplementationCreatePackageInvalid, "Rerun with `--package ./<safe-project-relative-go-package>` naming one canonical child package.")
-	case errors.Is(err, implementationcreate.ErrInterfaceNotFound):
-		return recoveryDiagnostic(diagnosticImplementationCreateInterfaceNotFound, "Replace the reported Interface ID with one canonical Interface visible in the effective Plystra Project graph, then rerun the command.")
+	case errors.Is(err, implementationcreate.ErrContractNotFound):
+		return recoveryDiagnostic(diagnosticImplementationCreateContractNotFound, "Replace the reported contract ID with one canonical Interface or Resource visible in the effective Plystra Project graph, then rerun the command.")
+	case errors.Is(err, implementationcreate.ErrAmbiguousContract):
+		return recoveryDiagnostic(diagnosticImplementationCreateContractAmbiguous, "Replace the reported contract ID with an unambiguous visible Interface or Resource ID, then rerun the command.")
+	case errors.Is(err, implementationcreate.ErrUnimplementableContract):
+		return recoveryDiagnostic(diagnosticImplementationCreateContractUnimplementable, "Choose a target package that can access the reported contract signature, or change the contract to an exported implementable signature, then rerun the command.")
 	case errors.Is(err, implementationcreate.ErrTargetExists):
 		return recoveryDiagnostic(diagnosticImplementationCreateTargetExists, "Rerun with a different `--package ./<project-relative-go-package>` whose target directory does not exist.")
 	case errors.Is(err, dependencyadd.ErrAdd) && errors.Is(err, moduleargument.ErrInvalidQuery):

@@ -37,7 +37,7 @@ const (
   plystra use <target> <constructor-symbol> [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
   plystra interface create <interface-name>
-  plystra implement <interface-id> --package <project-relative-package>
+  plystra implement <contract> --package <project-relative-package>
   plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]
   plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
@@ -428,9 +428,9 @@ Missing, ambiguous, or invalid bindings fail before generation with
 PLYSTRA_RESOURCE_BINDING_MISSING, PLYSTRA_RESOURCE_BINDING_AMBIGUOUS, or
 PLYSTRA_RESOURCE_BINDING_INVALID. Resources never become Interface roots,
 catalog entries, governed proxies, or transports. Use selects a compatible
-provider for an existing named instance without a kind flag. Resource implement
-and Data remain unsupported; Resource acceptance and compound change plans
-remain incomplete.
+provider for an existing named instance without a kind flag. Implement creates
+unfinished Interface or Resource scaffolds without activation. Data, full
+Resource acceptance, and compound change plans remain unsupported.
 The configuration view retains the selected current-Project layer, selected
 template ancestry, redacted field summaries, ownership and precedence, effective
 and overridden contributions, explicit removals, and ancestor suppression.

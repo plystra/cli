@@ -58,7 +58,7 @@ func installedCommands() []commandschema.CapabilityCommandInput {
 		installedCommand("plugin.create", []commandschema.CapabilityArgumentInput{positional("plugin-name", 1)}, nil, nil, false, false),
 		installedCommand("interface.create", []commandschema.CapabilityArgumentInput{positional("interface-name", 1)}, nil, nil, false, false),
 		installedCommand("implement", []commandschema.CapabilityArgumentInput{
-			positional("interface-id", 1),
+			positional("contract", 1),
 			requiredStringOption("--package"),
 		}, nil, nil, false, false),
 		installedCommand("capability.create", []commandschema.CapabilityArgumentInput{

@@ -33,6 +33,7 @@ plystra add <go-module-query>
 plystra remove <go-module-path>
 plystra update <go-module-query>
 plystra use <target> <constructor-symbol> [--env <environment>|--config <yaml-path>]
+plystra implement <contract> --package <project-relative-package>
 plystra plugin create <name>
 plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]
 plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]
@@ -2226,9 +2227,15 @@ Resource declarations and providers are ordinary authored Go. Replace a
 compatible provider on an existing instance with
 `plystra use <instance-name> <provider-constructor>` and the intended selector.
 Installed `resource.provider.selection` reports this transaction separately
-from full Resource acceptance. Resource `plystra implement` and instance
-creation commands remain unsupported. After manually authoring an instance or
-binding in selected YAML, run `plystra generate`, `plystra generate --check`,
+from full Resource acceptance. `plystra implement <resource-id> --package
+./<package>` creates an unfinished, inactive ordinary Resource provider
+scaffold. It does not create a named instance, select a provider, infer
+configuration, or provide runtime behavior; implement `New`, provider methods,
+configuration, dependencies, and lifecycle hooks as appropriate before
+generation. Instance creation remains unsupported. Installed
+`resource.provider.scaffold` reports scaffold stages separately from provider
+selection and full Resource acceptance; generated and executed scaffold support
+does not establish `accepted: yes`. After manually authoring an instance or binding in selected YAML, run `plystra generate`, `plystra generate --check`,
 and `plystra check` with the same selector. Never supply a missing binding by
 editing generated files.
 
@@ -2946,15 +2953,19 @@ Public scaffold commands classify pre-mutation input and target failures:
 - `PLYSTRA_INTERFACE_CREATE_NAME_INVALID` and
   `PLYSTRA_INTERFACE_CREATE_TARGET_EXISTS` identify an invalid unversioned name
   or an existing `/v1` package or visible ID;
-- `PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_INVALID` and
-  `PLYSTRA_IMPLEMENTATION_CREATE_INTERFACE_NOT_FOUND` identify a malformed or
-  invisible canonical versioned Interface ID;
+- `PLYSTRA_IMPLEMENTATION_CREATE_CONTRACT_INVALID` and
+  `PLYSTRA_IMPLEMENTATION_CREATE_CONTRACT_NOT_FOUND` identify a malformed or
+  invisible canonical versioned Interface or Resource ID;
+- `PLYSTRA_IMPLEMENTATION_CREATE_CONTRACT_AMBIGUOUS` identifies an ID shared by
+  visible Interface and Resource contracts; choose the unambiguous contract;
+- `PLYSTRA_IMPLEMENTATION_CREATE_CONTRACT_UNIMPLEMENTABLE` identifies a sealed
+  or inaccessible signature; choose an accessible target or authored contract;
 - `PLYSTRA_IMPLEMENTATION_CREATE_PACKAGE_INVALID` and
   `PLYSTRA_IMPLEMENTATION_CREATE_TARGET_EXISTS` identify an unsafe `--package`
   value or an existing target directory.
 
 Run the emitted corrected `plystra interface create <domain.operation>` or
-`plystra implement <interface-name>/vN --package ./<package>` form. These failures
+`plystra implement <contract> --package ./<package>` form. These failures
 occur before scaffold installation and leave authored and generated files
 unchanged.
 
