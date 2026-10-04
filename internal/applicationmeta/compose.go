@@ -180,7 +180,8 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	var templateLayers []TemplateLayer
 	active := make(map[string]Provenance)
 	effective := Manifest{startupTimeout: DefaultStartupTimeout}
-	apply := func(layer Manifest, owner *Dependency) error {
+	var corsSources httpCORSCompositionSources
+	apply := func(layer Manifest, owner *Dependency, environmentOverlay bool) error {
 		decisions, err := ConfigurationDecisions(layer, schemas)
 		if err != nil {
 			return err
@@ -201,6 +202,7 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		if owner != nil {
 			layer = qualifyTemplateSources(layer, *owner)
 		}
+		corsSources.apply(layer, current.modulePath, environmentOverlay)
 		effective, err = applyManifestLayer(effective, layer, schemas)
 		return err
 	}
@@ -231,18 +233,20 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		for _, layer := range manifestLayers(manifest) {
 			layer.httpAddress, layer.hasHTTPAddress, layer.removeHTTPAddress = "", false, false
 			layer.startupTimeout, layer.hasStartupTimeout, layer.removeStartupTimeout = DefaultStartupTimeout, false, false
-			if err := apply(layer, &dependency); err != nil {
+			if err := apply(layer, &dependency, false); err != nil {
 				return Composition{}, fmt.Errorf("%w: template %s: %w", ErrCompose, dependencyIdentity(dependency), err)
 			}
 		}
 	}
-	for _, layer := range manifestLayers(current) {
-		if err := apply(layer, nil); err != nil {
+	for index, layer := range manifestLayers(current) {
+		// ApplyOverlay retains the selected base followed by its overlay layers.
+		// A replacement document is the base, regardless of its filename.
+		if err := apply(layer, nil, index > 0); err != nil {
 			return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 		}
 	}
 	if err := validateHTTPCORSLayer(effective.httpCORS); err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+		return Composition{}, corsSources.invalid(effective.httpCORS, err)
 	}
 	if err := rejectAliasResolutionInputs(effective.requirements, effective.providerChoices, effective.aliases); err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
