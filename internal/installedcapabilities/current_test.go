@@ -140,11 +140,12 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"interfaces.policies.*.timeout|yes|yes|yes|yes|yes",
 		"invocation.default-concurrency|yes|not_applicable|yes|yes|yes",
 		"legacy.capability-timeout|yes|yes|yes|no|no",
-		"resource|yes|no|no|no|no",
+		"resource|yes|yes|yes|yes|no",
 		"resource.consumer.discovery|yes|yes|not_applicable|not_applicable|yes",
 		"resource.contract|yes|yes|not_applicable|not_applicable|yes",
 		"resource.provider.discovery|yes|yes|not_applicable|not_applicable|yes",
 		"template.interface-inheritance|yes|yes|yes|yes|yes",
+		"template.resource-inheritance|yes|yes|yes|yes|no",
 		"transport.connect|yes|yes|yes|yes|yes",
 	}
 	gotSupport := make([]string, 0, len(capabilities.Support()))

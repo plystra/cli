@@ -1228,6 +1228,12 @@ Data schema/query generation and migration commands remain unsupported.
 
 ### Named Resource instances
 
+The named-Resource lifecycle integration currently uses local Kernel baseline
+`28a800f`, not a published dependency. Follow-up cleanup fixes may advance the
+exact CLI dependency pin. Local integration checks do not establish ordinary
+remote module resolution or release acceptance; the final pin and integrated
+validation must be checked before using this slice as a published CLI/Kernel pair.
+
 Author `resources.instances.<name>` in the selected configuration document.
 Names are exact, case-sensitive, 1 through 128 ASCII bytes, matching
 `[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*`.
