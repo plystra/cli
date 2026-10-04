@@ -33,11 +33,14 @@ func TestResourceConfigurationEvidenceComposition(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lookup := func(symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+			lookup := func(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+				if namespace != applicationmeta.ConfigurationNamespaceResource {
+					return implementationinventory.Configuration{}, false
+				}
 				if symbol.String() == "example.com/acme/smtp.Other" {
 					symbol = original
 				}
-				return baseLookup(symbol)
+				return baseLookup(applicationmeta.ConfigurationNamespaceImplementation, symbol)
 			}
 			dependencies := []applicationmeta.Dependency{
 				{ModulePath: "example.com/oldest", ModuleVersion: "v1.0.0", Manifest: configurationManifest(t, "plystra.yaml", `resources:

@@ -340,7 +340,10 @@ func resourceParityCases(t *testing.T, options Options) string {
 	for _, provider := range options.ResourceInventory {
 		providers[provider.Symbol().String()] = provider
 	}
-	lookup := func(symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	lookup := func(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		if namespace != applicationmeta.ConfigurationNamespaceResource {
+			return implementationinventory.Configuration{}, false
+		}
 		return providers[symbol.String()].Configuration()
 	}
 	base, err := applicationmeta.ParseSource("template.yaml", []byte(resourceTemplate))
@@ -379,7 +382,7 @@ func resourceParityCases(t *testing.T, options Options) string {
 				if err == nil {
 					for _, resource := range composition.Manifest().ResourceInstances() {
 						result := instance{Name: resource.Name(), Provider: resource.Provider().String()}
-						if schema, exists := lookup(resource.Provider()); exists {
+						if schema, exists := lookup(applicationmeta.ConfigurationNamespaceResource, resource.Provider()); exists {
 							var parsed yaml.Node
 							var node *yaml.Node
 							if data := resource.ConfigurationYAML(); len(data) > 0 {

@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -18,7 +19,7 @@ func TestBuiltCLIInspectsResourceContracts(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
 	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/plystra")
 	build.Dir = commandRepositoryRoot(t)
-	build.Env = inspectCommandEnvironment(nil)
+	build.Env = commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}

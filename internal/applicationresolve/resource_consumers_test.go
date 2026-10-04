@@ -67,8 +67,8 @@ func TestResolveResourceConsumersRemainDormantUntilReached(t *testing.T) {
 							}
 						}
 					} else {
-						var unsupported *constructorgraph.ResourceBindingUnsupportedError
-						if !errors.Is(err, constructorgraph.ErrResourceBindingUnsupported) || !errors.As(err, &unsupported) {
+						var unsupported *constructorgraph.ResourceBindingError
+						if !errors.Is(err, constructorgraph.ErrMissingResourceBinding) || !errors.As(err, &unsupported) {
 							t.Fatalf("reachable Resource consumer error = %v", err)
 						}
 						if unsupported.Constructor().String() != "example.com/resource-consumer/consumer.New" || unsupported.ResourceID().String() != "storage.database/v1" || unsupported.ParameterName() != "primary" || unsupported.ParameterPosition() != 1 || unsupported.ModulePath() != "example.com/resource-consumer" || unsupported.SourcePath() != "consumer/service.go" || unsupported.Line() != 9 || unsupported.Column() != 6 {

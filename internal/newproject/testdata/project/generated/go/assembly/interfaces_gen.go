@@ -233,7 +233,7 @@ func NewInterfaceRuntime(configuration ConstructorConfiguration, rollbackTimeout
 		return InterfaceRuntime{}, fmt.Errorf("%w: implementation lifecycle: %w", ErrInterfaceAssembly, err)
 	}
 	bindings, err := kernelintrinsic.NewBindings(kernelintrinsic.BindingOptions{
-		ModuleVersion: "v0.0.0-20261003154357-996f32a75fcb",
+		ModuleVersion: "v0.0.0-20261004024423-1e554d6f14ac",
 		BuildIdentity: "",
 	})
 	if err != nil {

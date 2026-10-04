@@ -91,11 +91,12 @@ type DependencyInput struct {
 // ConstructorInput is one reachable constructor and its exact Go Module and
 // parameter provenance.
 type ConstructorInput struct {
-	Symbol           constructorsymbol.Symbol
-	ModulePath       string
-	ModuleVersion    string
-	HasConfiguration bool
-	Dependencies     []DependencyInput
+	Symbol               constructorsymbol.Symbol
+	ModulePath           string
+	ModuleVersion        string
+	HasConfiguration     bool
+	Dependencies         []DependencyInput
+	ResourceDependencies []ResourceDependencyInput
 }
 
 // Options is the complete frozen input needed to emit one static assembly.
@@ -107,6 +108,7 @@ type Options struct {
 	Bindings                 []BindingInput
 	IntrinsicBindings        []IntrinsicBindingInput
 	Constructors             []ConstructorInput
+	Resources                []ResourceInput
 }
 
 // File is one immutable normalized generated assembly source file.
@@ -115,6 +117,7 @@ type File struct {
 	bindings     []BindingInput
 	intrinsics   []IntrinsicBindingInput
 	constructors []ConstructorInput
+	resources    []ResourceInput
 }
 
 // Path returns the canonical Project-relative output path.
@@ -134,11 +137,15 @@ func (f File) IntrinsicBindings() []IntrinsicBindingInput {
 // Constructors returns the normalized dependency-first constructor plan.
 func (f File) Constructors() []ConstructorInput { return cloneConstructors(f.constructors) }
 
+// Resources returns the named-instance-keyed dependency-first Resource plan.
+func (f File) Resources() []ResourceInput { return cloneResources(f.resources) }
+
 type plan struct {
 	options            Options
 	bindings           []BindingInput
 	intrinsics         []IntrinsicBindingInput
 	constructors       []ConstructorInput
+	resources          []ResourceInput
 	bindingByID        map[string]BindingInput
 	contractPath       map[string]string
 	accessors          []string
@@ -162,6 +169,7 @@ func Render(options Options) (File, error) {
 		bindings:     append([]BindingInput(nil), planned.bindings...),
 		intrinsics:   append([]IntrinsicBindingInput(nil), planned.intrinsics...),
 		constructors: cloneConstructors(planned.constructors),
+		resources:    cloneResources(planned.resources),
 	}, nil
 }
 
@@ -236,6 +244,10 @@ func planAssembly(options Options) (plan, error) {
 		intrinsicAccessors[index] = accessor
 	}
 
+	resources, resourceByName, err := planResourceInstances(options)
+	if err != nil {
+		return plan{}, err
+	}
 	constructors := cloneConstructors(options.Constructors)
 	slices.SortFunc(constructors, func(left, right ConstructorInput) int {
 		return strings.Compare(left.Symbol.String(), right.Symbol.String())
@@ -257,13 +269,12 @@ func planAssembly(options Options) (plan, error) {
 			return plan{}, fmt.Errorf("%w: constructor %s module provenance: %v", ErrInvalidInput, symbol, err)
 		}
 		constructor.Dependencies = append([]DependencyInput(nil), constructor.Dependencies...)
-		expectedPosition := 1
-		if constructor.HasConfiguration {
-			expectedPosition = 2
+		if err := validateParameterOrder(constructor.HasConfiguration, constructor.Dependencies, constructor.ResourceDependencies); err != nil {
+			return plan{}, fmt.Errorf("%w: constructor %s: %v", ErrConstructorGraph, symbol, err)
 		}
 		for dependencyIndex, dependency := range constructor.Dependencies {
 			identifier := dependency.InterfaceID.String()
-			if identifier == "" || module.CheckImportPath(dependency.PackagePath) != nil || dependency.ParameterPosition != expectedPosition+dependencyIndex {
+			if identifier == "" || module.CheckImportPath(dependency.PackagePath) != nil {
 				return plan{}, fmt.Errorf("%w: constructor %s dependency %d is incomplete or out of parameter order", ErrConstructorGraph, symbol, dependencyIndex)
 			}
 			if dependency.ParameterName == "_" || !token.IsIdentifier(dependency.ParameterName) {
@@ -279,6 +290,11 @@ func planAssembly(options Options) (plan, error) {
 			_, bound := bindingByID[identifier]
 			if dependency.Available != bound {
 				return plan{}, fmt.Errorf("%w: constructor %s Interface %s availability contradicts the binding plan", ErrConstructorGraph, symbol, identifier)
+			}
+		}
+		for _, dependency := range constructor.ResourceDependencies {
+			if err := validateResourceDependency(dependency, resourceByName); err != nil {
+				return plan{}, fmt.Errorf("%w: constructor %s: %v", ErrConstructorGraph, symbol, err)
 			}
 		}
 		constructorBySymbol[symbol] = *constructor
@@ -305,12 +321,13 @@ func planAssembly(options Options) (plan, error) {
 	if err != nil {
 		return plan{}, err
 	}
-	imports := planImports(options.ModulePath, bindings, intrinsics, ordered, contractPath)
+	imports := planImports(options.ModulePath, bindings, intrinsics, ordered, resources, contractPath)
 	return plan{
 		options:            options,
 		bindings:           bindings,
 		intrinsics:         intrinsics,
 		constructors:       ordered,
+		resources:          resources,
 		bindingByID:        bindingByID,
 		contractPath:       contractPath,
 		accessors:          accessors,
@@ -374,13 +391,16 @@ func orderConstructors(constructors []ConstructorInput, bindings map[string]Bind
 	return ordered, nil
 }
 
-func planImports(modulePath string, bindings []BindingInput, intrinsics []IntrinsicBindingInput, constructors []ConstructorInput, contracts map[string]string) map[string]string {
+func planImports(modulePath string, bindings []BindingInput, intrinsics []IntrinsicBindingInput, constructors []ConstructorInput, resources []ResourceInput, contracts map[string]string) map[string]string {
 	paths := make([]string, 0, len(bindings)*3+len(intrinsics)*2+len(constructors)+len(contracts))
 	for _, packagePath := range contracts {
 		paths = append(paths, packagePath)
 	}
 	for _, constructor := range constructors {
 		paths = append(paths, constructor.Symbol.PackagePath())
+	}
+	for _, resource := range resources {
+		paths = append(paths, resource.Provider.PackagePath(), resource.PackagePath)
 	}
 	for _, binding := range bindings {
 		paths = append(paths, adapterPath(modulePath, binding.InterfaceID), proxyPath(modulePath, binding.InterfaceID))
@@ -446,6 +466,12 @@ func render(planned plan) ([]byte, error) {
 		}
 		fmt.Fprintf(&source, "\t// Config%d belongs to %s.\n", index, constructor.Symbol)
 		fmt.Fprintf(&source, "\tConfig%d %s.Config\n", index, planned.imports[constructor.Symbol.PackagePath()])
+	}
+	for index, resource := range planned.resources {
+		if resource.HasConfiguration {
+			fmt.Fprintf(&source, "\t// ResourceConfig%d belongs to instance %s, provider %s.\n", index, resource.Name, resource.Provider)
+			fmt.Fprintf(&source, "\tResourceConfig%d %s.Config\n", index, planned.imports[resource.Provider.PackagePath()])
+		}
 	}
 	fmt.Fprintln(&source, "}")
 	fmt.Fprintln(&source)
@@ -621,7 +647,7 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 	fmt.Fprintln(&source, "\tif rollbackTimeout <= 0 {")
 	fmt.Fprintln(&source, "\t\treturn InterfaceRuntime{}, fmt.Errorf(\"%w: invalid cleanup timeout\", ErrInterfaceAssembly)")
 	fmt.Fprintln(&source, "\t}")
-	fmt.Fprintf(&source, "\tlifecycleBindings := make([]kernellifecycle.Binding, 0, %d)\n", len(planned.constructors))
+	fmt.Fprintf(&source, "\tlifecycleBindings := make([]kernellifecycle.Binding, 0, %d)\n", len(planned.constructors)+len(planned.resources))
 	fmt.Fprintln(&source, "\tvar lifecycle *kernellifecycle.Manager")
 	fmt.Fprintln(&source, "\tvar dispatcher *kernelinvocation.Dispatcher")
 	fmt.Fprintln(&source, "\tvar err error")
@@ -677,28 +703,32 @@ func (failure *InterfaceAssemblyError) LogValue() slog.Value {
 		fmt.Fprintln(&source, "\t}")
 		fmt.Fprintf(&source, "\tinterface%d := %s.Interface(%s.New(handle%d))\n", index, contract, proxy, index)
 	}
+	resourceIndices := renderResourceConstruction(&source, planned)
 	constructorIndex := make(map[string]int, len(planned.constructors))
 	for index, constructor := range planned.constructors {
 		constructorIndex[constructor.Symbol.String()] = index
 		implementation := planned.imports[constructor.Symbol.PackagePath()]
 		fmt.Fprintf(&source, "\tcurrentConstructor = %s\n", strconv.Quote(constructor.Symbol.String()))
 		fmt.Fprintf(&source, "\timplementation%d, constructorError := %s.%s(", index, implementation, constructor.Symbol.FunctionName())
-		arguments := make([]string, 0, len(constructor.Dependencies)+1)
+		arguments := make([]string, len(constructor.Dependencies)+len(constructor.ResourceDependencies))
 		if constructor.HasConfiguration {
-			arguments = append(arguments, fmt.Sprintf("configuration.Config%d", index))
+			arguments = append([]string{fmt.Sprintf("configuration.Config%d", index)}, arguments...)
 		}
 		for _, dependency := range constructor.Dependencies {
 			contract := planned.imports[dependency.PackagePath]
 			if !dependency.Available {
-				arguments = append(arguments, fmt.Sprintf("plystra.Optional[%s.Interface]{}", contract))
+				arguments[dependency.ParameterPosition-1] = fmt.Sprintf("plystra.Optional[%s.Interface]{}", contract)
 				continue
 			}
 			bindingIndex := bindingIndex(planned.bindings, dependency.InterfaceID)
 			if dependency.Optional {
-				arguments = append(arguments, fmt.Sprintf("plystra.NewOptional[%s.Interface](interface%d)", contract, bindingIndex))
+				arguments[dependency.ParameterPosition-1] = fmt.Sprintf("plystra.NewOptional[%s.Interface](interface%d)", contract, bindingIndex)
 			} else {
-				arguments = append(arguments, fmt.Sprintf("interface%d", bindingIndex))
+				arguments[dependency.ParameterPosition-1] = fmt.Sprintf("interface%d", bindingIndex)
 			}
+		}
+		for _, dependency := range constructor.ResourceDependencies {
+			arguments[dependency.ParameterPosition-1] = fmt.Sprintf("resource%d", resourceIndices[dependency.InstanceName])
 		}
 		fmt.Fprint(&source, strings.Join(arguments, ", "))
 		fmt.Fprintln(&source, ")")
@@ -871,6 +901,7 @@ func cloneConstructors(values []ConstructorInput) []ConstructorInput {
 	result := append([]ConstructorInput(nil), values...)
 	for index := range result {
 		result[index].Dependencies = append([]DependencyInput(nil), result[index].Dependencies...)
+		result[index].ResourceDependencies = append([]ResourceDependencyInput(nil), result[index].ResourceDependencies...)
 	}
 	return result
 }

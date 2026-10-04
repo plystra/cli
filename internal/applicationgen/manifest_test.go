@@ -836,7 +836,7 @@ func TestApplicationModelDigestPinsNormalizedConnectProtobufProjection(t *testin
 	if err != nil {
 		t.Fatalf("ApplicationModelDigest(Connect Protobuf projection): %v", err)
 	}
-	const expected = "sha256:ecd9ef545d02be7b3858c86ef63b65bb084acf1d429ec286b72f52bf8da2e783"
+	const expected = "sha256:10b4a4160a2a1ae6550dbd5bf4c7256bf315f9be1e6304bc55b409ad38276719"
 	if digest != expected {
 		t.Fatalf("Connect Protobuf projection application-model digest = %q; want %q", digest, expected)
 	}
@@ -1078,6 +1078,88 @@ func TestApplicationModelDigestIncludesCompleteBindingPolicy(t *testing.T) {
 		if _, err := applicationModelDigest(t, options); err == nil {
 			t.Fatalf("unsupported policy entered frozen model: %#v", policy)
 		}
+	}
+}
+
+func TestApplicationModelDigestIncludesNamedResources(t *testing.T) {
+	t.Parallel()
+	id, err := interfaceid.Parse("data.database/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := constructorsymbol.Parse(applicationModulePath + "/database.New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapper, err := constructorsymbol.Parse(applicationModulePath + "/wrapper.New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alternative, err := constructorsymbol.Parse(applicationModulePath + "/alternative.New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := implementationassemblygen.ResourceInput{
+		Name: "database.primary", ResourceID: id, PackagePath: applicationModulePath + "/resources/database",
+		ContractDigest: sha256.Sum256([]byte("database-contract")), Provider: provider, ModulePath: applicationModulePath,
+	}
+	replica := resource
+	replica.Name = "database.replica"
+	consumer := resource
+	consumer.Name, consumer.Provider = "database.wrapper", wrapper
+	consumer.Dependencies = []implementationassemblygen.ResourceDependencyInput{{
+		ResourceID: id, PackagePath: resource.PackagePath, InstanceName: resource.Name, ParameterName: "database", ParameterPosition: 1,
+	}}
+	options := applicationgen.ApplicationModelOptions{
+		ModulePath: applicationModulePath, JavaScriptPackage: applicationSDKPackage,
+		KernelModuleVersion: "v0.0.0", KernelBuildIdentity: "application-render-test",
+		Providers: selectedProviderInputs(), Resolution: resolvedApplication(t, ""),
+		ImplementationAssembly: implementationassemblygen.Options{Resources: []implementationassemblygen.ResourceInput{resource, replica, consumer}},
+	}
+	baseline, err := applicationModelDigest(t, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Reverse(options.ImplementationAssembly.Resources)
+	reordered, err := applicationModelDigest(t, options)
+	if err != nil || baseline != reordered {
+		t.Fatalf("Resource ordering changed model: %v", err)
+	}
+	slices.Reverse(options.ImplementationAssembly.Resources)
+	for name, mutate := range map[string]func(*applicationgen.ApplicationModelOptions){
+		"name": func(o *applicationgen.ApplicationModelOptions) {
+			o.ImplementationAssembly.Resources[1].Name = "database.other"
+		},
+		"provider": func(o *applicationgen.ApplicationModelOptions) {
+			o.ImplementationAssembly.Resources[0].Provider = alternative
+		},
+		"contract": func(o *applicationgen.ApplicationModelOptions) {
+			for i := range o.ImplementationAssembly.Resources {
+				o.ImplementationAssembly.Resources[i].ContractDigest = sha256.Sum256([]byte("changed-contract"))
+			}
+		},
+		"binding": func(o *applicationgen.ApplicationModelOptions) {
+			o.ImplementationAssembly.Resources[2].Dependencies[0].InstanceName = replica.Name
+		},
+		"parameter": func(o *applicationgen.ApplicationModelOptions) {
+			o.ImplementationAssembly.Resources[2].Dependencies[0].ParameterName = "primary"
+		},
+		"unconsumed membership": func(o *applicationgen.ApplicationModelOptions) {
+			o.ImplementationAssembly.Resources = append(o.ImplementationAssembly.Resources[:1], o.ImplementationAssembly.Resources[2:]...)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := options
+			changed.ImplementationAssembly.Resources = slices.Clone(options.ImplementationAssembly.Resources)
+			for i := range changed.ImplementationAssembly.Resources {
+				changed.ImplementationAssembly.Resources[i].Dependencies = slices.Clone(changed.ImplementationAssembly.Resources[i].Dependencies)
+			}
+			mutate(&changed)
+			digest, err := applicationModelDigest(t, changed)
+			if err != nil || digest == baseline {
+				t.Fatalf("Resource %s did not change model: %v", name, err)
+			}
+		})
 	}
 }
 

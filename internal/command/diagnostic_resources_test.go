@@ -110,9 +110,9 @@ func TestResourceDiagnosticsRetainSelectionBindingAndCycleSources(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = applicationmeta.Compose(nil, manifest, func(symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+			_, err = applicationmeta.Compose(nil, manifest, func(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
 				p, ok := discovery.ResourceProviders().BySymbol(symbol)
-				if !ok {
+				if !ok || namespace != applicationmeta.ConfigurationNamespaceResource {
 					return implementationinventory.Configuration{}, false
 				}
 				return p.Configuration()

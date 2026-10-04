@@ -43,6 +43,7 @@ import (
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/providergen"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/sdkmodel"
 	"github.com/plystra/cli/internal/transportprovenance"
@@ -69,6 +70,7 @@ var (
 // Options carries application-owned generated package identities.
 type Options struct {
 	ConstructorInventory      []implementationinventory.Implementation
+	ResourceInventory         []resourceproviderinventory.Provider
 	Template                  string
 	Templates                 []runtimebaseline.Template
 	ModulePath                string
@@ -81,6 +83,7 @@ type Options struct {
 	ManifestProvenance        ManifestProvenance
 	Configurations            []configurationgen.Input
 	ConstructorConfigurations []bootstrapgen.ConstructorConfigurationInput
+	ResourceConfigurations    []bootstrapgen.ResourceConfigurationInput
 	Providers                 []assemblygen.ProviderInput
 	InterfaceProxies          []interfaceproxygen.Input
 	ImplementationAdapters    []implementationadaptergen.Input
@@ -165,6 +168,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (R
 		HTTPTransports:         options.HTTPTransports,
 		HTTPCORS:               options.HTTPCORS,
 		Configurations:         options.Configurations,
+		ResourceConfigurations: options.ResourceConfigurations,
 		Providers:              options.Providers,
 		InterfaceProxies:       options.InterfaceProxies,
 		ImplementationAdapters: options.ImplementationAdapters,
@@ -388,8 +392,32 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (R
 	for i, constructor := range implementationAssembly.Constructors() {
 		constructorOrder[i] = constructor.Symbol.String()
 	}
+	resourceOrder := make([]string, len(implementationAssembly.Resources()))
+	resourceInstances := make([]bootstrapgen.ResourceInstanceInput, len(resourceOrder))
+	var resourceBindings []bootstrapgen.ResourceBindingInput
+	for index, resource := range implementationAssembly.Resources() {
+		resourceOrder[index] = resource.Name
+		resourceInstances[index] = bootstrapgen.ResourceInstanceInput{Name: resource.Name, Provider: resource.Provider.String()}
+		for _, dependency := range resource.Dependencies {
+			resourceBindings = append(resourceBindings, bootstrapgen.ResourceBindingInput{Namespace: "instances", Consumer: resource.Name, ParameterName: dependency.ParameterName, Target: dependency.InstanceName})
+		}
+	}
+	for _, constructor := range implementationAssembly.Constructors() {
+		for _, dependency := range constructor.ResourceDependencies {
+			resourceBindings = append(resourceBindings, bootstrapgen.ResourceBindingInput{Namespace: "implementations", Consumer: constructor.Symbol.String(), ParameterName: dependency.ParameterName, Target: dependency.InstanceName})
+		}
+	}
+	modelCompatibility, err = modelCompatibility.WithResources(resourceInstances, resourceBindings)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: Resource compatibility: %w", ErrRender, err)
+	}
 	bootstrapOptions := bootstrapgen.Options{
 		ConstructorInventory:          options.ConstructorInventory,
+		ResourceInventory:             options.ResourceInventory,
+		ResourceInstances:             resourceInstances,
+		ResourceOrder:                 resourceOrder,
+		ResourceConfigurations:        options.ResourceConfigurations,
+		ResourceBindings:              resourceBindings,
 		Template:                      options.Template,
 		Templates:                     options.Templates,
 		ModulePath:                    options.ModulePath,

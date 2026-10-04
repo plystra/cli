@@ -113,7 +113,7 @@ func renderDependencyBaseline(t testing.TB, capability string) ([]byte, applicat
 		ModulePath:    "example.com/platform",
 		ModuleVersion: "v1.0.0",
 		Manifest:      dependencyManifest,
-	}}, currentManifest, func(constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	}}, currentManifest, func(applicationmeta.ConfigurationNamespace, constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
 		return implementationinventory.Configuration{}, false
 	})
 	if err != nil {

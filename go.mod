@@ -3,7 +3,7 @@ module github.com/plystra/cli
 go 1.26
 
 require (
-	github.com/plystra/kernel v0.0.0-20261003154357-996f32a75fcb
+	github.com/plystra/kernel v0.0.0-20261004024423-1e554d6f14ac
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/mod v0.38.0
 )

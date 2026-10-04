@@ -52,7 +52,7 @@ func (*Service) Run(context.Context, Request) (Response, error) { return Respons
 						Locations []diagnosticjson.Source `json:"locations"`
 					} `json:"diagnostics"`
 				}
-				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || stderr.Len() != 0 || result.Status != "validation_failed" || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diagnosticcode.ResourceBindingUnsupported {
+				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || stderr.Len() != 0 || result.Status != "validation_failed" || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diagnosticcode.ResourceBindingMissing {
 					t.Fatalf("structured Resource failure: %v: %s %s", err, &stdout, &stderr)
 				}
 				found := false
@@ -64,7 +64,7 @@ func (*Service) Run(context.Context, Request) (Response, error) { return Respons
 				if !found {
 					t.Fatal("creation lost template constructor source")
 				}
-			} else if stdout.Len() != 0 || !strings.Contains(stderr.String(), diagnosticcode.ResourceBindingUnsupported) || !strings.Contains(stderr.String(), "primary") {
+			} else if stdout.Len() != 0 || !strings.Contains(stderr.String(), diagnosticcode.ResourceBindingMissing) || !strings.Contains(stderr.String(), "primary") {
 				t.Fatalf("human Resource failure: %s %s", &stdout, &stderr)
 			}
 			for _, private := range []string{parent, proxy, "PRIVATE_RESOURCE_CONSTRUCTOR_ENTRY"} {
@@ -73,12 +73,100 @@ func (*Service) Run(context.Context, Request) (Response, error) { return Respons
 				}
 			}
 			if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("target exists after unsupported consumer: %v", err)
+				t.Fatalf("target exists after missing Resource binding: %v", err)
 			}
 			assertNoTransactionFiles(t, parent)
 		})
 	}
 	if !reflect.DeepEqual(before, snapshotTree(t, proxy)) {
 		t.Fatal("creation changed the template proxy")
+	}
+}
+
+func TestPublicCreateQualifiesTemplateResourceLifecycle(t *testing.T) {
+	const module = "example.com/acme/resource-lifecycle-template"
+	proxy := createKernelProxy(t)
+	writeProxyModule(t, proxy, module, "v1.0.0", map[string][]byte{
+		"plystra.yaml": []byte(`resources:
+  instances:
+    database.primary:
+      use: example.com/acme/resource-lifecycle-template.New
+      config: {name: primary}
+    database.replica:
+      use: example.com/acme/resource-lifecycle-template.New
+      config: {name: replica}
+`),
+		"resource.go": []byte(strings.ReplaceAll(`package database
+import ("context"; "errors"; "os")
+//plystra:resource storage.database/v1
+type Resource interface { Name() string }
+type Config struct { Name string @@yaml:"name" plystra:"required"@@ }
+type value struct { name string }
+//plystra:implements-resource storage.database/v1
+func New(c Config) (*value,error) {return &value{name:c.Name},nil}
+func (v *value) Name() string {return v.name}
+func (v *value) record(event string) error {
+ f,err:=os.OpenFile(os.Getenv("RESOURCE_CREATION_EVENTS"),os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600)
+ if err!=nil{return err};defer f.Close()
+ _,err=f.WriteString(event+":"+v.name+"\n");return err
+}
+func (v *value) Start(context.Context) error {
+ if err:=v.record("start");err!=nil{return err}
+ if v.name=="replica" {
+  switch os.Getenv("RESOURCE_CREATION_FAILURE") {
+  case "error": return errors.New("PRIVATE_RESOURCE_START_FAILURE")
+  case "panic": panic("PRIVATE_RESOURCE_START_FAILURE")
+  }
+ }
+ return nil
+}
+func (v *value) Stop(context.Context) error {return v.record("stop")}
+`, "@@", "`")),
+	})
+	before := snapshotTree(t, proxy)
+	for _, failure := range []string{"", "error", "panic"} {
+		name := failure
+		if name == "" {
+			name = "success"
+		}
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			marker := filepath.Join(t.TempDir(), "events")
+			environment := isolatedGoEnvironment(t, proxy)
+			environment = setEnvironmentValue(environment, "RESOURCE_CREATION_EVENTS", marker)
+			environment = setEnvironmentValue(environment, "RESOURCE_CREATION_FAILURE", failure)
+			var stdout, stderr bytes.Buffer
+			exit := command.RunIn([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--template", module + "@v1.0.0"}, &stdout, &stderr, parent, environment)
+			root := filepath.Join(parent, "my-app")
+			if failure == "" {
+				if exit != 0 {
+					t.Fatalf("Resource template creation = %d: %s %s", exit, &stdout, &stderr)
+				}
+				document, err := os.ReadFile(filepath.Join(root, "plystra.yaml"))
+				if err != nil || !bytes.Contains(document, []byte("template: "+module)) || bytes.Contains(document, []byte("resources:")) {
+					t.Fatalf("template relationship not retained as a delta: %s, %v", document, err)
+				}
+				stdout.Reset()
+				stderr.Reset()
+				if code := command.RunIn([]string{"generate", "--check"}, &stdout, &stderr, root, environment); code != 0 {
+					t.Fatalf("created Resource Project is stale: %d: %s %s", code, &stdout, &stderr)
+				}
+			} else {
+				if exit == 0 || !strings.Contains(stderr.String(), "lifecycle smoke failed") || strings.Contains(stdout.String()+stderr.String(), "PRIVATE_RESOURCE_START_FAILURE") {
+					t.Fatalf("Resource smoke failure = %d: %s %s", exit, &stdout, &stderr)
+				}
+				if _, err := os.Lstat(root); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("Resource smoke failure left target: %v", err)
+				}
+			}
+			events, err := os.ReadFile(marker)
+			if err != nil || string(events) != "start:primary\nstart:replica\nstop:replica\nstop:primary\n" {
+				t.Fatalf("selected unconsumed Resource lifecycle = %q, %v", events, err)
+			}
+			assertNoTransactionFiles(t, parent)
+		})
+	}
+	if !reflect.DeepEqual(before, snapshotTree(t, proxy)) {
+		t.Fatal("Resource template qualification changed source modules")
 	}
 }
