@@ -90,7 +90,7 @@ func TestRunImplementClassifiesAuthoringFailuresWithoutMutation(t *testing.T) {
 			name:       "existing target",
 			arguments:  []string{"implement", "records.list/v1", "--package", "./postgres"},
 			target:     true,
-			problem:    "Implementation target already exists",
+			problem:    "implementation target already exists",
 			recovery:   "Rerun with a different `--package ./<project-relative-go-package>` whose target directory does not exist.",
 			diagnostic: diagnosticcode.ImplementationCreateTargetExists,
 		},
