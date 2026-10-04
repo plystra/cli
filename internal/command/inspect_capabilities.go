@@ -297,7 +297,7 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 			return err
 		}
 	}
-	_, err := io.WriteString(writer, "Command argument, selector, effect-class, and transport component details are omitted from human output; use --format json for the complete installed payload.\n")
+	_, err := io.WriteString(writer, "Support stages are independent: parsed, generated, or executed support does not establish acceptance.\nCommand argument, selector, effect-class, and transport component details are omitted from human output; use --format json for the complete installed payload.\n")
 	return err
 }
 

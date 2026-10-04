@@ -371,7 +371,7 @@ Views:
   capabilities           Show installed command, schema, selector, default, effect, limit, toolchain, and support facts.
   modules                Show the selected current-model module graph.
   interfaces             Show visible Interfaces, active selections, and constructor dependencies.
-  resources              Show visible Resource contracts, exact digests, and owning sources.
+  resources              Show Resource contracts, named instances, bindings, and owning sources.
   implementations        Show visible constructors, selection state, dependencies, configuration, and assembly.
   configuration          Show selected layers, field ownership, precedence, removals, and suppression.
 
@@ -409,13 +409,26 @@ output includes each dependency name and position.
 Resource parameters appear as declared dependencies with reason resource and
 exact resource-contract identity and digest, never as Interface requirements.
 Malformed Resource parameters report PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID.
-Reachable Resource consumers report PLYSTRA_RESOURCE_BINDING_UNSUPPORTED before
-assembly or generation; dormant candidates remain discoverable and inspectable.
-The resources view retains consumer contracts only, with contract_digest on
-resource-contract nodes. Resource instance construction and binding remain
-unsupported. Invalid Resource declarations, contracts, or duplicate identities
+Reachable consumers bind to an exact compatible named instance, or implicitly
+to the uniquely compatible selected instance. Dormant Implementations stay
+inactive, but explicit binding addresses are still validated.
+The resources view retains contract_digest on resource-contract nodes, selected
+resource-instance nodes, and depends-on-resource edges with exact parameter
+names, positions, and explicit or unique-compatible reasons. Inspection never
+constructs values. Invalid Resource declarations, contracts, or duplicate identities
 report RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or
 RESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.
+Named instances use resources.instances.<name>.use and typed per-instance config.
+Names are 1..128 ASCII bytes in dot-separated lower-kebab segments. Bindings use
+resources.bind.implementations.<constructor>.<parameter> or
+resources.bind.instances.<consumer-instance>.<parameter> with an exact target name.
+Every selected instance is active, even unconsumed; one provider under different
+names is not deduplicated. A provider change discards the old instance config.
+Missing, ambiguous, or invalid bindings fail before generation with
+PLYSTRA_RESOURCE_BINDING_MISSING, PLYSTRA_RESOURCE_BINDING_AMBIGUOUS, or
+PLYSTRA_RESOURCE_BINDING_INVALID. Resources never become Interface roots,
+catalog entries, governed proxies, or transports. Resource mutation forms of
+use and implement are not installed; Data remains unsupported.
 The configuration view retains the selected current-Project layer, selected
 template ancestry, redacted field summaries, ownership and precedence, effective
 and overridden contributions, explicit removals, and ancestor suppression.
