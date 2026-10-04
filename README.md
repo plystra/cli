@@ -728,11 +728,10 @@ Plugin command or echoing rejected input.
 query, requires that selected module to contain regular root `plystra.yaml`,
 and retains it as an ordinary direct dependency. Creation records the resolved
 module path as root template metadata; go.mod alone selects the version. The
-supported Interface and named Resource baseline is inherited immediately through linear ancestry,
-without a separate activation step or copied configuration. Named Resource
-instances and bindings are inherited too; Data inheritance remains unsupported
-and fails before installation. Template origin
-does not rank Implementation candidates.
+supported Interface and named Resource baseline is inherited immediately through
+linear ancestry, without a separate activation step or copied configuration.
+Data inheritance remains unsupported and fails before installation. Template
+origin does not rank Implementation candidates.
 The CLI does not clone or copy dependency source, inspect dependency
 environment overlays, modify the Go Module Cache, create `go.work`, or grant
 the template any Implementation candidate priority. A module without root
@@ -1228,11 +1227,11 @@ Data schema/query generation and migration commands remain unsupported.
 
 ### Named Resource instances
 
-The named-Resource lifecycle integration currently uses local Kernel baseline
-`28a800f`, not a published dependency. Follow-up cleanup fixes may advance the
-exact CLI dependency pin. Local integration checks do not establish ordinary
-remote module resolution or release acceptance; the final pin and integrated
-validation must be checked before using this slice as a published CLI/Kernel pair.
+The named-Resource lifecycle integration requires the CLI's exact Kernel pin,
+which remains local rather than published. Local integration checks do not
+establish ordinary remote module resolution or release acceptance; the final
+pin and integrated validation must be checked before using this slice as a
+published CLI/Kernel pair.
 
 Author `resources.instances.<name>` in the selected configuration document.
 Names are exact, case-sensitive, 1 through 128 ASCII bytes, matching

@@ -57,7 +57,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	for _, phrase := range []string{
 		"records a direct dependency and its exact module path in root plystra.yaml",
 		"Creation immediately inherits the supported Interface and named Resource baseline without copying source or configuration",
-		"Named Resource instances and bindings are inherited; Data inheritance remains unsupported",
+		"Data inheritance remains unsupported",
 	} {
 		if !bytes.Contains(project, []byte(phrase)) {
 			t.Fatalf("Project guidance omits %q", phrase)
