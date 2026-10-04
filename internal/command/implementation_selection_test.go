@@ -285,6 +285,39 @@ func TestRunUseRejectsInvalidImplementationChoicesAndRestoresProject(t *testing.
 	}
 }
 
+func TestRunUsePreservesUnrelatedUnknownInterfaceDiagnosticWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name, selectedPath string
+		selectors          []string
+	}{
+		{name: "default", selectedPath: "plystra.yaml"},
+		{name: "environment", selectedPath: "plystra.production.yaml", selectors: []string{"--env", "production"}},
+		{name: "complete replacement", selectedPath: "deploy/customer.yaml", selectors: []string{"--config", "deploy/customer.yaml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, test.selectedPath), "# PRIVATE_REQUIREMENT_COMMENT\ninterfaces:\n  require: [email.send/v1, missing.operation/v1]\n")
+			before := commandTree(t, root)
+			arguments := append([]string{"use", "email.send/v1", "example.com/acme/implementation-use/local.New"}, test.selectors...)
+			code, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "local"), implementationSelectionCommandEnvironment(nil))
+			wantSource := "Source: example.com/acme/implementation-use:" + test.selectedPath + ":1:1 (declaration)"
+			wantSuffix := "\n\n" + wantSource + "\n\nRecovery:\nCorrect the reported Interface ID in " + test.selectedPath + " to one canonical Interface visible in the selected Go Module graph, then rerun the command.\n\nDiagnostic: " + diagnosticcode.ResolveUnknownInterface + "\n"
+			if code != 1 || stdout != "" || !strings.Contains(stderr, "missing.operation/v1") || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Count(stderr, "Recovery:") != 1 || strings.Count(stderr, "Diagnostic:") != 1 || strings.Contains(stderr, diagnosticcode.UseTargetNotFound) {
+				t.Fatalf("unrelated missing Interface during use = %d, %q, %q", code, stdout, stderr)
+			}
+			for _, private := range []string{root, filepath.ToSlash(root), "PRIVATE_REQUIREMENT_COMMENT"} {
+				if strings.Contains(stderr, private) {
+					t.Fatalf("unrelated missing Interface diagnostic exposed %q", private)
+				}
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("unrelated missing Interface selection mutated the Project")
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunUseReportsIntrinsicImplementationSelectionSourceAndRestoresProject(t *testing.T) {
 	tests := []struct {
 		name         string
