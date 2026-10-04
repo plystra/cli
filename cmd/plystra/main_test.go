@@ -52,7 +52,7 @@ type Response struct{}
 	if err := command.Run(); err != nil {
 		t.Fatalf("run plystra implement: %v, stdout %q, stderr %q", err, stdout.String(), stderr.String())
 	}
-	if want := "created Implementation example.com/acceptance/smtp.New for email.send/v1 at smtp/implementation.go\n"; stdout.String() != want || stderr.Len() != 0 {
+	if want := "created unfinished interface scaffold example.com/acceptance/smtp.New for email.send/v1 at smtp/implementation.go; not activated\n"; stdout.String() != want || stderr.Len() != 0 {
 		t.Fatalf("plystra implement = stdout %q, stderr %q, want stdout %q", stdout.String(), stderr.String(), want)
 	}
 
