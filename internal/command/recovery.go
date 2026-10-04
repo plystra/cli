@@ -269,6 +269,9 @@ func writeCommandFailure(writer io.Writer, prefix string, err error, context rec
 }
 
 func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source {
+	if resourceCode := resourceResolutionDiagnosticCode(err); resourceCode != "" && resourceCode == code {
+		return resourceResolutionSources(err)
+	}
 	var sources []diagnosticjson.Source
 	switch code {
 	case diagnosticInterfaceCreateTargetExists:
@@ -962,27 +965,6 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: step.RequiringColumn(),
 			})
 		}
-	case diagnosticcode.ResourceBindingUnsupported:
-		var unsupported *constructorgraph.ResourceBindingUnsupportedError
-		if !errors.As(err, &unsupported) || unsupported == nil {
-			return nil
-		}
-		for _, source := range unsupported.RequirementSources() {
-			sources = append(sources, diagnosticjson.Source{
-				Module: source.ModulePath, Path: source.Path, Kind: string(source.Kind),
-				Line: source.Line, Column: source.Column,
-			})
-		}
-		for _, step := range unsupported.Steps() {
-			sources = append(sources, diagnosticjson.Source{
-				Module: step.RequiringModulePath(), Path: step.RequiringSourcePath(), Kind: "implementation-constructor",
-				Line: step.RequiringLine(), Column: step.RequiringColumn(),
-			})
-		}
-		sources = append(sources, diagnosticjson.Source{
-			Module: unsupported.ModulePath(), Path: unsupported.SourcePath(), Kind: "implementation-constructor",
-			Line: unsupported.Line(), Column: unsupported.Column(),
-		})
 	case diagnosticResolveConstructorCycle:
 		var cycle *constructorgraph.CycleError
 		if !errors.As(err, &cycle) || cycle == nil {
@@ -1262,6 +1244,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	if errors.Is(err, applicationresolve.ErrTemplate) {
 		return recoveryDiagnostic(diagnosticTemplateInvalid, "Correct the root template relationship and its Go Module dependency graph; every ancestor must be a Project and the chain must not repeat a module, then rerun the command.")
 	}
+	if diagnostic, found := resourceResolutionRecovery(err, context); found {
+		return diagnostic, true
+	}
 	if errors.Is(err, applicationresolve.ErrPolicyNotEnforced) {
 		return recoveryDiagnostic(diagnosticPolicyNotEnforced, "Remove the reported policy from the selected configuration, or install a compatible CLI/Kernel pair that generates and executes it. Run `plystra inspect capabilities --format json` to verify installed support before retrying.")
 	}
@@ -1368,8 +1353,6 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticResolveMultipleImplementations, "Select one compatible Implementation by running `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"`.")
 	case errors.Is(err, constructorgraph.ErrMissingBinding):
 		return recoveryDiagnostic(diagnosticResolveMissingImplementation, "Create one compatible local Implementation by running `plystra implement <interface-id> --package <project-relative-package>`.")
-	case errors.Is(err, constructorgraph.ErrResourceBindingUnsupported):
-		return recoveryDiagnostic(diagnosticcode.ResourceBindingUnsupported, "Use a CLI version that supports named Resource instance binding before generating this reachable constructor. Resource dependency discovery alone does not provide runtime instances.")
 	case errors.Is(err, constructorgraph.ErrCycle):
 		return recoveryDiagnostic(diagnosticResolveConstructorCycle, "Remove one required Interface parameter from the reported constructor cycle, then rerun the command.")
 	case errors.Is(err, interfaceresolution.ErrReservedInterface):

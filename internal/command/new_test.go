@@ -231,7 +231,10 @@ func TestRunNewCommandPreservesTemplateValidationDiagnostics(t *testing.T) {
 		{"unknown implementation", interfaceresolution.ErrUnknownConstructor, diagnosticResolveUnknownImplementation},
 		{"constructor declaration", implementationinventory.ErrInvalidConfiguration, diagnosticImplementationConfigInvalid},
 		{"Resource parameter", implementationinventory.ErrInvalidRequiredResource, diagnosticcode.ImplementationResourceInvalid},
-		{"Resource binding", constructorgraph.ErrResourceBindingUnsupported, diagnosticcode.ResourceBindingUnsupported},
+		{"Resource instance", constructorgraph.ErrInvalidResourceInstance, diagnosticcode.ResourceInstanceInvalid},
+		{"Resource binding", constructorgraph.ErrInvalidResourceBinding, diagnosticcode.ResourceBindingInvalid},
+		{"missing Resource", constructorgraph.ErrMissingResourceBinding, diagnosticcode.ResourceBindingMissing},
+		{"ambiguous Resource", constructorgraph.ErrAmbiguousResourceBinding, diagnosticcode.ResourceBindingAmbiguous},
 		{"unsupported policy", applicationresolve.ErrPolicyNotEnforced, diagnosticPolicyNotEnforced},
 	}
 	for _, test := range tests {
