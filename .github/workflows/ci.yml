@@ -19,7 +19,7 @@ jobs:
           - os: ubuntu-latest
             timeout: 20m
           - os: windows-latest
-            timeout: 40m
+            timeout: 60m
           - os: macos-latest
             timeout: 20m
     runs-on: ${{ matrix.os }}
