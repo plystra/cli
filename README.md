@@ -1669,7 +1669,7 @@ CI prepares dependencies before offline generated-Project tests, including the
 older `logr` graph metadata and the telemetry SDK's test-only metric module.
 These fixtures also prepare their dependencies when run independently. Scaffold
 tests retain isolated module caches and file proxies while reusing Go's
-content-addressed build cache. CI package timeouts are 40 minutes on Windows
+content-addressed build cache. CI package timeouts are 60 minutes on Windows
 and 20 minutes on Linux, macOS, and the Linux race job; these are cumulative
 package limits, not per-test limits.
 

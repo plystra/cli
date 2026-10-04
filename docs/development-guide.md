@@ -162,7 +162,9 @@ Remove-Item Env:GOWORK
 
 `-p 2` is a bounded Windows setting, not a semantic requirement. It avoids
 process exhaustion on machines where the full CLI suite starts many nested Go
-commands. A failure to download the Kernel version recorded in `cli/go.mod`
+commands. Hosted Windows CI uses a 60-minute package timeout because the full
+suite can exceed the Linux and macOS budget while starting those commands. A
+failure to download the Kernel version recorded in `cli/go.mod`
 means that version is unavailable through normal module resolution; use the
 root workspace for source integration. Do not add a permanent `replace` or make
 `go.work` part of a released contract.
