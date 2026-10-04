@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/interfaceprovenance"
 )
 
@@ -54,6 +55,19 @@ func validateResourceGraph(nodes []GraphNode, edges []GraphEdge) error {
 		contract, ok := contracts[resource.ResourceID]
 		if !ok || contract.ContractDigest != resource.ContractDigest || contract.Label != resource.PackagePath {
 			return errors.New("resource instance does not match its visible contract")
+		}
+		foundDeclaration := false
+		for _, source := range contract.Sources {
+			if source.Kind != "resource-declaration" {
+				continue
+			}
+			if source != diagnosticjson.Source(resource.ContractSource) {
+				return errors.New("resource instance contract source does not match its visible contract")
+			}
+			foundDeclaration = true
+		}
+		if !foundDeclaration {
+			return errors.New("resource instance contract source is absent from its visible contract")
 		}
 		count := 0
 		for _, edge := range edges {
