@@ -1170,7 +1170,22 @@ resolved Secrets and unrestricted configuration values. The command accepts the 
 Constructor dependency edges in both Interface and Implementation inspection
 retain `parameter_name` and one-based `parameter_position`. These fields are
 absent on other edges. Repeated dependencies on one Interface remain distinct;
-human output names each parameter alongside its position.
+human output names each parameter alongside its position. Implementation
+inspection also includes `resource-contract` nodes with exact `resource_id`,
+`contract_digest`, and declaration sources. Its `declares-dependency` edges use
+reason `resource` for canonical Resource parameters, preserving each name and
+position even when several parameters consume the same contract. These are
+declarations, not Interface requirements, active bindings, or runtime instances.
+
+Ordinary Implementation constructors may declare explicitly named canonical
+Resource parameters alongside required and optional Interface dependencies.
+Discovery validates unselected and dormant candidates, and inspection retains
+their Resource dependencies without activating them. Malformed Resource-shaped
+parameters fail with `PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID` and the
+owning constructor source. Reachable Resource-consuming constructors fail with
+`PLYSTRA_RESOURCE_BINDING_UNSUPPORTED` before assembly or generation until named
+Resource binding is implemented. Keep such candidates dormant; selecting one
+for an active Interface does not provide a Resource instance.
 
 Resource-only packages are discovered in the current and dependency Projects
 through the same Go-selected source boundary as Interfaces. Declare one
@@ -1200,10 +1215,10 @@ files. Invalid configuration defaults retain field context but never their value
 Mixed Interface/Resource-provider directives, invalid signatures and failed
 assignability produce `PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID` or
 `PLYSTRA_RESOURCE_PROVIDER_INVALID` with owning source locations.
-Installed capability facts report `resource.contract` and
-`resource.provider.discovery` separately from unsupported Resource instance
-configuration, provider construction and binding. Contract inspection does not
-yet display provider candidates.
+Installed capability facts report `resource.contract`,
+`resource.consumer.discovery`, and `resource.provider.discovery` separately
+from unsupported Resource instance configuration, provider construction and
+binding. Contract inspection does not yet display provider candidates.
 
 `plystra explain capability <capability-name>/vN` is the corresponding causal
 read-only view. For a required Capability it reports the selected ordinary

@@ -2130,6 +2130,25 @@ dependency as a distinct edge with exact `parameter_name` and one-based
 `parameter_position`; other edges omit these fields. Human output includes the
 same name and position even when several parameters use the same Interface.
 
+Ordinary Implementation constructors also accept explicitly named canonical
+Resource parameters. `inspect implementations` shows their exact contracts as
+`resource-contract` nodes with `resource_id`, `contract_digest`, package and
+declaration sources. Each `declares-dependency` edge with reason `resource`
+retains its exact parameter name and position, including repeated parameters
+for the same contract. These declarations do not become Interface requirements,
+exposures, active bindings, or runtime instances. `inspect resources` remains a
+contract-only inventory without constructor dependency edges.
+
+Installed `resource.consumer.discovery` support covers discovery and inspection
+of these dependencies, including dormant explicit and unselected candidates.
+Malformed Resource-shaped parameters report
+`PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID` with the owning constructor
+source. Reachable Resource-consuming constructors report
+`PLYSTRA_RESOURCE_BINDING_UNSUPPORTED` before assembly or generation: named
+Resource instance configuration and binding are not implemented. Keep these
+candidates dormant until that support is available; no handwritten generated
+binding or Interface selection can supply the missing runtime instance.
+
 Resource declarations are checked even when no instance uses them. A single
 `//plystra:resource <resource-id>` directive must document a non-generic defined
 Go interface named `Resource`. Duplicate IDs fail with every defining source;
