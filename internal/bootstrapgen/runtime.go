@@ -153,6 +153,7 @@ func renderRuntimeConfigurationSupport(schemas []runtimeConfigurationSchema, exe
 	source.WriteString("}\n\n")
 	source.WriteString(runtimeConfigurationSupport)
 	source.WriteString(runtimeTemplateSupport)
+	source.WriteString(runtimeResourceSupport)
 	return source.String(), nil
 }
 
@@ -194,7 +195,7 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
-	values, err := runtimeMapping(root, "effective runtime configuration", runtimeKeySet("http", "timeouts", "interfaces", "config"))
+	values, err := runtimeMapping(root, "effective runtime configuration", runtimeKeySet("http", "timeouts", "interfaces", "config", "resources"))
 	if err != nil {
 		return "", err
 	}
@@ -206,6 +207,8 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 	if err != nil {
 		return "", err
 	}
+	resources, resourceBindings, err := runtimeApplicationModelResources(values["resources"])
+	if err != nil { return "", err }
 	canonical, err := json.Marshal(map[string]any{
 		"application_model_digest": compiledApplicationModelDigest,
 		"projection": map[string]any{
@@ -214,8 +217,10 @@ func runtimeApplicationModelCompatibilityDigest(document []byte) (string, error)
 			"implementation_choices": implementations,
 			"interface_policies":     policies,
 			"interface_requirements": requirements,
+			"resource_instances": resources,
+			"resource_bindings": resourceBindings,
 		},
-		"version": 11,
+		"version": 12,
 	})
 	if err != nil {
 		return "", runtimeConfigurationError("encode build-affecting runtime projection")

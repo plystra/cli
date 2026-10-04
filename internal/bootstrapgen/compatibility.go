@@ -15,7 +15,7 @@ import (
 	"github.com/plystra/cli/internal/invocationpolicy"
 )
 
-const applicationModelCompatibilityVersion = 11
+const applicationModelCompatibilityVersion = 12
 
 // ErrInvalidApplicationModelCompatibility reports a compatibility projection
 // that cannot be tied to one complete generated application model.
@@ -44,6 +44,8 @@ type applicationModelCompatibilityProjection struct {
 	InterfaceRequirements []string                                      `json:"interface_requirements"`
 	ImplementationChoices []applicationModelCompatibilityImplementation `json:"implementation_choices"`
 	InterfacePolicies     []applicationModelCompatibilityPolicy         `json:"interface_policies"`
+	ResourceInstances     []ResourceInstanceInput                       `json:"resource_instances"`
+	ResourceBindings      []ResourceBindingInput                        `json:"resource_bindings"`
 }
 
 type applicationModelCompatibilityExposure struct {
@@ -103,6 +105,8 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 		InterfaceRequirements: make([]string, 0),
 		ImplementationChoices: make([]applicationModelCompatibilityImplementation, 0),
 		InterfacePolicies:     make([]applicationModelCompatibilityPolicy, 0),
+		ResourceInstances:     make([]ResourceInstanceInput, 0),
+		ResourceBindings:      make([]ResourceBindingInput, 0),
 	}
 	if cors, exists := manifest.HTTPCORS(); exists {
 		normalized, err := applicationmeta.NormalizeHTTPCORS(cors)
@@ -170,6 +174,26 @@ func newApplicationModelCompatibility(applicationModelDigest string, manifest ap
 		digest:        applicationModelCompatibilityDigest(canonical),
 		prepared:      true,
 	}, nil
+}
+
+// WithResources attaches the complete resolved Resource graph. Explicit and
+// implicit bindings use the same frozen representation; dormant edges stay out.
+func (c ApplicationModelCompatibility) WithResources(instances []ResourceInstanceInput, bindings []ResourceBindingInput) (ApplicationModelCompatibility, error) {
+	if !c.Valid() {
+		return ApplicationModelCompatibility{}, ErrInvalidApplicationModelCompatibility
+	}
+	plannedInstances, plannedBindings, err := planResourceIdentities(instances, bindings)
+	if err != nil {
+		return ApplicationModelCompatibility{}, ErrInvalidApplicationModelCompatibility
+	}
+	c.document.Projection.ResourceInstances = plannedInstances
+	c.document.Projection.ResourceBindings = plannedBindings
+	c.canonicalJSON, err = encodeApplicationModelCompatibility(c.document)
+	if err != nil {
+		return ApplicationModelCompatibility{}, ErrInvalidApplicationModelCompatibility
+	}
+	c.digest = applicationModelCompatibilityDigest(c.canonicalJSON)
+	return c, nil
 }
 
 // Valid reports whether the value is a complete constructor-produced
@@ -260,6 +284,8 @@ func encodeApplicationModelCompatibility(document applicationModelCompatibilityD
 			"implementation_choices": implementations,
 			"interface_policies":     policies,
 			"interface_requirements": document.Projection.InterfaceRequirements,
+			"resource_instances":     document.Projection.ResourceInstances,
+			"resource_bindings":      document.Projection.ResourceBindings,
 		},
 		"version": document.Version,
 	})

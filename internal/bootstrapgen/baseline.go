@@ -2,6 +2,7 @@ package bootstrapgen
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 
 	"github.com/plystra/cli/internal/constructorconfig"
@@ -17,9 +18,10 @@ type baselineTemplate struct {
 }
 
 type baselineConstructor struct {
-	Symbol     string                    `json:"symbol"`
-	Interfaces []string                  `json:"interfaces"`
-	Schema     *constructorconfig.Schema `json:"schema"`
+	Symbol       string                       `json:"symbol"`
+	Interfaces   []string                     `json:"interfaces"`
+	Schema       *constructorconfig.Schema    `json:"schema"`
+	Dependencies []baselineResourceDependency `json:"resource_dependencies"`
 }
 
 // RuntimeBaseline produces private build output from the same inputs as bootstrap.
@@ -59,6 +61,9 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 		}
 		seen[symbol] = true
 		entry := baselineConstructor{Symbol: symbol, Interfaces: []string{}}
+		for _, dependency := range implementation.RequiredResources() {
+			entry.Dependencies = append(entry.Dependencies, baselineResourceDependency{dependency.ParameterName(), dependency.ID().String()})
+		}
 		for _, declaration := range implementation.Declaration().ImplementedInterfaces() {
 			entry.Interfaces = append(entry.Interfaces, declaration.ID().String())
 		}
@@ -75,6 +80,18 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 		inventory = append(inventory, entry)
 	}
 	sort.Slice(inventory, func(i, j int) bool { return inventory[i].Symbol < inventory[j].Symbol })
+	resourceInventory, resourceConfigurations, err := planResourceBaseline(options, defaults)
+	if err != nil {
+		return runtimebaseline.Document{}, err
+	}
+	instances, bindings, err := planResourceIdentities(options.ResourceInstances, options.ResourceBindings)
+	if err != nil {
+		return runtimebaseline.Document{}, err
+	}
+	projection := options.ApplicationModelCompatibility.document.Projection
+	if options.ApplicationModelCompatibility.Valid() && (!slices.Equal(projection.ResourceInstances, instances) || !slices.Equal(projection.ResourceBindings, bindings)) {
+		return runtimebaseline.Document{}, ErrInvalidOptions
+	}
 	templates := append([]runtimebaseline.Template{}, options.Templates...)
 	ancestry := make([]baselineTemplate, len(templates))
 	previous := ""
@@ -91,16 +108,18 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 		return runtimebaseline.Document{}, ErrInvalidOptions
 	}
 	contract, err := json.Marshal(struct {
-		Schema               string                `json:"baseline_schema"`
-		Module               string                `json:"module"`
-		ApplicationModel     string                `json:"application_model"`
-		Compatibility        json.RawMessage       `json:"compatibility"`
-		Constructors         []constructor         `json:"constructors"`
-		ConstructorInventory []baselineConstructor `json:"constructor_inventory"`
-		Template             string                `json:"template"`
-		Templates            []baselineTemplate    `json:"template_ancestry"`
-		RuntimeProcessFields []string              `json:"runtime_process_fields"`
-	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, inventory, options.Template, ancestry, []string{"http.address", "timeouts.startup"}})
+		Schema               string                          `json:"baseline_schema"`
+		Module               string                          `json:"module"`
+		ApplicationModel     string                          `json:"application_model"`
+		Compatibility        json.RawMessage                 `json:"compatibility"`
+		Constructors         []constructor                   `json:"constructors"`
+		ConstructorInventory []baselineConstructor           `json:"constructor_inventory"`
+		ResourceInventory    []baselineResourceProvider      `json:"resource_inventory"`
+		Resources            []baselineResourceConfiguration `json:"resource_configurations"`
+		Template             string                          `json:"template"`
+		Templates            []baselineTemplate              `json:"template_ancestry"`
+		RuntimeProcessFields []string                        `json:"runtime_process_fields"`
+	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, inventory, resourceInventory, resourceConfigurations, options.Template, ancestry, []string{"http.address", "timeouts.startup"}})
 	if err != nil {
 		return runtimebaseline.Document{}, ErrInvalidOptions
 	}
@@ -117,8 +136,11 @@ func validateRuntimeBaseline(document runtimebaseline.Document) error {
 	if err != nil { return err }
 	inventory, err := runtimeConstructorInventory(document)
 	if err != nil { return err }
+	providers, err := runtimeResourceInventory(document)
+	if err != nil { return err }
 	expected := make(map[string]bool)
 	for symbol, entry := range inventory { if entry.Schema != nil { expected[symbol] = true } }
+	for symbol, entry := range providers { if entry.Schema != nil { expected[symbol] = true } }
 	for _, binding := range bindings {
 		expected[binding.symbol] = true
 		compiled, err := constructorconfig.DefaultsJSON(binding.schema)
@@ -134,6 +156,7 @@ type runtimeConstructorInventoryEntry struct {
 	Symbol string
 	Interfaces []string
 	Schema *constructorconfig.Schema
+	Dependencies []runtimeResourceDependency ` + "`json:\"resource_dependencies\"`" + `
 }
 
 func runtimeConstructorInventory(document runtimebaseline.Document) (map[string]runtimeConstructorInventoryEntry, error) {

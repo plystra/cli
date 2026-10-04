@@ -42,7 +42,7 @@ func TestGeneratedTemplateRuntimeWithoutSourceTree(t *testing.T) {
 		t.Fatal("compile Config", err)
 	}
 	input := ConstructorConfigurationInput{Symbol: "example.com/probe.New", Schema: schema, YAML: []byte("value: frozen\n")}
-	constructors, err := renderConstructorConfiguration([]ConstructorConfigurationInput{input}, []string{input.Symbol})
+	constructors, err := renderConstructorConfiguration([]ConstructorConfigurationInput{input}, []string{input.Symbol}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +94,16 @@ func TestGeneratedTemplateRuntimeWithoutSourceTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	runEmittedRuntime(t, "package assembly\n"+config+"type ConstructorConfiguration struct { Config0 Config }\n", runtimeTestHeader+
+		"const compiledRuntimeContract = "+strconv.Quote(baseline.ContractID)+"\n"+
+		"const compiledApplicationModelDigest = "+strconv.Quote(compatibility.ApplicationModelDigest())+"\n"+
+		"const compiledApplicationModelCompatibilityDigest = "+strconv.Quote(compatibility.Digest())+"\n"+
+		"const initialBaseline = "+strconv.Quote(string(encoded))+"\n"+
+		runtimeSource+runtimeBaselineSupport+constructors, runtimeTemplateTests)
+}
+
+func runEmittedRuntime(t *testing.T, assembly, runtime, tests string) {
+	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -119,14 +129,9 @@ func TestGeneratedTemplateRuntimeWithoutSourceTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	write("go.sum", string(sums))
-	write("assembly/config.go", "package assembly\n"+config+"type ConstructorConfiguration struct { Config0 Config }\n")
-	write("runtime.go", runtimeTestHeader+
-		"const compiledRuntimeContract = "+strconv.Quote(baseline.ContractID)+"\n"+
-		"const compiledApplicationModelDigest = "+strconv.Quote(compatibility.ApplicationModelDigest())+"\n"+
-		"const compiledApplicationModelCompatibilityDigest = "+strconv.Quote(compatibility.Digest())+"\n"+
-		"const initialBaseline = "+strconv.Quote(string(encoded))+"\n"+
-		runtimeSource+runtimeBaselineSupport+constructors)
-	write("runtime_test.go", runtimeTemplateTests)
+	write("assembly/config.go", assembly)
+	write("runtime.go", runtime)
+	write("runtime_test.go", tests)
 	binary := filepath.Join(t.TempDir(), "runtime.test.exe")
 	build := exec.CommandContext(t.Context(), "go", "test", "-c", "-race", "-buildvcs=false", "-mod=readonly", "-o", binary, ".")
 	build.Dir = source
@@ -331,7 +336,7 @@ func TestAncestryIdentityAndLayerRejections(t *testing.T) {
   "process address": func(d *runtimebaseline.Document) { d.Templates[0].YAML += "http: {address: PRIVATE_SENTINEL}\n" },
   "process startup": func(d *runtimebaseline.Document) { d.Templates[0].YAML += "timeouts: {startup: 1s}\n" },
   "nested template": func(d *runtimebaseline.Document) { d.Templates[0].YAML += "template: example.com/other\n" },
-  "resources": func(d *runtimebaseline.Document) { d.Templates[0].YAML += "resources: {}\n" },
+  "resources": func(d *runtimebaseline.Document) { d.Templates[0].YAML += "resources: {instances: {primary: {use: example.com/missing.New}}}\n" },
   "data": func(d *runtimebaseline.Document) { d.Templates[0].YAML += "data: {}\n" },
   "malformed scalar suppressed": func(d *runtimebaseline.Document) { d.Templates[0].YAML = "config: {example.com/probe.New: {value: !!binary PRIVATE_SENTINEL}}\n" },
  } {
@@ -344,7 +349,7 @@ func TestAncestryIdentityAndLayerRejections(t *testing.T) {
  for _, root := range []string{"{}\n", "template: example.com/other\n", "template: [example.com/near]\n", "template: ../PRIVATE_SENTINEL\n"} {
   if _, err := composeRuntimeTemplateDocument(fixture(t), []byte(root), nil, nil); err == nil || strings.Contains(err.Error(), "PRIVATE_SENTINEL") { t.Fatal("accepted root drift or leaked value", err) }
  }
- for _, selected := range []string{"template: example.com/near\n", "resources: {}\n", "data: {}\n", "composition: {}\n"} {
+ for _, selected := range []string{"template: example.com/near\n", "resources: {instances: {primary: {use: example.com/missing.New}}}\n", "data: {}\n", "composition: {}\n"} {
   for _, overlay := range []bool{false, true} {
    var replacement, environment []byte
    if overlay { environment = []byte(selected) } else { replacement = []byte(selected) }

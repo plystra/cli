@@ -33,9 +33,12 @@ func composeRuntimeTemplateDocument(baseline runtimebaseline.Document, rootData,
 	}
 	result := runtimeMappingNode(nil)
 	configurations := make([]*yaml.Node, 0, len(layers))
+	resources := make([]*yaml.Node, 0, len(layers))
 	for _, layer := range layers {
 		configurations = append(configurations, layer["config"])
 		delete(layer, "config")
+		resources = append(resources, layer["resources"])
+		delete(layer, "resources")
 		result, err = mergeRuntimeDocument(result, runtimeMappingNode(layer))
 		if err != nil { return nil, err }
 	}
@@ -49,6 +52,10 @@ func composeRuntimeTemplateDocument(baseline runtimebaseline.Document, rootData,
 	owners, err := runtimeConfigurationOwners(fields["interfaces"], inventory)
 	if err != nil { return nil, err }
 	fields["config"], err = composeRuntimeTemplateConfigurations(configurations, inventory, owners)
+	if err != nil { return nil, err }
+	providers, err := runtimeResourceInventory(baseline)
+	if err != nil { return nil, err }
+	fields["resources"], err = composeRuntimeResources(resources, providers, inventory)
 	if err != nil { return nil, err }
 	return encodeRuntimeDocument(runtimeMappingNode(fields))
 }
@@ -84,7 +91,7 @@ func runtimeTemplateLayers(baseline runtimebaseline.Document, relationship strin
 func runtimeApplicationLayer(document *yaml.Node, inherited bool) (map[string]*yaml.Node, error) {
 	fields, err := runtimeMapping(document, "application configuration", runtimeKeySet("http", "timeouts", "interfaces", "config", "resources", "data"))
 	if err != nil { return nil, err }
-	if fields["resources"] != nil || fields["data"] != nil { return nil, runtimeConfigurationError("Resources and Data are not supported by this runtime") }
+	if fields["data"] != nil { return nil, runtimeConfigurationError("Data is not supported by this runtime") }
 	if inherited {
 		if fields["timeouts"] != nil { return nil, runtimeConfigurationError("private template baseline cannot contain process settings") }
 		http, err := runtimeOptionalMapping(fields["http"], "template http", runtimeKeySet("cors", "expose"))
