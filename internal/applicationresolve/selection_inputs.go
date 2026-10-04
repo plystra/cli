@@ -36,6 +36,7 @@ type SelectionInputs struct {
 	dependencySnapshots  []dependencyManifestSnapshot
 	templateDependencies []applicationmeta.Dependency
 	moduleMetadata       []ModuleMetadataSnapshot
+	workspaceSnapshots   []selectionWorkspaceSnapshot
 	dependencyOptions    moduledependency.Options
 }
 
@@ -181,6 +182,10 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 	dependencyOptions := moduledependency.Options{
 		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...), OutputLimit: options.DependencyOutputLimit,
 	}
+	workspaceSnapshots, err := captureSelectionWorkspace(module.Path(), dependencyOptions.Environment)
+	if err != nil {
+		return SelectionInputs{}, fmt.Errorf("%w: %w", ErrResolve, selectionWorkspaceError(module.ModulePath()))
+	}
 	dependencies, err := moduledependency.Discover(ctx, module, dependencyOptions)
 	if err != nil {
 		err = normalizeDependencyConcurrentChange(err)
@@ -222,7 +227,7 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 		rootManifest: rootManifest, selectedManifest: selectedManifest,
 		rootSnapshot: rootSnapshot, selectedSnapshot: selectedSnapshot, selector: selector,
 		dependencySnapshots: dependencySnapshots, templateDependencies: dependencyManifests,
-		moduleMetadata: moduleMetadata, dependencyOptions: dependencyOptions,
+		moduleMetadata: moduleMetadata, workspaceSnapshots: workspaceSnapshots, dependencyOptions: dependencyOptions,
 	}, nil
 }
 
