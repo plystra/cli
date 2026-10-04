@@ -92,6 +92,12 @@ func Current() (commandschema.Capabilities, error) {
 				Accepted: commandschema.SupportYes,
 			},
 			{
+				ID:        "template.resource-inheritance",
+				Specified: commandschema.SupportYes, Parsed: commandschema.SupportYes,
+				Generated: commandschema.SupportYes, Executed: commandschema.SupportYes,
+				Accepted: commandschema.SupportNo,
+			},
+			{
 				ID:        "invocation.default-concurrency",
 				Specified: commandschema.SupportYes,
 				Parsed:    commandschema.SupportNotApplicable,
@@ -120,9 +126,9 @@ func Current() (commandschema.Capabilities, error) {
 			{
 				ID:        "resource",
 				Specified: commandschema.SupportYes,
-				Parsed:    commandschema.SupportNo,
-				Generated: commandschema.SupportNo,
-				Executed:  commandschema.SupportNo,
+				Parsed:    commandschema.SupportYes,
+				Generated: commandschema.SupportYes,
+				Executed:  commandschema.SupportYes,
 				Accepted:  commandschema.SupportNo,
 			},
 			{
