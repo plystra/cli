@@ -230,6 +230,8 @@ func TestRunNewCommandPreservesTemplateValidationDiagnostics(t *testing.T) {
 		{"missing implementation", constructorgraph.ErrMissingBinding, diagnosticResolveMissingImplementation},
 		{"unknown implementation", interfaceresolution.ErrUnknownConstructor, diagnosticResolveUnknownImplementation},
 		{"constructor declaration", implementationinventory.ErrInvalidConfiguration, diagnosticImplementationConfigInvalid},
+		{"Resource parameter", implementationinventory.ErrInvalidRequiredResource, diagnosticcode.ImplementationResourceInvalid},
+		{"Resource binding", constructorgraph.ErrResourceBindingUnsupported, diagnosticcode.ResourceBindingUnsupported},
 		{"unsupported policy", applicationresolve.ErrPolicyNotEnforced, diagnosticPolicyNotEnforced},
 	}
 	for _, test := range tests {

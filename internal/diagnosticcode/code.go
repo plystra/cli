@@ -81,6 +81,7 @@ const (
 	ImplementationDeclarationInvalid     = Prefix + "IMPLEMENTATION_DECLARATION_INVALID"
 	ImplementationConfigInvalid          = Prefix + "IMPLEMENTATION_CONFIG_INVALID"
 	ImplementationRequiredInvalid        = Prefix + "IMPLEMENTATION_REQUIRED_INTERFACE_INVALID"
+	ImplementationResourceInvalid        = Prefix + "IMPLEMENTATION_REQUIRED_RESOURCE_INVALID"
 	ImplementationOptionalInvalid        = Prefix + "IMPLEMENTATION_OPTIONAL_INTERFACE_INVALID"
 	ImplementationResultInvalid          = Prefix + "IMPLEMENTATION_RESULT_INVALID"
 	ImplementationConformanceInvalid     = Prefix + "IMPLEMENTATION_CONFORMANCE_INVALID"
@@ -93,6 +94,7 @@ const (
 	ResourceIDDuplicate                  = Prefix + "RESOURCE_ID_DUPLICATE"
 	ResourceProviderDeclarationInvalid   = Prefix + "RESOURCE_PROVIDER_DECLARATION_INVALID"
 	ResourceProviderInvalid              = Prefix + "RESOURCE_PROVIDER_INVALID"
+	ResourceBindingUnsupported           = Prefix + "RESOURCE_BINDING_UNSUPPORTED"
 	AuthoredPackageInvalid               = Prefix + "AUTHORING_PACKAGE_INVALID"
 )
 

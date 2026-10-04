@@ -23,7 +23,7 @@ var (
 		"The configuration view retains",
 		"The resources view retains consumer contracts only, with contract_digest on\nresource-contract nodes. Resource instance construction and binding remain\nunsupported. Invalid Resource declarations, contracts, or duplicate identities\nreport RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or\nRESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.\nThe configuration view retains",
 		"configuration provenance, and reachable assembly membership.\n",
-		"configuration provenance, and reachable assembly membership.\nDependency edges retain exact parameter_name and one-based parameter_position;\nother edges omit these fields. Repeated parameters remain distinct, and human\noutput includes each dependency name and position.\n",
+		"configuration provenance, and reachable assembly membership.\nDependency edges retain exact parameter_name and one-based parameter_position;\nother edges omit these fields. Repeated parameters remain distinct, and human\noutput includes each dependency name and position.\nResource parameters appear as declared dependencies with reason resource and\nexact resource-contract identity and digest, never as Interface requirements.\nMalformed Resource parameters report PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID.\nReachable Resource consumers report PLYSTRA_RESOURCE_BINDING_UNSUPPORTED before\nassembly or generation; dormant candidates remain discoverable and inspectable.\n",
 		"Usage:\n",
 		"Usage:\n  plystra inspect capabilities [--format human|json]\n",
 		"\n\nViews:\n",

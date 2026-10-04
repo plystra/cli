@@ -121,7 +121,7 @@ func TestBuiltCLIInspectsLongResourceConsumerIdentities(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
 	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/plystra")
 	build.Dir = commandRepositoryRoot(t)
-	// Compile the same source overlay and build flags as the running test.
+	// Preserve explicit build flags while retaining normal VCS checks by default.
 	build.Env = commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
