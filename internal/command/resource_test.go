@@ -88,7 +88,7 @@ func TestInspectResourcesReportsDeterministicReadOnlyContracts(t *testing.T) {
 		t.Fatal("repeated Resource view changed")
 	}
 	code, stdout, stderr = runCommand(t, []string{"inspect", "resources", "--verbose"}, nested, environment)
-	if code != 0 || stderr != "" || !strings.Contains(stdout, "Resource contracts: 2 visible") || !strings.Contains(stdout, originalDigest) || !strings.Contains(stdout, "Resource instance construction and binding are not supported.") || !strings.Contains(stdout, "Resolution evidence:") {
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "Resource contracts: 2 visible") || !strings.Contains(stdout, originalDigest) || !strings.Contains(stdout, "Resource instances: 0 selected") || !strings.Contains(stdout, "Resolution evidence:") {
 		t.Fatalf("human Resource view = %d, %s, %s", code, stdout, stderr)
 	}
 	if after := snapshotInspectProject(t, root); !reflect.DeepEqual(before, after) {
