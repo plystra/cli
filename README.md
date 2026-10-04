@@ -407,7 +407,7 @@ Root `plystra.yaml` may declare one exact `template` module path. Resolve each r
 
 Template roots immediately contribute Interface requirements, choices, invocation policies, typed constructor configuration, exposure, and CORS. Later exact-key replacements and removals have precedence. Ancestry is configuration precedence, never Implementation candidate priority. Ordinary dependencies remain discoverable but their application configuration stays inactive.
 
-Only reusable root configuration is inherited. Ancestor overlays, replacement documents, selector state, process-local `http.address` and `timeouts.startup`, resolved Secrets, and deployment material are excluded. The root relationship persists under every selector; overlays and replacements cannot declare it. Named Resource instances, typed configuration, and bindings participate in this baseline. Data inheritance remains unsupported and fails before partial activation. Complete Gate 5 acceptance remains unfinished.
+Only reusable root configuration is inherited. Ancestor overlays, replacement documents, selector state, process-local `http.address` and `timeouts.startup`, resolved Secrets, and deployment material are excluded. The root relationship persists under every selector; overlays and replacements cannot declare it. Named Resource instances, typed configuration, and bindings participate in this baseline. Data inheritance remains unsupported and fails before partial activation. Gate 5 and Gate 7 template acceptance is complete; Gate 9 remains unfinished.
 
 Malformed ancestry reports `PLYSTRA_TEMPLATE_INVALID`, exact owning relationship sources, and module identities without private configuration values. Fix authored roots or their ordinary module graph, never the Module Cache copy.
 
@@ -601,7 +601,7 @@ instances receive their own typed configuration and Secrets through this same
 private-baseline boundary. Runtime compatibility version 12 binds instance
 names, providers, contracts, and resolved bindings; frozen model version 19
 records their assembly identity. Regenerate and rebuild older output. This
-support does not establish complete Gate 5 or Gate 9 acceptance.
+support does not establish complete Gate 9 acceptance.
 
 `Application.Interfaces` exposes the frozen governed typed Interface runtime after successful construction, while `Application.Invocations` retains the existing canonical invocation handles during the migration. `Application.Start` starts lifecycle-aware named Resources and static Implementations in dependency order within `timeouts.startup`; failure is redacted and rolls back the full constructed lifecycle set, including never-started instances. `Application.Stop` coordinates reverse-order shutdown, remains retryable after a bounded failure, and reports the combined application state. The CLI-owned `generated/go/application` process entrypoint delegates configuration selection to bootstrap, waits for `SIGINT` or `SIGTERM` during normal execution, and owns bounded shutdown. No runtime value or Secret reference target is embedded in generated source.
 
@@ -1306,7 +1306,7 @@ from provider selection and full Resource acceptance; generated and executed
 scaffold support does not establish `accepted: yes`. After manual declaration or binding edits, run `plystra generate`,
 `plystra generate --check`, and `plystra check` with the same selector. Do not
 hand-edit generated assembly. Installed `resource.provider.selection` support
-does not establish Resource, Data, or Gate 5 acceptance.
+does not establish Resource or Data acceptance; Gate 5 template acceptance is already complete.
 
 ### Explain resolution
 

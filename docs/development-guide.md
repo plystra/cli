@@ -866,7 +866,7 @@ template: github.com/acme/base-app
 
 `go.mod` selects its version. Each template may name one ancestor. Resolve all relationships in the current application's effective graph, reject missing/non-Project targets and cycles, then compose oldest to nearest before the selected current-Project delta. No additional activation step is required, and commands never copy template configuration or sources.
 
-The supported baseline includes Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, and CORS. Named Resource instances, typed configuration, and bindings are inherited; Data inheritance remains unsupported and fails before partial activation. This support does not complete Gate 5.
+The supported baseline includes Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, and CORS. Named Resource instances, typed configuration, and bindings are inherited; Data inheritance remains unsupported and fails before partial activation. This template behavior is covered by completed Gate 5 and Gate 7 evidence; Gate 9 remains incomplete.
 
 Only reusable root declarations are inherited. Ancestor overlays, replacement documents, selector state, resolved Secrets, process settings, and deployment material remain excluded. `http.address` and `timeouts.startup` belong to the current Project. Ordinary dependency relationships are not followed unless reached through the selected root chain.
 
@@ -1732,7 +1732,7 @@ Secret inputs. Named Resource instances receive separately owned typed Config
 and Secrets through the same private runtime baseline. Runtime compatibility
 version 12 binds exact instance names, provider contracts, and resolved bindings;
 frozen model version 19 includes their construction identity. Regenerate and
-rebuild older output. Complete Gate 5 and Gate 9 acceptance remain unfinished.
+rebuild older output. Gate 5 and Gate 7 are complete; Gate 9 acceptance remains unfinished.
 
 Bootstrap validates composed active Config objects using generated typed
 bindings and shared support under `generated/go/internal/constructorconfig`.
@@ -2323,7 +2323,7 @@ private baseline. Instance names, providers, bindings, and build-visible Config
 changes require regeneration and rebuilding. Valid runtime-only values and
 Secret references may change without public generated drift; private values,
 reference targets, and private hashes stay out of public artifacts. Data schema,
-query, migration, and complete Gate 5 acceptance remain unsupported or incomplete.
+query and migration support remain unsupported or incomplete; Gate 9 acceptance also remains incomplete.
 
 ### Explain resolution
 
