@@ -105,7 +105,18 @@ func maintainDependencyConfiguration(data []byte, modulePath, sourcePath string,
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
-	decisions, err := ConfigurationDecisions(current, schemas)
+	selected := current
+	if overlay != nil {
+		selected, err = ApplyOverlay(current, *overlay, schemas)
+		if err != nil {
+			return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
+		}
+	}
+	composition, err := Compose(dependencies, selected, schemas)
+	if err != nil {
+		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
+	}
+	decisions, err := ConfigurationDecisions(composition.CurrentLayers()[0], schemas)
 	if err != nil {
 		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
@@ -114,16 +125,6 @@ func maintainDependencyConfiguration(data []byte, modulePath, sourcePath string,
 		if decision.dependencyComposable {
 			local = append(local, decision.path)
 		}
-	}
-	selected := current
-	if overlay != nil {
-		selected, err = ApplyOverlay(current, *overlay, schemas)
-		if err != nil {
-			return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
-		}
-	}
-	if _, err := Compose(dependencies, selected, schemas); err != nil {
-		return ConfigurationMaintenance{}, fmt.Errorf("%w: %w", ErrMaintainConfiguration, err)
 	}
 	return ConfigurationMaintenance{data: append([]byte(nil), data...), localPaths: local}, nil
 }

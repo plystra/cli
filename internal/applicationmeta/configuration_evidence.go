@@ -127,6 +127,11 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 		result = append(result, ConfigurationDecision{path: "template", digest: digestStrings("template", manifest.template), summary: ConfigurationSummaryString, source: manifest.templateSource.Path()})
 	}
 	result = append(result, processConfigurationDecisions(manifest)...)
+	resources, err := resourceConfigurationDecisions(manifest, schemas, false)
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, resources...)
 	// maintenanceDecisions and the process decision builder are both typed and
 	// deterministic, but sort again at this public boundary so future fields do
 	// not accidentally inherit map ordering.
@@ -184,6 +189,10 @@ func configurationLayerDigestDecisions(manifest Manifest, schemas SchemaLookup) 
 	withoutConstructorConfiguration := manifest
 	withoutConstructorConfiguration.configurations = nil
 	withoutConstructorConfiguration.removedConfigurations = nil
+	withoutConstructorConfiguration.resourceInstances = nil
+	withoutConstructorConfiguration.removedResourceInstances = nil
+	withoutConstructorConfiguration.resourceBindings = nil
+	withoutConstructorConfiguration.removedResourceBindings = nil
 	result, err := ConfigurationDecisions(withoutConstructorConfiguration, schemas)
 	if err != nil {
 		return nil, err
@@ -218,6 +227,11 @@ func configurationLayerDigestDecisions(manifest Manifest, schemas SchemaLookup) 
 			removal.source,
 		)))
 	}
+	resources, err := resourceConfigurationDecisions(manifest, schemas, true)
+	if err != nil {
+		return nil, err
+	}
+	result = append(result, resources...)
 	sortConfigurationDecisions(result)
 	for index := 1; index < len(result); index++ {
 		if result[index-1].path == result[index].path {
