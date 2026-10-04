@@ -865,8 +865,10 @@ The root relationship remains effective under default, environment, and replacem
 Interface activation is explicit. Every discovered `//plystra:implements`
 constructor is only a compatible candidate, including constructors authored in
 the current Project. A candidate becomes reachable only when its Interface is
-collected from `interfaces.require`, selected current-Project `http.expose`, or
-another reachable constructor's required Interface parameter. Discovery and
+collected from effective `interfaces.require` or `http.expose` entries composed
+from template roots and the selected current-Project delta, or another reachable
+constructor's required Interface parameter. Inherited requirements and exposure
+create roots immediately without repeated current-Project declarations. Discovery and
 `interfaces.use` alone create no root, binding, constructor call, lifecycle
 entry, runtime configuration, or generated proxy or adapter. An exact compatible
 choice is still validated immediately; it remains dormant until the Interface
