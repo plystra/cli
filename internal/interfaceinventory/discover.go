@@ -29,6 +29,7 @@ import (
 	"github.com/plystra/cli/internal/interfacecontract"
 	"github.com/plystra/cli/internal/interfacedecl"
 	"github.com/plystra/cli/internal/interfacedigest"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfacemeta"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -407,7 +408,21 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 			Types:       discovered.types,
 		}
 	}
-	implementations, err := implementationinventory.Build(found.implementations, canonicalInterfaces)
+	canonicalResources := make([]implementationinventory.ResourceInput, len(resourceInventory.resources))
+	for index, discovered := range resourceInventory.resources {
+		identifier, err := interfaceid.Parse(discovered.ID())
+		if err != nil {
+			return Discovery{}, fmt.Errorf("%w: invalid discovered Resource identity: %w", ErrDiscover, err)
+		}
+		compiled, err := found.importer.Import(discovered.PackagePath())
+		if err != nil {
+			return Discovery{}, fmt.Errorf("%w: cannot load canonical Resource %s at %s", ErrDiscover, discovered.ID(), discovered.Source())
+		}
+		canonicalResources[index] = implementationinventory.ResourceInput{
+			ID: identifier, PackagePath: discovered.PackagePath(), Types: compiled,
+		}
+	}
+	implementations, err := implementationinventory.Build(found.implementations, canonicalInterfaces, canonicalResources)
 	if err != nil {
 		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}

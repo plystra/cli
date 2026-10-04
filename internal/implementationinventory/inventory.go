@@ -26,6 +26,9 @@ var (
 	// ErrInvalidRequiredInterface reports a non-Config constructor parameter
 	// that is not one exact visible canonical Interface type.
 	ErrInvalidRequiredInterface = errors.New("invalid required Interface constructor parameter")
+	// ErrInvalidRequiredResource reports a Resource-shaped parameter that is
+	// not one exact visible canonical Resource value with a nonblank identifier.
+	ErrInvalidRequiredResource = errors.New("invalid required Resource constructor parameter")
 	// ErrInvalidOptionalInterface reports a constructor parameter that resembles
 	// Optional but is not exact plystra.Optional[canonical Interface].
 	ErrInvalidOptionalInterface = errors.New("invalid optional Interface constructor parameter")
@@ -125,6 +128,7 @@ type Implementation struct {
 	hasConfig     bool
 	required      []RequiredInterface
 	optional      []OptionalInterface
+	resources     []RequiredResource
 	concrete      ConcreteType
 }
 
@@ -182,6 +186,12 @@ func (i Implementation) OptionalInterfaces() []OptionalInterface {
 	return append([]OptionalInterface(nil), i.optional...)
 }
 
+// RequiredResources returns a defensive parameter-ordered view of exact
+// canonical Resource dependencies, separate from Interface requirements.
+func (i Implementation) RequiredResources() []RequiredResource {
+	return append([]RequiredResource(nil), i.resources...)
+}
+
 // ConcreteType returns the exact defined non-interface pointer type produced by
 // the constructor.
 func (i Implementation) ConcreteType() ConcreteType { return i.concrete }
@@ -218,8 +228,12 @@ func (i Index) BySymbol(symbol constructorsymbol.Symbol) (Implementation, bool) 
 
 // Build validates shared-loader provenance and constructs a deterministic
 // immutable inventory without performing another filesystem or Go graph scan.
-func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
+func Build(inputs []Input, interfaces []InterfaceInput, resources []ResourceInput) (Index, error) {
 	interfacePackages, err := indexInterfacePackages(interfaces)
+	if err != nil {
+		return Index{}, err
+	}
+	resourcePackages, err := indexResourcePackages(resources)
 	if err != nil {
 		return Index{}, err
 	}
@@ -256,7 +270,11 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 		if optionalErr != nil {
 			return Index{}, validationError(ErrInvalidOptionalInterface, input, symbol.String(), optionalErr)
 		}
-		required, requiredErr := validateRequiredInterfaces(function, hasConfig, optionalPositions, interfacePackages)
+		requiredResources, resourcePositions, resourceErr := validateRequiredResources(function, hasConfig, resourcePackages)
+		if resourceErr != nil {
+			return Index{}, validationError(ErrInvalidRequiredResource, input, symbol.String(), resourceErr)
+		}
+		required, requiredErr := validateRequiredInterfaces(function, hasConfig, optionalPositions, resourcePositions, interfacePackages)
 		if requiredErr != nil {
 			return Index{}, validationError(ErrInvalidRequiredInterface, input, symbol.String(), requiredErr)
 		}
@@ -280,6 +298,7 @@ func Build(inputs []Input, interfaces []InterfaceInput) (Index, error) {
 			hasConfig:     hasConfig,
 			required:      required,
 			optional:      optional,
+			resources:     requiredResources,
 			concrete:      concrete,
 		}
 	}

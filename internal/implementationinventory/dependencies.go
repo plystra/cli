@@ -108,7 +108,7 @@ func indexInterfacePackages(inputs []InterfaceInput) (canonicalInterfaceIndex, e
 	return result, nil
 }
 
-func validateRequiredInterfaces(function *types.Func, hasConfig bool, optionalPositions map[int]struct{}, interfaces canonicalInterfaceIndex) ([]RequiredInterface, error) {
+func validateRequiredInterfaces(function *types.Func, hasConfig bool, optionalPositions, resourcePositions map[int]struct{}, interfaces canonicalInterfaceIndex) ([]RequiredInterface, error) {
 	signature, ok := function.Type().(*types.Signature)
 	if !ok {
 		return nil, fmt.Errorf("compiled constructor is not a Go function")
@@ -120,6 +120,9 @@ func validateRequiredInterfaces(function *types.Func, hasConfig bool, optionalPo
 			continue
 		}
 		if _, optional := optionalPositions[index]; optional {
+			continue
+		}
+		if _, resource := resourcePositions[index]; resource {
 			continue
 		}
 		parameter := parameters.At(index)
