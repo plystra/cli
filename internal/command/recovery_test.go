@@ -637,6 +637,31 @@ func TestTemplateDiagnosticPrecedesCreationAndManifestWrappers(t *testing.T) {
 	}
 }
 
+func TestImplementationAmbiguityDiagnosticPrecedesCreationWrapper(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{
+		fmt.Errorf("%w: %w", newproject.ErrCreate, interfaceresolution.ErrAmbiguousImplementation),
+		errors.Join(newproject.ErrCreate, interfaceresolution.ErrAmbiguousImplementation),
+	} {
+		var output strings.Builder
+		writeCommandFailure(&output, "create project", err, recoveryContext{operation: "new"})
+		got := output.String()
+		if !strings.HasSuffix(got, "Diagnostic: "+diagnosticResolveMultipleImplementations+"\n") || strings.Contains(got, diagnosticProjectCreateFailed) || strings.Count(got, "Recovery:") != 1 || strings.Count(got, "Diagnostic:") != 1 || !strings.Contains(got, "plystra use <interface-id> <constructor-symbol>") {
+			t.Fatalf("creation wrapper masked Implementation ambiguity: %s", got)
+		}
+	}
+	for _, cause := range []error{newproject.ErrCreate, fmt.Errorf("%w: %w: %w", newproject.ErrCreate, newproject.ErrInvalidTemplate, interfaceresolution.ErrAmbiguousImplementation)} {
+		diagnostic, ok := primaryActionableDiagnostic(cause, recoveryContext{operation: "new"})
+		want := diagnosticProjectCreateFailed
+		if errors.Is(cause, newproject.ErrInvalidTemplate) {
+			want = diagnosticTemplateInvalid
+		}
+		if !ok || diagnostic.code != want {
+			t.Fatalf("other creation failure changed classification: %#v, %t; want %s", diagnostic, ok, want)
+		}
+	}
+}
+
 func TestWriteCommandFailureReportsCapabilityRequirementConflictSources(t *testing.T) {
 	t.Parallel()
 
