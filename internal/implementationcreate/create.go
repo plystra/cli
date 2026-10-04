@@ -1,4 +1,4 @@
-// Package implementationcreate scaffolds ordinary Go Implementation packages.
+// Package implementationcreate scaffolds ordinary Go contract implementations.
 package implementationcreate
 
 import (
@@ -26,20 +26,24 @@ import (
 var (
 	// ErrCreate reports a failed Implementation-package creation transaction.
 	ErrCreate = errors.New("create Implementation package")
-	// ErrInvalidInterface reports a malformed canonical Interface ID.
-	ErrInvalidInterface = errors.New("invalid Interface ID")
+	// ErrInvalidContract reports a malformed canonical contract ID.
+	ErrInvalidContract = errors.New("invalid contract ID")
 	// ErrInvalidPackage reports an unsafe or noncanonical target package path.
-	ErrInvalidPackage = errors.New("invalid Implementation package")
-	// ErrInterfaceNotFound reports an Interface absent from the visible Project graph.
-	ErrInterfaceNotFound = errors.New("Interface is not visible")
+	ErrInvalidPackage = errors.New("invalid implementation package")
+	// ErrContractNotFound reports a contract absent from the visible Project graph.
+	ErrContractNotFound = errors.New("contract is not visible")
+	// ErrAmbiguousContract reports an ID shared by Interface and Resource contracts.
+	ErrAmbiguousContract = errors.New("contract ID names both an Interface and a Resource")
+	// ErrUnimplementableContract reports a contract inaccessible to the target package.
+	ErrUnimplementableContract = errors.New("contract cannot be implemented in the target package")
 	// ErrTargetExists reports an authored target package that must not be overwritten.
-	ErrTargetExists = errors.New("Implementation target already exists")
+	ErrTargetExists = errors.New("implementation target already exists")
 )
 
 // Options controls one ordinary Implementation-package creation transaction.
 type Options struct {
 	Start                 string
-	InterfaceID           string
+	ContractID            string
 	Package               string
 	GoCommand             string
 	Environment           []string
@@ -48,7 +52,8 @@ type Options struct {
 
 // Result identifies one committed ordinary Go Implementation package.
 type Result struct {
-	interfaceID interfaceid.Identifier
+	contractID  interfaceid.Identifier
+	kind        string
 	moduleRoot  string
 	packagePath string
 	importPath  string
@@ -56,8 +61,11 @@ type Result struct {
 	constructor constructorsymbol.Symbol
 }
 
-// InterfaceID returns the exact canonical Interface implemented by the scaffold.
-func (r Result) InterfaceID() interfaceid.Identifier { return r.interfaceID }
+// ContractID returns the exact canonical contract implemented by the scaffold.
+func (r Result) ContractID() interfaceid.Identifier { return r.contractID }
+
+// Kind returns interface or resource, inferred from the visible contract.
+func (r Result) Kind() string { return r.kind }
 
 // ModuleRoot returns the canonical absolute current-Project root.
 func (r Result) ModuleRoot() string { return r.moduleRoot }
@@ -75,7 +83,7 @@ func (r Result) SourcePath() string { return r.sourcePath }
 func (r Result) Constructor() constructorsymbol.Symbol { return r.constructor }
 
 // Create writes and validates one new ordinary Go package implementing a visible
-// canonical Interface. It does not copy the contract, edit configuration, or
+// canonical Interface or Resource. It does not copy the contract, edit configuration, or
 // create authored registration source.
 func Create(ctx context.Context, options Options) (Result, error) {
 	return create(ctx, options, nil)
@@ -87,9 +95,9 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrCreate)
 	}
-	identifier, err := interfaceid.Parse(options.InterfaceID)
+	identifier, err := interfaceid.Parse(options.ContractID)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w %q: %v", ErrCreate, ErrInvalidInterface, options.InterfaceID, err)
+		return Result{}, fmt.Errorf("%w: %w: %v", ErrCreate, ErrInvalidContract, err)
 	}
 	project, err := projectlocate.Find(options.Start)
 	if err != nil {
@@ -105,13 +113,13 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 
 	before, err := discover(ctx, project, options)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: validate visible Interfaces before mutation: %w", ErrCreate, err)
+		return Result{}, fmt.Errorf("%w: validate visible contracts before mutation: %w", ErrCreate, err)
 	}
-	canonical, found := findInterface(before.Interfaces(), identifier.String())
-	if !found {
-		return Result{}, fmt.Errorf("%w: %w: %s; add the Go Module that defines it or create the Interface first", ErrCreate, ErrInterfaceNotFound, identifier)
+	canonical, err := findContract(before, identifier.String())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}
-	source, err := render(identifier, canonical, target.packageName)
+	source, err := canonical.render(identifier, target)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: render source: %w", ErrCreate, err)
 	}
@@ -136,13 +144,27 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 		if err != nil {
 			return err
 		}
-		implementation, found := discovery.Implementations().BySymbol(constructor)
-		if !found || !implementation.Local() || implementation.PackagePath() != target.importPath || implementation.SourcePath() != target.sourcePath {
-			return fmt.Errorf("created Implementation %s was not discovered at source %s", constructor, target.sourcePath)
+		current, err := findContract(discovery, identifier.String())
+		if err != nil {
+			return err
 		}
-		declared := implementation.Declaration().ImplementedInterfaces()
-		if len(declared) != 1 || declared[0].ID() != identifier {
-			return fmt.Errorf("created Implementation %s does not declare only Interface %s", constructor, identifier)
+		if current.kind != canonical.kind || current.digest() != canonical.digest() {
+			return errors.New("contract changed during implementation creation")
+		}
+		if canonical.kind == "resource" {
+			provider, found := discovery.ResourceProviders().BySymbol(constructor)
+			if !found || !provider.Local() || provider.PackagePath() != target.importPath || provider.Declaration().Position().Path != target.sourcePath || provider.ID() != identifier.String() {
+				return fmt.Errorf("created Resource provider %s was not discovered for %s at source %s", constructor, identifier, target.sourcePath)
+			}
+		} else {
+			implementation, found := discovery.Implementations().BySymbol(constructor)
+			if !found || !implementation.Local() || implementation.PackagePath() != target.importPath || implementation.SourcePath() != target.sourcePath {
+				return fmt.Errorf("created Implementation %s was not discovered at source %s", constructor, target.sourcePath)
+			}
+			declared := implementation.Declaration().ImplementedInterfaces()
+			if len(declared) != 1 || declared[0].ID() != identifier {
+				return fmt.Errorf("created Implementation %s does not declare only Interface %s", constructor, identifier)
+			}
 		}
 		if after != nil {
 			return after(updatedRoot, discovery)
@@ -153,7 +175,8 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 	}
 
 	return Result{
-		interfaceID: identifier,
+		contractID:  identifier,
+		kind:        canonical.kind,
 		moduleRoot:  project.Path(),
 		packagePath: target.packagePath,
 		importPath:  target.importPath,
