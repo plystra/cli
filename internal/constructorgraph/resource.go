@@ -1,64 +1,138 @@
 package constructorgraph
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/plystra/cli/internal/constructorsymbol"
-	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
-// ResourceBindingUnsupportedError identifies the first Resource parameter of
-// a reachable constructor, preserving the Interface path that activated it.
-type ResourceBindingUnsupportedError struct {
-	implementation implementationinventory.Implementation
-	dependency     implementationinventory.RequiredResource
-	path           dependencyPath
+// ResourceConsumerNamespace identifies one exact Resource binding address space.
+type ResourceConsumerNamespace string
+
+const (
+	ResourceConsumerImplementation ResourceConsumerNamespace = "implementations"
+	ResourceConsumerInstance       ResourceConsumerNamespace = "instances"
+)
+
+// ResourceSource is stable, non-secret provenance for an instance selection or
+// explicit binding. It is independent of configuration parsing and precedence.
+type ResourceSource struct {
+	Reference  string
+	ModulePath string
+	Path       string
+	Line       int
+	Column     int
 }
 
-func (e *ResourceBindingUnsupportedError) Constructor() constructorsymbol.Symbol {
-	return e.implementation.Symbol()
-}
-func (e *ResourceBindingUnsupportedError) ResourceID() interfaceid.Identifier {
-	return e.dependency.ID()
-}
-func (e *ResourceBindingUnsupportedError) ParameterName() string {
-	return e.dependency.ParameterName()
-}
-func (e *ResourceBindingUnsupportedError) ParameterPosition() int {
-	return e.dependency.ParameterPosition()
-}
-func (e *ResourceBindingUnsupportedError) ModulePath() string { return e.implementation.ModulePath() }
-func (e *ResourceBindingUnsupportedError) SourcePath() string { return e.implementation.SourcePath() }
-func (e *ResourceBindingUnsupportedError) Line() int {
-	return e.implementation.Declaration().Position().Line
-}
-func (e *ResourceBindingUnsupportedError) Column() int {
-	return e.implementation.Declaration().Position().Column
-}
-func (e *ResourceBindingUnsupportedError) Root() Root { return e.path.clone().root }
-func (e *ResourceBindingUnsupportedError) Steps() []PathStep {
-	return clonePathSteps(e.path.steps)
-}
-func (e *ResourceBindingUnsupportedError) RequirementSources() []RequirementSource {
-	return append([]RequirementSource(nil), e.path.root.sources...)
+func (s ResourceSource) String() string { return s.Reference }
+
+// ResourceInstanceInput selects one exact provider for a named instance.
+// Every selected instance is active, including instances without consumers.
+type ResourceInstanceInput struct {
+	Name     string
+	Provider constructorsymbol.Symbol
+	Sources  []ResourceSource
 }
 
-func (e *ResourceBindingUnsupportedError) Error() string {
-	if e == nil {
-		return ErrResourceBindingUnsupported.Error()
+// ResourceBindingInput addresses one exact Resource parameter. Instances use
+// the consumer instance name; Implementations use the constructor symbol.
+type ResourceBindingInput struct {
+	Namespace ResourceConsumerNamespace
+	Consumer  string
+	Parameter string
+	Target    string
+	Sources   []ResourceSource
+}
+
+// ResourceNode is one selected process-local instance, not a provider singleton.
+type ResourceNode struct {
+	name         string
+	resourceID   interfaceid.Identifier
+	provider     resourceproviderinventory.Provider
+	sources      []ResourceSource
+	dependencies []ResourceDependency
+}
+
+func (n ResourceNode) Name() string                                 { return n.name }
+func (n ResourceNode) ResourceID() interfaceid.Identifier           { return n.resourceID }
+func (n ResourceNode) Provider() resourceproviderinventory.Provider { return n.provider }
+func (n ResourceNode) Sources() []ResourceSource {
+	return append([]ResourceSource(nil), n.sources...)
+}
+func (n ResourceNode) Dependencies() []ResourceDependency {
+	return cloneResourceDependencies(n.dependencies)
+}
+
+// ResourceDependency retains a consumer parameter, its exact selected instance,
+// provider, and independent binding and instance-selection provenance.
+type ResourceDependency struct {
+	namespace                ResourceConsumerNamespace
+	consumer                 string
+	constructor              constructorsymbol.Symbol
+	declaration              ResourceSource
+	resourceID               interfaceid.Identifier
+	packagePath              string
+	parameterName            string
+	parameterPosition        int
+	instanceName             string
+	provider                 constructorsymbol.Symbol
+	reason                   SelectionReason
+	sources                  []ResourceSource
+	selectionSources         []ResourceSource
+	consumerSelectionSources []ResourceSource
+}
+
+func (d ResourceDependency) Namespace() ResourceConsumerNamespace  { return d.namespace }
+func (d ResourceDependency) Consumer() string                      { return d.consumer }
+func (d ResourceDependency) Constructor() constructorsymbol.Symbol { return d.constructor }
+func (d ResourceDependency) DeclarationSource() ResourceSource     { return d.declaration }
+func (d ResourceDependency) ResourceID() interfaceid.Identifier    { return d.resourceID }
+func (d ResourceDependency) PackagePath() string                   { return d.packagePath }
+func (d ResourceDependency) ParameterName() string                 { return d.parameterName }
+func (d ResourceDependency) ParameterPosition() int                { return d.parameterPosition }
+func (d ResourceDependency) InstanceName() string                  { return d.instanceName }
+func (d ResourceDependency) Provider() constructorsymbol.Symbol    { return d.provider }
+func (d ResourceDependency) Reason() SelectionReason               { return d.reason }
+func (d ResourceDependency) Sources() []ResourceSource {
+	return append([]ResourceSource(nil), d.sources...)
+}
+func (d ResourceDependency) SelectionSources() []ResourceSource {
+	return append([]ResourceSource(nil), d.selectionSources...)
+}
+
+// ConsumerSelectionSources returns the consumer instance's selection sources.
+// Implementation consumers have no instance selection and return nil.
+func (d ResourceDependency) ConsumerSelectionSources() []ResourceSource {
+	return append([]ResourceSource(nil), d.consumerSelectionSources...)
+}
+
+// ResourceConstructionOrder returns every selected instance once, with its
+// upstream instances first. Construct these before ConstructionOrder.
+func (g Graph) ResourceConstructionOrder() []ResourceNode {
+	return cloneResourceNodes(g.resourceConstruction)
+}
+
+// ResourceDependencies returns the parameter-ordered bindings of an active
+// Implementation. Dormant constructors have no executable Resource edges.
+func (g Graph) ResourceDependencies(constructor constructorsymbol.Symbol) []ResourceDependency {
+	return cloneResourceDependencies(g.resourceDependencies[constructor])
+}
+
+func cloneResourceDependencies(values []ResourceDependency) []ResourceDependency {
+	result := append([]ResourceDependency(nil), values...)
+	for index := range result {
+		result[index].sources = append([]ResourceSource(nil), result[index].sources...)
+		result[index].selectionSources = append([]ResourceSource(nil), result[index].selectionSources...)
+		result[index].consumerSelectionSources = append([]ResourceSource(nil), result[index].consumerSelectionSources...)
 	}
-	var message strings.Builder
-	fmt.Fprintf(&message, "%s: %s at %s requires %s through parameter %d (%s); reached from %s",
-		ErrResourceBindingUnsupported, e.Constructor(), e.implementation.Source(), e.ResourceID(),
-		e.ParameterPosition(), e.ParameterName(), e.path.root.interfaceID)
-	for _, step := range e.path.steps {
-		fmt.Fprintf(&message, "; %s parameter %d (%s) selects %s for %s",
-			step.RequiringConstructor(), step.ParameterPosition(), step.ParameterName(),
-			step.SelectedConstructor(), step.InterfaceID())
-	}
-	return message.String()
+	return result
 }
 
-func (*ResourceBindingUnsupportedError) Unwrap() error { return ErrResourceBindingUnsupported }
+func cloneResourceNodes(values []ResourceNode) []ResourceNode {
+	result := append([]ResourceNode(nil), values...)
+	for index := range result {
+		result[index].sources = append([]ResourceSource(nil), result[index].sources...)
+		result[index].dependencies = cloneResourceDependencies(result[index].dependencies)
+	}
+	return result
+}
