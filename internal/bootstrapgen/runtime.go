@@ -1687,7 +1687,7 @@ func runtimeMapping(node *yaml.Node, path string, allowed map[string]struct{}) (
 		}
 		if allowed != nil {
 			if _, known := allowed[key]; !known {
-				return nil, runtimeConfigurationError("%s contains unknown key %q", path, key)
+				return nil, runtimeConfigurationError("%s contains unknown key", path)
 			}
 		}
 		result[key] = node.Content[index+1]

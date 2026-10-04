@@ -353,6 +353,33 @@ func TestAncestryIdentityAndLayerRejections(t *testing.T) {
  }
 }
 
+func TestUnknownRuntimeRootKeysAreRedactedAcrossLayers(t *testing.T) {
+ const unknown = "PRIVATE_UNKNOWN_ROOT_KEY: {value: PRIVATE_UNKNOWN_ROOT_VALUE, token: {env: PRIVATE_UNKNOWN_ROOT_SECRET}}\n"
+ for _, mode := range []string{"root", "environment root", "overlay", "replacement", "excluded root", "private template"} {
+  t.Run(mode, func(t *testing.T) {
+   d := fixture(t)
+   root, selected, overlay := []byte(rootRelationship), []byte(nil), []byte(nil)
+   path := "root configuration"
+   switch mode {
+   case "root": root = append(root, unknown...)
+   case "environment root": root = append(root, unknown...); overlay = []byte("{}\n")
+   case "overlay": overlay = []byte(unknown); path = "application configuration"
+   case "replacement": selected = []byte(unknown); path = "application configuration"
+   case "excluded root": root = append(root, unknown...); selected = []byte("{}\n")
+   case "private template": d.Templates[0].YAML += unknown; path = "application configuration"
+   }
+   rootBefore, selectedBefore, overlayBefore := bytes.Clone(root), bytes.Clone(selected), bytes.Clone(overlay)
+   templateBefore := d.Templates[0].YAML
+   _, err := composeRuntimeTemplateDocument(d, root, selected, overlay)
+   if !errors.Is(err, ErrRuntimeConfiguration) || !strings.Contains(err.Error(), path+" contains unknown key") { t.Fatal("unknown key lost its typed path and rule", err) }
+   for _, private := range []string{"PRIVATE_UNKNOWN_ROOT_KEY", "PRIVATE_UNKNOWN_ROOT_VALUE", "PRIVATE_UNKNOWN_ROOT_SECRET"} {
+    if strings.Contains(err.Error(), private) { t.Fatal("unknown-key diagnostic disclosed private input", err) }
+   }
+   if !bytes.Equal(root, rootBefore) || !bytes.Equal(selected, selectedBefore) || !bytes.Equal(overlay, overlayBefore) || d.Templates[0].YAML != templateBefore { t.Fatal("validation changed configuration inputs") }
+  })
+ }
+}
+
 func TestRuntimeBuildVisibleDriftAndDefaults(t *testing.T) {
  d := fixture(t)
  document := compose(t, d, rootRelationship+"config: {example.com/probe.New: {count: 8}}\n", "", "")
