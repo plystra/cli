@@ -88,9 +88,12 @@ func Resolve(input Input) (Result, error) {
 		graphRequirements[index] = constructorgraph.Requirement(requirement)
 	}
 	graph, err := constructorgraph.Build(constructorgraph.Input{
-		Implementations: input.Implementations,
-		Requirements:    graphRequirements,
-		Selections:      selections,
+		Implementations:   input.Implementations,
+		Requirements:      graphRequirements,
+		Selections:        selections,
+		ResourceProviders: input.ResourceProviders,
+		ResourceInstances: input.ResourceInstances,
+		ResourceBindings:  input.ResourceBindings,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)

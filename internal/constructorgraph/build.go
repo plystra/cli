@@ -27,9 +27,6 @@ var (
 	ErrMissingBinding = errors.New("missing required Interface binding")
 	// ErrCycle reports a synchronous selected-constructor dependency cycle.
 	ErrCycle = errors.New("constructor dependency cycle")
-	// ErrResourceBindingUnsupported prevents incomplete static assembly of a
-	// reachable constructor that requires a Resource instance.
-	ErrResourceBindingUnsupported = errors.New("resource instance binding is not supported by this CLI")
 )
 
 type normalizedConstructor struct {
@@ -59,15 +56,27 @@ type normalizedSelection struct {
 	sources     []string
 }
 
-// Build validates one already resolved selection set and constructs its exact
-// reachable constructor graph. Optional parameters without a supplied binding
-// remain unavailable and never create a requirement.
+// Build validates resolved Interface selections and all explicit Resource
+// bindings, then constructs active Implementations and every selected Resource
+// instance in dependency order. Optional Interface parameters without a supplied
+// binding remain unavailable and never create a requirement.
 func Build(input Input) (Graph, error) {
 	constructors, err := normalizeConstructors(input.Implementations)
 	if err != nil {
 		return Graph{}, fmt.Errorf("%w: %w: %v", ErrBuild, ErrInvalidInput, err)
 	}
-	return build(constructors, input.Requirements, input.Selections)
+	resources, err := newResourceGraphBuilder(input)
+	if err != nil {
+		return Graph{}, fmt.Errorf("%w: %w", ErrBuild, err)
+	}
+	graph, err := build(constructors, input.Requirements, input.Selections)
+	if err != nil {
+		return Graph{}, err
+	}
+	if err := resources.resolve(&graph); err != nil {
+		return Graph{}, fmt.Errorf("%w: %w", ErrBuild, err)
+	}
+	return graph, nil
 }
 
 func build(constructors []normalizedConstructor, requirements []Requirement, selections []Selection) (Graph, error) {
@@ -412,14 +421,6 @@ func (b *graphBuilder) visitInterface(identifier interfaceid.Identifier, path de
 	}
 	b.bindings[identifier.String()] = binding
 	constructor := b.constructors[selection.constructor.String()]
-	if resources := constructor.implementation.RequiredResources(); len(resources) != 0 {
-		return &ResourceBindingUnsupportedError{
-			implementation: constructor.implementation,
-			dependency:     resources[0],
-			path:           path.clone(),
-		}
-	}
-
 	switch b.states[selection.constructor.String()] {
 	case visitDone:
 		return nil
