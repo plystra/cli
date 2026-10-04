@@ -962,6 +962,27 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Column: step.RequiringColumn(),
 			})
 		}
+	case diagnosticcode.ResourceBindingUnsupported:
+		var unsupported *constructorgraph.ResourceBindingUnsupportedError
+		if !errors.As(err, &unsupported) || unsupported == nil {
+			return nil
+		}
+		for _, source := range unsupported.RequirementSources() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: source.ModulePath, Path: source.Path, Kind: string(source.Kind),
+				Line: source.Line, Column: source.Column,
+			})
+		}
+		for _, step := range unsupported.Steps() {
+			sources = append(sources, diagnosticjson.Source{
+				Module: step.RequiringModulePath(), Path: step.RequiringSourcePath(), Kind: "implementation-constructor",
+				Line: step.RequiringLine(), Column: step.RequiringColumn(),
+			})
+		}
+		sources = append(sources, diagnosticjson.Source{
+			Module: unsupported.ModulePath(), Path: unsupported.SourcePath(), Kind: "implementation-constructor",
+			Line: unsupported.Line(), Column: unsupported.Column(),
+		})
 	case diagnosticResolveConstructorCycle:
 		var cycle *constructorgraph.CycleError
 		if !errors.As(err, &cycle) || cycle == nil {
@@ -1072,6 +1093,7 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 		})
 	case diagnosticImplementationConfigInvalid,
 		diagnosticImplementationRequiredInvalid,
+		diagnosticcode.ImplementationResourceInvalid,
 		diagnosticImplementationOptionalInvalid,
 		diagnosticImplementationResultInvalid,
 		diagnosticImplementationConformanceInvalid:
@@ -1346,6 +1368,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticResolveMultipleImplementations, "Select one compatible Implementation by running `plystra use <interface-id> <constructor-symbol>"+context.selectorSuffix()+"`.")
 	case errors.Is(err, constructorgraph.ErrMissingBinding):
 		return recoveryDiagnostic(diagnosticResolveMissingImplementation, "Create one compatible local Implementation by running `plystra implement <interface-id> --package <project-relative-package>`.")
+	case errors.Is(err, constructorgraph.ErrResourceBindingUnsupported):
+		return recoveryDiagnostic(diagnosticcode.ResourceBindingUnsupported, "Use a CLI version that supports named Resource instance binding before generating this reachable constructor. Resource dependency discovery alone does not provide runtime instances.")
 	case errors.Is(err, constructorgraph.ErrCycle):
 		return recoveryDiagnostic(diagnosticResolveConstructorCycle, "Remove one required Interface parameter from the reported constructor cycle, then rerun the command.")
 	case errors.Is(err, interfaceresolution.ErrReservedInterface):
@@ -1358,6 +1382,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticImplementationConfigInvalid, "Correct the reported constructor's first Config parameter and exported Config fields to use the supported typed configuration schema, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidRequiredInterface):
 		return recoveryDiagnostic(diagnosticImplementationRequiredInvalid, "Use one visible canonical Interface type and an explicit nonblank Go identifier for the reported required constructor parameter, then rerun the command.")
+	case errors.Is(err, implementationinventory.ErrInvalidRequiredResource):
+		return recoveryDiagnostic(diagnosticcode.ImplementationResourceInvalid, "Use one exact visible canonical Resource value type and an explicit nonblank Go identifier for the reported Resource parameter, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidOptionalInterface):
 		return recoveryDiagnostic(diagnosticImplementationOptionalInvalid, "Use the exact plystra.Optional[T] value type around one visible canonical Interface and an explicit nonblank Go identifier for the reported optional constructor parameter, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidResult):

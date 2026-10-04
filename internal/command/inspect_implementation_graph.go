@@ -63,6 +63,29 @@ func inspectImplementationsGraph(resolved applicationresolve.Result) (diagnostic
 	}
 
 	edges := make(inspectGraphEdges)
+	resourceNodes := make(map[string]string)
+	for _, definition := range resolved.Resources().Resources() {
+		identifier := definition.ID()
+		if _, duplicate := resourceNodes[identifier]; duplicate {
+			return diagnosticschema.GraphResult{}, fmt.Errorf("visible Resource %s appears more than once", identifier)
+		}
+		owner, exists := moduleNodes[definition.ModulePath()]
+		if !exists {
+			return diagnosticschema.GraphResult{}, fmt.Errorf("visible Resource %s owner module %s is absent from resolution evidence", identifier, definition.ModulePath())
+		}
+		position := definition.Declaration().Position()
+		sources := []diagnosticjson.Source{{
+			Module: definition.ModulePath(), Path: definition.SourcePath(), Kind: "resource-declaration",
+			Line: position.Line, Column: position.Column,
+		}}
+		nodeID := inspectGraphNodeID("resource-contract", identifier)
+		resourceNodes[identifier] = nodeID
+		nodes = append(nodes, diagnosticschema.GraphNode{
+			ID: nodeID, Kind: "resource-contract", Label: definition.PackagePath(),
+			Sources: sources, ResourceID: identifier, ContractDigest: definition.ContractDigest(),
+		})
+		edges.add("defines-resource", owner, nodeID, "authored", sources)
+	}
 	implementations := make(map[string]implementationinventory.Implementation)
 	constructorSources := make(map[string]diagnosticjson.Source)
 	configurationNodes := make(map[string]string)
@@ -110,6 +133,13 @@ func inspectImplementationsGraph(resolved applicationresolve.Result) (diagnostic
 				return diagnosticschema.GraphResult{}, fmt.Errorf("constructor %s optionally requires absent Interface %s", symbol, dependency.ID())
 			}
 			edges.addDependency("declares-dependency", constructorNode, interfaceNode, "optional", dependency.ParameterName(), dependency.ParameterPosition(), constructorSource)
+		}
+		for _, dependency := range implementation.RequiredResources() {
+			resourceNode, exists := resourceNodes[dependency.ID().String()]
+			if !exists {
+				return diagnosticschema.GraphResult{}, fmt.Errorf("constructor %s requires absent Resource %s", symbol, dependency.ID())
+			}
+			edges.addDependency("declares-dependency", constructorNode, resourceNode, "resource", dependency.ParameterName(), dependency.ParameterPosition(), constructorSource)
 		}
 		if configuration, present := implementation.Configuration(); present {
 			configurationNode := inspectGraphNodeID("configuration", symbol)
@@ -229,12 +259,15 @@ func writeHumanImplementationGraph(writer io.Writer, result diagnosticschema.Gra
 	configurations := make(map[string]string)
 	candidateCount := 0
 	configurationCount := 0
+	resourceIdentities := make(map[string]string)
 	for _, node := range nodes {
 		switch node.Kind {
 		case "constructor":
 			candidateCount++
 		case "configuration":
 			configurationCount++
+		case "resource-contract":
+			resourceIdentities[node.ID] = node.ResourceID
 		}
 	}
 	for _, edge := range edges {
@@ -301,10 +334,29 @@ func writeHumanImplementationGraph(writer io.Writer, result diagnosticschema.Gra
 			fmt.Fprintf(&content, "  Source: %s\n", explainSourceSummary(source))
 		}
 	}
+	if len(resourceIdentities) > 0 {
+		fmt.Fprintf(&content, "Resource contracts: %d visible\n", len(resourceIdentities))
+		for _, node := range nodes {
+			if node.Kind != "resource-contract" {
+				continue
+			}
+			fmt.Fprintf(&content, "Resource: %s\n  Package: %s\n  Contract digest: %s\n", node.ResourceID, node.Label, node.ContractDigest)
+			for _, source := range node.Sources {
+				fmt.Fprintf(&content, "  Source: %s\n", explainSourceSummary(source))
+			}
+		}
+		content.WriteString("Resource dependencies are declarations only; instance construction and binding are not supported.\n")
+	}
 	writeHumanInterfaceRelationships(&content, "Implemented Interfaces", edges, "implements-interface")
 	writeHumanInterfaceRelationships(&content, "Active selections", edges, "selects-constructor")
 	writeHumanInterfaceRelationships(&content, "Dormant explicit selections", edges, "dormant-selects-constructor")
-	writeHumanInterfaceRelationships(&content, "Declared dependencies", edges, "declares-dependency")
+	declaredEdges := append([]diagnosticschema.GraphEdge(nil), edges...)
+	for index, edge := range declaredEdges {
+		if identity, exists := resourceIdentities[edge.To]; exists {
+			declaredEdges[index].To = identity
+		}
+	}
+	writeHumanInterfaceRelationships(&content, "Declared dependencies", declaredEdges, "declares-dependency")
 	writeHumanInterfaceRelationships(&content, "Resolved dependencies", edges, "depends-on-interface")
 	writeHumanInterfaceRelationships(&content, "Assembly", edges, "assembles-constructor")
 	writeHumanInterfaceRelationships(&content, "Configuration ownership", edges, "owns-configuration")

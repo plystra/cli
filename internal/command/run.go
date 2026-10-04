@@ -406,6 +406,11 @@ configuration provenance, and reachable assembly membership.
 Dependency edges retain exact parameter_name and one-based parameter_position;
 other edges omit these fields. Repeated parameters remain distinct, and human
 output includes each dependency name and position.
+Resource parameters appear as declared dependencies with reason resource and
+exact resource-contract identity and digest, never as Interface requirements.
+Malformed Resource parameters report PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID.
+Reachable Resource consumers report PLYSTRA_RESOURCE_BINDING_UNSUPPORTED before
+assembly or generation; dormant candidates remain discoverable and inspectable.
 The resources view retains consumer contracts only, with contract_digest on
 resource-contract nodes. Resource instance construction and binding remain
 unsupported. Invalid Resource declarations, contracts, or duplicate identities

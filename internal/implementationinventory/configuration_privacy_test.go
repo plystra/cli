@@ -185,7 +185,7 @@ func buildPrivacyConfiguration(t testing.TB, value types.Type) (implementationin
 	index, err := implementationinventory.Build([]implementationinventory.Input{{
 		ModulePath: "example.com/app", PackagePath: "example.com/app/service", Local: true,
 		Declaration: declaration(t, "service/implementation.go", "service", "New", "service.operation.run/v1"), Types: compiled,
-	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")}, nil)
 	if err != nil {
 		return implementationinventory.Configuration{}, err
 	}

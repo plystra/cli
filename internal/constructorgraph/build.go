@@ -27,6 +27,9 @@ var (
 	ErrMissingBinding = errors.New("missing required Interface binding")
 	// ErrCycle reports a synchronous selected-constructor dependency cycle.
 	ErrCycle = errors.New("constructor dependency cycle")
+	// ErrResourceBindingUnsupported prevents incomplete static assembly of a
+	// reachable constructor that requires a Resource instance.
+	ErrResourceBindingUnsupported = errors.New("resource instance binding is not supported by this CLI")
 )
 
 type normalizedConstructor struct {
@@ -409,6 +412,13 @@ func (b *graphBuilder) visitInterface(identifier interfaceid.Identifier, path de
 	}
 	b.bindings[identifier.String()] = binding
 	constructor := b.constructors[selection.constructor.String()]
+	if resources := constructor.implementation.RequiredResources(); len(resources) != 0 {
+		return &ResourceBindingUnsupportedError{
+			implementation: constructor.implementation,
+			dependency:     resources[0],
+			path:           path.clone(),
+		}
+	}
 
 	switch b.states[selection.constructor.String()] {
 	case visitDone:

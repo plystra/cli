@@ -39,7 +39,7 @@ func TestBuildOrdersAndProtectsDiscoveredImplementations(t *testing.T) {
 			Declaration: alpha,
 			Types:       compiledPackage("example.com/app/alpha", "alpha", "Build", "Run"),
 		},
-	}, []implementationinventory.InterfaceInput{alphaInterface, zetaInterface})
+	}, []implementationinventory.InterfaceInput{alphaInterface, zetaInterface}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestBuildClassifiesExactKernelSecretConfigurationField(t *testing.T) {
 		Local:       true,
 		Declaration: parsed,
 		Types:       compiled,
-	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestBuildRejectsSecretConfigurationContainers(t *testing.T) {
 				Local:       true,
 				Declaration: parsed,
 				Types:       compiled,
-			}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+			}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")}, nil)
 			if !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), "Secret configuration must be a direct named field") {
 				t.Fatalf("Build error = %v", err)
 			}
@@ -192,7 +192,7 @@ func TestBuildCompilesConfigurationFieldMetadata(t *testing.T) {
 		Local:       true,
 		Declaration: parsed,
 		Types:       compiled,
-	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+	}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")}, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestBuildRejectsInvalidConfigurationFieldMetadata(t *testing.T) {
 				Local:       true,
 				Declaration: parsed,
 				Types:       compiled,
-			}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")})
+			}}, []implementationinventory.InterfaceInput{canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")}, nil)
 			if !errors.Is(err, implementationinventory.ErrInvalidConfiguration) || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Build error = %v, want %q", err, test.want)
 			}
@@ -342,7 +342,7 @@ func TestBuildRejectsInconsistentCompiledPackageProvenance(t *testing.T) {
 		PackagePath: "example.com/app/service",
 		Declaration: parsed,
 		Types:       types.NewPackage("example.com/other/service", "service"),
-	}}, nil)
+	}}, nil, nil)
 	if !errors.Is(err, implementationinventory.ErrInvalidInput) {
 		t.Fatalf("Build error = %v", err)
 	}
@@ -357,7 +357,7 @@ func TestBuildRejectsConstructorAbsentFromCompiledPackage(t *testing.T) {
 		PackagePath: "example.com/app/service",
 		Declaration: parsed,
 		Types:       types.NewPackage("example.com/app/service", "service"),
-	}}, nil)
+	}}, nil, nil)
 	if !errors.Is(err, implementationinventory.ErrInvalidInput) {
 		t.Fatalf("Build error = %v", err)
 	}
@@ -376,7 +376,7 @@ func TestBuildRejectsDuplicateFullyQualifiedConstructorSymbol(t *testing.T) {
 		Types:       compiled,
 	}
 	canonical := canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")
-	_, err := implementationinventory.Build([]implementationinventory.Input{input, input}, []implementationinventory.InterfaceInput{canonical})
+	_, err := implementationinventory.Build([]implementationinventory.Input{input, input}, []implementationinventory.InterfaceInput{canonical}, nil)
 	if !errors.Is(err, implementationinventory.ErrDuplicateSymbol) || !strings.Contains(err.Error(), "example.com/app/service.New") || !strings.Contains(err.Error(), "example.com/app@local/service/new.go:4:6") {
 		t.Fatalf("Build error = %v", err)
 	}
@@ -409,7 +409,7 @@ func TestBuildRejectsInvalidCanonicalInterfaceInputs(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := implementationinventory.Build(nil, test.inputs); !errors.Is(err, implementationinventory.ErrInvalidInput) {
+			if _, err := implementationinventory.Build(nil, test.inputs, nil); !errors.Is(err, implementationinventory.ErrInvalidInput) {
 				t.Fatalf("Build error = %v", err)
 			}
 		})
@@ -440,7 +440,7 @@ func TestBuildRejectsMissingAndIncompatibleDeclaredInterfaces(t *testing.T) {
 				PackagePath: "example.com/app/service",
 				Declaration: parsed,
 				Types:       compiled,
-			}}, []implementationinventory.InterfaceInput{canonical})
+			}}, []implementationinventory.InterfaceInput{canonical}, nil)
 			if !errors.Is(err, implementationinventory.ErrInvalidConformance) || !strings.Contains(err.Error(), "example.com/app/service.New") || !strings.Contains(err.Error(), "example.com/app@local/service/new.go:3:1") || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Build error = %v", err)
 			}
