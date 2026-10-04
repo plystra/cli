@@ -37,7 +37,7 @@ func resourceDocument(entry string) string {
 
 func resourceLookup(t testing.TB, fields string) applicationmeta.SchemaLookup {
 	t.Helper()
-	return composeSchemaLookup(map[string]implementationinventory.Configuration{
+	return namespacedSchemaLookup(applicationmeta.ConfigurationNamespaceResource, map[string]implementationinventory.Configuration{
 		resourceProvider:            composeSchema(t, fields),
 		replacementResourceProvider: composeSchema(t, fields),
 	})
@@ -560,7 +560,7 @@ func containsResourcePath(paths []string, want string) bool {
 
 func TestResourceProviderSourcesAndDistinctSchemas(t *testing.T) {
 	t.Parallel()
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
+	lookup := namespacedSchemaLookup(applicationmeta.ConfigurationNamespaceResource, map[string]implementationinventory.Configuration{
 		resourceProvider:            composeSchema(t, "Shared int; Old string"),
 		replacementResourceProvider: composeSchema(t, "Shared string; Current string"),
 	})

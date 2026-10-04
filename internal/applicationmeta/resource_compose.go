@@ -116,7 +116,7 @@ func resourceConfigDecisions(instance ResourceInstance, schemas SchemaLookup) (m
 	for _, layer := range instance.configuration {
 		var decisions []constructorConfigDecision
 		if layer.remove {
-			if _, exists := schemas(instance.provider); !exists {
+			if _, exists := schemas(ConfigurationNamespaceResource, instance.provider); !exists {
 				return nil, resourceConfigurationError(instance, layer.declarationSource, ErrConfigurationSchema)
 			}
 			decision := newConstructorConfigDecision(instance.provider, nil, constructorConfigRemoval, "", nil, layer.source)
@@ -124,7 +124,7 @@ func resourceConfigDecisions(instance ResourceInstance, schemas SchemaLookup) (m
 			decisions = []constructorConfigDecision{decision}
 		} else {
 			var err error
-			decisions, err = normalizeConstructorConfigDecisions(ConstructorConfiguration{constructor: instance.provider, source: layer.source, declarationSource: layer.declarationSource, yaml: layer.yaml}, schemas)
+			decisions, err = normalizeConstructorConfigDecisions(ConstructorConfiguration{constructor: instance.provider, source: layer.source, declarationSource: layer.declarationSource, yaml: layer.yaml}, schemas, ConfigurationNamespaceResource)
 			if err != nil {
 				return nil, resourceConfigurationError(instance, layer.declarationSource, err)
 			}
@@ -283,7 +283,7 @@ func qualifyResourceSources(layer Manifest, owner Dependency) Manifest {
 
 func (c Composition) validateRequiredResourceConfiguration(schemas SchemaLookup, source ConfigurationDeclarationSource) error {
 	for _, instance := range c.manifest.resourceInstances {
-		schema, exists := schemas(instance.provider)
+		schema, exists := schemas(ConfigurationNamespaceResource, instance.provider)
 		if !exists {
 			continue
 		}
