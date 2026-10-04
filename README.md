@@ -1347,9 +1347,10 @@ copy.
 `PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION` report every effective
 `interfaces.use` declaration as an `implementation-selection` source. A
 current-Project choice identifies only the selected root, environment, or
-complete-replacement document; a template choice identifies its nearest effective declaration.
-document to remove the local or inherited effective selection; Kernel supplies
-that Interface intrinsically.
+complete-replacement document; a template choice identifies its nearest
+effective declaration. For an intrinsic Interface, correct the owning document
+to remove the local or inherited effective selection; Kernel supplies that
+Interface intrinsically.
 `PLYSTRA_TEMPLATE_INVALID` reports invalid root relationships and template chains with owning module-relative declarations. Correct the root relationship or Go Module graph and rerun the same command.
 
 Configuration-selection failures use

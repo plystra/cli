@@ -58,7 +58,7 @@ func (r Result) Module() modulelocate.Module { return r.module }
 func (r Result) Query() string { return r.query }
 
 // Update resolves one already-selected ordinary Go Module query with go get,
-// recomputes visible named exports and explicit adoptions, regenerates, tidies,
+// recomputes visible declarations and template ancestry, regenerates, tidies,
 // validates, and commits only when the complete Project is consistent. It
 // updates exactly one selected module rather than implicitly upgrading the
 // complete graph.

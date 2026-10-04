@@ -112,16 +112,16 @@ type Candidate struct {
 }
 
 // ChoiceSourceKind identifies whether one effective capabilities.use source
-// belongs to the selected current-project layer or an adopted export.
+// belongs to the selected current-project layer or an inherited template.
 type ChoiceSourceKind string
 
 const (
 	// ChoiceSourceCurrentProject identifies the winning selected-current-project
 	// configuration declaration.
 	ChoiceSourceCurrentProject ChoiceSourceKind = "current-project"
-	// ChoiceSourceAdoptedExport identifies one compatible selection contributed
-	// by an explicitly adopted named export.
-	ChoiceSourceAdoptedExport ChoiceSourceKind = "adopted-export"
+	// ChoiceSourceTemplate identifies the surviving selection contributed
+	// by the explicit template ancestry.
+	ChoiceSourceTemplate ChoiceSourceKind = "template"
 )
 
 // ChoiceSource is one typed, stable, module-relative source for an effective
@@ -930,14 +930,14 @@ func normalizeChoiceSources(inputs []ChoiceSource) ([]ChoiceSource, error) {
 			return nil, fmt.Errorf("sources[%d].reference %v", index, err)
 		}
 		switch input.Kind {
-		case ChoiceSourceCurrentProject, ChoiceSourceAdoptedExport:
+		case ChoiceSourceCurrentProject, ChoiceSourceTemplate:
 		default:
 			return nil, fmt.Errorf("sources[%d].kind %q is invalid", index, input.Kind)
 		}
 		if kind == "" {
 			kind = input.Kind
 		} else if input.Kind != kind {
-			return nil, errors.New("sources cannot mix current-Project and adopted-export declarations")
+			return nil, errors.New("sources cannot mix current-Project and template declarations")
 		}
 		if err := modulepath.CheckProject(input.ModulePath); err != nil {
 			return nil, fmt.Errorf("sources[%d].module_path %q is invalid: %v", index, input.ModulePath, err)

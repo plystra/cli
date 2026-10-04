@@ -25,7 +25,7 @@ import (
 	gomodule "golang.org/x/mod/module"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 // ErrBuild reports an absent or internally inconsistent normalized model.
 var ErrBuild = errors.New("build resolution evidence")
@@ -92,9 +92,9 @@ const (
 	// ProviderSelectionCurrentProject identifies an explicit replacement in the
 	// selected current-Project configuration layer.
 	ProviderSelectionCurrentProject ProviderSelectionReason = "current-project-replacement"
-	// ProviderSelectionAdopted identifies one compatible Provider choice from
-	// one or more explicitly adopted exports.
-	ProviderSelectionAdopted ProviderSelectionReason = "adopted-export-selection"
+	// ProviderSelectionTemplate identifies the surviving Provider choice from
+	// the explicit template ancestry.
+	ProviderSelectionTemplate ProviderSelectionReason = "template-selection"
 	// ProviderSelectionIntrinsic identifies a Kernel-owned intrinsic
 	// implementation outside ordinary Plugin Provider selection.
 	ProviderSelectionIntrinsic ProviderSelectionReason = "intrinsic-kernel"
@@ -140,12 +140,12 @@ const (
 )
 
 // ConfigurationOwner identifies the layer that owns one effective typed
-// configuration decision. Adopted exports are always lower precedence than
+// configuration decision. Templates are always lower precedence than
 // the selected current-project layer.
 type ConfigurationOwner string
 
 const (
-	ConfigurationOwnerAdopted     ConfigurationOwner = "adopted-export"
+	ConfigurationOwnerTemplate    ConfigurationOwner = "template"
 	ConfigurationOwnerRoot        ConfigurationOwner = "current-project-root"
 	ConfigurationOwnerEnvironment ConfigurationOwner = "current-project-environment"
 	ConfigurationOwnerExplicit    ConfigurationOwner = "current-project-config"
@@ -163,6 +163,7 @@ type ConfigurationLayerInput struct {
 // is deliberately separate from the generated runtime configuration and never
 // carries YAML or Secret values.
 type ConfigurationInput struct {
+	Templates          []applicationmeta.TemplateLayer
 	DependencyBaseline applicationmeta.DependencyBaseline
 	Layers             []ConfigurationLayerInput
 	Effective          []applicationmeta.ConfigurationDecision
@@ -862,16 +863,17 @@ func (f ConfigurationField) Contributors() []ConfigurationContribution {
 }
 
 // ConfigurationContribution is one normalized value or explicit removal from
-// one configuration layer. Identical dependency values are represented by one
-// contribution with multiple source locations.
+// one configuration layer. Template layers retain their individual precedence
+// even when their public-safe value digests are identical.
 type ConfigurationContribution struct {
-	owner      ConfigurationOwner
-	precedence int
-	digest     string
-	summary    string
-	removed    bool
-	effective  bool
-	sources    []Source
+	owner         ConfigurationOwner
+	precedence    int
+	templateOrder int
+	digest        string
+	summary       string
+	removed       bool
+	effective     bool
+	sources       []Source
 }
 
 // Owner returns the layer that authored the contribution.
@@ -880,6 +882,10 @@ func (c ConfigurationContribution) Owner() ConfigurationOwner { return c.owner }
 // Precedence returns the closed numeric layer precedence (dependency 1, root
 // or explicit configuration 2, environment overlay 3).
 func (c ConfigurationContribution) Precedence() int { return c.precedence }
+
+// TemplateOrder is the one-based oldest-to-nearest template position, or zero
+// for a current-Project declaration.
+func (c ConfigurationContribution) TemplateOrder() int { return c.templateOrder }
 
 // Digest returns the normalized non-secret contribution digest.
 func (c ConfigurationContribution) Digest() string { return c.digest }
@@ -928,7 +934,7 @@ func (s ConfigurationSelection) SelectedPath() string { return s.selectedPath }
 // SelectedDigest returns the normalized selected-document digest.
 func (s ConfigurationSelection) SelectedDigest() string { return s.selectedDigest }
 
-// DependencyCompositionDigest returns the normalized adopted-export layer and
+// DependencyCompositionDigest returns the normalized template layer and
 // all-source provenance digest.
 func (s ConfigurationSelection) DependencyCompositionDigest() string {
 	return s.dependencyDigest
@@ -1236,13 +1242,14 @@ type canonicalPublicExposureSource struct {
 }
 
 type canonicalConfigurationContribution struct {
-	Owner      ConfigurationOwner `json:"owner"`
-	Precedence int                `json:"precedence"`
-	Digest     string             `json:"digest"`
-	Summary    string             `json:"summary"`
-	Removed    bool               `json:"removed,omitempty"`
-	Effective  bool               `json:"effective"`
-	Sources    []canonicalSource  `json:"sources"`
+	Owner         ConfigurationOwner `json:"owner"`
+	Precedence    int                `json:"precedence"`
+	TemplateOrder int                `json:"template_order,omitempty"`
+	Digest        string             `json:"digest"`
+	Summary       string             `json:"summary"`
+	Removed       bool               `json:"removed,omitempty"`
+	Effective     bool               `json:"effective"`
+	Sources       []canonicalSource  `json:"sources"`
 }
 
 type canonicalConfigurationField struct {
@@ -2042,13 +2049,14 @@ func encode(e Evidence) ([]byte, error) {
 				}
 			}
 			contributors[contributorIndex] = canonicalConfigurationContribution{
-				Owner:      contribution.owner,
-				Precedence: contribution.precedence,
-				Digest:     contribution.digest,
-				Summary:    contribution.summary,
-				Removed:    contribution.removed,
-				Effective:  contribution.effective,
-				Sources:    sources,
+				Owner:         contribution.owner,
+				Precedence:    contribution.precedence,
+				TemplateOrder: contribution.templateOrder,
+				Digest:        contribution.digest,
+				Summary:       contribution.summary,
+				Removed:       contribution.removed,
+				Effective:     contribution.effective,
+				Sources:       sources,
 			}
 		}
 		configurationFields[index] = canonicalConfigurationField{
@@ -2924,8 +2932,8 @@ func selectedProvidersFromResolution(
 			switch choiceSources[0].Kind {
 			case providerresolution.ChoiceSourceCurrentProject:
 				value.selectionReason = ProviderSelectionCurrentProject
-			case providerresolution.ChoiceSourceAdoptedExport:
-				value.selectionReason = ProviderSelectionAdopted
+			case providerresolution.ChoiceSourceTemplate:
+				value.selectionReason = ProviderSelectionTemplate
 			default:
 				return nil, fmt.Errorf("explicit Provider selection %s has invalid source kind %q", identifier, choiceSources[0].Kind)
 			}
@@ -2938,8 +2946,8 @@ func selectedProvidersFromResolution(
 				if choiceSource.Kind == providerresolution.ChoiceSourceCurrentProject && project.role != ModuleRoleCurrent {
 					return nil, fmt.Errorf("provider selection %s current-Project source belongs to dependency %q", identifier, choiceSource.ModulePath)
 				}
-				if choiceSource.Kind == providerresolution.ChoiceSourceAdoptedExport && project.role != ModuleRoleCurrent && project.role != ModuleRoleDependency {
-					return nil, fmt.Errorf("provider selection %s adopted-export source has an invalid Project role", identifier)
+				if choiceSource.Kind == providerresolution.ChoiceSourceTemplate && project.role != ModuleRoleDependency {
+					return nil, fmt.Errorf("provider selection %s template source has an invalid Project role", identifier)
 				}
 				value.selectionSources = append(value.selectionSources, ProviderSelectionSource{
 					projectModule: choiceSource.ModulePath,
@@ -3035,9 +3043,9 @@ func validateSelectedProviders(values []SelectedProvider, modules []Module, cand
 			if len(value.selectionSources) != 1 {
 				return fmt.Errorf("selected_providers[%d] current-project replacement requires one source", index)
 			}
-		case ProviderSelectionAdopted:
+		case ProviderSelectionTemplate:
 			if len(value.selectionSources) == 0 {
-				return fmt.Errorf("selected_providers[%d] adopted-export selection requires sources", index)
+				return fmt.Errorf("selected_providers[%d] template selection requires sources", index)
 			}
 		default:
 			return fmt.Errorf("selected_providers[%d].selection_reason %q is invalid", index, value.selectionReason)
@@ -3050,8 +3058,8 @@ func validateSelectedProviders(values []SelectedProvider, modules []Module, cand
 			if value.selectionReason == ProviderSelectionCurrentProject && sourceProject.role != ModuleRoleCurrent {
 				return fmt.Errorf("selected_providers[%d] current-project source belongs to a dependency", index)
 			}
-			if value.selectionReason == ProviderSelectionAdopted && sourceProject.role != ModuleRoleCurrent && sourceProject.role != ModuleRoleDependency {
-				return fmt.Errorf("selected_providers[%d] adopted-export source has an invalid Project role", index)
+			if value.selectionReason == ProviderSelectionTemplate && sourceProject.role != ModuleRoleDependency {
+				return fmt.Errorf("selected_providers[%d] template source has an invalid Project role", index)
 			}
 			if sourceIndex > 0 && providerSelectionSourceKey(value.selectionSources[sourceIndex-1]) >= providerSelectionSourceKey(selectionSource) {
 				return fmt.Errorf("selected_providers[%d].selection_sources are not in unique canonical order", index)

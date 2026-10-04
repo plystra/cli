@@ -84,15 +84,22 @@ capabilities:
 	}
 }
 
-func TestEnvironmentOverlayDigestAcceptsOnlySparseOverlayValidation(t *testing.T) {
+func TestConfigurationDigestsAcceptPartialTemplateDelta(t *testing.T) {
 	t.Parallel()
 
 	data := []byte("http: {cors: {allow_credentials: false}}\n")
 	if _, err := applicationgen.EnvironmentOverlayDigest(data); err != nil {
 		t.Fatalf("EnvironmentOverlayDigest: %v", err)
 	}
-	if _, err := applicationgen.ConfigurationDigest(data); err == nil || !strings.Contains(err.Error(), "allowed_origins is required") {
-		t.Fatalf("ConfigurationDigest(sparse overlay) error = %v", err)
+	if _, err := applicationgen.ConfigurationDigest(data); err != nil {
+		t.Fatalf("ConfigurationDigest(partial root): %v", err)
+	}
+	invalid := []byte("http: {cors: {allow_credentials: invalid}}\n")
+	if _, err := applicationgen.EnvironmentOverlayDigest(invalid); err == nil {
+		t.Fatal("EnvironmentOverlayDigest accepted invalid credentials type")
+	}
+	if _, err := applicationgen.ConfigurationDigest(invalid); err == nil {
+		t.Fatal("ConfigurationDigest accepted invalid credentials type")
 	}
 }
 
@@ -231,8 +238,8 @@ func TestManifestProvenanceRetainsStrictPerSelectionBaselines(t *testing.T) {
 			t.Fatalf("generated manifest leaked %q: %s", forbidden, data)
 		}
 	}
-	oldSchema := bytes.Replace(data, []byte(`"version":7`), []byte(`"version":6`), 1)
-	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 7") {
+	oldSchema := bytes.Replace(data, []byte(`"version":8`), []byte(`"version":7`), 1)
+	if _, err := applicationgen.DecodeManifestProvenance(oldSchema); err == nil || !strings.Contains(err.Error(), "must use version 8") {
 		t.Fatalf("DecodeManifestProvenance(old schema) error = %v", err)
 	}
 	withoutOwnership := bytes.Replace(data, []byte(`,"current_project_paths":["interfaces.use[\"email.send/v1\"]"]`), nil, 1)

@@ -1288,9 +1288,6 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		}
 		return recoveryDiagnostic(diagnosticTemplateInvalid, "Use a corrected published template version whose clean Project passes generation, check, build, and lifecycle validation.")
 	}
-	if errors.Is(err, newproject.ErrCreate) && !errors.Is(err, interfaceresolution.ErrAmbiguousImplementation) {
-		return recoveryDiagnostic(diagnosticProjectCreateFailed, "Inspect and correct the reported Project creation failure, then rerun the same `plystra new` invocation.")
-	}
 	var requirementConflict *providerresolution.RequirementConflictError
 	if errors.As(err, &requirementConflict) && requirementConflict != nil {
 		return recoveryDiagnostic(diagnosticCapabilityRequirementConflict, identicalContractRecovery(requirementConflict.Capability().String()))
@@ -1543,6 +1540,8 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticGeneratedManifestInvalid, "Restore generated/.plystra-manifest.json from a known-good generated state, then run `plystra generate"+context.selectorSuffix()+"`.")
 	case errors.Is(err, capabilitymeta.ErrInvalidManifest):
 		return recoveryDiagnostic(diagnosticCapabilityManifestInvalid, "Correct the reported authored capability.yaml, then rerun the command.")
+	case errors.Is(err, newproject.ErrCreate):
+		return recoveryDiagnostic(diagnosticProjectCreateFailed, "Inspect and correct the reported Project creation failure, then rerun the same `plystra new` invocation.")
 	default:
 		return actionableDiagnostic{}, false
 	}

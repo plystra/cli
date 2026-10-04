@@ -24,11 +24,13 @@ const PermissionsVersion = "v0.47.0"
 
 var ErrBaseline = errors.New("invalid private runtime baseline; regenerate and supply the matching owner-private deployment input")
 
-// Export retains exact inert dependency data. It is never public provenance.
-type Export struct {
-	Module  string `json:"module"`
-	Version string `json:"version"`
-	YAML    string `json:"yaml"`
+// Template retains a normalized reusable layer and its exact ancestry identity.
+// YAML is private deployment data, never public provenance.
+type Template struct {
+	Module   string `json:"module"`
+	Version  string `json:"version"`
+	Template string `json:"template"`
+	YAML     string `json:"yaml"`
 }
 
 type Document struct {
@@ -36,13 +38,13 @@ type Document struct {
 	ContractID string                     `json:"runtime_contract"`
 	Contract   json.RawMessage            `json:"contract"`
 	Defaults   map[string]json.RawMessage `json:"defaults"`
-	Exports    []Export                   `json:"dependency_exports"`
+	Templates  []Template                 `json:"template_ancestry"`
 }
 
 func (Document) String() string   { return "<private-runtime-baseline>" }
 func (Document) GoString() string { return "<private-runtime-baseline>" }
-func (Export) String() string     { return "<private-dependency-exports>" }
-func (Export) GoString() string   { return "<private-dependency-exports>" }
+func (Template) String() string   { return "<private-template-baseline>" }
+func (Template) GoString() string { return "<private-template-baseline>" }
 
 // ContractID hashes only the explicitly public contract projection supplied by the compiler.
 func ContractID(contract []byte) string {
@@ -51,7 +53,7 @@ func ContractID(contract []byte) string {
 }
 
 func Encode(document Document) ([]byte, error) {
-	if document.Schema != Schema || !json.Valid(document.Contract) || document.ContractID != ContractID(document.Contract) || document.Defaults == nil || document.Exports == nil {
+	if document.Schema != Schema || !json.Valid(document.Contract) || document.ContractID != ContractID(document.Contract) || document.Defaults == nil || document.Templates == nil {
 		return nil, ErrBaseline
 	}
 	data, err := json.MarshalIndent(document, "", "  ")

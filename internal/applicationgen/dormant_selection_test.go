@@ -51,10 +51,11 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 	withHistory := beta
 	withHistory.contributions = append([]DormantSelectionContribution{
 		{
-			owner:      string(resolutionevidence.ConfigurationOwnerAdopted),
-			precedence: 1,
-			digest:     "sha256:" + strings.Repeat("1", 64),
-			summary:    "redacted",
+			owner:         string(resolutionevidence.ConfigurationOwnerTemplate),
+			precedence:    1,
+			templateOrder: 1,
+			digest:        "sha256:" + strings.Repeat("1", 64),
+			summary:       "redacted",
 			sources: []DormantSelectionSource{{
 				module: "example.com/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1,
 			}},
@@ -72,10 +73,11 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 	withRemoval.selectionOwner = string(resolutionevidence.ConfigurationOwnerEnvironment)
 	withRemoval.contributions = []DormantSelectionContribution{
 		{
-			owner:      string(resolutionevidence.ConfigurationOwnerAdopted),
-			precedence: 1,
-			digest:     "sha256:" + strings.Repeat("1", 64),
-			summary:    "redacted",
+			owner:         string(resolutionevidence.ConfigurationOwnerTemplate),
+			precedence:    1,
+			templateOrder: 1,
+			digest:        "sha256:" + strings.Repeat("1", 64),
+			summary:       "redacted",
 			sources: []DormantSelectionSource{{
 				module: "example.com/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1,
 			}},

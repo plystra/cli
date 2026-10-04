@@ -93,6 +93,10 @@ Its linear ancestry immediately supplies the supported Interface baseline,
 including CORS, without copying source or configuration or ranking candidates.
 Resource and Data inheritance remain unsupported.
 
+Invalid inherited declarations retain their owning source and specific
+diagnostic with exit 3. Ambiguous Implementation choices require a decision
+with exit 4. Both failures leave the requested target absent.
+
 Invalid Project names, explicit Go Module paths, and template queries emit
 PLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,
 and PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID.

@@ -40,7 +40,8 @@ func TestPublicCommandsReportMalformedSelectedConfigurationSourcesWithoutMutatio
 			t.Run(selection.name+"/"+command.name, func(t *testing.T) {
 				t.Parallel()
 				root := writeCapabilityCommandModule(t)
-				writeCommandFile(t, filepath.Join(root, filepath.FromSlash(selection.path)), "unknown: true\n")
+				const privateKey = "private-unknown-configuration-key"
+				writeCommandFile(t, filepath.Join(root, filepath.FromSlash(selection.path)), privateKey+": true\n")
 				before := commandTree(t, root)
 				arguments := append(append([]string(nil), command.arguments...), selection.selectors...)
 				exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "records"), commandGoEnvironment())
@@ -50,7 +51,7 @@ func TestPublicCommandsReportMalformedSelectedConfigurationSourcesWithoutMutatio
 				}
 				if exitCode != wantExit || stdout != command.wantStdout || !commandContainsAll(
 					stderr,
-					`unknown key "unknown"`,
+					"unknown root field",
 					"Source: example.com/acme/library:"+selection.path+":1:1 (configuration-declaration)",
 					"Recovery:\nEdit "+selection.path+" so every value matches a selected Plugin's closed typed schema, then rerun the command.\n",
 					"Diagnostic: "+diagnosticcode.ConfigurationInvalid,
@@ -59,6 +60,9 @@ func TestPublicCommandsReportMalformedSelectedConfigurationSourcesWithoutMutatio
 				}
 				if strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
 					t.Fatalf("%s %s exposed private Project path: %q", selection.name, command.name, stderr)
+				}
+				if strings.Contains(stdout+stderr, privateKey) {
+					t.Fatalf("%s %s exposed private configuration key: stdout %q stderr %q", selection.name, command.name, stdout, stderr)
 				}
 				if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 					t.Fatalf("%s %s mutated malformed selected configuration:\nbefore: %#v\nafter:  %#v", selection.name, command.name, before, after)

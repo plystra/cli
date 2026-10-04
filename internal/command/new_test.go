@@ -9,9 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/gocommand"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/newproject"
 )
@@ -207,6 +211,61 @@ func TestRunNewCommandClassifiesClosedFailureOutcomes(t *testing.T) {
 				t.Fatalf("diagnostic message length = %d", len(document.Diagnostics[0].Message))
 			}
 		})
+	}
+}
+
+func TestRunNewCommandPreservesTemplateValidationDiagnostics(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		cause error
+		code  string
+	}{
+		{"root manifest", applicationresolve.ErrManifest, diagnosticProjectManifestInvalid},
+		{"CORS invariant", applicationmeta.ErrInvalidManifest, diagnosticConfigurationInvalid},
+		{"constructor schema", applicationmeta.ErrConfigurationSchema, diagnosticConstructorConfigurationSchemaInvalid},
+		{"constructor value", applicationmeta.ErrConfigurationValues, diagnosticConstructorConfigurationValuesInvalid},
+		{"required field", applicationmeta.ErrConfigurationRequired, diagnosticConstructorConfigurationValuesInvalid},
+		{"unowned configuration", applicationresolve.ErrUnownedConstructorConfiguration, diagnosticConstructorConfigurationUnselected},
+		{"missing implementation", constructorgraph.ErrMissingBinding, diagnosticResolveMissingImplementation},
+		{"unknown implementation", interfaceresolution.ErrUnknownConstructor, diagnosticResolveUnknownImplementation},
+		{"constructor declaration", implementationinventory.ErrInvalidConfiguration, diagnosticImplementationConfigInvalid},
+		{"unsupported policy", applicationresolve.ErrPolicyNotEnforced, diagnosticPolicyNotEnforced},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			for _, cause := range []error{
+				fmt.Errorf("%w: %w", newproject.ErrCreate, test.cause),
+				errors.Join(newproject.ErrCreate, test.cause),
+			} {
+				creator := func(context.Context, newproject.Options) (newProjectResult, error) { return nil, cause }
+				for _, format := range []string{"human", "json"} {
+					exit, stdout, stderr := runNewCommandForTest(t, []string{"new", "app", "--format", format}, creator, nil)
+					if exit != 3 {
+						t.Fatalf("%s exit = %d: %s %s", format, exit, stdout, stderr)
+					}
+					if format == "human" {
+						if stdout != "" || !strings.HasSuffix(stderr, "Diagnostic: "+test.code+"\n") || strings.Count(stderr, "Recovery:") != 1 {
+							t.Fatalf("typed creation failure was masked: %s %s", stdout, stderr)
+						}
+						continue
+					}
+					if stderr != "" {
+						t.Fatalf("JSON stderr = %q", stderr)
+					}
+					document := decodeNewResult(t, stdout)
+					assertNewFailure(t, document, "validation_failed", 3, test.code)
+					if len(document.Recovery) != 1 || document.Recovery[0].Target.Kind != "argument" || document.Recovery[0].Target.ID != "template" {
+						t.Fatalf("recovery target = %#v", document.Recovery)
+					}
+				}
+			}
+		})
+	}
+	status, code, message := classifyNewFailure(fmt.Errorf("%w: %w: private-tool-detail", newproject.ErrCreate, gocommand.ErrRun))
+	if status != commandschema.StatusExecutionFailed || code != diagnosticProjectCreateFailed || strings.Contains(message, "private-tool-detail") {
+		t.Fatalf("tool execution failure was classified as validation: %s %s %s", status, code, message)
 	}
 }
 

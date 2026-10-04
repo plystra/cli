@@ -280,6 +280,14 @@ repository, copying Plugin directories, inspecting dependency environment
 overlays, modifying Module Cache source, generating `go.work`, or assigning the
 template special Implementation candidate priority after creation.
 
+Inherited declaration and configuration failures retain their specific
+diagnostic and owning module-relative source in human and JSON output, with
+`validation_failed` and exit 3. Ambiguous Implementation candidates retain
+`PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS`, `decision_required`, and exit 4.
+Neither failure installs the target Project. Correct the owning template
+Project and select a corrected version before retrying; do not edit Module
+Cache contents or the absent target.
+
 The CLI validates and prepares module state; it never publishes refs. Any
 corrected template, dependency, or release version is handed to the project
 owner for manual publication.

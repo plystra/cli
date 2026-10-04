@@ -41,7 +41,7 @@ func (r Result) Module() modulelocate.Module { return r.module }
 func (r Result) Query() string { return r.query }
 
 // Add resolves one ordinary Go Module query with go get, recomputes visible
-// named exports and explicit adoptions, regenerates, tidies, validates, and
+// declarations and template ancestry, regenerates, tidies, validates, and
 // commits only when the complete Project is consistent. Module metadata and
 // every nested generation-owned change roll back on failure.
 func Add(ctx context.Context, options Options) (Result, error) {

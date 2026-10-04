@@ -12,7 +12,7 @@ func TestConfigurationEvidenceRetainsSuppressedRequirementSources(t *testing.T) 
 	t.Parallel()
 	lookup := configurationSchemaLookup(t)
 	dependencies := []applicationmeta.Dependency{{
-		ModulePath: "example.com/platform", ModuleVersion: "v1.0.0", ExportName: "defaults",
+		ModulePath: "example.com/platform", ModuleVersion: "v1.0.0",
 		Manifest: configurationManifest(t, "plystra.yaml", "interfaces: {require: [audit.write/v1, email.send/v1]}"),
 	}}
 	for _, overlayData := range []string{"interfaces: {require: []}", "interfaces: {require: [email.send/v1]}"} {

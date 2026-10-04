@@ -11,8 +11,9 @@ func TestValidConfigurationFieldPathAcceptsCompositionEvidence(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]bool{
-		`composition.exports["defaults"]`:                         true,
-		`composition.adopt["example.com/acme/platform#defaults"]`: true,
+		`template`:                        true,
+		`composition.exports["defaults"]`: false,
+		`composition.adopt["example.com/acme/platform#defaults"]`: false,
 		`composition.exports["Bad"]`:                              false,
 		`composition.adopt["../platform#defaults"]`:               false,
 		`composition.adopt["example.com/acme/platform#Bad"]`:      false,
@@ -131,10 +132,11 @@ func TestValidateConfigurationFieldsRejectsMalformedEvidence(t *testing.T) {
 	t.Run("contributor order", func(t *testing.T) {
 		field := internalValidConfigurationField()
 		dependency := ConfigurationContribution{
-			owner:      ConfigurationOwnerAdopted,
-			precedence: 1,
-			digest:     internalConfigurationDigest("2"),
-			summary:    "redacted",
+			owner:         ConfigurationOwnerTemplate,
+			precedence:    1,
+			templateOrder: 1,
+			digest:        internalConfigurationDigest("2"),
+			summary:       "redacted",
 			sources: []Source{{
 				module: "corp.example/platform",
 				path:   "plystra.yaml",
@@ -152,15 +154,16 @@ func TestValidateConfigurationFieldsRejectsMalformedEvidence(t *testing.T) {
 	t.Run("source order", func(t *testing.T) {
 		field := internalValidConfigurationField()
 		field.path = `config["acme.smtp"]["host"]`
-		field.owner = ConfigurationOwnerAdopted
+		field.owner = ConfigurationOwnerTemplate
 		field.digest = internalConfigurationDigest("2")
 		field.summary = "redacted"
 		field.contributors = []ConfigurationContribution{{
-			owner:      ConfigurationOwnerAdopted,
-			precedence: 1,
-			digest:     field.digest,
-			summary:    field.summary,
-			effective:  true,
+			owner:         ConfigurationOwnerTemplate,
+			precedence:    1,
+			templateOrder: 1,
+			digest:        field.digest,
+			summary:       field.summary,
+			effective:     true,
 			sources: []Source{
 				{module: "corp.example/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1},
 				{module: "aaa.example/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1},

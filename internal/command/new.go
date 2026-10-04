@@ -43,6 +43,10 @@ Its linear ancestry immediately supplies the supported Interface baseline,
 including CORS, without copying source or configuration or ranking candidates.
 Resource and Data inheritance remain unsupported.
 
+Invalid inherited declarations retain their owning source and specific
+diagnostic with exit 3. Ambiguous Implementation choices require a decision
+with exit 4. Both failures leave the requested target absent.
+
 Invalid Project names, explicit Go Module paths, and template queries emit
 PLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,
 and PLYSTRA_PROJECT_CREATE_TEMPLATE_INVALID.
@@ -500,8 +504,33 @@ func classifyNewFailure(err error) (commandschema.Status, string, string) {
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateTargetExists, "The Project target already exists."
 	case errors.Is(err, newproject.ErrGitInitialization):
 		return commandschema.StatusExecutionFailed, diagnosticcode.ProjectCreateGitInitializationFailed, "Git repository initialization failed."
+	}
+	if diagnostic, found := primaryActionableDiagnostic(err, recoveryContext{operation: "new"}); found && newTemplateValidationCode(diagnostic.code) {
+		return commandschema.StatusValidationFailed, diagnostic.code, "The resolved Project template contains invalid application declarations."
+	}
+	return commandschema.StatusExecutionFailed, diagnosticcode.ProjectCreateFailed, "Project creation failed."
+}
+
+func newTemplateValidationCode(code string) bool {
+	switch code {
+	case diagnosticProjectManifestInvalid, diagnosticConfigurationInvalid,
+		diagnosticConstructorConfigurationSchemaInvalid, diagnosticConstructorConfigurationValuesInvalid,
+		diagnosticConstructorConfigurationUnselected, diagnosticPolicyNotEnforced,
+		diagnosticResolveUnknownInterface, diagnosticResolveUnknownImplementation,
+		diagnosticResolveIncompatibleImplementation, diagnosticResolveMissingImplementation,
+		diagnosticResolveConstructorCycle, diagnosticResolveReservedInterface,
+		diagnosticResolveIntrinsicInterfaceSelection, diagnosticImplementationDeclarationInvalid,
+		diagnosticImplementationConfigInvalid, diagnosticImplementationRequiredInvalid,
+		diagnosticImplementationOptionalInvalid, diagnosticImplementationResultInvalid,
+		diagnosticImplementationConformanceInvalid, diagnosticInterfaceDeclarationInvalid,
+		diagnosticInterfaceContractInvalid, diagnosticInterfaceMetadataInvalid,
+		diagnosticInterfaceIDDuplicate, diagnosticAuthoredPackageInvalid,
+		diagnosticcode.ResourceDeclarationInvalid, diagnosticcode.ResourceProviderDeclarationInvalid,
+		diagnosticcode.ResourceProviderInvalid, diagnosticcode.ResourceContractInvalid,
+		diagnosticcode.ResourceIDDuplicate:
+		return true
 	default:
-		return commandschema.StatusExecutionFailed, diagnosticcode.ProjectCreateFailed, "Project creation failed."
+		return false
 	}
 }
 
@@ -535,6 +564,10 @@ func newFailureRecovery(code string) (commandschema.Recovery, error) {
 		id, targetKind, targetID, precondition = "correct-git-initialization", "tool", "git", "git_initialization_ready"
 	case diagnosticcode.ProjectCreateCancelled:
 		id, targetKind, targetID, precondition = "retry-project-creation", "command", "new", "intent_confirmed"
+	default:
+		if newTemplateValidationCode(code) {
+			id, targetKind, targetID, precondition = "correct-project-template", "argument", "template", "valid_template_input"
+		}
 	}
 	return commandschema.NewRecovery(commandschema.RecoveryInput{
 		ID:            id,
