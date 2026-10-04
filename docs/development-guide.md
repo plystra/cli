@@ -1589,8 +1589,11 @@ rejects intrinsic Interfaces, unknown Interfaces, unknown constructors, and
 constructors that do not implement the exact canonical Interface.
 
 For a Resource instance, the command selects an exact compatible provider under
-`resources.instances.<name>.use`. Only an exact provider change discards that
-instance's old Config; other instances and same-provider Config stay intact.
+`resources.instances.<name>.use`. Replacing a nonempty previous provider discards
+that instance's old Config; other instances and same-provider Config stay intact.
+An existing instance without a provider can receive its first selection. This
+retains unbound Config authored in the selected document, not inherited unbound
+values, and still validates the final typed configuration.
 Selection removes configuration whose last explicit or reachable owner
 disappears and only consumer binding parameters proven obsolete. It preserves
 still-owned configuration, revalidates surviving bindings, and never retargets

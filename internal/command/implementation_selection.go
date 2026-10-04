@@ -2,13 +2,11 @@ package command
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/plystra/cli/internal/implementationselect"
-	"github.com/plystra/cli/internal/interfaceresolution"
 )
 
 const (
@@ -89,10 +87,6 @@ func runUse(arguments []string, stdout, stderr io.Writer, workingDirectory strin
 		Environment:       environment,
 	})
 	if err != nil {
-		var missing *interfaceresolution.UnknownInterfaceError
-		if errors.As(err, &missing) && missing != nil && missing.InterfaceID().String() == parsed.target {
-			err = fmt.Errorf("%w: %w", implementationselect.ErrTargetNotFound, err)
-		}
 		writeCommandFailure(stderr, "", err, commandRecoveryContext(parsed.config, parsed.environment, environment))
 		return 1
 	}

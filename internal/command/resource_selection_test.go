@@ -42,6 +42,61 @@ func TestBuiltCLISelectsResourceProvider(t *testing.T) {
 	assertNoCommandTransactions(t, root)
 }
 
+func TestBuiltCLIRejectsMissingUseTargetsWithoutMutation(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "plystra.exe")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/plystra")
+	build.Dir, build.Env = commandRepositoryRoot(t), commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+	root := writeResourceSelectionCommandProject(t)
+	environment := implementationSelectionCommandEnvironment(nil)
+	generate := exec.CommandContext(t.Context(), binary, "generate", "--env", "production")
+	generate.Dir, generate.Env = root, environment
+	var generationStderr bytes.Buffer
+	generate.Stderr = &generationStderr
+	if output, err := generate.Output(); err != nil || generationStderr.Len() != 0 || len(output) == 0 {
+		t.Fatalf("prepare generated Project: %v\n%s\n%s", err, output, &generationStderr)
+	}
+	before := commandTree(t, root)
+	for _, test := range []struct {
+		name, target, constructor string
+	}{
+		{name: "Interface", target: "missing.operation/v1", constructor: "local.New"},
+		{name: "Resource", target: "database.missing", constructor: "replacement.New"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			command := exec.CommandContext(t.Context(), binary, "use", test.target, "example.com/acme/implementation-use/"+test.constructor, "--env", "production")
+			command.Dir, command.Env = filepath.Join(root, "database"), environment
+			var stderr bytes.Buffer
+			command.Stderr = &stderr
+			stdout, err := command.Output()
+			exitError, ok := err.(*exec.ExitError)
+			if !ok || exitError.ExitCode() != 1 || len(stdout) != 0 {
+				t.Fatalf("built CLI missing %s: %v\n%s\n%s", test.name, err, stdout, &stderr)
+			}
+			diagnostic := stderr.String()
+			if !strings.Contains(diagnostic, "Diagnostic: "+diagnosticcode.UseTargetNotFound+"\n") || strings.Count(diagnostic, "Recovery:") != 1 || strings.Count(diagnostic, "Diagnostic:") != 1 {
+				t.Fatalf("missing target diagnostic: %s", diagnostic)
+			}
+			for _, recovery := range []string{`plystra inspect interfaces --env "production"`, `plystra inspect resources --env "production"`, `plystra use <target> <constructor-symbol> --env "production"`} {
+				if !strings.Contains(diagnostic, recovery) {
+					t.Fatalf("missing selector-aware recovery %q: %s", recovery, diagnostic)
+				}
+			}
+			for _, private := range []string{root, filepath.ToSlash(root), "PRIVATE_PRIMARY", "PRIVATE_RETAINED", "PRIVATE_OVERLAY"} {
+				if strings.Contains(string(stdout)+diagnostic, private) {
+					t.Fatalf("missing target diagnostic exposed %q", private)
+				}
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("missing target selection mutated the Project")
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestRunUseSelectsResourceProviderAcrossSelectors(t *testing.T) {
 	for _, test := range []struct {
 		name, path string
