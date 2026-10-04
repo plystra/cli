@@ -355,32 +355,48 @@ config:
 	for _, modulePath := range []string{"my-app", "example.com/absent", "example.com/platform/v2", "gopkg.in/yaml.v3", "example.com/" + strings.Repeat("segment/", 160) + "module"} {
 		cases = append(cases, runtimeCase{name: "valid but unlinked relationship/" + modulePath, root: "template: " + strconv.Quote(modulePath) + "\n", rule: "root template relationship changed"})
 	}
-	// Resource execution is not implemented; active layers must fail before Secrets.
-	// A replacement still excludes every root application declaration.
-	for _, resource := range []string{
-
-		`null`, `{private-key: private-value}`, `{instances: null}`, `{instances: []}`,
-		`{instances: {database.1: {}}}`, `{instances: {database--primary: {}}}`,
-		`{instances: {` + strings.Repeat("a", 129) + `: {}}}`,
-		`{instances: {database: null}}`, `{instances: {database: {private-key: private-value}}}`,
-		`{instances: {database: {use: example.com/db.new}}}`, `{instances: {database: {use: null}}}`,
-		`{instances: {database: {config: null}}}`, `{instances: {database: {config: []}}}`,
-		`{bind: null}`, `{bind: {private-key: private-value}}`, `{bind: {instances: null}}`,
-		`{bind: {implementations: {private-key: {database: primary}}}}`,
-		`{bind: {instances: {Bad: {database: primary}}}}`, `{bind: {instances: {primary: []}}}`,
-		`{bind: {instances: {primary: {_ : secondary}}}}`, `{bind: {instances: {primary: {database: null}}}}`,
-		`{bind: {instances: {primary: {database: Database}}}}`, `{bind: {instances: {primary: {database: {instance: secondary}}}}}`,
-
-		`{}`, `{instances: {database: {}}}`, `{instances: {` + strings.Repeat("a", 128) + `: {}}}`,
-		`{instances: {database-1.primary: {use: example.com/db.New, config: {private: null, options: [], labels: {$remove: true, ordinary: 1}}}}}`,
-		`{bind: {implementations: {example.com/service.New: {Database: database-1.primary}}, instances: {cache: {"\u03b4": database}}}}`,
+	// Invalid Resource declarations fail before Secrets; empty collections add no
+	// instances. A replacement still excludes root application declarations.
+	for _, resource := range []struct {
+		yaml, rule string
+	}{
+		{`null`, "invalid Resource declaration mapping"},
+		{`{private-key: private-value}`, "invalid Resource declaration mapping"},
+		{`{instances: null}`, "invalid Resource declaration mapping"},
+		{`{instances: []}`, "invalid Resource declaration mapping"},
+		{`{instances: {database.1: {}}}`, "invalid Resource instance name"},
+		{`{instances: {database--primary: {}}}`, "invalid Resource instance name"},
+		{`{instances: {` + strings.Repeat("a", 129) + `: {}}}`, "invalid Resource instance name"},
+		{`{instances: {database: null}}`, "invalid Resource declaration mapping"},
+		{`{instances: {database: {private-key: private-value}}}`, "invalid Resource declaration mapping"},
+		{`{instances: {database: {use: example.com/db.new}}}`, "invalid Resource provider identity"},
+		{`{instances: {database: {use: null}}}`, "invalid Resource provider identity"},
+		{`{instances: {database: {config: null}}}`, "Resource config must be a mapping or removal"},
+		{`{instances: {database: {config: []}}}`, "Resource config must be a mapping or removal"},
+		{`{bind: null}`, "invalid Resource declaration mapping"},
+		{`{bind: {private-key: private-value}}`, "invalid Resource declaration mapping"},
+		{`{bind: {instances: null}}`, "invalid Resource declaration mapping"},
+		{`{bind: {implementations: {private-key: {database: primary}}}}`, "invalid Resource binding consumer"},
+		{`{bind: {instances: {Bad: {database: primary}}}}`, "invalid Resource binding consumer"},
+		{`{bind: {instances: {primary: []}}}`, "invalid Resource declaration mapping"},
+		{`{bind: {instances: {primary: {_ : secondary}}}}`, "invalid Resource dependency parameter"},
+		{`{bind: {instances: {primary: {database: null}}}}`, "invalid Resource binding target"},
+		{`{bind: {instances: {primary: {database: Database}}}}`, "invalid Resource binding target"},
+		{`{bind: {instances: {primary: {database: {instance: secondary}}}}}`, "invalid Resource binding target"},
+		{`{instances: {database: {}}}`, "Resource instance has no visible provider"},
+		{`{instances: {` + strings.Repeat("a", 128) + `: {}}}`, "Resource instance has no visible provider"},
+		{`{instances: {database-1.primary: {use: example.com/db.New, config: {private: null, options: [], labels: {$remove: true, ordinary: 1}}}}}`, "Resource provider has no Config schema"},
+		{`{bind: {implementations: {example.com/service.New: {Database: database-1.primary}}, instances: {cache: {"\u03b4": database}}}}`, "Resource binding consumer is not visible or selected"},
+		{`{}`, ""},
+		{`{instances: {}}`, ""},
+		{`{bind: {implementations: {}, instances: {}}}`, ""},
 	} {
 		cases = append(cases,
-			runtimeCase{name: "unsupported inherited resource/" + resource, rule: "Resources and Data", edit: func(d *runtimebaseline.Document) {
-				change(d, 1, resource, "resources")
+			runtimeCase{name: "inherited resource/" + resource.yaml, rule: resource.rule, edit: func(d *runtimebaseline.Document) {
+				change(d, 1, resource.yaml, "resources")
 			}},
-			runtimeCase{name: "unsupported current resource/" + resource, root: relationship + "resources: " + resource + "\n", rule: "Resources and Data"},
-			runtimeCase{name: "excluded root resource/" + resource, root: relationship + "resources: " + resource + "\n", selected: "{}\n"},
+			runtimeCase{name: "current resource/" + resource.yaml, root: relationship + "resources: " + resource.yaml + "\n", rule: resource.rule},
+			runtimeCase{name: "excluded root resource/" + resource.yaml, root: relationship + "resources: " + resource.yaml + "\n", selected: "{}\n"},
 		)
 	}
 	for _, resource := range []string{
