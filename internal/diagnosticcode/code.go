@@ -94,7 +94,13 @@ const (
 	ResourceIDDuplicate                  = Prefix + "RESOURCE_ID_DUPLICATE"
 	ResourceProviderDeclarationInvalid   = Prefix + "RESOURCE_PROVIDER_DECLARATION_INVALID"
 	ResourceProviderInvalid              = Prefix + "RESOURCE_PROVIDER_INVALID"
-	ResourceBindingUnsupported           = Prefix + "RESOURCE_BINDING_UNSUPPORTED"
+	ResourceInstanceInvalid              = Prefix + "RESOURCE_INSTANCE_INVALID"
+	ResourceBindingInvalid               = Prefix + "RESOURCE_BINDING_INVALID"
+	ResourceBindingMissing               = Prefix + "RESOURCE_BINDING_MISSING"
+	ResourceBindingAmbiguous             = Prefix + "RESOURCE_BINDING_AMBIGUOUS"
+	ResourceMetadataInvalid              = Prefix + "RESOURCE_METADATA_INVALID"
+	ResourceConfigurationSchemaInvalid   = Prefix + "RESOURCE_CONFIGURATION_SCHEMA_INVALID"
+	ResourceConfigurationValuesInvalid   = Prefix + "RESOURCE_CONFIGURATION_VALUES_INVALID"
 	AuthoredPackageInvalid               = Prefix + "AUTHORING_PACKAGE_INVALID"
 )
 

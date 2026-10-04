@@ -11,7 +11,6 @@ import (
 
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
-	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/interfaceresolution"
@@ -497,8 +496,6 @@ func classifyNewFailure(err error) (commandschema.Status, string, string) {
 		return commandschema.StatusValidationFailed, diagnosticcode.TemplateInvalid, "The resolved Project template is invalid."
 	case errors.Is(err, interfaceresolution.ErrAmbiguousImplementation):
 		return commandschema.StatusDecisionRequired, diagnosticcode.ResolveMultipleImplementations, "The Project template requires an explicit Interface implementation choice."
-	case errors.Is(err, constructorgraph.ErrResourceBindingUnsupported):
-		return commandschema.StatusValidationFailed, diagnosticcode.ResourceBindingUnsupported, "The Project template requires unsupported Resource instance binding."
 	case errors.Is(err, newproject.ErrInvalidPluginName):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreatePluginNameInvalid, "The initial Plugin name is invalid."
 	case errors.Is(err, newproject.ErrInvalidPluginID):
@@ -531,7 +528,10 @@ func newTemplateValidationCode(code string) bool {
 		diagnosticInterfaceIDDuplicate, diagnosticAuthoredPackageInvalid,
 		diagnosticcode.ResourceDeclarationInvalid, diagnosticcode.ResourceProviderDeclarationInvalid,
 		diagnosticcode.ResourceProviderInvalid, diagnosticcode.ResourceContractInvalid,
-		diagnosticcode.ResourceIDDuplicate, diagnosticcode.ResourceBindingUnsupported:
+		diagnosticcode.ResourceIDDuplicate, diagnosticcode.ResourceInstanceInvalid,
+		diagnosticcode.ResourceBindingInvalid, diagnosticcode.ResourceBindingMissing,
+		diagnosticcode.ResourceBindingAmbiguous, diagnosticcode.ResourceMetadataInvalid,
+		diagnosticcode.ResourceConfigurationSchemaInvalid, diagnosticcode.ResourceConfigurationValuesInvalid:
 		return true
 	default:
 		return false

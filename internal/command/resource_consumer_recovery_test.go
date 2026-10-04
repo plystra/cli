@@ -60,7 +60,7 @@ func TestBuiltCLIInspectsAndRejectsResourceConsumers(t *testing.T) {
 	before = snapshotInspectProject(t, root)
 	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}, {"inspect", "implementations", "--format", "json"}} {
 		exit, stdout, stderr := run(arguments...)
-		if exit != 1 || !strings.Contains(stderr, diagnosticcode.ResourceBindingUnsupported) || !strings.Contains(stderr, "primary") {
+		if exit != 1 || !strings.Contains(stderr, diagnosticcode.ResourceBindingMissing) || !strings.Contains(stderr, "primary") {
 			t.Fatalf("built activation %v = %d: %s %s", arguments, exit, stdout, stderr)
 		}
 		if !reflect.DeepEqual(before, snapshotInspectProject(t, root)) {
@@ -109,7 +109,7 @@ func TestPublicCommandsRejectReachableResourceConsumersWithoutMutation(t *testin
 								Locations []diagnosticjson.Source `json:"locations"`
 							} `json:"diagnostics"`
 						}
-						if err := json.Unmarshal([]byte(stdout), &result); err != nil || stderr != "" || result.Status != "validation_failed" || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diagnosticcode.ResourceBindingUnsupported {
+						if err := json.Unmarshal([]byte(stdout), &result); err != nil || stderr != "" || result.Status != "validation_failed" || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != diagnosticcode.ResourceBindingMissing {
 							t.Fatalf("structured Resource failure: %v: %s %s", err, stdout, stderr)
 						}
 						found := false
@@ -122,10 +122,10 @@ func TestPublicCommandsRejectReachableResourceConsumersWithoutMutation(t *testin
 							t.Fatal("structured Resource failure lost constructor source")
 						}
 					} else if !commandContainsAll(stderr,
-						"Diagnostic: "+diagnosticcode.ResourceBindingUnsupported,
+						"Diagnostic: "+diagnosticcode.ResourceBindingMissing,
 						"Source: "+owner+":consumer/service.go:9:6 (implementation-constructor)",
 						"Source: example.com/acme/inspect:"+path+":1:1 (declaration)",
-						"storage.database/v1", "primary", "parameter 1", "Resource dependency discovery alone",
+						"storage.database/v1", "primary", "parameter 1", "Select a compatible named instance",
 					) || strings.Count(stderr, "Diagnostic:") != 1 || strings.Count(stderr, "Recovery:") != 1 {
 						t.Fatalf("%v Resource failure lost typed recovery: %s %s", arguments, stdout, stderr)
 					}
