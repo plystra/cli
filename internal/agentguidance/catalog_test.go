@@ -215,7 +215,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	if !bytes.Contains(resources, []byte("plystra inspect capabilities --format json")) {
 		t.Fatalf("Resource and Data guidance omits installed capability discovery:\n%s", resources)
 	}
-	for _, phrase := range []string{"plystra inspect resources --format json", "contract_digest", "Resource instance configuration, provider construction, binding", "64 type-reference levels and 65,536 public shape nodes", "PLYSTRA_RESOURCE_ID_DUPLICATE", "resource.provider.discovery", "PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID", "PLYSTRA_RESOURCE_PROVIDER_INVALID", "does not select, construct, execute, or display provider candidates"} {
+	for _, phrase := range []string{"plystra inspect resources --format json", "contract_digest", "Resource instance configuration, provider construction, binding", "64 type-reference levels and 65,536 public shape nodes", "PLYSTRA_RESOURCE_ID_DUPLICATE", "resource.provider.discovery", "PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID", "PLYSTRA_RESOURCE_PROVIDER_INVALID", "does not select, construct, execute, or display provider candidates", "resource.consumer.discovery", "plystra inspect implementations --format json", "declares-dependency edges with reason resource", "exact parameter_name and one-based parameter_position", "PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID", "PLYSTRA_RESOURCE_BINDING_UNSUPPORTED", "Resource instance configuration and runtime binding remain unsupported"} {
 		if !bytes.Contains(resources, []byte(phrase)) {
 			t.Fatalf("Resource guidance omits %q", phrase)
 		}

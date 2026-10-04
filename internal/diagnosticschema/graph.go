@@ -326,7 +326,7 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 	}
 
 	nodes := make([]GraphNode, len(inputNodes))
-	nodeIDs := make(map[string]struct{}, len(inputNodes))
+	nodeIDs := make(map[string]GraphNodeKind, len(inputNodes))
 	for index, input := range inputNodes {
 		if !validExplanationCode(string(input.Kind)) {
 			return nil, nil, fmt.Errorf("nodes[%d].kind %q is not canonical lower kebab case", index, input.Kind)
@@ -342,17 +342,20 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 		}
 		if input.Kind == "resource-contract" {
 			_, identityErr := interfaceid.Parse(input.ResourceID)
-			if graphType != GraphTypeResources || identityErr != nil || input.ID != GraphNodeID(input.Kind, input.ResourceID) || !validReleaseDigest(input.ContractDigest) {
-				return nil, nil, fmt.Errorf("nodes[%d] requires a Resource contract digest in the resources view", index)
+			if (graphType != GraphTypeResources && graphType != GraphTypeImplementations) || identityErr != nil || input.ID != GraphNodeID(input.Kind, input.ResourceID) || !validReleaseDigest(input.ContractDigest) {
+				return nil, nil, fmt.Errorf("nodes[%d] requires a Resource contract identity and digest in the resources or implementations view", index)
 			}
 		} else if input.ContractDigest != "" || input.ResourceID != "" {
 			return nil, nil, fmt.Errorf("nodes[%d] is not a Resource contract", index)
+		}
+		if graphType == GraphTypeResources && input.Kind != "module" && input.Kind != "resource-contract" {
+			return nil, nil, fmt.Errorf("nodes[%d] is not a Resource contract or its owning module", index)
 		}
 		sources, err := normalizeGraphSources(mode, digest, input.Sources)
 		if err != nil {
 			return nil, nil, fmt.Errorf("nodes[%d].sources: %v", index, err)
 		}
-		nodeIDs[input.ID] = struct{}{}
+		nodeIDs[input.ID] = input.Kind
 		nodes[index] = GraphNode{ID: input.ID, Kind: input.Kind, Label: input.Label, Sources: sources, ContractDigest: input.ContractDigest, ResourceID: input.ResourceID}
 	}
 	sort.Slice(nodes, func(left, right int) bool { return nodes[left].ID < nodes[right].ID })
@@ -381,6 +384,13 @@ func normalizeGraphElements(graphType GraphType, mode generation.ConfigurationMo
 		}
 		if input.Reason != "" && !validExplanationCode(input.Reason) {
 			return nil, nil, fmt.Errorf("edges[%d].reason %q is not canonical lower kebab case", index, input.Reason)
+		}
+		if graphType == GraphTypeResources || input.Kind == "defines-resource" || input.Reason == "resource" || nodeIDs[input.From] == "resource-contract" || nodeIDs[input.To] == "resource-contract" {
+			definition := input.Kind == "defines-resource" && nodeIDs[input.From] == "module" && nodeIDs[input.To] == "resource-contract" && input.Reason == "authored"
+			dependency := graphType == GraphTypeImplementations && input.Kind == "declares-dependency" && nodeIDs[input.From] == "constructor" && nodeIDs[input.To] == "resource-contract" && input.Reason == "resource"
+			if !definition && !dependency {
+				return nil, nil, fmt.Errorf("edges[%d] is not a Resource contract definition or declared Implementation dependency", index)
+			}
 		}
 		if input.Kind == "declares-dependency" || input.Kind == "depends-on-interface" {
 			if input.ParameterName == "_" || !token.IsIdentifier(input.ParameterName) || input.ParameterPosition <= 0 || input.ParameterPosition > 65535 {

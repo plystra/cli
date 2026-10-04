@@ -141,6 +141,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"invocation.default-concurrency|yes|not_applicable|yes|yes|yes",
 		"legacy.capability-timeout|yes|yes|yes|no|no",
 		"resource|yes|no|no|no|no",
+		"resource.consumer.discovery|yes|yes|not_applicable|not_applicable|yes",
 		"resource.contract|yes|yes|not_applicable|not_applicable|yes",
 		"resource.provider.discovery|yes|yes|not_applicable|not_applicable|yes",
 		"template.interface-inheritance|yes|yes|yes|yes|yes",
