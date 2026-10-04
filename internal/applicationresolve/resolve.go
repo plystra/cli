@@ -24,7 +24,6 @@ import (
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/plugininventory"
-	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/resolutionevidence"
 	"github.com/plystra/cli/internal/resourceproviderinventory"
 	"github.com/plystra/cli/internal/runtimebaseline"
@@ -44,8 +43,8 @@ var (
 	// ErrUnsafeManifest reports a plystra.yaml that is symbolic or not a
 	// regular bounded file.
 	ErrUnsafeManifest = errors.New("unsafe application manifest")
-	// ErrConcurrentChange reports plystra.yaml changing while it was read or
-	// before the complete resolution finished.
+	// ErrConcurrentChange reports authored documents, module identities or
+	// declaration semantics changing before resolution or planning completed.
 	ErrConcurrentChange = errors.New("application manifest changed during resolution")
 	// ErrUnownedConstructorConfiguration reports effective constructor
 	// configuration whose constructor is neither explicitly selected nor
@@ -315,99 +314,21 @@ func (r Result) PreviousManifestProvenance() applicationgen.ManifestProvenance {
 // Resolve locates the nearest Project, loads its root plystra.yaml, discovers
 // the effective Go Module graph and active authored Interface and Implementation
 // packages, indexes legacy Project inputs not yet removed by later roadmap
-// gates, and resolves the application. It rechecks the application manifest
-// before returning and writes no application files.
+// gates, and resolves the application. It rechecks captured documents, module
+// identities and declaration semantics before returning and writes no
+// application files.
 func Resolve(ctx context.Context, options Options) (Result, error) {
-	if ctx == nil {
-		return Result{}, fmt.Errorf("%w: context is nil", ErrResolve)
-	}
-	module, err := projectlocate.Find(options.Start)
+	inputs, err := discoverSelectionInputs(ctx, options)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrResolve, err)
+		return Result{}, err
 	}
-	rootSnapshot, err := loadProjectManifestSnapshot(module.ModulePath(), module.Path())
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	selector, err := resolveConfigurationSelector(module.Path(), options.ConfigurationPath, options.EnvironmentName, options.Environment)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
-	}
-	rootManifest, err := parseProjectManifestSnapshot(module.ModulePath(), rootSnapshot, selector.mode == configurationModeExplicit)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	rootManifest, err = applicationmeta.WithProjectModule(rootManifest, module.ModulePath())
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: associate root configuration with Project module: %w", ErrResolve, err)
-	}
-	configurationSnapshot := rootSnapshot
-	selectedManifest := rootManifest
-	if selector.path != applicationManifestName {
-		if selector.mode == configurationModeEnvironment {
-			configurationSnapshot, selectedManifest, err = loadEnvironmentOverlay(module.ModulePath(), module.Path(), selector.path)
-		} else {
-			configurationSnapshot, selectedManifest, err = loadConfiguration(module.ModulePath(), module.Path(), selector.path)
-		}
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
-		}
-		selectedManifest, err = applicationmeta.WithProjectModule(selectedManifest, module.ModulePath())
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: associate selected configuration with Project module: %w", ErrResolve, err)
-		}
-	}
-	if selector.mode == configurationModeExplicit {
-		if err := validateReplacementMetadata(module.ModulePath(), selectedManifest); err != nil {
-			return Result{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
-		}
-	}
-	dependencies, err := moduledependency.Discover(ctx, module, moduledependency.Options{
-		GoCommand:   options.GoCommand,
-		Environment: append([]string(nil), options.Environment...),
-		OutputLimit: options.DependencyOutputLimit,
-	})
-	if err != nil {
-		err = normalizeDependencyConcurrentChange(err)
-		if errors.Is(err, projectlocate.ErrInvalidManifest) {
-			err = fmt.Errorf("%w: %w", ErrManifest, err)
-		}
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	dependencySnapshots, dependencyManifests, err := loadTemplateManifests(module.ModulePath(), rootManifest, dependencies)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	declarations, err := interfaceinventory.DiscoverApplication(ctx, module, dependencies, interfaceinventory.Options{
-		GoCommand:   options.GoCommand,
-		Environment: append([]string(nil), options.Environment...),
-		OutputLimit: options.DependencyOutputLimit,
-	})
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
+	module, dependencies, declarations := inputs.module, inputs.dependencies, inputs.declarations
+	rootSnapshot, configurationSnapshot := inputs.rootSnapshot, inputs.selectedSnapshot
+	rootManifest, selectedManifest, selector := inputs.rootManifest, inputs.selectedManifest, inputs.selector
+	dependencySnapshots, dependencyManifests := inputs.dependencySnapshots, inputs.templateDependencies
 	interfaces := declarations.Interfaces()
 	implementations := declarations.Implementations()
-	if err := interfaceinventory.ValidateUniqueIDs(interfaces); err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	inventory, err := plugininventory.Build(module, dependencies)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	schemaLookup := func(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
-		switch namespace {
-		case applicationmeta.ConfigurationNamespaceImplementation:
-			if implementation, exists := implementations.BySymbol(symbol); exists {
-				return implementation.Configuration()
-			}
-		case applicationmeta.ConfigurationNamespaceResource:
-			if provider, exists := declarations.ResourceProviders().BySymbol(symbol); exists {
-				return provider.Configuration()
-			}
-		}
-		return implementationinventory.Configuration{}, false
-	}
+	inventory, schemaLookup := inputs.inventory, inputs.schemaLookup
 	_, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, generatedManifestSourceError(module.ModulePath(), err))
@@ -433,17 +354,13 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: associate maintained configuration with Project module: %w", ErrResolve, err)
 	}
-	currentManifest := maintainedManifest
+	compositionSelected := maintainedManifest
 	if selector.mode == configurationModeEnvironment {
-		currentManifest, err = applicationmeta.ApplyOverlay(maintainedManifest, selectedManifest, schemaLookup)
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: environment %q: %w", ErrResolve, selector.environment, err)
-		}
+		compositionSelected = selectedManifest
 	}
-	currentManifest = applicationmeta.WithRootMetadata(currentManifest, rootManifest)
-	composition, err := applicationmeta.Compose(dependencyManifests, currentManifest, schemaLookup)
+	currentManifest, composition, err := inputs.composeCurrent(maintainedManifest, compositionSelected)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return Result{}, err
 	}
 	manifest := composition.Manifest()
 	currentLayers := composition.CurrentLayers()
@@ -471,15 +388,8 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	if err := validateConstructorConfigurationOwners(manifest, interfaceResolution, sourceContext); err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	var activeConstructors []constructorsymbol.Symbol
-	for _, node := range interfaceResolution.Graph().ConstructionOrder() {
-		activeConstructors = append(activeConstructors, node.Symbol())
-	}
-	if err := composition.ValidateRequiredConfiguration(schemaLookup, activeConstructors, selector.path); err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	if err := inputs.validateCandidateConfiguration(composition, interfaceResolution, sourceContext); err != nil {
+		return Result{}, err
 	}
 	rootLayerManifest := rootManifest
 	if maintenanceSnapshot.path == applicationManifestName {
@@ -560,48 +470,8 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct Resource resolution evidence: %w", ErrResolve, err)
 	}
-	after, err := ReadManifestSnapshot(module.Path())
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
-			module.ModulePath(),
-			applicationManifestName,
-			0,
-			0,
-			fmt.Errorf("%w: recheck plystra.yaml: %v", ErrConcurrentChange, err),
-		))
-	}
-	if !sameManifestSnapshot(rootSnapshot, after) {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
-			module.ModulePath(),
-			applicationManifestName,
-			0,
-			0,
-			fmt.Errorf("%w: plystra.yaml changed before resolution completed", ErrConcurrentChange),
-		))
-	}
-	if selector.path != applicationManifestName {
-		after, err := readManifestSnapshot(module.Path(), selector.path)
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
-				module.ModulePath(),
-				selector.path,
-				0,
-				0,
-				fmt.Errorf("%w: recheck selected configuration %s: %v", ErrConcurrentChange, selector.path, err),
-			))
-		}
-		if !sameManifestSnapshot(configurationSnapshot, after) {
-			return Result{}, fmt.Errorf("%w: %w", ErrResolve, configurationSourceError(
-				module.ModulePath(),
-				selector.path,
-				0,
-				0,
-				fmt.Errorf("%w: selected configuration %s changed before resolution completed", ErrConcurrentChange, selector.path),
-			))
-		}
-	}
-	if err := recheckDependencyManifests(dependencySnapshots); err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	if err := inputs.ValidateSnapshot(ctx); err != nil {
+		return Result{}, err
 	}
 	return Result{
 		module:              module,
