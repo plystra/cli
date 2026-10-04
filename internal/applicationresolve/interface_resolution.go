@@ -17,6 +17,14 @@ import (
 )
 
 func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Result, error) {
+	input, err := interfaceResolutionInput(manifest, interfaces, implementations, resourceProviders, legacyPlugins, sourceContext)
+	if err != nil {
+		return interfaceresolution.Result{}, err
+	}
+	return interfaceresolution.Resolve(input)
+}
+
+func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Input, error) {
 	requirements := manifest.InterfaceRequirements()
 	exposures := manifest.HTTPExposures()
 	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures))
@@ -24,7 +32,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		path := fmt.Sprintf("interfaces.require[%q]", requirement.ID().String())
 		sources, err := applicationinput.ConfigurationSources(sourceContext, requirement.Source(), path)
 		if err != nil {
-			return interfaceresolution.Result{}, fmt.Errorf("interface requirement %s provenance: %w", requirement.ID(), err)
+			return interfaceresolution.Input{}, fmt.Errorf("interface requirement %s provenance: %w", requirement.ID(), err)
 		}
 		for _, source := range sources {
 			rootRequirements = append(rootRequirements, interfaceresolution.Requirement{
@@ -57,7 +65,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		path := fmt.Sprintf("http.expose[%q]", identifier)
 		sources, err := applicationinput.ConfigurationSources(sourceContext, exposure.Source(), path)
 		if err != nil {
-			return interfaceresolution.Result{}, fmt.Errorf("HTTP exposure %s provenance: %w", exposure.ID(), err)
+			return interfaceresolution.Input{}, fmt.Errorf("HTTP exposure %s provenance: %w", exposure.ID(), err)
 		}
 		for _, source := range sources {
 			rootRequirements = append(rootRequirements, interfaceresolution.Requirement{
@@ -79,7 +87,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		path := fmt.Sprintf("interfaces.use[%q]", choice.InterfaceID().String())
 		sources, err := applicationinput.ConfigurationSources(sourceContext, choice.Source(), path)
 		if err != nil {
-			return interfaceresolution.Result{}, fmt.Errorf("implementation choice %s provenance: %w", choice.InterfaceID(), err)
+			return interfaceresolution.Input{}, fmt.Errorf("implementation choice %s provenance: %w", choice.InterfaceID(), err)
 		}
 		choiceSources := make([]interfaceresolution.ChoiceSource, len(sources))
 		for sourceIndex, source := range sources {
@@ -101,7 +109,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 	for _, instance := range manifest.ResourceInstances() {
 		sources, err := resourceConfigurationSources(sourceContext, instance.ProviderSource(), fmt.Sprintf("resources.instances[%q].use", instance.Name()), instance.ProviderDeclarationSource())
 		if err != nil {
-			return interfaceresolution.Result{}, err
+			return interfaceresolution.Input{}, err
 		}
 		resourceInstances = append(resourceInstances, constructorgraph.ResourceInstanceInput{Name: instance.Name(), Provider: instance.Provider(), Sources: sources})
 	}
@@ -110,13 +118,13 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		field := fmt.Sprintf("resources.bind.%s[%q][%q]", binding.Namespace(), binding.Consumer(), binding.ParameterName())
 		sources, err := resourceConfigurationSources(sourceContext, binding.Source(), field, binding.DeclarationSource())
 		if err != nil {
-			return interfaceresolution.Result{}, err
+			return interfaceresolution.Input{}, err
 		}
 		resourceBindings = append(resourceBindings, constructorgraph.ResourceBindingInput{
 			Namespace: constructorgraph.ResourceConsumerNamespace(binding.Namespace()), Consumer: binding.Consumer(), Parameter: binding.ParameterName(), Target: binding.Target(), Sources: sources,
 		})
 	}
-	return interfaceresolution.Resolve(interfaceresolution.Input{
+	return interfaceresolution.Input{
 		Interfaces:        interfaces,
 		Implementations:   implementations,
 		Requirements:      rootRequirements,
@@ -124,7 +132,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 		ResourceProviders: resourceProviders,
 		ResourceInstances: resourceInstances,
 		ResourceBindings:  resourceBindings,
-	})
+	}, nil
 }
 
 func resourceConfigurationSources(context applicationinput.SourceContext, reference, field string, declaration applicationmeta.ConfigurationDeclarationSource) ([]constructorgraph.ResourceSource, error) {
