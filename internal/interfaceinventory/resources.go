@@ -28,6 +28,7 @@ func (r Resource) SourcePath() string                    { return r.declaration.
 func (r Resource) Local() bool                           { return r.local }
 func (r Resource) Declaration() resourcedecl.Declaration { return r.declaration }
 func (r Resource) ContractDigest() string                { return r.contract.Digest() }
+func (r Resource) Contract() resourcecontract.Contract   { return r.contract }
 
 func (r Resource) Source() string {
 	version := r.moduleVersion

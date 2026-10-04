@@ -2,6 +2,7 @@ package interfaceinventory_test
 
 import (
 	"errors"
+	"go/types"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -48,6 +49,10 @@ func TestDiscoverResourceContractsUsesSharedProjectBoundary(t *testing.T) {
 		if first[i].ID() != id || len(first[i].ContractDigest()) != 71 || first[i].Declaration().Position().Line != 2 {
 			t.Fatalf("Resource = %#v", first[i])
 		}
+	}
+	methods, err := first[0].Contract().ImplementationMethods("example.com/app/generated", func(pkg *types.Package) string { return pkg.Name() })
+	if err != nil || len(methods) != 1 || methods[0].Name() != "Read" || methods[0].Signature() != "func() api.Value" {
+		t.Fatalf("discovered Resource scaffold methods = %#v, %v", methods, err)
 	}
 	if !first[0].Local() || first[0].ModuleVersion() != "" || first[1].Local() || first[1].ModuleVersion() != "v1.0.0" || first[2].ModuleVersion() != "v1.1.0" {
 		t.Fatal("lost module provenance")

@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"go/types"
 	"sort"
+	"strings"
 
 	"github.com/plystra/cli/internal/resourcedecl"
+	"golang.org/x/mod/module"
 )
 
 const (
@@ -19,9 +21,14 @@ const (
 
 var ErrInvalid = errors.New("invalid Resource contract")
 
+// ErrImplementationMethods reports a valid Resource contract whose ordinary
+// implementation method signatures cannot be named from the target package.
+var ErrImplementationMethods = errors.New("resource implementation methods are not nameable")
+
 // Contract is an immutable validated consumer contract, not a provider schema.
 type Contract struct {
 	digest string
+	root   *types.Named
 }
 
 func (c Contract) Digest() string { return c.digest }
@@ -97,7 +104,301 @@ func Validate(declaration resourcedecl.Declaration, pkg *types.Package) (Contrac
 	if err != nil {
 		return Contract{}, fmt.Errorf("%w: encode public shape: %w", ErrInvalid, err)
 	}
-	return Contract{digest: fmt.Sprintf("sha256:%x", sha256.Sum256(data))}, nil
+	return Contract{digest: fmt.Sprintf("sha256:%x", sha256.Sum256(data)), root: named}, nil
+}
+
+// Method is one ordinary Resource method signature suitable for a generated
+// implementation declaration. Its fields are intentionally private so callers
+// cannot mutate the returned method values.
+type Method struct {
+	name      string
+	signature string
+}
+
+// Name returns the exact exported Resource method name.
+func (m Method) Name() string { return m.name }
+
+// Signature returns the complete method function signature, including func.
+func (m Method) Signature() string { return m.signature }
+
+// ImplementationMethods returns the exact effective Resource method set in
+// deterministic name order. targetImportPath is the package that will contain
+// the generated implementation. The qualifier is used by go/types when
+// spelling imported named types.
+func (c Contract) ImplementationMethods(targetImportPath string, qualifier types.Qualifier) ([]Method, error) {
+	if c.root == nil || c.root.Obj() == nil || c.root.Obj().Pkg() == nil {
+		return nil, fmt.Errorf("%w: contract has no compiled Resource root", ErrImplementationMethods)
+	}
+	if err := module.CheckImportPath(targetImportPath); err != nil {
+		return nil, fmt.Errorf("%w: invalid target import path %q", ErrImplementationMethods, targetImportPath)
+	}
+	resourcePackage := c.root.Obj().Pkg().Path()
+	if !importVisible(resourcePackage, targetImportPath) {
+		return nil, fmt.Errorf("%w: Resource package %q is not importable from %q", ErrImplementationMethods, resourcePackage, targetImportPath)
+	}
+	iface, ok := c.root.Underlying().(*types.Interface)
+	if !ok || !iface.Complete().IsMethodSet() {
+		return nil, fmt.Errorf("%w: compiled Resource root is not an ordinary interface", ErrImplementationMethods)
+	}
+	checker := signatureNameability{targetImportPath: targetImportPath}
+	result := make([]Method, 0, iface.NumMethods())
+	for index := 0; index < iface.NumMethods(); index++ {
+		method := iface.Method(index)
+		if !method.Exported() && method.Pkg() != nil && method.Pkg().Path() != targetImportPath {
+			return nil, fmt.Errorf("%w: sealed Resource method %q belongs to %q", ErrImplementationMethods, method.Name(), method.Pkg().Path())
+		}
+		signature, ok := method.Type().(*types.Signature)
+		if !ok {
+			return nil, fmt.Errorf("%w: method %q has no Go signature", ErrImplementationMethods, method.Name())
+		}
+		if err := checker.checkSignature(signature); err != nil {
+			return nil, fmt.Errorf("%w: method %q: %w", ErrImplementationMethods, method.Name(), err)
+		}
+		// go/types includes authored parameter and result names in TypeString.
+		// Rebuild only the outer tuple; nested function types retain their exact
+		// own signatures while generated method bodies cannot be shadowed.
+		spelled := types.NewSignatureType(signature.Recv(), typeParams(signature.RecvTypeParams()), typeParams(signature.TypeParams()),
+			unnamedTuple(signature.Params()), unnamedTuple(signature.Results()), signature.Variadic())
+		result = append(result, Method{name: method.Name(), signature: types.TypeString(spelled, detachedQualifier(qualifier))})
+	}
+	return result, nil
+}
+
+func typeParams(list *types.TypeParamList) []*types.TypeParam {
+	if list == nil || list.Len() == 0 {
+		return nil
+	}
+	result := make([]*types.TypeParam, list.Len())
+	for index := range result {
+		result[index] = list.At(index)
+	}
+	return result
+}
+
+func unnamedTuple(tuple *types.Tuple) *types.Tuple {
+	if tuple == nil || tuple.Len() == 0 {
+		return tuple
+	}
+	vars := make([]*types.Var, tuple.Len())
+	for index := range vars {
+		variable := tuple.At(index)
+		vars[index] = types.NewVar(variable.Pos(), variable.Pkg(), "", variable.Type())
+	}
+	return types.NewTuple(vars...)
+}
+
+// detachedQualifier prevents a caller's qualifier from receiving the retained
+// compiler package graph. Qualifiers should use Package.Path or Package.Name,
+// as required by go/types. The type graph itself is never exposed by Contract.
+func detachedQualifier(qualifier types.Qualifier) types.Qualifier {
+	if qualifier == nil {
+		return nil
+	}
+	return func(pkg *types.Package) string {
+		if pkg == nil {
+			return qualifier(nil)
+		}
+		return qualifier(types.NewPackage(pkg.Path(), pkg.Name()))
+	}
+}
+
+type signatureNameability struct {
+	targetImportPath string
+	active           map[types.Type]bool
+	nodes            int
+}
+
+func (c *signatureNameability) checkSignature(signature *types.Signature) error {
+	if signature == nil {
+		return errors.New("nil signature")
+	}
+	if signature.TypeParams().Len() != 0 {
+		return errors.New("generic method signatures are not nameable")
+	}
+	if err := c.checkTuple(signature.Params(), false); err != nil {
+		return err
+	}
+	return c.checkTuple(signature.Results(), true)
+}
+
+func (c *signatureNameability) checkTuple(tuple *types.Tuple, results bool) error {
+	if tuple == nil {
+		return nil
+	}
+	for index := 0; index < tuple.Len(); index++ {
+		if err := c.check(tuple.At(index).Type(), 0); err != nil {
+			return fmt.Errorf("%s %d: %w", map[bool]string{false: "parameter", true: "result"}[results], index+1, err)
+		}
+	}
+	return nil
+}
+
+func (c *signatureNameability) check(t types.Type, depth int) error {
+	if t == nil {
+		return errors.New("nil type")
+	}
+	if depth > MaximumDepth {
+		return fmt.Errorf("signature type shape exceeds %d type-reference levels", MaximumDepth)
+	}
+	c.nodes++
+	if c.nodes > MaximumNodes {
+		return fmt.Errorf("signature type shape exceeds %d nodes", MaximumNodes)
+	}
+	if c.active == nil {
+		c.active = make(map[types.Type]bool)
+	}
+	if c.active[t] {
+		return nil
+	}
+	c.active[t] = true
+	defer delete(c.active, t)
+	child := func(child types.Type) error { return c.check(child, depth+1) }
+	switch typ := t.(type) {
+	case *types.Basic:
+		if typ.Kind() == types.Invalid || typ.Info()&types.IsUntyped != 0 {
+			return errors.New("invalid or untyped signature type")
+		}
+	case *types.Named:
+		if err := c.checkNamed(typ.Obj(), typ.TypeArgs(), child); err != nil {
+			return err
+		}
+	case *types.Alias:
+		if err := c.checkNamed(typ.Obj(), typ.TypeArgs(), child); err != nil {
+			return err
+		}
+	case *types.Pointer:
+		return child(typ.Elem())
+	case *types.Slice:
+		return child(typ.Elem())
+	case *types.Array:
+		return child(typ.Elem())
+	case *types.Map:
+		if err := child(typ.Key()); err != nil {
+			return err
+		}
+		return child(typ.Elem())
+	case *types.Chan:
+		return child(typ.Elem())
+	case *types.Signature:
+		if err := c.checkSignature(typ); err != nil {
+			return err
+		}
+	case *types.Interface:
+		if !typ.Complete().IsMethodSet() {
+			return errors.New("signature interface is not an ordinary method set")
+		}
+		if err := c.checkInterface(typ, child); err != nil {
+			return err
+		}
+	case *types.Struct:
+		for index := 0; index < typ.NumFields(); index++ {
+			field := typ.Field(index)
+			if !field.Exported() && !samePackage(field.Pkg(), c.targetImportPath) {
+				return fmt.Errorf("unexported struct field %q belongs to %q", field.Name(), signaturePackagePath(field.Pkg()))
+			}
+			if err := child(field.Type()); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported signature type %T", t)
+	}
+	return nil
+}
+
+func (c *signatureNameability) checkNamed(object *types.TypeName, arguments *types.TypeList, child func(types.Type) error) error {
+	if object == nil {
+		return errors.New("unnamed named type")
+	}
+	// Predeclared named interfaces such as error have no owning package but
+	// are always nameable in generated Go source.
+	if object.Pkg() == nil {
+		return nil
+	}
+	if !object.Exported() && object.Pkg().Path() != c.targetImportPath {
+		return fmt.Errorf("unexported named type %q belongs to %q", object.Name(), object.Pkg().Path())
+	}
+	if !importVisible(object.Pkg().Path(), c.targetImportPath) {
+		return fmt.Errorf("named type package %q is not importable from %q", object.Pkg().Path(), c.targetImportPath)
+	}
+	if arguments != nil {
+		for index := 0; index < arguments.Len(); index++ {
+			if err := child(arguments.At(index)); err != nil {
+				return fmt.Errorf("type argument %d: %w", index+1, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *signatureNameability) checkInterface(iface *types.Interface, child func(types.Type) error) error {
+	for index := 0; index < iface.NumEmbeddeds(); index++ {
+		if err := child(iface.EmbeddedType(index)); err != nil {
+			return err
+		}
+	}
+	for index := 0; index < iface.NumMethods(); index++ {
+		method := iface.Method(index)
+		if !method.Exported() && !samePackage(method.Pkg(), c.targetImportPath) && !embeddedMethod(iface, method) {
+			return fmt.Errorf("unexported interface method %q belongs to %q", method.Name(), signaturePackagePath(method.Pkg()))
+		}
+		signature, ok := method.Type().(*types.Signature)
+		if !ok {
+			return errors.New("interface method has no Go signature")
+		}
+		if err := c.checkSignature(signature); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func embeddedMethod(iface *types.Interface, method *types.Func) bool {
+	for index := 0; index < iface.NumEmbeddeds(); index++ {
+		embedded := types.Unalias(iface.EmbeddedType(index))
+		named, ok := embedded.(*types.Named)
+		if !ok || !named.Obj().Exported() || named.Obj().Pkg() == nil {
+			continue
+		}
+		set := types.NewMethodSet(named)
+		for methodIndex := 0; methodIndex < set.Len(); methodIndex++ {
+			candidate := set.At(methodIndex).Obj().(*types.Func)
+			if candidate.Name() == method.Name() && candidate.Pkg() != nil && method.Pkg() != nil && candidate.Pkg().Path() == method.Pkg().Path() && types.Identical(candidate.Type(), method.Type()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func samePackage(pkg *types.Package, path string) bool {
+	return pkg != nil && pkg.Path() == path
+}
+
+func signaturePackagePath(pkg *types.Package) string {
+	if pkg == nil {
+		return ""
+	}
+	return pkg.Path()
+}
+
+func importVisible(importPath, targetImportPath string) bool {
+	if strings.HasPrefix(importPath, "internal/") {
+		return false
+	}
+	for start := 0; ; {
+		relative := strings.Index(importPath[start:], "/internal/")
+		if relative < 0 {
+			break
+		}
+		index := start + relative
+		parent := importPath[:index]
+		if parent == "" || (targetImportPath != parent && !strings.HasPrefix(targetImportPath, parent+"/")) {
+			return false
+		}
+		start = index + len("/internal/")
+	}
+	return true
 }
 
 type walker struct {
