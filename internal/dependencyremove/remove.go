@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/dependencycleanup"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulemutation"
@@ -87,30 +88,41 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 		Environment: options.Environment,
 		Arguments:   []string{"get", modulePath + "@none"},
 	}, func(mutate applicationgenerate.ModuleMutation) error {
-		_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+		plan, err := dependencycleanup.Plan(ctx, dependencycleanup.Options{
 			Start:                 project.Path(),
 			GoCommand:             options.GoCommand,
 			Environment:           options.Environment,
 			DependencyOutputLimit: options.DependencyOutputLimit,
-			Validate:              options.Validate,
-			MutateModule: func(ctx context.Context, root string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
-				return mutate(ctx, root, requirements, func() error {
-					if err := validate(); err != nil {
-						return err
-					}
-					_, selected, err := modulemutation.FindRequirement(root, modulePath)
-					if err != nil {
-						return fmt.Errorf("confirm removed dependency: %w", err)
-					}
-					if selected {
-						return fmt.Errorf("removed Go Module %q remains selected after regeneration and tidy", modulePath)
-					}
-					return nil
-				})
-			},
-			RejectUnexpected: true,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		return dependencycleanup.Commit(project.Path(), plan, func(root string) error {
+			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+				Start:                 root,
+				GoCommand:             options.GoCommand,
+				Environment:           options.Environment,
+				DependencyOutputLimit: options.DependencyOutputLimit,
+				Validate:              options.Validate,
+				MutateModule: func(ctx context.Context, root string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
+					return mutate(ctx, root, requirements, func() error {
+						if err := validate(); err != nil {
+							return err
+						}
+						_, selected, err := modulemutation.FindRequirement(root, modulePath)
+						if err != nil {
+							return fmt.Errorf("confirm removed dependency: %w", err)
+						}
+						if selected {
+							return fmt.Errorf("removed Go Module %q remains selected after regeneration and tidy", modulePath)
+						}
+						return nil
+					})
+				},
+				RejectUnexpected: true,
+			})
+			return err
+		})
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrRemove, err)

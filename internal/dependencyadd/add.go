@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/dependencycleanup"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/modulelocate"
 	"github.com/plystra/cli/internal/modulemutation"
@@ -62,16 +63,27 @@ func Add(ctx context.Context, options Options) (Result, error) {
 		Arguments:          []string{"get", query},
 		DirectRequirements: []string{modulePath},
 	}, func(mutate applicationgenerate.ModuleMutation) error {
-		_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+		plan, err := dependencycleanup.Plan(ctx, dependencycleanup.Options{
 			Start:                 project.Path(),
 			GoCommand:             options.GoCommand,
 			Environment:           options.Environment,
 			DependencyOutputLimit: options.DependencyOutputLimit,
-			Validate:              options.Validate,
-			MutateModule:          mutate,
-			RejectUnexpected:      true,
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		return dependencycleanup.Commit(project.Path(), plan, func(root string) error {
+			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+				Start:                 root,
+				GoCommand:             options.GoCommand,
+				Environment:           options.Environment,
+				DependencyOutputLimit: options.DependencyOutputLimit,
+				Validate:              options.Validate,
+				MutateModule:          mutate,
+				RejectUnexpected:      true,
+			})
+			return err
+		})
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrAdd, err)
