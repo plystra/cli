@@ -33,7 +33,7 @@ func TestGenerateRejectsActiveDataMembersBeforeMutation(t *testing.T) {
 `)
 			before := commandTree(t, root)
 			code, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
-			if code != 1 || stdout != "" || !strings.Contains(stderr, `plystra.production.yaml data.members["authn.persistence/v1"]`) || !strings.Contains(stderr, "Data compiler integration is unavailable") || !strings.Contains(stderr, "Diagnostic: "+diagnosticcode.DataCompilerUnavailable) || !strings.Contains(stderr, "Source: example.com/acme/data-member:plystra.production.yaml:3:5 (configuration-declaration)") {
+			if code != 1 || stdout != "" || !strings.Contains(stderr, `plystra.production.yaml data.members["authn.persistence/v1"]`) || !strings.Contains(stderr, "Data compiler integration is unavailable") || !strings.Contains(stderr, "selected Project graph has no github.com/plystra/data module") || !strings.Contains(stderr, "Select an exact published github.com/plystra/data Go Module") || !strings.Contains(stderr, "Diagnostic: "+diagnosticcode.DataCompilerUnavailable) || !strings.Contains(stderr, "Source: example.com/acme/data-member:plystra.production.yaml:3:5 (configuration-declaration)") {
 				t.Fatalf("command = exit %d, stdout %q, stderr %q", code, stdout, stderr)
 			}
 			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {

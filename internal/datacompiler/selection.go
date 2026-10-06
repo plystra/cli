@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/sumdb/dirhash"
 )
 
 const maximumGoModBytes = 1 << 20
@@ -48,6 +49,21 @@ type Selection struct {
 func Resolve(source Source) (Selection, error) {
 	root, err := validateModuleRoot(source.Root)
 	if source.ModulePath != ModulePath || source.ModuleVersion == "" || module.Check(ModulePath, source.ModuleVersion) != nil || !validModuleChecksum(source.ModuleChecksum) || root == "" || source.Workspace || source.Replacement {
+		return Selection{}, fmt.Errorf("%w: %w", ErrSelection, ErrInvalidSelection)
+	}
+	if err := filepath.WalkDir(root, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && !entry.Type().IsRegular() {
+			return ErrInvalidSelection
+		}
+		return nil
+	}); err != nil {
+		return Selection{}, fmt.Errorf("%w: %w", ErrSelection, ErrInvalidSelection)
+	}
+	checksum, err := dirhash.HashDir(root, ModulePath+"@"+source.ModuleVersion, dirhash.Hash1)
+	if err != nil || checksum != source.ModuleChecksum {
 		return Selection{}, fmt.Errorf("%w: %w", ErrSelection, ErrInvalidSelection)
 	}
 	manifest, digest, err := Load(root)

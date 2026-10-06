@@ -56,12 +56,21 @@ var (
 // be installed by this CLI, without claiming a compiler distribution was run.
 type DataCompilerUnavailableError struct {
 	member applicationmeta.DataMember
+	cause  error
 }
 
 func (e *DataCompilerUnavailableError) Error() string {
+	if e.cause != nil {
+		return fmt.Sprintf("%s: %s: %v", ErrDataCompilerUnavailable, e.member.Source(), e.cause)
+	}
 	return fmt.Sprintf("%s: %s requires the selected Data compiler before generation", ErrDataCompilerUnavailable, e.member.Source())
 }
-func (*DataCompilerUnavailableError) Unwrap() error { return ErrDataCompilerUnavailable }
+func (e *DataCompilerUnavailableError) Unwrap() []error {
+	if e.cause == nil {
+		return []error{ErrDataCompilerUnavailable}
+	}
+	return []error{ErrDataCompilerUnavailable, e.cause}
+}
 func (e *DataCompilerUnavailableError) Source() applicationmeta.ConfigurationDeclarationSource {
 	return e.member.DeclarationSource()
 }
@@ -273,6 +282,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	manifest := composition.Manifest()
 	if members := manifest.DataMembers(); len(members) != 0 {
+		if _, err := inputs.DataCompilerSelection(); err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err})
+		}
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0]})
 	}
 	currentLayers := composition.CurrentLayers()

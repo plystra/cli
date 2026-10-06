@@ -159,6 +159,7 @@ func sameModuleGraph(left, right moduledependency.Index, allowTidy bool) bool {
 		aReplacement, aReplaced := a.Replacement()
 		bReplacement, bReplaced := b.Replacement()
 		if a.Path() != b.Path() || a.Root() != b.Root() || a.SelectedVersion() != b.SelectedVersion() ||
+			a.Checksum() != b.Checksum() || a.GoModChecksum() != b.GoModChecksum() ||
 			a.Workspace() != b.Workspace() || a.Project() != b.Project() ||
 			aReplaced != bReplaced || aReplacement != bReplacement {
 			return false

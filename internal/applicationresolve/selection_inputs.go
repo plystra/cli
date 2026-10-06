@@ -11,6 +11,7 @@ import (
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
@@ -50,6 +51,24 @@ func (s SelectionInputs) Module() modulelocate.Module { return s.module }
 
 // Dependencies returns the captured effective Go Module graph.
 func (s SelectionInputs) Dependencies() moduledependency.Index { return s.dependencies }
+
+// DataCompilerSelection resolves the exact published Data distribution from
+// this Project's selected Go Module graph. It does not activate Data members.
+func (s SelectionInputs) DataCompilerSelection() (datacompiler.Selection, error) {
+	if s.module.Path() == "" {
+		return datacompiler.Selection{}, fmt.Errorf("%w: Project selection inputs are empty", datacompiler.ErrSelection)
+	}
+	module, exists := s.dependencies.ByPath(datacompiler.ModulePath)
+	if !exists {
+		return datacompiler.Selection{}, fmt.Errorf("%w: selected Project graph has no %s module", datacompiler.ErrSelection, datacompiler.ModulePath)
+	}
+	_, replaced := module.Replacement()
+	return datacompiler.Resolve(datacompiler.Source{
+		ModulePath: module.Path(), ModuleVersion: module.SelectedVersion(),
+		ModuleChecksum: module.Checksum(), Root: module.Root(),
+		Workspace: module.Workspace(), Replacement: replaced,
+	})
+}
 
 // Declarations returns the same validated Go declarations used by Resolve.
 func (s SelectionInputs) Declarations() interfaceinventory.Discovery { return s.declarations }

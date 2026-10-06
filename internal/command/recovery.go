@@ -23,6 +23,7 @@ import (
 	"github.com/plystra/cli/internal/capabilityversion"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
+	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/dependencyadd"
 	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/dependencyupdate"
@@ -1248,6 +1249,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 		return recoveryDiagnostic(diagnosticcode.DataMemberMetadataInvalid, "Correct the reported data.members entry to use a canonical member ID, one valid resource name, and an optional valid access name, then rerun the command.")
 	}
 	if errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) {
+		if errors.Is(err, datacompiler.ErrSelection) {
+			return recoveryDiagnostic(diagnosticcode.DataCompilerUnavailable, "Select an exact published github.com/plystra/data Go Module with a verified checksum and valid compiler distribution manifest, then rerun the command.")
+		}
 		return recoveryDiagnostic(diagnosticcode.DataCompilerUnavailable, "Remove the selected data.members activation or use a CLI with exact Data compiler integration, then rerun the command.")
 	}
 	switch {

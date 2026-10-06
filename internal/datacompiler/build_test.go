@@ -2,7 +2,6 @@ package datacompiler_test
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/datacompiler"
+	"golang.org/x/mod/sumdb/dirhash"
 )
 
 func TestBuildCreatesAndReusesCompilerCache(t *testing.T) {
 	root := writeCompilerModule(t)
 	options := datacompiler.BuildOptions{
-		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(),
+		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(t, root),
 		CacheRoot: filepath.Join(t.TempDir(), "cache"), Environment: []string{"GOWORK=bad"},
 	}
 	first, err := datacompiler.Build(context.Background(), options)
@@ -74,13 +74,31 @@ func TestBuildRejectsMismatchedModuleRootWithoutCacheOutput(t *testing.T) {
 	}
 	cache := filepath.Join(t.TempDir(), "cache")
 	_, err := datacompiler.Build(context.Background(), datacompiler.BuildOptions{
-		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(), CacheRoot: cache,
+		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(t, root), CacheRoot: cache,
 	})
 	if !errors.Is(err, datacompiler.ErrBuild) || !errors.Is(err, datacompiler.ErrSelection) || !errors.Is(err, datacompiler.ErrInvalidSelection) {
 		t.Fatalf("Build() error = %v", err)
 	}
 	if _, err := os.Stat(cache); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cache exists after rejected root: %v", err)
+	}
+}
+
+func TestBuildRejectsChangedSourceBeforeCacheOutput(t *testing.T) {
+	root := writeCompilerModule(t)
+	checksum := testModuleChecksum(t, root)
+	if err := os.WriteFile(filepath.Join(root, "plystra-data-compiler.json"), []byte(validManifestJSON+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(t.TempDir(), "cache")
+	_, err := datacompiler.Build(context.Background(), datacompiler.BuildOptions{
+		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: checksum, CacheRoot: cache,
+	})
+	if !errors.Is(err, datacompiler.ErrInvalidSelection) {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if _, err := os.Stat(cache); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cache exists after changed source: %v", err)
 	}
 }
 
@@ -91,7 +109,7 @@ func TestBuildFailureDoesNotLeaveFinalArtifact(t *testing.T) {
 	}
 	cache := t.TempDir()
 	_, err := datacompiler.Build(context.Background(), datacompiler.BuildOptions{
-		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(), CacheRoot: cache,
+		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(t, root), CacheRoot: cache,
 	})
 	if !errors.Is(err, datacompiler.ErrBuild) {
 		t.Fatalf("Build() error = %v", err)
@@ -125,6 +143,11 @@ func writeCompilerModule(t *testing.T) string {
 	return root
 }
 
-func testModuleChecksum() string {
-	return "h1:" + base64.StdEncoding.EncodeToString(make([]byte, 32))
+func testModuleChecksum(t *testing.T, root string) string {
+	t.Helper()
+	checksum, err := dirhash.HashDir(root, datacompiler.ModulePath+"@v0.0.0-test", dirhash.Hash1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checksum
 }

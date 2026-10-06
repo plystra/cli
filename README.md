@@ -1205,9 +1205,14 @@ instance. An environment overlay replaces an entire entry or removes it with
 `{$remove: true}`; root and complete replacement documents cannot remove it.
 This is configuration composition only. An effective active member makes
 `plystra generate` and `plystra generate --check` fail with
-`PLYSTRA_DATA_COMPILER_UNAVAILABLE` before changing the Project. Invalid entries
-report `PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location.
-Compiler acquisition, assignment validation, generated access, and migrations
+`PLYSTRA_DATA_COMPILER_UNAVAILABLE` before changing the Project. The CLI first
+resolves the exact `github.com/plystra/data` version, verified `h1:` checksum,
+and distribution manifest from the selected Project's ordinary Go Module graph;
+workspace and replacement sources are not accepted as published compiler
+distributions. A missing or invalid distribution is reported with the active
+member's configuration source. Invalid entries report
+`PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location. Project
+compiler execution, assignment validation, generated access, and migrations
 are not installed yet.
 
 ### Named Resource instances
