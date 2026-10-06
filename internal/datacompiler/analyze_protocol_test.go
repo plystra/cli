@@ -47,6 +47,36 @@ func TestValidateAnalyzeRequestBindsCompilerAndBuildIdentity(t *testing.T) {
 	}
 }
 
+func TestValidateAnalyzeRequestRequiresClosedPackageRootEligibility(t *testing.T) {
+	artifact := testAnalyzeArtifact(t)
+	for _, eligibility := range []string{"eligible", "support", "", "unknown"} {
+		var request map[string]any
+		if err := json.Unmarshal(validAnalyzeRequest(t, artifact), &request); err != nil {
+			t.Fatal(err)
+		}
+		pkg := map[string]any{
+			"import_path": "example.com/model",
+			"files":       []any{map[string]any{"path": "model.go", "content": base64.StdEncoding.EncodeToString([]byte("package model\n"))}},
+		}
+		if eligibility != "" {
+			pkg["root_eligibility"] = eligibility
+		}
+		request["snapshot"].(map[string]any)["packages"] = []any{pkg}
+		data, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = validateAnalyzeRequest(data, artifact)
+		if eligibility == "eligible" || eligibility == "support" {
+			if err != nil {
+				t.Fatalf("eligibility %q rejected: %v", eligibility, err)
+			}
+		} else if !errors.Is(err, ErrAnalyzeRequest) {
+			t.Fatalf("eligibility %q accepted: %v", eligibility, err)
+		}
+	}
+}
+
 func TestValidateAnalyzeResponseRequiresIdentityAndBoundedDiagnostics(t *testing.T) {
 	artifact := testAnalyzeArtifact(t)
 	request := validAnalyzeRequest(t, artifact)

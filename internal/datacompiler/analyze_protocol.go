@@ -66,6 +66,12 @@ type analyzeSnapshotEnvelope struct {
 	Limits    analyzeLimits   `json:"limits"`
 }
 
+type analyzeSnapshotPackage struct {
+	ImportPath      string          `json:"import_path"`
+	RootEligibility string          `json:"root_eligibility"`
+	Files           json.RawMessage `json:"files"`
+}
+
 type analyzeRequestEnvelope struct {
 	Schema      string                  `json:"schema"`
 	Phase       string                  `json:"phase"`
@@ -124,7 +130,7 @@ func validateAnalyzeRequest(data []byte, artifact Artifact) (analyzeRequestEnvel
 	if err := decodeStrictJSON(request.Snapshot, &snapshot); err != nil || snapshot.Limits != request.Limits || len(snapshot.Packages) == 0 || len(snapshot.Resources) == 0 {
 		return analyzeRequestEnvelope{}, fmt.Errorf("%w: snapshot and declared limits differ or are malformed", ErrAnalyzeRequest)
 	}
-	if err := validateAnalyzeArray(snapshot.Packages); err != nil {
+	if err := validateAnalyzePackages(snapshot.Packages); err != nil {
 		return analyzeRequestEnvelope{}, fmt.Errorf("%w: package inventory is malformed", ErrAnalyzeRequest)
 	}
 	if err := validateAnalyzeArray(snapshot.Resources); err != nil {
@@ -246,6 +252,23 @@ func validateAnalyzeArray(data []byte) error {
 	var values []json.RawMessage
 	if err := decodeStrictJSON(data, &values); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateAnalyzePackages(data []byte) error {
+	var packages []analyzeSnapshotPackage
+	if err := decodeStrictJSON(data, &packages); err != nil {
+		return err
+	}
+	for _, pkg := range packages {
+		if strings.TrimSpace(pkg.ImportPath) == "" || (pkg.RootEligibility != "eligible" && pkg.RootEligibility != "support") || len(pkg.Files) == 0 {
+			return errors.New("package identity or root eligibility is invalid")
+		}
+		var files []json.RawMessage
+		if err := decodeStrictJSON(pkg.Files, &files); err != nil || len(files) == 0 {
+			return errors.New("package files are missing")
+		}
 	}
 	return nil
 }
