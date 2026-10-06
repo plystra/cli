@@ -55,6 +55,84 @@ func TestBuildCreatesAndReusesCompilerCache(t *testing.T) {
 	}
 }
 
+func TestBuildOfflineRequiresVerifiedExistingCompiler(t *testing.T) {
+	root := writeCompilerModule(t)
+	cache := filepath.Join(t.TempDir(), "cache")
+	options := datacompiler.BuildOptions{
+		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(t, root),
+		CacheRoot: cache, GoCommand: "nonexistent-go-command", Offline: true,
+	}
+	_, err := datacompiler.Build(context.Background(), options)
+	if !errors.Is(err, datacompiler.ErrOfflineUnavailable) {
+		t.Fatalf("cold offline cache error = %v", err)
+	}
+	if _, err := os.Stat(cache); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cold offline cache created directory: %v", err)
+	}
+	online := options
+	online.GoCommand = ""
+	online.Offline = false
+	artifact, err := datacompiler.Build(context.Background(), online)
+	if err != nil {
+		t.Fatalf("online build: %v", err)
+	}
+	warm, err := datacompiler.Build(context.Background(), options)
+	if err != nil || !warm.CacheHit || warm.Path != artifact.Path || warm.BinaryDigest != artifact.BinaryDigest {
+		t.Fatalf("warm offline cache = %#v, %v", warm, err)
+	}
+	file, err := os.OpenFile(artifact.Path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("tampered"); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = datacompiler.Build(context.Background(), options)
+	if !errors.Is(err, datacompiler.ErrOfflineUnavailable) {
+		t.Fatalf("corrupt offline cache error = %v", err)
+	}
+	data, err := os.ReadFile(artifact.Path)
+	if err != nil || !strings.HasSuffix(string(data), "tampered") {
+		t.Fatalf("offline cache was modified: %v", err)
+	}
+}
+
+func TestBuildOfflineRejectsSymbolicCacheRecord(t *testing.T) {
+	root := writeCompilerModule(t)
+	options := datacompiler.BuildOptions{
+		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(t, root),
+		CacheRoot: filepath.Join(t.TempDir(), "cache"),
+	}
+	artifact, err := datacompiler.Build(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := artifact.Path + ".json"
+	copy := record + ".copy"
+	data, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(copy, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(copy, record); err != nil {
+		t.Skipf("symbolic links unavailable: %v", err)
+	}
+	options.Offline = true
+	_, err = datacompiler.Build(context.Background(), options)
+	if !errors.Is(err, datacompiler.ErrOfflineUnavailable) {
+		t.Fatalf("symbolic cache record error = %v", err)
+	}
+}
+
 func TestBuildRejectsIncompleteIdentityWithoutCacheOutput(t *testing.T) {
 	root := writeCompilerModule(t)
 	cache := filepath.Join(t.TempDir(), "cache")

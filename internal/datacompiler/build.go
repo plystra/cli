@@ -23,6 +23,9 @@ var (
 	ErrBuild = errors.New("build Data compiler")
 	// ErrInvalidBuildOptions identifies incomplete compiler acquisition inputs.
 	ErrInvalidBuildOptions = errors.New("invalid Data compiler build options")
+	// ErrOfflineUnavailable identifies an exact compiler without a verified
+	// executable already present in the private cache.
+	ErrOfflineUnavailable = errors.New("exact Data compiler is unavailable offline")
 )
 
 // BuildOptions identifies one immutable compiler source and its CLI-owned
@@ -36,6 +39,9 @@ type BuildOptions struct {
 	Environment    []string
 	Workspace      bool
 	Replacement    bool
+	// Offline verifies the selected source and returns only an existing
+	// verified cache entry; it never invokes Go or creates cache files.
+	Offline bool
 }
 
 // Artifact is one verified compiler executable and its immutable provenance.
@@ -67,6 +73,7 @@ type cacheRecord struct {
 }
 
 const cacheRecordSchema = "plystra.data-compiler-cache/v1"
+const maximumCacheRecordBytes = 4096
 
 // Build validates the selected module distribution and builds its compiler
 // into a deterministic private cache entry. The compiler receives no input
@@ -90,6 +97,9 @@ func Build(ctx context.Context, options BuildOptions) (Artifact, error) {
 	if artifact, ok := readCache(options.CacheRoot, key, manifestDigest, options, goToolchain, goos, goarch); ok {
 		artifact.CacheHit = true
 		return artifact, nil
+	}
+	if options.Offline {
+		return Artifact{}, fmt.Errorf("%w: %w", ErrBuild, ErrOfflineUnavailable)
 	}
 	if err := os.MkdirAll(options.CacheRoot, 0o700); err != nil {
 		return Artifact{}, fmt.Errorf("%w: create private cache: %v", ErrBuild, err)
@@ -222,6 +232,10 @@ func cacheKey(manifestDigest, version, checksum, toolchain, goos, goarch string)
 func readCache(root, key, manifestDigest string, options BuildOptions, toolchain, goos, goarch string) (Artifact, bool) {
 	path := filepath.Join(root, "data-compiler-"+key+executableSuffix(goos))
 	recordPath := path + ".json"
+	recordInfo, err := os.Lstat(recordPath)
+	if err != nil || !recordInfo.Mode().IsRegular() || recordInfo.Size() <= 0 || recordInfo.Size() > maximumCacheRecordBytes {
+		return Artifact{}, false
+	}
 	data, err := os.ReadFile(recordPath)
 	if err != nil {
 		return Artifact{}, false
@@ -233,7 +247,7 @@ func readCache(root, key, manifestDigest string, options BuildOptions, toolchain
 	if decoder.Decode(&record) != nil || decoder.Decode(&extra) != io.EOF || record.Schema != cacheRecordSchema || record.Key != key || record.ModulePath != ModulePath || record.ModuleVersion != options.ModuleVersion || record.ModuleChecksum != options.ModuleChecksum || record.ManifestDigest != manifestDigest || record.GoToolchain != toolchain || record.GOOS != goos || record.GOARCH != goarch || record.Bytes <= 0 || !validDigest(record.BinaryDigest) {
 		return Artifact{}, false
 	}
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() || info.Size() != record.Bytes {
 		return Artifact{}, false
 	}
