@@ -259,6 +259,120 @@ func TestDiscoverAcceptsDownloadedSelectedVersionWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestDiscoverOfflineUsesWarmSelectedSourceWithoutProjectMutation(t *testing.T) {
+	t.Parallel()
+
+	const (
+		modulePath = "example.com/plugin"
+		version    = "v1.2.3"
+	)
+	root := t.TempDir()
+	proxyRoot := writeModuleProxy(t, root, modulePath, version)
+	appRoot := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire "+modulePath+" "+version+"\n")
+	environment := isolatedGoEnvironment(t, proxyRoot)
+	runGo(t, appRoot, environment, "mod", "download", modulePath+"@"+version)
+	goModBefore := readFile(t, filepath.Join(appRoot, "go.mod"))
+	goSumBefore := readFile(t, filepath.Join(appRoot, "go.sum"))
+
+	index, err := moduledependency.Discover(t.Context(), locate(t, appRoot), moduledependency.Options{
+		Environment: environment,
+		Offline:     true,
+	})
+	if err != nil {
+		t.Fatalf("Discover offline: %v", err)
+	}
+	selected, ok := index.ByPath(modulePath)
+	if !ok || selected.SelectedVersion() != version || selected.Checksum() == "" || !selected.Project() || len(index.Projects()) != 1 {
+		t.Fatalf("offline selected module = %#v, %t", selected, ok)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.mod")); !bytes.Equal(got, goModBefore) {
+		t.Fatalf("Discover changed go.mod from %q to %q", goModBefore, got)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.sum")); !bytes.Equal(got, goSumBefore) {
+		t.Fatalf("Discover changed go.sum from %q to %q", goSumBefore, got)
+	}
+}
+
+func TestDiscoverOfflineRejectsMissingSelectedSourceWithoutMaterialization(t *testing.T) {
+	t.Parallel()
+
+	const (
+		modulePath = "example.com/plugin"
+		version    = "v1.2.3"
+	)
+	root := t.TempDir()
+	proxyRoot := writeModuleProxy(t, root, modulePath, version)
+	appRoot := filepath.Join(root, "app")
+	writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire "+modulePath+" "+version+"\n")
+	environment := isolatedGoEnvironment(t, proxyRoot)
+	runGo(t, appRoot, environment, "mod", "download", modulePath+"@"+version)
+	escapedPath, err := module.EscapePath(modulePath)
+	if err != nil {
+		t.Fatalf("EscapePath: %v", err)
+	}
+	escapedVersion, err := module.EscapeVersion(version)
+	if err != nil {
+		t.Fatalf("EscapeVersion: %v", err)
+	}
+	extractedRoot := filepath.Join(environmentValue(t, environment, "GOMODCACHE"), filepath.FromSlash(escapedPath)+"@"+escapedVersion)
+	if err := os.RemoveAll(extractedRoot); err != nil {
+		t.Fatalf("RemoveAll(extracted source): %v", err)
+	}
+	goModBefore := readFile(t, filepath.Join(appRoot, "go.mod"))
+	goSumBefore := readFile(t, filepath.Join(appRoot, "go.sum"))
+
+	_, err = moduledependency.Discover(t.Context(), locate(t, appRoot), moduledependency.Options{
+		Environment: environment,
+		Offline:     true,
+	})
+	if !errors.Is(err, moduledependency.ErrDiscover) || !errors.Is(err, moduledependency.ErrModuleUnavailable) || !strings.Contains(err.Error(), modulePath+"@"+version) {
+		t.Fatalf("Discover offline error = %v, want exact unavailable source", err)
+	}
+	if _, err := os.Stat(extractedRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("offline discovery materialized selected source: %v", err)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.mod")); !bytes.Equal(got, goModBefore) {
+		t.Fatalf("Discover changed go.mod from %q to %q", goModBefore, got)
+	}
+	if got := readFile(t, filepath.Join(appRoot, "go.sum")); !bytes.Equal(got, goSumBefore) {
+		t.Fatalf("Discover changed go.sum from %q to %q", goSumBefore, got)
+	}
+}
+
+func TestDiscoverOfflineDoesNotFetchColdGraphFromFileProxy(t *testing.T) {
+	t.Parallel()
+
+	const (
+		modulePath = "example.com/plugin"
+		version    = "v1.2.3"
+	)
+	root := t.TempDir()
+	proxyRoot := writeModuleProxy(t, root, modulePath, version)
+	appRoot := filepath.Join(root, "app")
+	goModPath := filepath.Join(appRoot, "go.mod")
+	writeFile(t, goModPath, "module example.com/app\n\ngo 1.26\n\nrequire "+modulePath+" "+version+"\n")
+	environment := isolatedGoEnvironment(t, proxyRoot)
+	goModBefore := readFile(t, goModPath)
+
+	_, err := moduledependency.Discover(t.Context(), locate(t, appRoot), moduledependency.Options{
+		Environment: environment,
+		Offline:     true,
+	})
+	if !errors.Is(err, moduledependency.ErrDiscover) {
+		t.Fatalf("Discover cold offline error = %v, want ErrDiscover", err)
+	}
+	if _, err := os.Stat(filepath.Join(environmentValue(t, environment, "GOMODCACHE"), "cache", "download", "example.com", "plugin", "@v", version+".mod")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("offline discovery fetched module metadata: %v", err)
+	}
+	if got := readFile(t, goModPath); !bytes.Equal(got, goModBefore) {
+		t.Fatalf("Discover changed go.mod from %q to %q", goModBefore, got)
+	}
+	if _, err := os.Stat(filepath.Join(appRoot, "go.sum")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("offline discovery created go.sum: %v", err)
+	}
+}
+
 func TestDiscoverMaterializesMissingSelectedSourceWithoutProjectMutation(t *testing.T) {
 	t.Parallel()
 
