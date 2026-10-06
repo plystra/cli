@@ -57,6 +57,36 @@ func TestDataCompilerSelectionUsesSelectedVerifiedModule(t *testing.T) {
 	}
 }
 
+func TestResolveAcquiresSelectedCompilerBeforeAnalyzeBoundary(t *testing.T) {
+	root := t.TempDir()
+	proxy := filepath.Join(root, "proxy")
+	manifest := dataCompilerManifest(t)
+	writeCompilerProxyModule(t, proxy, datacompiler.ModulePath, "v0.2.0", "module github.com/plystra/data\n\ngo 1.26\n", map[string][]byte{
+		"plystra-data-compiler.json":        manifest,
+		"cmd/plystra-data-compiler/main.go": []byte("package main\nfunc main() {}\n"),
+	})
+	project := filepath.Join(root, "project")
+	writeFile(t, filepath.Join(project, "go.mod"), "module example.com/project\n\ngo 1.26\n\nrequire github.com/plystra/data v0.2.0\n")
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "data: {members: {example.records/v1: {resource: database.primary}}}\n")
+	environment := compilerProxyEnvironment(t, proxy)
+	runCompilerGo(t, project, environment, "mod", "download", "all")
+	cache := filepath.Join(root, "compiler-cache")
+	options := applicationresolve.Options{Start: project, Environment: environment, DataCompilerCacheRoot: cache, CompileTimeout: 30 * time.Second}
+	_, err := applicationresolve.Resolve(t.Context(), options)
+	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) || !errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) {
+		t.Fatalf("Resolve error = %v", err)
+	}
+	entries, err := os.ReadDir(cache)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("compiler cache entries = %v, error = %v", entries, err)
+	}
+	options.Offline = true
+	_, err = applicationresolve.Resolve(t.Context(), options)
+	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) {
+		t.Fatalf("offline warm Resolve error = %v", err)
+	}
+}
+
 func TestDataCompilerSelectionOfflineRejectsColdModuleGraph(t *testing.T) {
 	root := t.TempDir()
 	proxy := filepath.Join(root, "proxy")

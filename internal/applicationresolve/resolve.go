@@ -48,8 +48,11 @@ var (
 	// reachable in the frozen Interface constructor graph.
 	ErrUnownedConstructorConfiguration = errors.New("constructor configuration has no explicit selection or reachable constructor")
 	// ErrDataCompilerUnavailable reports selected Data activation before the
-	// official compiler is integrated into Project generation.
+	// official compiler acquisition or analyze/emit integration is available.
 	ErrDataCompilerUnavailable = errors.New("Data compiler integration is unavailable")
+	// ErrDataCompilerAnalysisUnavailable reports a verified compiler that has
+	// not yet been connected to the pre-Freeze analyze phase.
+	ErrDataCompilerAnalysisUnavailable = errors.New("Data compiler analyze integration is unavailable")
 )
 
 // DataCompilerUnavailableError identifies the selected member that cannot yet
@@ -161,10 +164,11 @@ type Options struct {
 	DependencyOutputLimit     int
 	// Offline constrains module and eligible-package discovery to locally
 	// available selected sources. Other Go helpers still need their own guard.
-	Offline          bool
-	CompileTimeout   time.Duration
-	ExecutionTimeout time.Duration
-	TemporaryParent  string
+	Offline               bool
+	DataCompilerCacheRoot string
+	CompileTimeout        time.Duration
+	ExecutionTimeout      time.Duration
+	TemporaryParent       string
 }
 
 // Result is one immutable filesystem provenance and stable generation
@@ -285,10 +289,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	manifest := composition.Manifest()
 	if members := manifest.DataMembers(); len(members) != 0 {
-		if _, err := inputs.DataCompilerSelection(); err != nil {
+		if _, err := inputs.AcquireDataCompiler(ctx, options); err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err})
 		}
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0]})
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable})
 	}
 	currentLayers := composition.CurrentLayers()
 	if len(currentLayers) == 0 {
