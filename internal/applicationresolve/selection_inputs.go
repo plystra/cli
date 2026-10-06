@@ -198,7 +198,7 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 		moduleMetadata = append(moduleMetadata, metadata)
 	}
 	declarations, err := interfaceinventory.DiscoverApplication(ctx, module, dependencies, interfaceinventory.Options{
-		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...), OutputLimit: options.DependencyOutputLimit,
+		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...), OutputLimit: options.DependencyOutputLimit, Offline: options.Offline,
 	})
 	if err != nil {
 		return SelectionInputs{}, fmt.Errorf("%w: %w", ErrResolve, err)

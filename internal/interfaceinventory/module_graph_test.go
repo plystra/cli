@@ -113,8 +113,8 @@ func testPrivateDiscoveryChecksums(t *testing.T, replacement bool) {
 	for _, dependency := range dependencies.Projects() {
 		before[dependency.Root()] = snapshotFiles(t, dependency.Root())
 	}
-	for range 2 {
-		found, err := interfaceinventory.DiscoverApplication(t.Context(), project, dependencies, interfaceinventory.Options{Environment: environment})
+	for attempt := range 2 {
+		found, err := interfaceinventory.DiscoverApplication(t.Context(), project, dependencies, interfaceinventory.Options{Environment: environment, Offline: attempt == 1})
 		if err != nil {
 			t.Fatal(err)
 		}

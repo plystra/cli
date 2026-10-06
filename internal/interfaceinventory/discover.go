@@ -71,6 +71,9 @@ type Options struct {
 	GoCommand   string
 	Environment []string
 	OutputLimit int
+	// Offline prevents package loading and private checksum preparation from
+	// contacting a proxy or switching toolchains.
+	Offline bool
 }
 
 // ExactInterfacePackages identifies an explicit bounded set of canonical
@@ -296,6 +299,7 @@ func Discover(ctx context.Context, application modulelocate.Module, dependencies
 // treating the module as a dependency Plystra Project or scanning any other
 // ordinary dependency.
 func DiscoverExactInterfaces(ctx context.Context, selection ExactInterfacePackages, options Options) (Index, error) {
+	options = withOfflineGoEnvironment(options)
 	if ctx == nil {
 		return Index{}, fmt.Errorf("%w: context is nil", ErrDiscover)
 	}
@@ -343,6 +347,7 @@ func DiscoverExactInterfaces(ctx context.Context, selection ExactInterfacePackag
 // through one shared eligible-package scan. Go tooling selects source files and
 // supplies compiled type information before any declaration kind is exposed.
 func DiscoverApplication(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options) (Discovery, error) {
+	options = withOfflineGoEnvironment(options)
 	if ctx == nil {
 		return Discovery{}, fmt.Errorf("%w: context is nil", ErrDiscover)
 	}

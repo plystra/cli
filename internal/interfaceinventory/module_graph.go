@@ -14,6 +14,29 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
+func withOfflineGoEnvironment(options Options) Options {
+	if !options.Offline {
+		return options
+	}
+	environment := options.Environment
+	if environment == nil {
+		environment = os.Environ()
+	}
+	for _, setting := range []string{"GOPROXY=off", "GONOPROXY=none", "GOSUMDB=off", "GOTOOLCHAIN=local"} {
+		key, _, _ := strings.Cut(setting, "=")
+		filtered := make([]string, 0, len(environment)+1)
+		for _, entry := range environment {
+			name, _, _ := strings.Cut(entry, "=")
+			if !strings.EqualFold(name, key) {
+				filtered = append(filtered, entry)
+			}
+		}
+		environment = append(filtered, setting)
+	}
+	options.Environment = environment
+	return options
+}
+
 func loadProjectCandidates(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, candidates []packageCandidate, options Options) (result loadedInventory, err error) {
 	if len(candidates) == 0 {
 		return loadedInventory{}, nil

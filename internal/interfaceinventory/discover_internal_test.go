@@ -2,8 +2,23 @@ package interfaceinventory
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
+
+func TestOfflineGoEnvironmentOverridesNetworkSettingsWithoutMutatingCaller(t *testing.T) {
+	t.Parallel()
+	environment := []string{"GOPROXY=https://proxy.example", "goproxy=https://second.example", "GONOPROXY=example.com", "GOSUMDB=sum.example", "GOTOOLCHAIN=auto", "GOWORK=off"}
+	before := append([]string(nil), environment...)
+	options := withOfflineGoEnvironment(Options{Environment: environment, Offline: true})
+	want := []string{"GOWORK=off", "GOPROXY=off", "GONOPROXY=none", "GOSUMDB=off", "GOTOOLCHAIN=local"}
+	if !reflect.DeepEqual(options.Environment, want) || !reflect.DeepEqual(environment, before) {
+		t.Fatalf("offline environment = %#v, original = %#v", options.Environment, environment)
+	}
+	if online := withOfflineGoEnvironment(Options{Environment: environment}); !reflect.DeepEqual(online.Environment, before) {
+		t.Fatalf("online environment changed: %#v", online.Environment)
+	}
+}
 
 func TestDecodePackagesRejectsDuplicateAndUnsafeRecords(t *testing.T) {
 	t.Parallel()

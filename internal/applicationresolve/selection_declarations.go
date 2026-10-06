@@ -16,7 +16,7 @@ import (
 // Config defaults are compared privately, never formatted or publicly hashed.
 func (s SelectionInputs) recheckDeclarations(ctx context.Context) error {
 	current, err := interfaceinventory.DiscoverApplication(ctx, s.module, s.dependencies, interfaceinventory.Options{
-		GoCommand: s.dependencyOptions.GoCommand, Environment: s.dependencyOptions.Environment, OutputLimit: s.dependencyOptions.OutputLimit,
+		GoCommand: s.dependencyOptions.GoCommand, Environment: s.dependencyOptions.Environment, OutputLimit: s.dependencyOptions.OutputLimit, Offline: s.dependencyOptions.Offline,
 	})
 	if err != nil {
 		if ctx.Err() != nil {

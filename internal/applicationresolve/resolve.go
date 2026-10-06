@@ -159,8 +159,8 @@ type Options struct {
 	GoCommand                 string
 	Environment               []string
 	DependencyOutputLimit     int
-	// Offline prevents module graph discovery from fetching selected sources.
-	// Callers must separately constrain other Go helpers they invoke.
+	// Offline constrains module and eligible-package discovery to locally
+	// available selected sources. Other Go helpers still need their own guard.
 	Offline          bool
 	CompileTimeout   time.Duration
 	ExecutionTimeout time.Duration
