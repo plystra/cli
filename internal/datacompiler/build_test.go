@@ -67,6 +67,23 @@ func TestBuildRejectsIncompleteIdentityWithoutCacheOutput(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsMismatchedModuleRootWithoutCacheOutput(t *testing.T) {
+	root := writeCompilerModule(t)
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/not-data\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(t.TempDir(), "cache")
+	_, err := datacompiler.Build(context.Background(), datacompiler.BuildOptions{
+		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(), CacheRoot: cache,
+	})
+	if !errors.Is(err, datacompiler.ErrBuild) || !errors.Is(err, datacompiler.ErrSelection) || !errors.Is(err, datacompiler.ErrInvalidSelection) {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if _, err := os.Stat(cache); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cache exists after rejected root: %v", err)
+	}
+}
+
 func TestBuildFailureDoesNotLeaveFinalArtifact(t *testing.T) {
 	root := writeCompilerModule(t)
 	if err := os.Remove(filepath.Join(root, "cmd", "plystra-data-compiler", "main.go")); err != nil {

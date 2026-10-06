@@ -34,6 +34,8 @@ type BuildOptions struct {
 	CacheRoot      string
 	GoCommand      string
 	Environment    []string
+	Workspace      bool
+	Replacement    bool
 }
 
 // Artifact is one verified compiler executable and its immutable provenance.
@@ -73,10 +75,15 @@ func Build(ctx context.Context, options BuildOptions) (Artifact, error) {
 	if err := validateBuildOptions(options); err != nil {
 		return Artifact{}, fmt.Errorf("%w: %w", ErrBuild, err)
 	}
-	manifest, manifestDigest, err := Load(options.ModuleRoot)
+	selection, err := Resolve(Source{
+		ModulePath: ModulePath, ModuleVersion: options.ModuleVersion,
+		ModuleChecksum: options.ModuleChecksum, Root: options.ModuleRoot,
+		Workspace: options.Workspace, Replacement: options.Replacement,
+	})
 	if err != nil {
-		return Artifact{}, fmt.Errorf("%w: %w", ErrBuild, err)
+		return Artifact{}, fmt.Errorf("%w: resolve compiler selection: %w", ErrBuild, err)
 	}
+	manifest, manifestDigest := selection.Manifest, selection.ManifestDigest
 	goos, goarch := target(options.Environment)
 	goToolchain := runtime.Version()
 	key := cacheKey(manifestDigest, options.ModuleVersion, options.ModuleChecksum, goToolchain, goos, goarch)
@@ -109,7 +116,7 @@ func Build(ctx context.Context, options BuildOptions) (Artifact, error) {
 	environment = replaceEnvironment(environment, "GOCACHE", goCache)
 	environment = replaceEnvironment(environment, "GOTMPDIR", goTemp)
 	if err := gocommand.Run(ctx, gocommand.Options{
-		Command: options.GoCommand, Directory: options.ModuleRoot, Environment: environment,
+		Command: options.GoCommand, Directory: selection.Root, Environment: environment,
 	}, "build", "-mod=readonly", "-o", temporaryPath, manifest.CommandImportPath); err != nil {
 		return Artifact{}, fmt.Errorf("%w: %v", ErrBuild, err)
 	}
@@ -144,7 +151,7 @@ func validateBuildOptions(options BuildOptions) error {
 	if options.ModuleRoot == "" || !filepath.IsAbs(options.ModuleRoot) || options.CacheRoot == "" || !filepath.IsAbs(options.CacheRoot) {
 		return ErrInvalidBuildOptions
 	}
-	if module.Check(ModulePath, options.ModuleVersion) != nil || !validModuleChecksum(options.ModuleChecksum) {
+	if module.Check(ModulePath, options.ModuleVersion) != nil || !validModuleChecksum(options.ModuleChecksum) || options.Workspace || options.Replacement {
 		return ErrInvalidBuildOptions
 	}
 	return nil
