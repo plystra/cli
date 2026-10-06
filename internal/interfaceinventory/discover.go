@@ -6,6 +6,8 @@ package interfaceinventory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -249,6 +251,17 @@ type Discovery struct {
 	implementations   implementationinventory.Index
 	resources         ResourceIndex
 	resourceProviders resourceproviderinventory.Index
+	dataPackages      []DataPackage
+}
+
+// DataPackages returns source identities for packages with an active Data
+// directive, without exposing source bytes or filesystem roots.
+func (d Discovery) DataPackages() []DataPackage {
+	packages := append([]DataPackage(nil), d.dataPackages...)
+	for index := range packages {
+		packages[index].files = packages[index].Files()
+	}
+	return packages
 }
 
 // Resources returns the validated visible Resource contracts from the shared scan.
@@ -431,6 +444,7 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 		implementations:   implementations,
 		resources:         resourceInventory,
 		resourceProviders: providers,
+		dataPackages:      found.dataPackages,
 	}, nil
 }
 
@@ -459,6 +473,7 @@ type loadedInventory struct {
 	implementations   []implementationinventory.Input
 	resources         []Resource
 	resourceProviders []resourceproviderinventory.Input
+	dataPackages      []DataPackage
 	importer          types.Importer
 }
 
@@ -515,7 +530,7 @@ func loadCandidatesAt(ctx context.Context, candidates []packageCandidate, option
 		if err != nil {
 			return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
 		}
-		if len(declarations.interfaces) == 0 && len(declarations.implementations) == 0 && len(declarations.resources) == 0 && len(declarations.resourceProviders) == 0 {
+		if len(declarations.interfaces) == 0 && len(declarations.implementations) == 0 && len(declarations.resources) == 0 && len(declarations.resourceProviders) == 0 && !declarations.dataDirective {
 			continue
 		}
 		if err := validateLoadedPackage(candidate, loaded); err != nil {
@@ -531,6 +546,12 @@ func loadCandidatesAt(ctx context.Context, candidates []packageCandidate, option
 		}
 		if checkedPackage.Path() != candidate.importPath || checkedPackage.Name() != loaded.Name {
 			return loadedInventory{}, fmt.Errorf("%w: compiled package identity for %q is %s %q", ErrInvalidOutput, candidate.importPath, checkedPackage.Path(), checkedPackage.Name())
+		}
+		if declarations.dataDirective {
+			result.dataPackages = append(result.dataPackages, DataPackage{
+				modulePath: candidate.source.path, moduleVersion: candidate.source.version,
+				importPath: candidate.importPath, files: declarations.sourceFiles,
+			})
 		}
 		for _, declaration := range declarations.resources {
 			contract, err := resourcecontract.Validate(declaration, checkedPackage)
@@ -969,11 +990,27 @@ func hasImplementationDirectiveComment(filename string, source []byte) bool {
 }
 
 func hasDeclarationDirectiveComment(filename string, source []byte) bool {
-	return hasDirectiveComment(filename, source,
+	return hasDataDirectiveComment(filename, source) || hasDirectiveComment(filename, source,
 		"//plystra:interface", "/*plystra:interface",
 		"//plystra:implements", "/*plystra:implements",
 		"//plystra:resource", "/*plystra:resource",
 	)
+}
+
+func hasDataDirectiveComment(filename string, source []byte) bool {
+	files := token.NewFileSet()
+	file := files.AddFile(filename, -1, len(source))
+	var lexical scanner.Scanner
+	lexical.Init(file, source, nil, scanner.ScanComments)
+	for {
+		_, kind, literal := lexical.Scan()
+		if kind == token.EOF {
+			return false
+		}
+		if kind == token.COMMENT && (literal == "//plystra:data" || strings.HasPrefix(literal, "//plystra:data ")) {
+			return true
+		}
+	}
 }
 
 func hasDirectiveComment(filename string, source []byte, prefixes ...string) bool {
@@ -1059,6 +1096,8 @@ type packageDeclarations struct {
 	implementations   []implementationdecl.Declaration
 	resources         []resourcedecl.Declaration
 	resourceProviders []resourceproviderdecl.Declaration
+	dataDirective     bool
+	sourceFiles       []DataSourceFile
 }
 
 func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packageDeclarations, error) {
@@ -1080,17 +1119,20 @@ func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packag
 		if err != nil {
 			return packageDeclarations{}, fmt.Errorf("read selected Go source %s: %w", fileName, err)
 		}
+		relativePath, err := filepath.Rel(candidate.source.root, absolutePath)
+		if err != nil || relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+			return packageDeclarations{}, fmt.Errorf("%w: package %q source %q escapes its module root", ErrInvalidOutput, candidate.importPath, fileName)
+		}
+		sourcePath := filepath.ToSlash(relativePath)
+		sum := sha256.Sum256(data)
+		declarations.sourceFiles = append(declarations.sourceFiles, DataSourceFile{path: sourcePath, digest: "sha256:" + hex.EncodeToString(sum[:]), bytes: len(data)})
+		declarations.dataDirective = declarations.dataDirective || hasDataDirectiveComment(fileName, data)
 		hasInterface := hasInterfaceDirectiveComment(fileName, data)
 		hasImplementation := hasImplementationDirectiveComment(fileName, data)
 		hasResource := hasDirectiveComment(fileName, data, "//plystra:resource", "/*plystra:resource")
 		if !hasInterface && !hasImplementation && !hasResource {
 			continue
 		}
-		relativePath, err := filepath.Rel(candidate.source.root, absolutePath)
-		if err != nil || relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
-			return packageDeclarations{}, fmt.Errorf("%w: package %q source %q escapes its module root", ErrInvalidOutput, candidate.importPath, fileName)
-		}
-		sourcePath := filepath.ToSlash(relativePath)
 		if hasDirectiveComment(fileName, data, "//plystra:implements-resource", "/*plystra:implements-resource") {
 			parsed, err := resourceproviderdecl.ParseFile(sourcePath, data)
 			if err != nil {

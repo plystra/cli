@@ -2,6 +2,8 @@ package interfaceinventory_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -91,6 +93,52 @@ func TestDiscoverLoadsOnlyActiveEligiblePackagesDeterministically(t *testing.T) 
 	}
 	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("discovery mutated Project files:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDiscoverDataPackagesRetainsOnlyGoSelectedSourceIdentities(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeProject(t, root, "example.com/app")
+	declaration := "package model\n\n//plystra:data records.item/v1\nvar Records = 1\n"
+	helper := "package model\n\nconst namespace = \"records\"\n"
+	writeFile(t, filepath.Join(root, "model", "data.go"), declaration)
+	writeFile(t, filepath.Join(root, "model", "helper.go"), helper)
+	writeFile(t, filepath.Join(root, "model", "inactive.go"), "//go:build inventory_inactive\n\npackage model\n\n//plystra:data records.hidden/v1\nvar Hidden = 1\n")
+	writeFile(t, filepath.Join(root, "inactive", "data.go"), "//go:build inventory_inactive\n\npackage inactive\n\n//plystra:data records.inactive/v1\nvar Inactive = 1\n")
+	writeFile(t, filepath.Join(root, "ordinary", "ordinary.go"), "package ordinary\n\nconst text = \"//plystra:data records.fake/v1\"\n")
+	writeFile(t, filepath.Join(root, "generated", "data.go"), "package generated\n\n//plystra:data records.generated/v1\nvar Generated = 1\n")
+	before := snapshotFiles(t, root)
+	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
+	discovery := discoverApplication(t, root, environment)
+	first := discovery.DataPackages()
+	second := discoverApplication(t, root, environment).DataPackages()
+	if !reflect.DeepEqual(first, second) || len(first) != 1 {
+		t.Fatalf("Data packages = %#v, repeated = %#v", first, second)
+	}
+	pkg := first[0]
+	if pkg.ModulePath() != "example.com/app" || pkg.ModuleVersion() != "" || pkg.ImportPath() != "example.com/app/model" {
+		t.Fatalf("Data package provenance = %#v", pkg)
+	}
+	files := pkg.Files()
+	if len(files) != 2 {
+		t.Fatalf("selected files = %#v", files)
+	}
+	for index, expected := range []struct{ path, content string }{
+		{"model/data.go", declaration}, {"model/helper.go", helper},
+	} {
+		sum := sha256.Sum256([]byte(expected.content))
+		if files[index].Path() != expected.path || files[index].Bytes() != len(expected.content) || files[index].Digest() != "sha256:"+hex.EncodeToString(sum[:]) {
+			t.Fatalf("selected file %d = %#v", index, files[index])
+		}
+	}
+	files[0] = interfaceinventory.DataSourceFile{}
+	first[0] = interfaceinventory.DataPackage{}
+	if restored := discovery.DataPackages(); len(restored) != 1 || len(restored[0].Files()) != 2 {
+		t.Fatalf("Data package inventory was mutable: %#v", restored)
+	}
+	if after := snapshotFiles(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Data discovery changed Project files: before %#v, after %#v", before, after)
 	}
 }
 

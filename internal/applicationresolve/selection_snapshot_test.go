@@ -95,6 +95,35 @@ func TestSelectionInputsSnapshotRejectsDocumentModuleAndDeclarationDrift(t *test
 	}
 }
 
+func TestSelectionInputsSnapshotRejectsDataPackageSourceDrift(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []struct {
+		name, path, after string
+	}{
+		{"directive", "model/data.go", "package model\n\n//plystra:data records.item/v1\nvar Records = 2\n"},
+		{"helper", "model/helper.go", "package model\n\nconst namespace = \"items\"\n"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeModule(t, root, "example.com/app")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+			writeFile(t, filepath.Join(root, "model/data.go"), "package model\n\n//plystra:data records.item/v1\nvar Records = 1\n")
+			writeFile(t, filepath.Join(root, "model/helper.go"), "package model\n\nconst namespace = \"records\"\n")
+			inputs, err := applicationresolve.DiscoverSelectionInputs(t.Context(), selectionOptions(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(root, scenario.path), scenario.after)
+			err = inputs.ValidateSnapshot(t.Context())
+			var source *applicationresolve.ManifestSourceError
+			if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrConcurrentChange) || !errors.As(err, &source) || source.ModulePath() != "example.com/app" || source.SourcePath() != scenario.path || source.SourceKind() != "authored-package" || strings.Contains(err.Error(), root) {
+				t.Fatalf("Data source drift was not reported privately: %v", err)
+			}
+		})
+	}
+}
+
 func TestSelectionInputsSnapshotRechecksWorkspaceMembership(t *testing.T) {
 	t.Parallel()
 	parent := t.TempDir()

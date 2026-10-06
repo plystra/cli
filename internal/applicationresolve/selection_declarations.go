@@ -49,9 +49,23 @@ func compareDeclarations(before, after interfaceinventory.Discovery) error {
 	resources, currentResources := before.Resources().Resources(), after.Resources().Resources()
 	implementations, currentImplementations := before.Implementations().Implementations(), after.Implementations().Implementations()
 	providers, currentProviders := before.ResourceProviders().Providers(), after.ResourceProviders().Providers()
+	dataPackages, currentDataPackages := before.DataPackages(), after.DataPackages()
 	// A new or removed declaration changes the candidate set even if unselected.
-	if len(interfaces) != len(currentInterfaces) || len(resources) != len(currentResources) || len(implementations) != len(currentImplementations) || len(providers) != len(currentProviders) {
+	if len(interfaces) != len(currentInterfaces) || len(resources) != len(currentResources) || len(implementations) != len(currentImplementations) || len(providers) != len(currentProviders) || len(dataPackages) != len(currentDataPackages) {
 		return fmt.Errorf("%w: authored declaration membership changed", ErrConcurrentChange)
+	}
+	for index, selected := range dataPackages {
+		current := currentDataPackages[index]
+		files, currentFiles := selected.Files(), current.Files()
+		if selected.ModulePath() != current.ModulePath() || selected.ModuleVersion() != current.ModuleVersion() || selected.ImportPath() != current.ImportPath() || len(files) != len(currentFiles) {
+			return declarationSnapshotError(selected.ModulePath(), "go.mod")
+		}
+		for fileIndex, source := range files {
+			other := currentFiles[fileIndex]
+			if source.Path() != other.Path() || source.Digest() != other.Digest() || source.Bytes() != other.Bytes() {
+				return declarationSnapshotError(selected.ModulePath(), source.Path())
+			}
+		}
 	}
 	for index, a := range interfaces {
 		b := currentInterfaces[index]
