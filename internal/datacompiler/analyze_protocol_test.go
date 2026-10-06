@@ -62,6 +62,9 @@ func TestValidateAnalyzeRequestRequiresClosedPackageRootEligibility(t *testing.T
 			pkg["root_eligibility"] = eligibility
 		}
 		request["snapshot"].(map[string]any)["packages"] = []any{pkg}
+		if eligibility == "eligible" || eligibility == "support" {
+			refreshAnalyzeRequestDigest(t, request, artifact)
+		}
 		data, err := json.Marshal(request)
 		if err != nil {
 			t.Fatal(err)
@@ -74,6 +77,35 @@ func TestValidateAnalyzeRequestRequiresClosedPackageRootEligibility(t *testing.T
 		} else if !errors.Is(err, ErrAnalyzeRequest) {
 			t.Fatalf("eligibility %q accepted: %v", eligibility, err)
 		}
+	}
+}
+
+func TestBuildAnalyzeRequestBindsManifestSnapshotAndInputDigest(t *testing.T) {
+	artifact := testAnalyzeArtifact(t)
+	manifestBytes := dataCompilerManifestForAnalyzeTest(t)
+	manifest, digest, err := Parse(manifestBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact.ManifestDigest = digest
+	snapshot, err := json.Marshal(map[string]any{
+		"packages": []any{map[string]any{
+			"import_path": "example.com/model", "root_eligibility": "eligible",
+			"files": []any{map[string]any{"path": "model.go", "content": []byte("package model\n")}},
+		}},
+		"resources": []any{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := BuildAnalyzeRequest(artifact, manifest, AnalyzeRequestOptions{
+		RequestID: "request-1", Build: AnalyzeBuildContext{GOOS: artifact.GOOS, GOARCH: artifact.GOARCH}, Snapshot: snapshot,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateAnalyzeRequest(request, artifact); err != nil {
+		t.Fatalf("built request rejected: %v", err)
 	}
 }
 
@@ -130,6 +162,7 @@ func TestValidateAnalyzeResponseUsesDeclaredRootLimit(t *testing.T) {
 	request["limits"] = map[string]any{"max_roots": 1}
 	snapshot := request["snapshot"].(map[string]any)
 	snapshot["limits"] = request["limits"]
+	refreshAnalyzeRequestDigest(t, request, testAnalyzeArtifact(t))
 	requestBytes, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
@@ -229,11 +262,25 @@ func validAnalyzeRequest(t *testing.T, artifact Artifact) []byte {
 		"limits": map[string]any{}, "input_digest": "sha256:" + strings.Repeat("1", 64),
 		"snapshot": map[string]any{"packages": []any{}, "resources": []any{}, "limits": map[string]any{}},
 	}
+	refreshAnalyzeRequestDigest(t, request, artifact)
 	data, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func refreshAnalyzeRequestDigest(t *testing.T, request map[string]any, artifact Artifact) {
+	t.Helper()
+	snapshot, err := json.Marshal(request["snapshot"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := AnalyzeInputDigest(snapshot, AnalyzeBuildContext{GOOS: artifact.GOOS, GOARCH: artifact.GOARCH})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request["input_digest"] = digest
 }
 
 func validAnalyzeResponse(t *testing.T, request analyzeRequestEnvelope) []byte {
@@ -247,6 +294,21 @@ func validAnalyzeResponse(t *testing.T, request analyzeRequestEnvelope) []byte {
 		"diagnostics":   []any{}, "truncated": false,
 	}
 	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func dataCompilerManifestForAnalyzeTest(t *testing.T) []byte {
+	t.Helper()
+	data, err := json.Marshal(Manifest{
+		Schema: DistributionSchema, ModulePath: ModulePath, CommandImportPath: CommandImportPath,
+		AnalyzeProtocol: AnalyzeSchema, EmitProtocol: EmitSchema, DeclarationLanguage: DeclarationLanguage,
+		Bounds: Bounds{MaxRoots: MaxRoots, MaxNodes: MaxNodes, MaxImports: MaxImports, MaxNesting: MaxNesting,
+			MaxSymbolBytes: MaxSymbolBytes, MaxDiagnostics: MaxDiagnostics, MaxDiagnosticBytes: MaxDiagnosticBytes,
+			MaxFrameBytes: MaxFrameBytes, MaxArtifacts: MaxArtifacts, MaxArtifactBytes: MaxArtifactBytes, MaxArtifactPathBytes: MaxArtifactPathBytes},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

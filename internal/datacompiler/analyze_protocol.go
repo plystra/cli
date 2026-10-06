@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -48,6 +49,23 @@ type analyzeBuildContext struct {
 	GOOS      string   `json:"goos"`
 	GOARCH    string   `json:"goarch"`
 	BuildTags []string `json:"build_tags,omitempty"`
+}
+
+// AnalyzeBuildContext identifies the Go context used to type-check one
+// immutable Data source snapshot.
+type AnalyzeBuildContext struct {
+	GOOS      string
+	GOARCH    string
+	BuildTags []string
+}
+
+// AnalyzeRequestOptions supplies the finite source inventory for one analyze
+// request. Snapshot is a JSON object with packages and resources; compiler
+// limits are added from the selected distribution manifest.
+type AnalyzeRequestOptions struct {
+	RequestID string
+	Build     AnalyzeBuildContext
+	Snapshot  json.RawMessage
 }
 
 type analyzeLimits struct {
@@ -118,6 +136,62 @@ type AnalyzeResponse struct {
 	Truncated    bool
 }
 
+// BuildAnalyzeRequest creates one canonical request payload for the selected
+// compiler without importing the independent Data module.
+func BuildAnalyzeRequest(artifact Artifact, manifest Manifest, options AnalyzeRequestOptions) ([]byte, error) {
+	if artifact.ModulePath != ModulePath || artifact.ModuleVersion == "" || artifact.ManifestDigest == "" || options.RequestID == "" || options.Build.GOOS == "" || options.Build.GOARCH == "" {
+		return nil, fmt.Errorf("%w: compiler identity, request ID, or build context is incomplete", ErrAnalyzeRequest)
+	}
+	var source struct {
+		Packages  json.RawMessage `json:"packages"`
+		Resources json.RawMessage `json:"resources"`
+	}
+	if err := decodeStrictJSON(options.Snapshot, &source); err != nil || len(source.Packages) == 0 || len(source.Resources) == 0 {
+		return nil, fmt.Errorf("%w: source snapshot is incomplete", ErrAnalyzeRequest)
+	}
+	limits := analyzeLimits{
+		MaxRoots: manifest.Bounds.MaxRoots, MaxNodes: manifest.Bounds.MaxNodes,
+		MaxImports: manifest.Bounds.MaxImports, MaxNesting: manifest.Bounds.MaxNesting,
+		MaxSymbolBytes: manifest.Bounds.MaxSymbolBytes, MaxDiagnostics: manifest.Bounds.MaxDiagnostics,
+		MaxDiagnosticBytes: manifest.Bounds.MaxDiagnosticBytes,
+	}
+	snapshot, err := json.Marshal(struct {
+		Packages  json.RawMessage `json:"packages"`
+		Resources json.RawMessage `json:"resources"`
+		Limits    analyzeLimits   `json:"limits"`
+	}{source.Packages, source.Resources, limits})
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode source snapshot: %v", ErrAnalyzeRequest, err)
+	}
+	inputDigest, err := AnalyzeInputDigest(snapshot, options.Build)
+	if err != nil {
+		return nil, err
+	}
+	request := struct {
+		Schema      string                  `json:"schema"`
+		Phase       string                  `json:"phase"`
+		RequestID   string                  `json:"request_id"`
+		Compiler    analyzeCompilerIdentity `json:"compiler"`
+		Build       analyzeBuildContext     `json:"build"`
+		Limits      analyzeLimits           `json:"limits"`
+		InputDigest string                  `json:"input_digest"`
+		Snapshot    json.RawMessage         `json:"snapshot"`
+	}{
+		Schema: AnalyzeSchema, Phase: analyzePhase, RequestID: options.RequestID,
+		Compiler: analyzeCompilerIdentity{ModulePath: artifact.ModulePath, ModuleVersion: artifact.ModuleVersion, ModuleChecksum: artifact.ModuleChecksum, ManifestDigest: artifact.ManifestDigest, CommandImportPath: CommandImportPath, AnalyzeProtocol: AnalyzeSchema, EmitProtocol: EmitSchema, DeclarationLanguage: DeclarationLanguage, GoToolchain: artifact.GoToolchain},
+		Build:    analyzeBuildContext{GOOS: options.Build.GOOS, GOARCH: options.Build.GOARCH, BuildTags: append([]string(nil), options.Build.BuildTags...)},
+		Limits:   limits, InputDigest: inputDigest, Snapshot: snapshot,
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode request: %v", ErrAnalyzeRequest, err)
+	}
+	if len(data) > manifest.Bounds.MaxFrameBytes {
+		return nil, fmt.Errorf("%w: request exceeds the compiler frame limit", ErrAnalyzeRequest)
+	}
+	return data, nil
+}
+
 func validateAnalyzeRequest(data []byte, artifact Artifact) (analyzeRequestEnvelope, error) {
 	var request analyzeRequestEnvelope
 	if err := decodeStrictJSON(data, &request); err != nil {
@@ -141,6 +215,12 @@ func validateAnalyzeRequest(data []byte, artifact Artifact) (analyzeRequestEnvel
 		return analyzeRequestEnvelope{}, fmt.Errorf("%w: declared limits exceed the compiler manifest", ErrAnalyzeRequest)
 	}
 	request.effective = effective
+	expectedInput, err := AnalyzeInputDigest(request.Snapshot, AnalyzeBuildContext{
+		GOOS: request.Build.GOOS, GOARCH: request.Build.GOARCH, BuildTags: request.Build.BuildTags,
+	})
+	if err != nil || request.InputDigest != expectedInput {
+		return analyzeRequestEnvelope{}, fmt.Errorf("%w: input digest does not match snapshot and build context", ErrAnalyzeRequest)
+	}
 	if request.Compiler.ModulePath != artifact.ModulePath || request.Compiler.ModuleVersion != artifact.ModuleVersion || request.Compiler.ModuleChecksum != artifact.ModuleChecksum || request.Compiler.ManifestDigest != artifact.ManifestDigest || request.Compiler.CommandImportPath != CommandImportPath || request.Compiler.AnalyzeProtocol != AnalyzeSchema || request.Compiler.EmitProtocol != EmitSchema || request.Compiler.DeclarationLanguage != DeclarationLanguage || request.Compiler.GoToolchain != artifact.GoToolchain || !validModuleChecksum(request.Compiler.ModuleChecksum) || !validDigest(request.Compiler.ManifestDigest) {
 		return analyzeRequestEnvelope{}, fmt.Errorf("%w: compiler identity differs from selected artifact", ErrAnalyzeRequest)
 	}
@@ -148,6 +228,95 @@ func validateAnalyzeRequest(data []byte, artifact Artifact) (analyzeRequestEnvel
 		return analyzeRequestEnvelope{}, fmt.Errorf("%w: build context differs from selected artifact", ErrAnalyzeRequest)
 	}
 	return request, nil
+}
+
+// AnalyzeInputDigest computes the Data protocol input identity without
+// importing the independent Data module. Snapshot must be the canonical JSON
+// object containing packages, resources, and limits.
+func AnalyzeInputDigest(snapshot []byte, build AnalyzeBuildContext) (string, error) {
+	var envelope analyzeSnapshotEnvelope
+	if err := decodeStrictJSON(snapshot, &envelope); err != nil {
+		return "", fmt.Errorf("%w: snapshot is malformed", ErrAnalyzeRequest)
+	}
+	if err := validateAnalyzePackages(envelope.Packages); err != nil {
+		return "", fmt.Errorf("%w: package inventory is malformed: %v", ErrAnalyzeRequest, err)
+	}
+	if err := validateAnalyzeArray(envelope.Resources); err != nil {
+		return "", fmt.Errorf("%w: Resource inventory is malformed: %v", ErrAnalyzeRequest, err)
+	}
+	limits, ok := effectiveAnalyzeLimits(envelope.Limits)
+	if !ok {
+		return "", fmt.Errorf("%w: snapshot limits exceed the compiler manifest", ErrAnalyzeRequest)
+	}
+	var packages []struct {
+		ImportPath      string `json:"import_path"`
+		RootEligibility string `json:"root_eligibility"`
+		Files           []struct {
+			Path    string `json:"path"`
+			Content []byte `json:"content"`
+		} `json:"files"`
+	}
+	if err := decodeStrictJSON(envelope.Packages, &packages); err != nil {
+		return "", fmt.Errorf("%w: package inventory is malformed", ErrAnalyzeRequest)
+	}
+	type fileIdentity struct {
+		Path   string `json:"path"`
+		Digest string `json:"digest"`
+		Bytes  int    `json:"bytes"`
+	}
+	type packageIdentity struct {
+		ImportPath      string         `json:"import_path"`
+		RootEligibility string         `json:"root_eligibility"`
+		Files           []fileIdentity `json:"files"`
+	}
+	identities := make([]packageIdentity, 0, len(packages))
+	for _, pkg := range packages {
+		identity := packageIdentity{ImportPath: pkg.ImportPath, RootEligibility: pkg.RootEligibility, Files: make([]fileIdentity, 0, len(pkg.Files))}
+		for _, file := range pkg.Files {
+			sum := sha256.Sum256(file.Content)
+			identity.Files = append(identity.Files, fileIdentity{Path: file.Path, Digest: "sha256:" + hex.EncodeToString(sum[:]), Bytes: len(file.Content)})
+		}
+		sort.Slice(identity.Files, func(left, right int) bool { return identity.Files[left].Path < identity.Files[right].Path })
+		identities = append(identities, identity)
+	}
+	sort.Slice(identities, func(left, right int) bool { return identities[left].ImportPath < identities[right].ImportPath })
+	var resources []struct {
+		ImportPath string `json:"import_path"`
+		TypeName   string `json:"type_name"`
+		ID         string `json:"id"`
+	}
+	if err := decodeStrictJSON(envelope.Resources, &resources); err != nil {
+		return "", fmt.Errorf("%w: Resource inventory is malformed", ErrAnalyzeRequest)
+	}
+	sort.Slice(resources, func(left, right int) bool {
+		if resources[left].ID != resources[right].ID {
+			return resources[left].ID < resources[right].ID
+		}
+		if resources[left].ImportPath != resources[right].ImportPath {
+			return resources[left].ImportPath < resources[right].ImportPath
+		}
+		return resources[left].TypeName < resources[right].TypeName
+	})
+	snapshotPayload, err := json.Marshal(struct {
+		Packages  any           `json:"packages"`
+		Resources any           `json:"resources"`
+		Limits    analyzeLimits `json:"limits"`
+	}{identities, resources, limits})
+	if err != nil {
+		return "", fmt.Errorf("%w: snapshot digest: %v", ErrAnalyzeRequest, err)
+	}
+	snapshotSum := sha256.Sum256(append([]byte("plystra.data.snapshot/v1\x00"), snapshotPayload...))
+	tags := append([]string(nil), build.BuildTags...)
+	sort.Strings(tags)
+	inputPayload, err := json.Marshal(struct {
+		SnapshotDigest string              `json:"snapshot_digest"`
+		Build          analyzeBuildContext `json:"build"`
+	}{"sha256:" + hex.EncodeToString(snapshotSum[:]), analyzeBuildContext{GOOS: build.GOOS, GOARCH: build.GOARCH, BuildTags: tags}})
+	if err != nil {
+		return "", fmt.Errorf("%w: input digest: %v", ErrAnalyzeRequest, err)
+	}
+	inputSum := sha256.Sum256(append([]byte("plystra.data.analyze-input/v1\x00"), inputPayload...))
+	return "sha256:" + hex.EncodeToString(inputSum[:]), nil
 }
 
 func validateAnalyzeResponse(data []byte, request analyzeRequestEnvelope) (AnalyzeResponse, error) {
