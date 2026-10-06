@@ -92,6 +92,9 @@ func TestDiscoverUsesSortedEffectiveGraphAndRecognizesProjects(t *testing.T) {
 	if modules[3].RequiredVersion() != "v1.4.0" || modules[3].SelectedVersion() != "v1.5.0" || !modules[3].Direct() || !modules[3].Indirect() || modules[3].Workspace() || !modules[3].Project() {
 		t.Fatalf("z module provenance = %#v", modules[3])
 	}
+	if modules[3].Checksum() != "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" || modules[3].GoModChecksum() != "h1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=" {
+		t.Fatalf("z module checksums = %q, %q", modules[3].Checksum(), modules[3].GoModChecksum())
+	}
 	if _, ok := modules[0].Replacement(); ok {
 		t.Fatal("a module unexpectedly has replacement provenance")
 	}
@@ -529,12 +532,17 @@ func runHelper(mode string) int {
 			{Path: "example.com/a", Version: "v1.3.0", Root: os.Getenv("PLYSTRA_MODULE_A_ROOT")},
 			{Path: "example.com/transitive", Version: "v1.8.0", Root: os.Getenv("PLYSTRA_MODULE_TRANSITIVE_ROOT")},
 		} {
-			if err := encoder.Encode(map[string]any{
+			module := map[string]any{
 				"Path":    value.Path,
 				"Version": value.Version,
 				"Dir":     value.Root,
 				"GoMod":   filepath.Join(value.Root, "go.mod"),
-			}); err != nil {
+			}
+			if value.Path == "example.com/z" {
+				module["Sum"] = "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+				module["GoModSum"] = "h1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+			}
+			if err := encoder.Encode(module); err != nil {
 				return 12
 			}
 		}

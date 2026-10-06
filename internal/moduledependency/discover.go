@@ -76,6 +76,8 @@ type Module struct {
 	selectedVersion string
 	root            string
 	sourcePath      string
+	checksum        string
+	goModChecksum   string
 	direct          bool
 	indirect        bool
 	workspace       bool
@@ -94,6 +96,14 @@ func (m Module) RequiredVersion() string { return m.requiredVersion }
 // SelectedVersion returns the version selected by Go. It is empty for a
 // module supplied directly by the active go.work workspace.
 func (m Module) SelectedVersion() string { return m.selectedVersion }
+
+// Checksum returns the verified Go checksum for the selected module archive.
+// It is empty for workspace and local-replacement sources.
+func (m Module) Checksum() string { return m.checksum }
+
+// GoModChecksum returns the verified Go checksum for the selected module's
+// go.mod file. It is empty when Go does not report one for the source.
+func (m Module) GoModChecksum() string { return m.goModChecksum }
 
 // Root returns the canonical absolute source root. This CLI-only path is not
 // generation-extension input or generated manifest data.
@@ -293,13 +303,15 @@ func parseRequirements(data []byte, applicationPath string) ([]requirement, erro
 }
 
 type listedModule struct {
-	Path    string             `json:"Path"`
-	Version string             `json:"Version"`
-	Main    bool               `json:"Main"`
-	Dir     string             `json:"Dir"`
-	GoMod   string             `json:"GoMod"`
-	Replace *listedReplacement `json:"Replace"`
-	Error   *listedError       `json:"Error"`
+	Path     string             `json:"Path"`
+	Version  string             `json:"Version"`
+	Main     bool               `json:"Main"`
+	Dir      string             `json:"Dir"`
+	GoMod    string             `json:"GoMod"`
+	Checksum string             `json:"Sum"`
+	GoModSum string             `json:"GoModSum"`
+	Replace  *listedReplacement `json:"Replace"`
+	Error    *listedError       `json:"Error"`
 }
 
 type listedReplacement struct {
@@ -415,6 +427,8 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 			selectedVersion: listed.Version,
 			root:            root,
 			sourcePath:      expectedSourcePath,
+			checksum:        listed.Checksum,
+			goModChecksum:   listed.GoModSum,
 			direct:          isDirect,
 			indirect:        isDirect && declared.indirect,
 			workspace:       listed.Main,
@@ -439,10 +453,12 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 }
 
 type downloadedModule struct {
-	Path    string `json:"Path"`
-	Version string `json:"Version"`
-	Dir     string `json:"Dir"`
-	GoMod   string `json:"GoMod"`
+	Path     string `json:"Path"`
+	Version  string `json:"Version"`
+	Dir      string `json:"Dir"`
+	GoMod    string `json:"GoMod"`
+	Checksum string `json:"Sum"`
+	GoModSum string `json:"GoModSum"`
 }
 
 func resolveMissingSources(ctx context.Context, applicationRoot, applicationModulePath string, expectedGoMod fileSnapshot, modules []Module, options Options, outputLimit int) error {
@@ -504,6 +520,8 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		}
 		modules[index].root = root
 		modules[index].goMod = goModData
+		modules[index].checksum = downloaded.Checksum
+		modules[index].goModChecksum = downloaded.GoModSum
 	}
 
 	// Downloads run outside the Project directory. Recheck the Project module
