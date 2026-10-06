@@ -172,6 +172,7 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 	}
 	dependencyOptions := moduledependency.Options{
 		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...), OutputLimit: options.DependencyOutputLimit,
+		Offline: options.Offline,
 	}
 	workspaceSnapshots, err := captureSelectionWorkspace(module.Path(), dependencyOptions.Environment)
 	if err != nil {

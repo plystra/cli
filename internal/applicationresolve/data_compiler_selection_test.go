@@ -19,6 +19,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/datacompiler"
+	"github.com/plystra/cli/internal/moduledependency"
 	"golang.org/x/mod/module"
 )
 
@@ -34,7 +35,7 @@ func TestDataCompilerSelectionUsesSelectedVerifiedModule(t *testing.T) {
 	writeFile(t, filepath.Join(project, "plystra.yaml"), "data: {members: {example.records/v1: {resource: database.primary}}}\n")
 	environment := compilerProxyEnvironment(t, proxy)
 	runCompilerGo(t, project, environment, "mod", "download", "all")
-	options := applicationresolve.Options{Start: project, Environment: environment}
+	options := applicationresolve.Options{Start: project, Environment: environment, Offline: true}
 	inputs, err := applicationresolve.DiscoverSelectionInputs(t.Context(), options)
 	if err != nil {
 		t.Fatalf("DiscoverSelectionInputs: %v", err)
@@ -53,6 +54,29 @@ func TestDataCompilerSelectionUsesSelectedVerifiedModule(t *testing.T) {
 	_, err = applicationresolve.Resolve(t.Context(), options)
 	if !errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) || errors.Is(err, datacompiler.ErrSelection) {
 		t.Fatalf("active selected compiler should remain uninstalled: %v", err)
+	}
+}
+
+func TestDataCompilerSelectionOfflineRejectsColdModuleGraph(t *testing.T) {
+	root := t.TempDir()
+	proxy := filepath.Join(root, "proxy")
+	writeCompilerProxyModule(t, proxy, datacompiler.ModulePath, "v0.2.0", "module github.com/plystra/data\n\ngo 1.26\n", map[string][]byte{"plystra-data-compiler.json": dataCompilerManifest(t)})
+	project := filepath.Join(root, "project")
+	goMod := "module example.com/project\n\ngo 1.26\n\nrequire github.com/plystra/data v0.2.0\n"
+	writeFile(t, filepath.Join(project, "go.mod"), goMod)
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "{}\n")
+	_, err := applicationresolve.DiscoverSelectionInputs(t.Context(), applicationresolve.Options{
+		Start: project, Environment: compilerProxyEnvironment(t, proxy), Offline: true,
+	})
+	if !errors.Is(err, moduledependency.ErrDiscover) {
+		t.Fatalf("cold offline discovery error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(project, "go.mod"))
+	if err != nil || string(data) != goMod {
+		t.Fatalf("offline discovery changed go.mod: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(project, "go.sum")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("offline discovery created go.sum: %v", err)
 	}
 }
 

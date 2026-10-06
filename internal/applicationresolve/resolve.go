@@ -159,9 +159,12 @@ type Options struct {
 	GoCommand                 string
 	Environment               []string
 	DependencyOutputLimit     int
-	CompileTimeout            time.Duration
-	ExecutionTimeout          time.Duration
-	TemporaryParent           string
+	// Offline prevents module graph discovery from fetching selected sources.
+	// Callers must separately constrain other Go helpers they invoke.
+	Offline          bool
+	CompileTimeout   time.Duration
+	ExecutionTimeout time.Duration
+	TemporaryParent  string
 }
 
 // Result is one immutable filesystem provenance and stable generation
