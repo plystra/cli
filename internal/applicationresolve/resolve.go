@@ -47,7 +47,24 @@ var (
 	// configuration whose constructor is neither explicitly selected nor
 	// reachable in the frozen Interface constructor graph.
 	ErrUnownedConstructorConfiguration = errors.New("constructor configuration has no explicit selection or reachable constructor")
+	// ErrDataCompilerUnavailable reports selected Data activation before the
+	// official compiler is integrated into Project generation.
+	ErrDataCompilerUnavailable = errors.New("Data compiler integration is unavailable")
 )
+
+// DataCompilerUnavailableError identifies the selected member that cannot yet
+// be installed by this CLI, without claiming a compiler distribution was run.
+type DataCompilerUnavailableError struct {
+	member applicationmeta.DataMember
+}
+
+func (e *DataCompilerUnavailableError) Error() string {
+	return fmt.Sprintf("%s: %s requires the selected Data compiler before generation", ErrDataCompilerUnavailable, e.member.Source())
+}
+func (*DataCompilerUnavailableError) Unwrap() error { return ErrDataCompilerUnavailable }
+func (e *DataCompilerUnavailableError) Source() applicationmeta.ConfigurationDeclarationSource {
+	return e.member.DeclarationSource()
+}
 
 type dependencyConcurrentChangeError struct {
 	cause error
@@ -255,6 +272,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, err
 	}
 	manifest := composition.Manifest()
+	if members := manifest.DataMembers(); len(members) != 0 {
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0]})
+	}
 	currentLayers := composition.CurrentLayers()
 	if len(currentLayers) == 0 {
 		return Result{}, fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)

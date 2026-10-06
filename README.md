@@ -1199,6 +1199,17 @@ named-instance configuration, binding, generation, and execution. Read each
 support stage independently; implemented stages do not imply `accepted: yes`.
 Data schema/query generation and migration commands remain unsupported.
 
+The CLI parses current-Project `data.members` assignments as exact member-ID
+entries. Each entry requires one valid named `resource` and may name an `access`
+instance. An environment overlay replaces an entire entry or removes it with
+`{$remove: true}`; root and complete replacement documents cannot remove it.
+This is configuration composition only. An effective active member makes
+`plystra generate` and `plystra generate --check` fail with
+`PLYSTRA_DATA_COMPILER_UNAVAILABLE` before changing the Project. Invalid entries
+report `PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location.
+Compiler acquisition, assignment validation, generated access, and migrations
+are not installed yet.
+
 ### Named Resource instances
 
 The named-Resource lifecycle integration requires the CLI's exact Kernel pin,

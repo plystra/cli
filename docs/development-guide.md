@@ -794,7 +794,7 @@ selected path or query.
 
 Every effective-graph module with root `plystra.yaml` is a discoverable Project. Ordinary dependencies remain inactive. `--template` resolves one Project module and records it as an ordinary direct Go Module dependency. It has no ancestry and contributes no configuration or source; creation and later dependency commands never copy or activate dependency configuration.
 
-The supported configuration layers are the current Project root plus one selected environment overlay, or one complete replacement document. They cover Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, CORS, and Resource declarations authored by the current Project. Data configuration remains outside Core.
+The supported configuration layers are the current Project root plus one selected environment overlay, or one complete replacement document. They cover Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, CORS, Resource declarations, and typed `data.members` assignments authored by the current Project. Each Data member ID is an exact key; an overlay replaces or removes its whole assignment. This CLI parses the closed assignment shape but rejects effective active members before generation or drift checking because official Data compiler integration is not installed. Parsing an assignment does not validate its declared member, database provider, or access contract.
 
 Ordinary dependencies are discoverable Go Modules, not configuration layers. Their root marker may identify a Project for discovery, but their declarations, overlays, replacement documents, runtime baselines, and source never enter the current application model.
 

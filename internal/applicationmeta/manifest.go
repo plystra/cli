@@ -265,6 +265,8 @@ type Manifest struct {
 	removedResourceInstances      []ResourceInstance
 	resourceBindings              []ResourceBinding
 	removedResourceBindings       []ResourceBinding
+	dataMembers                   []DataMember
+	removedDataMembers            []dataMemberRemoval
 	startupTimeout                time.Duration
 	hasStartupTimeout             bool
 	removeStartupTimeout          bool
@@ -297,6 +299,14 @@ func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error
 	manifest.removedConfigurations = append([]constructorConfigurationRemoval(nil), manifest.removedConfigurations...)
 	for index := range manifest.removedConfigurations {
 		manifest.removedConfigurations[index].declarationSource.modulePath = projectModule
+	}
+	manifest.dataMembers = append([]DataMember(nil), manifest.dataMembers...)
+	for index := range manifest.dataMembers {
+		manifest.dataMembers[index].declarationSource.modulePath = projectModule
+	}
+	manifest.removedDataMembers = append([]dataMemberRemoval(nil), manifest.removedDataMembers...)
+	for index := range manifest.removedDataMembers {
+		manifest.removedDataMembers[index].declarationSource.modulePath = projectModule
 	}
 	return manifest, nil
 }
@@ -457,9 +467,6 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 	if err := validateRootEnvelope(root, values); err != nil {
 		return Manifest{}, err
 	}
-	if values["data"] != nil {
-		return Manifest{}, invalid("data configuration is not supported by this installed CLI")
-	}
 	address, hasAddress, removeAddress, cors, exposures, removedExposures, err := parseHTTP(values["http"])
 	if err != nil {
 		return Manifest{}, err
@@ -510,6 +517,9 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 	if err := parseResources(&manifest, values["resources"]); err != nil {
 		return Manifest{}, err
 	}
+	if err := parseDataMembers(&manifest, values["data"], sparseOverlay); err != nil {
+		return Manifest{}, err
+	}
 	if complete && !sparseOverlay {
 		if err := validateCompleteConfigurationLayer(values, manifest); err != nil {
 			return Manifest{}, err
@@ -532,7 +542,7 @@ func validateCompleteConfigurationLayer(values map[string]*yaml.Node, manifest M
 	if manifest.removeHTTPAddress || manifest.httpCORS.remove || manifest.httpCORS.removeAllowedOrigins || manifest.httpCORS.removeAllowCredentials || manifest.removeStartupTimeout ||
 		len(manifest.removedHTTPExposures) != 0 || len(manifest.removedRequirements) != 0 || len(manifest.removedProviderChoices) != 0 || len(manifest.removedInterfaceReqs) != 0 ||
 		len(manifest.removedImplementationChoices) != 0 || len(manifest.removedInterfacePolicies) != 0 || len(manifest.removedAliases) != 0 || len(manifest.removedConfigurations) != 0 ||
-		len(manifest.removedResourceInstances) != 0 || len(manifest.removedResourceBindings) != 0 {
+		len(manifest.removedResourceInstances) != 0 || len(manifest.removedResourceBindings) != 0 || len(manifest.removedDataMembers) != 0 {
 		return invalid("removal markers are valid only in environment overlays")
 	}
 	return nil
@@ -633,6 +643,14 @@ func rewriteManifestSource(manifest *Manifest, source string) {
 	for index := range manifest.removedConfigurations {
 		manifest.removedConfigurations[index].source = rewrite(manifest.removedConfigurations[index].source)
 		manifest.removedConfigurations[index].declarationSource.path = source
+	}
+	for index := range manifest.dataMembers {
+		manifest.dataMembers[index].source = rewrite(manifest.dataMembers[index].source)
+		manifest.dataMembers[index].declarationSource.path = source
+	}
+	for index := range manifest.removedDataMembers {
+		manifest.removedDataMembers[index].source = rewrite(manifest.removedDataMembers[index].source)
+		manifest.removedDataMembers[index].declarationSource.path = source
 	}
 }
 

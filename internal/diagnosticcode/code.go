@@ -100,6 +100,8 @@ const (
 	ResourceMetadataInvalid              = Prefix + "RESOURCE_METADATA_INVALID"
 	ResourceConfigurationSchemaInvalid   = Prefix + "RESOURCE_CONFIGURATION_SCHEMA_INVALID"
 	ResourceConfigurationValuesInvalid   = Prefix + "RESOURCE_CONFIGURATION_VALUES_INVALID"
+	DataMemberMetadataInvalid            = Prefix + "DATA_MEMBER_METADATA_INVALID"
+	DataCompilerUnavailable              = Prefix + "DATA_COMPILER_UNAVAILABLE"
 	AuthoredPackageInvalid               = Prefix + "AUTHORING_PACKAGE_INVALID"
 )
 

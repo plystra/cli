@@ -134,6 +134,9 @@ report none.
 Configuration composes only the current Project root with one selected overlay,
 or uses one complete current-Project replacement document.
 Generation does not rewrite the selected current-Project configuration document.
+data.members entries compose by exact member ID. An effective active member
+reports PLYSTRA_DATA_COMPILER_UNAVAILABLE before generation or drift checking;
+malformed entries report PLYSTRA_DATA_MEMBER_METADATA_INVALID.
 PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
 installed CLI/Kernel pair both generates and executes it. The diagnostic reports
 the field, support stages, and module-relative configuration declarations.

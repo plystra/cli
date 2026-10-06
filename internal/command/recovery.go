@@ -276,6 +276,25 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 	}
 	var sources []diagnosticjson.Source
 	switch code {
+	case diagnosticcode.DataMemberMetadataInvalid, diagnosticcode.DataCompilerUnavailable:
+		var location applicationmeta.ConfigurationDeclarationSource
+		var metadata *applicationmeta.DataMemberMetadataError
+		var unavailable *applicationresolve.DataCompilerUnavailableError
+		if errors.As(err, &metadata) && metadata != nil {
+			location = metadata.Source()
+		} else if errors.As(err, &unavailable) && unavailable != nil {
+			location = unavailable.Source()
+		}
+		module := location.ModulePath()
+		if module == "" {
+			var outer diagnosticSourceLocation
+			if errors.As(err, &outer) && outer != nil {
+				module = outer.ModulePath()
+			}
+		}
+		if location.Path() != "" {
+			sources = append(sources, diagnosticjson.Source{Module: module, Path: location.Path(), Kind: "configuration-declaration", Line: location.Line(), Column: location.Column()})
+		}
 	case diagnosticInterfaceCreateTargetExists:
 		var conflict *interfacecreate.TargetExistsError
 		if !errors.As(err, &conflict) || conflict == nil {
@@ -1225,6 +1244,12 @@ func primaryFailureMessage(err error) string {
 }
 
 func primaryActionableDiagnostic(err error, context recoveryContext) (actionableDiagnostic, bool) {
+	if errors.Is(err, applicationmeta.ErrInvalidDataMember) {
+		return recoveryDiagnostic(diagnosticcode.DataMemberMetadataInvalid, "Correct the reported data.members entry to use a canonical member ID, one valid resource name, and an optional valid access name, then rerun the command.")
+	}
+	if errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) {
+		return recoveryDiagnostic(diagnosticcode.DataCompilerUnavailable, "Remove the selected data.members activation or use a CLI with exact Data compiler integration, then rerun the command.")
+	}
 	switch {
 	case errors.Is(err, implementationselect.ErrInvalidTarget):
 		return recoveryDiagnostic(diagnosticUseTargetInvalid, "Rerun `plystra use <target> <constructor-symbol>"+context.selectorSuffix()+"` with one canonical Interface ID including /vN or one existing named Resource instance.")

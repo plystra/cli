@@ -128,6 +128,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 		return nil, err
 	}
 	result = append(result, resources...)
+	result = append(result, dataMemberConfigurationDecisions(manifest)...)
 	// configurationDecisions and the process decision builder are both typed and
 	// deterministic, but sort again at this public boundary so future fields do
 	// not accidentally inherit map ordering.
