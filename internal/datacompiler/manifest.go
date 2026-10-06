@@ -8,7 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 )
 
 const (
@@ -30,11 +33,16 @@ const (
 	MaxArtifactBytes     = 4 * 1024 * 1024
 	MaxArtifactPathBytes = 512
 	maximumJSONDepth     = 16
+	distributionManifest = "plystra-data-compiler.json"
 )
 
 // ErrInvalidManifest identifies an invalid or unsafe Data compiler
 // distribution manifest. Its text is deliberately independent of input.
 var ErrInvalidManifest = errors.New("invalid Data compiler distribution manifest")
+
+// ErrManifestUnavailable identifies a selected compiler source without a
+// readable regular distribution manifest.
+var ErrManifestUnavailable = errors.New("Data compiler distribution manifest is unavailable")
 
 // Bounds contains the advertised limits of the Data compiler protocol.
 type Bounds struct {
@@ -87,6 +95,38 @@ func Parse(data []byte) (Manifest, string, error) {
 
 	sum := sha256.Sum256(data)
 	return manifest, "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// Load reads the exact distribution manifest from one selected module source
+// root. It does not follow a manifest symlink and never includes the host path
+// or source bytes in an error.
+func Load(root string) (Manifest, string, error) {
+	if root == "" || !filepath.IsAbs(root) {
+		return Manifest{}, "", ErrManifestUnavailable
+	}
+	path := filepath.Join(root, distributionManifest)
+	before, err := os.Lstat(path)
+	if err != nil || !before.Mode().IsRegular() || before.Size() <= 0 || before.Size() > MaxFrameBytes {
+		return Manifest{}, "", ErrManifestUnavailable
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return Manifest{}, "", ErrManifestUnavailable
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, MaxFrameBytes+1))
+	if err != nil || len(data) == 0 || len(data) > MaxFrameBytes {
+		return Manifest{}, "", ErrManifestUnavailable
+	}
+	after, err := file.Stat()
+	if err != nil || !after.Mode().IsRegular() || after.Size() != before.Size() {
+		return Manifest{}, "", ErrManifestUnavailable
+	}
+	manifest, digest, err := Parse(data)
+	if err != nil {
+		return Manifest{}, "", fmt.Errorf("%w: %w", ErrManifestUnavailable, err)
+	}
+	return manifest, digest, nil
 }
 
 func validManifest(manifest Manifest) bool {

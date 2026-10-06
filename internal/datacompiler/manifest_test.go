@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -149,4 +151,41 @@ func TestParseConcurrent(t *testing.T) {
 		}()
 	}
 	group.Wait()
+}
+
+func TestLoadReadsSelectedModuleManifest(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, "plystra-data-compiler.json")
+	data := []byte(validManifestJSON)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want, wantDigest, err := datacompiler.Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, gotDigest, err := datacompiler.Load(root)
+	if err != nil || got != want || gotDigest != wantDigest {
+		t.Fatalf("Load() = %#v, %q, %v; want %#v, %q", got, gotDigest, err, want, wantDigest)
+	}
+}
+
+func TestLoadRejectsMissingAndNonRegularManifest(t *testing.T) {
+	t.Parallel()
+
+	if _, _, err := datacompiler.Load(t.TempDir()); !errors.Is(err, datacompiler.ErrManifestUnavailable) {
+		t.Fatalf("missing manifest error = %v", err)
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "plystra-data-compiler.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := datacompiler.Load(root); !errors.Is(err, datacompiler.ErrManifestUnavailable) {
+		t.Fatalf("directory manifest error = %v", err)
+	}
+	if _, _, err := datacompiler.Load("relative"); !errors.Is(err, datacompiler.ErrManifestUnavailable) {
+		t.Fatalf("relative root error = %v", err)
+	}
 }
