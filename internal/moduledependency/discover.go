@@ -49,6 +49,9 @@ type Options struct {
 	GoCommand   string
 	Environment []string
 	OutputLimit int
+	// Offline requires the selected module sources to be present locally and
+	// prevents Go from contacting a module proxy or checksum service.
+	Offline bool
 }
 
 // Replacement records the selected replacement provenance reported by Go.
@@ -193,10 +196,17 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if outputLimit <= 0 {
 		outputLimit = defaultOutputLimit
 	}
+	environment := options.Environment
+	if options.Offline {
+		environment = environmentWith(environment, "GOPROXY", "off")
+		environment = environmentWith(environment, "GONOPROXY", "none")
+		environment = environmentWith(environment, "GOSUMDB", "off")
+		environment = environmentWith(environment, "GOTOOLCHAIN", "local")
+	}
 	output, err := gocommand.Output(ctx, gocommand.Options{
 		Command:     options.GoCommand,
 		Directory:   application.Path(),
-		Environment: options.Environment,
+		Environment: environment,
 		OutputLimit: outputLimit,
 	}, "list", "-m", "-json", "-mod=readonly", "all")
 	if err != nil {
@@ -471,6 +481,19 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 	}
 	if !missing {
 		return nil
+	}
+	if options.Offline {
+		for _, dependency := range modules {
+			if dependency.root == "" {
+				sourcePath := dependency.sourcePath
+				version := dependency.selectedVersion
+				if replacement, exists := dependency.Replacement(); exists && !replacement.Local() {
+					sourcePath = replacement.Path()
+					version = replacement.Version()
+				}
+				return fmt.Errorf("%w: selected source %s@%s for module %q is not available locally", ErrModuleUnavailable, sourcePath, version, dependency.path)
+			}
+		}
 	}
 
 	downloadRoot, err := os.MkdirTemp("", "plystra-module-download-")
