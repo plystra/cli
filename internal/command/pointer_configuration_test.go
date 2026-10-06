@@ -47,6 +47,9 @@ func TestPublicPointerConfigurationAcrossSelections(t *testing.T) {
 				selectedData = selection + "config: {" + constructor + ": {settings: {first: current.internal}}}\n"
 				options.ConfigurationPath = selectedPath
 			}
+			if selectedPath == "plystra.yaml" {
+				rootData = selectedData
+			}
 			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
 			writeCommandFile(t, filepath.Join(root, selectedPath), selectedData)
 

@@ -139,9 +139,9 @@ installed CLI/Kernel pair both generates and executes it. The diagnostic reports
 the field, support stages, and module-relative configuration declarations.
 Remove the policy or use a compatible stack; inspect capabilities reports support.
 Dormant policies remain intent, not enforced guarantees.
-PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
-Project plystra.yaml as a project-marker source. Malformed readable documents
-use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_PROJECT_MANIFEST_INVALID reports malformed current-Project plystra.yaml
+or an unsafe current or dependency Project marker. Malformed current-Project
+content uses 1:1; unsafe or unreadable markers omit the unavailable span.
 PLYSTRA_CONFIGURATION_INVALID reports a malformed selected environment or
 complete-replacement document at 1:1 as a configuration-declaration source.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at
@@ -261,9 +261,9 @@ installed CLI/Kernel pair both generates and executes it. The diagnostic reports
 the field, support stages, and module-relative configuration declarations.
 Remove the policy or use a compatible stack; inspect capabilities reports support.
 Dormant policies remain intent, not enforced guarantees.
-PLYSTRA_PROJECT_MANIFEST_INVALID reports the owning current or dependency
-Project plystra.yaml as a project-marker source. Malformed readable documents
-use 1:1; unsafe or unreadable markers omit the unavailable span.
+PLYSTRA_PROJECT_MANIFEST_INVALID reports malformed current-Project plystra.yaml
+or an unsafe current or dependency Project marker. Malformed current-Project
+content uses 1:1; unsafe or unreadable markers omit the unavailable span.
 PLYSTRA_CONFIGURATION_INVALID reports a malformed selected environment or
 complete-replacement document at 1:1 as a configuration-declaration source.
 PLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at

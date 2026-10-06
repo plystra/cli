@@ -37,14 +37,6 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		},
 		{
-			name: "malformed-dependency-manifest",
-			setup: func(t *testing.T, parent string) string {
-				return writeManifestDiagnosticDependencyProject(t, parent, "unknown: true\n", false)
-			},
-			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
-			wantCode:   diagnosticcode.ProjectManifestInvalid,
-		},
-		{
 			name: "unsupported-current-resource",
 			setup: func(t *testing.T, parent string) string {
 				applicationRoot := filepath.Join(parent, "application")
@@ -131,6 +123,25 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestRunIgnoresDependencyApplicationConfiguration(t *testing.T) {
+	parent := t.TempDir()
+	root := writeManifestDiagnosticDependencyProject(t, parent, "unknown: dependency-only-value\ninterfaces: {require: [missing.read/v1]}\n", false)
+	dependency := filepath.Join(parent, "dependency")
+	before := commandTree(t, dependency)
+	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		code, _, stderr := runCommand(t, arguments, root, commandGoEnvironment())
+		if code != 0 || stderr != "" {
+			t.Fatalf("%v = %d, %q", arguments, code, stderr)
+		}
+		if !reflect.DeepEqual(commandTree(t, dependency), before) {
+			t.Fatalf("%v changed dependency Project", arguments)
+		}
+	}
+	if strings.Contains(string(readCommandFile(t, root, "generated/manifest.json")), "dependency-only-value") {
+		t.Fatal("dependency configuration entered generated provenance")
 	}
 }
 

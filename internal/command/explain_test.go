@@ -210,7 +210,7 @@ func TestExplainAliasHumanOutputIsConciseCausalAndReadOnly(t *testing.T) {
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "alias", "mail.send/v1"}, nested, inspectCommandEnvironment(nil))
 	for _, fragment := range []string{
 		"Alias: mail.send/v1\n",
-		"Decision: maps directly to email.send/v1; inherits target exposure (Go, HTTP, JavaScript)\n",
+		"Decision: maps directly to email.send/v1; uses target exposure (Go, HTTP, JavaScript)\n",
 		"Reason: application-alias\n",
 		"Source: example.com/acme/provider-use:plystra.yaml:",
 		"(alias-target)\n",
@@ -1282,6 +1282,8 @@ replace github.com/plystra/kernel => %s
 	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `capabilities:
   require: [email.send/v1, reports.read/v1]
   use: {email.send/v1: example.shared}
+interfaces:
+  use: {email.send/v1: example.com/platform/shared.New}
 http:
   address: resolved-secret-marker
 config:
@@ -1304,6 +1306,8 @@ config:
 	writeCommandFile(t, filepath.Join(appRoot, "deploy", "customer.yaml"), `capabilities:
   require: [email.send/v1, reports.read/v1]
   use: {email.send/v1: example.alternative}
+interfaces:
+  use: {email.send/v1: example.com/platform/shared.New}
 config:
   example.com/platform/shared.New:
     host: customer-private.example

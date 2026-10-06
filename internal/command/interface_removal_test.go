@@ -33,6 +33,14 @@ func TestPublicInterfaceTombstonesAcrossSelections(t *testing.T) {
 			if selectedPath != "plystra.yaml" {
 				writeCommandFile(t, filepath.Join(root, selectedPath), removals)
 			}
+			if mode != "environment" {
+				before := commandTree(t, root)
+				code, stdout, stderr := runCommand(t, append([]string{"generate"}, selector...), root, commandGoEnvironment())
+				if code != 1 || stdout != "" || !strings.Contains(stderr, "removal markers are valid only in environment overlays") || !reflect.DeepEqual(commandTree(t, root), before) {
+					t.Fatalf("%s removal = %d, %q, %q", mode, code, stdout, stderr)
+				}
+				return
+			}
 			selectedBefore := string(readCommandFile(t, root, selectedPath))
 			assertCommandInvocationPolicy(t, root, selector, commandGoEnvironment(), invocationpolicy.Default())
 			manifest, err := applicationgen.DecodeManifestProvenance(readCommandFile(t, root, "generated/manifest.json"))

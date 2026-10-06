@@ -35,6 +35,12 @@ func TestPublicMissingRequiredConstructorConfigurationDoesNotMutate(t *testing.T
 						configuration += "config: {" + constructor + ": " + entry + "}\n"
 					}
 					writeCommandFile(t, filepath.Join(root, mode.selected), configuration)
+					if !active && entry == "" {
+						if code, _, stderr := runCommand(t, append([]string{"generate"}, mode.selector...), root, commandGoEnvironment()); code != 0 {
+							t.Fatalf("dormant selection without configuration = %d, %s", code, stderr)
+						}
+						continue
+					}
 					before := commandTree(t, root)
 					for _, invocation := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
 						args := append(append([]string(nil), invocation...), mode.selector...)

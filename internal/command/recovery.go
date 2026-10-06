@@ -1347,7 +1347,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, interfaceresolution.ErrReservedInterface):
 		return recoveryDiagnostic(diagnosticResolveReservedInterface, "Remove the reported local kernel.* Interface declaration and import the canonical Kernel Interface package instead.")
 	case errors.Is(err, interfaceresolution.ErrIntrinsicChoice):
-		return recoveryDiagnostic(diagnosticResolveIntrinsicInterfaceSelection, "Set the reported interfaces.use entry to {$remove: true} in "+context.configurationTarget()+" to remove the effective selection; Kernel supplies that Interface intrinsically.")
+		return recoveryDiagnostic(diagnosticResolveIntrinsicInterfaceSelection, "Remove the reported interfaces.use entry from "+context.configurationTarget()+"; in an environment overlay, use {$remove: true} to remove a root selection. Kernel supplies that Interface intrinsically.")
 	case errors.Is(err, implementationdecl.ErrInvalid):
 		return recoveryDiagnostic(diagnosticImplementationDeclarationInvalid, "Correct the reported //plystra:implements directive so it immediately documents one exported package-level constructor and names canonical Interface IDs, then rerun the command.")
 	case errors.Is(err, implementationinventory.ErrInvalidConfiguration):
@@ -1435,7 +1435,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, implementationselect.ErrInvalidConstructor):
 		return recoveryDiagnostic(diagnosticUseConstructorInvalid, "Rerun `plystra use <target> <constructor-symbol>"+context.selectorSuffix()+"` with one visible fully qualified exported constructor symbol.")
 	case errors.Is(err, applicationresolve.ErrManifest) && !errors.Is(err, applicationresolve.ErrConfigurationSelection):
-		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported root or dependency Project plystra.yaml, then rerun the command.")
+		return recoveryDiagnostic(diagnosticProjectManifestInvalid, "Correct the reported current-Project plystra.yaml content or unsafe current/dependency Project marker, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationRequired):

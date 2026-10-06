@@ -118,6 +118,14 @@ func providerEnvironment(t *testing.T, proxy string) []string {
 		t.Fatal(err)
 	}
 	temp := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(filepath.Join(temp, "modcache"), func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				_ = os.Chmod(path, 0o755)
+			}
+			return nil
+		})
+	})
 	for _, name := range []string{"modcache", "gocache", "gotmp", "tmp", "temp"} {
 		if err := os.MkdirAll(filepath.Join(temp, name), 0o755); err != nil {
 			t.Fatal(err)

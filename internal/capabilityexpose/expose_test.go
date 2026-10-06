@@ -104,11 +104,15 @@ func TestManifestWriteReplacesExactSparseRemoval(t *testing.T) {
 	const modulePath = "example.com/application"
 	root := t.TempDir()
 	original := []byte("# Selected environment.\nhttp:\n  expose:\n    records.read/v1: {$remove: true}\n    records.write/v1: {$remove: true}\n")
-	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), original)
+	writeExposureFile(t, filepath.Join(root, "plystra.yaml"), []byte("{}\n"))
+	writeExposureFile(t, filepath.Join(root, "plystra.production.yaml"), original)
 
-	write, changed, err := capabilityexpose.ManifestWrite(modulePath, root, mustCapabilityID(t, "records.read/v1"))
+	write, changed, _, err := capabilityexpose.SelectedManifestWrite(modulePath, root, mustCapabilityID(t, "records.read/v1"), "", "production", nil)
 	if err != nil || !changed {
-		t.Fatalf("ManifestWrite = changed %t, %#v, %v", changed, write, err)
+		t.Fatalf("SelectedManifestWrite = changed %t, %#v, %v", changed, write, err)
+	}
+	if write.Path != "plystra.production.yaml" {
+		t.Fatalf("SelectedManifestWrite path = %q", write.Path)
 	}
 	for _, expected := range [][]byte{
 		[]byte("# Selected environment."),

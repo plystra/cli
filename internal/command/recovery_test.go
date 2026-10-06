@@ -160,7 +160,7 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			name:    "missing required constructor configuration",
 			err:     fmt.Errorf("validate configuration: %w: %w", applicationmeta.ErrConfigurationValues, applicationmeta.ErrConfigurationRequired),
 			context: commandRecoveryContext("deploy/customer.yaml", "", nil),
-			want:    "Supply the missing required field in deploy/customer.yaml or the selected root document, or correct the tombstone that removed it, then rerun the command.",
+			want:    "Supply the missing required field in deploy/customer.yaml, or correct the overlay tombstone that removed it, then rerun the command.",
 			code:    diagnosticConstructorConfigurationValuesInvalid,
 		},
 		{
@@ -197,7 +197,7 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 		{
 			name: "invalid dependency Project manifest",
 			err:  errors.Join(applicationresolve.ErrManifest, applicationmeta.ErrInvalidManifest),
-			want: "Correct the reported root or dependency Project plystra.yaml, then rerun the command.",
+			want: "Correct the reported current-Project plystra.yaml content or unsafe current/dependency Project marker, then rerun the command.",
 			code: diagnosticProjectManifestInvalid,
 		},
 		{
@@ -735,7 +735,7 @@ func TestWriteCommandFailureReportsIntrinsicImplementationSelectionSources(t *te
 	wantSuffix := "\n\n" +
 		"Source: example.com/a:plystra.yaml:1:1 (implementation-selection)\n" +
 		"Source: example.com/z:plystra.yaml:1:1 (implementation-selection)\n\n" +
-		"Recovery:\nSet the reported interfaces.use entry to {$remove: true} in deploy/customer.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.\n\n" +
+		"Recovery:\nRemove the reported interfaces.use entry from deploy/customer.yaml; in an environment overlay, use {$remove: true} to remove a root selection. Kernel supplies that Interface intrinsically.\n\n" +
 		"Diagnostic: " + diagnosticResolveIntrinsicInterfaceSelection + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
 		t.Fatalf("intrinsic Implementation selection output = %q, want suffix %q", got, wantSuffix)

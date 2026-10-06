@@ -345,7 +345,7 @@ func TestRunUseReportsIntrinsicImplementationSelectionSourceAndRestoresProject(t
 				implementationSelectionCommandEnvironment(nil),
 			)
 			wantSource := "Source: example.com/acme/implementation-use:" + test.selectedPath + ":1:1 (implementation-selection)"
-			wantRecovery := "Recovery:\nSet the reported interfaces.use entry to {$remove: true} in " + test.selectedPath + " to remove the effective selection; Kernel supplies that Interface intrinsically.\n"
+			wantRecovery := "Recovery:\nRemove the reported interfaces.use entry from " + test.selectedPath + "; in an environment overlay, use {$remove: true} to remove a root selection. Kernel supplies that Interface intrinsically.\n"
 			if exitCode != 1 || stdout != "" || !commandContainsAll(
 				stderr,
 				"kernel.health/v1",

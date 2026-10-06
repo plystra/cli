@@ -152,7 +152,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"dependency module/version membership",
 		"Compatible private value edits require a refreshed baseline",
 		"Root `plystra.yaml` is the Project marker",
-		"the selected current-Project document",
+		"A selected environment overlay",
 		"An interfaces.require sequence replaces the complete lower explicit requirement set; [] clears it",
 		"In an environment overlay, omission and {} keep the root set",
 		"Root and complete replacement documents reject sparse requirement forms",

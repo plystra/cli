@@ -532,7 +532,7 @@ func TestPublicResolvingCommandsReportIntrinsicImplementationChoiceSources(t *te
 				arguments := append(append([]string(nil), command...), test.selectors...)
 				exitCode, stdout, stderr := runCommand(t, arguments, root, commandGoEnvironment())
 				wantSource := "Source: example.com/intrinsic-choice-command:" + test.selectedPath + ":1:1 (implementation-selection)"
-				wantRecovery := "Recovery:\nSet the reported interfaces.use entry to {$remove: true} in " + test.selectedPath + " to remove the effective selection; Kernel supplies that Interface intrinsically.\n"
+				wantRecovery := "Recovery:\nRemove the reported interfaces.use entry from " + test.selectedPath + "; in an environment overlay, use {$remove: true} to remove a root selection. Kernel supplies that Interface intrinsically.\n"
 				if exitCode != 1 || stdout != "" || !commandContainsAll(
 					stderr,
 					"kernel.health/v1",
@@ -835,7 +835,7 @@ func TestPublicResolvingCommandsReportInvalidExposureSourcesWithoutMutation(t *t
 					recovery := "Edit " + mode.recoveryTarget + " so every value matches a selected Plugin's closed typed schema, then rerun the command."
 					if mode.name == "default" {
 						code, kind = diagnosticcode.ProjectManifestInvalid, "project-marker"
-						recovery = "Correct the reported root or dependency Project plystra.yaml, then rerun the command."
+						recovery = "Correct the reported current-Project plystra.yaml content or unsafe current/dependency Project marker, then rerun the command."
 					}
 					if exitCode != 1 || stdout != "" || !commandContainsAll(
 						stderr,

@@ -40,6 +40,9 @@ func TestPublicInterfaceRequirementCompleteSets(t *testing.T) {
 				switch mode {
 				case "environment":
 					rootData = lower + "\n"
+					if lower == "" {
+						rootData = "{}\n"
+					}
 					selectedData, selectedPath = test.selected+"\n", "plystra.production.yaml"
 					selector = []string{"--env", "production"}
 				case "replacement":
@@ -118,7 +121,7 @@ func (*Service) Run(context.Context, runv1.Request) (runv1.Response, error) {
 		t.Fatal(err)
 	}
 	bindings := manifest.InterfaceProvenance().Bindings()
-	if len(bindings) != 2 || bindings[0].InterfaceID() != "app.run/v1" || len(bindings[0].ExposureSources()) != 1 || bindings[1].InterfaceID() != "email.send/v1" || len(bindings[1].RequiringConstructors()) != 1 || len(bindings[1].RootSources()) != 0 {
+	if len(bindings) != 2 || bindings[0].InterfaceID() != "app.run/v1" || len(bindings[0].ExposureSources()) == 0 || bindings[1].InterfaceID() != "email.send/v1" || len(bindings[1].RequiringConstructors()) != 1 || len(bindings[1].RootSources()) != 0 {
 		t.Fatalf("empty explicit set suppressed independent requirements: %#v", bindings)
 	}
 	if code, stdout, stderr := runCommand(t, []string{"check"}, root, commandGoEnvironment()); code != 0 {

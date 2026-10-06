@@ -461,7 +461,7 @@ func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing
 	contributions := selection.Contributions()
 	if len(contributions) != 1 ||
 		contributions[0].Owner() != string(resolutionevidence.ConfigurationOwnerRoot) ||
-		contributions[0].Precedence() != 2 ||
+		contributions[0].Precedence() != 1 ||
 		contributions[0].Digest() != selection.SelectionDigest() ||
 		contributions[0].Summary() != "implementation" ||
 		contributions[0].Removed() ||
@@ -3732,9 +3732,9 @@ func assertDormantSelectionRecord(
 		t.Fatalf("dormant selection contributions = %#v, expectations = %v/%v/%v", contributions, contributionOwners, sourceModules, sourcePaths)
 	}
 	precedence := map[string]int{
-		string(resolutionevidence.ConfigurationOwnerRoot):        2,
-		string(resolutionevidence.ConfigurationOwnerExplicit):    2,
-		string(resolutionevidence.ConfigurationOwnerEnvironment): 3,
+		string(resolutionevidence.ConfigurationOwnerRoot):        1,
+		string(resolutionevidence.ConfigurationOwnerExplicit):    1,
+		string(resolutionevidence.ConfigurationOwnerEnvironment): 2,
 	}
 	for index, contribution := range contributions {
 		wantOwner := contributionOwners[index]
