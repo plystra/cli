@@ -542,8 +542,16 @@ func validateCompleteConfigurationLayer(values map[string]*yaml.Node, manifest M
 	if manifest.removeHTTPAddress || manifest.httpCORS.remove || manifest.httpCORS.removeAllowedOrigins || manifest.httpCORS.removeAllowCredentials || manifest.removeStartupTimeout ||
 		len(manifest.removedHTTPExposures) != 0 || len(manifest.removedRequirements) != 0 || len(manifest.removedProviderChoices) != 0 || len(manifest.removedInterfaceReqs) != 0 ||
 		len(manifest.removedImplementationChoices) != 0 || len(manifest.removedInterfacePolicies) != 0 || len(manifest.removedAliases) != 0 || len(manifest.removedConfigurations) != 0 ||
-		len(manifest.removedResourceInstances) != 0 || len(manifest.removedResourceBindings) != 0 || len(manifest.removedDataMembers) != 0 {
+		len(manifest.removedResourceInstances) != 0 || len(manifest.removedResourceBindings) != 0 {
 		return invalid("removal markers are valid only in environment overlays")
+	}
+	if len(manifest.removedDataMembers) != 0 {
+		removal := manifest.removedDataMembers[0]
+		return &DataMemberMetadataError{
+			source: removal.declarationSource,
+			field:  dataMemberPath(removal.id),
+			rule:   "removal markers are valid only in environment overlays",
+		}
 	}
 	return nil
 }
