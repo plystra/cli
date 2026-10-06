@@ -262,7 +262,7 @@ func validateAnalyzePackages(data []byte) error {
 		return err
 	}
 	for _, pkg := range packages {
-		if strings.TrimSpace(pkg.ImportPath) == "" || (pkg.RootEligibility != "eligible" && pkg.RootEligibility != "support") || len(pkg.Files) == 0 {
+		if strings.TrimSpace(pkg.ImportPath) == "" || (pkg.RootEligibility != RootEligibilityEligible && pkg.RootEligibility != RootEligibilitySupport) || len(pkg.Files) == 0 {
 			return errors.New("package identity or root eligibility is invalid")
 		}
 		var files []json.RawMessage
