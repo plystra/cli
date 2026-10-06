@@ -343,6 +343,76 @@ func TestCreateRejectsTemplateWithoutRootProjectMarkerAndRollsBack(t *testing.T)
 	assertNoTransactionFiles(t, parent)
 }
 
+func TestTemplateCreationAndUpdateKeepDependencyConfigurationInert(t *testing.T) {
+	proxy := createKernelProxy(t)
+	const templatePath = "example.com/acme/platform"
+	writeProxyModule(t, proxy, templatePath, "v1.0.0", map[string][]byte{
+		"plystra.yaml": []byte("interfaces:\n  require: [ghost.missing/v1]\n"),
+		"platform.go":  []byte("package platform\n"),
+		"template.txt": []byte("not copied\n"),
+	})
+	writeProxyModule(t, proxy, templatePath, "v1.1.0", map[string][]byte{
+		"plystra.yaml": []byte("interfaces:\n  require: [ghost.changed/v1]\n"),
+		"platform.go":  []byte("package platform\n"),
+	})
+	environment := isolatedGoEnvironment(t, proxy)
+	const modulePath = "example.com/acme/my-app"
+	base, err := newproject.Create(t.Context(), newproject.Options{
+		Parent: t.TempDir(), ProjectName: "my-app", ModulePath: modulePath,
+		NoAgentGuidance: true, Environment: environment,
+	})
+	if err != nil {
+		t.Fatalf("create ordinary Project: %v", err)
+	}
+	createdParent := t.TempDir()
+	var createStdout, createStderr bytes.Buffer
+	if exitCode := command.RunIn([]string{"new", "my-app", "--module", modulePath, "--template", templatePath + "@v1.0.0", "--no-agent-guidance"}, &createStdout, &createStderr, createdParent, environment); exitCode != 0 || createStderr.Len() != 0 {
+		t.Fatalf("public template creation: exit=%d stdout=%q stderr=%q", exitCode, createStdout.String(), createStderr.String())
+	}
+	if want := "Created my-app with dependency " + templatePath + "@v1.0.0\nConfiguration scaffolded\nGenerated and tested\n\nNext:\n  cd my-app\n  plystra check\n"; createStdout.String() != want {
+		t.Fatalf("public template creation output = %q, want %q", createStdout.String(), want)
+	}
+	createdPath := filepath.Join(createdParent, "my-app")
+	baseRoot, err := os.ReadFile(filepath.Join(base.Path(), "plystra.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdRoot, err := os.ReadFile(filepath.Join(createdPath, "plystra.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(baseRoot, createdRoot) || bytes.Contains(createdRoot, []byte("template:")) {
+		t.Fatalf("template changed current-Project configuration: base=%q created=%q", baseRoot, createdRoot)
+	}
+	assertDirectRequirement(t, createdPath, templatePath, "v1.0.0")
+	if _, err := os.Lstat(filepath.Join(createdPath, "template.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("template source was copied: %v", err)
+	}
+	for _, generated := range []string{"generated/go/assembly/interfaces_gen.go", "generated/go/assembly/providers_gen.go", "generated/compatibility/interfaces.json"} {
+		ordinary, err := os.ReadFile(filepath.Join(base.Path(), filepath.FromSlash(generated)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		withTemplate, err := os.ReadFile(filepath.Join(createdPath, filepath.FromSlash(generated)))
+		if err != nil || !bytes.Equal(ordinary, withTemplate) {
+			t.Fatalf("template activated application artifact %s: %v", generated, err)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := command.RunIn([]string{"update", templatePath}, &stdout, &stderr, createdPath, environment); exitCode != 0 || stderr.Len() != 0 {
+		t.Fatalf("update ordinary template dependency: exit=%d stdout=%q stderr=%q", exitCode, stdout.String(), stderr.String())
+	}
+	assertDirectRequirement(t, createdPath, templatePath, "v1.1.0")
+	updatedRoot, err := os.ReadFile(filepath.Join(createdPath, "plystra.yaml"))
+	if err != nil || !bytes.Equal(updatedRoot, createdRoot) {
+		t.Fatalf("template dependency update changed root configuration: %q, %v", updatedRoot, err)
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: createdPath, Check: true, Environment: environment})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("updated ordinary dependency produced generated drift: %#v, %v", checked.Report().Changes(), err)
+	}
+}
+
 func TestCreateRejectsInvalidTemplateQueryBeforeMutation(t *testing.T) {
 	t.Parallel()
 

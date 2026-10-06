@@ -810,9 +810,9 @@ repository is intended.
 Successful creation with `--template` reports the selected query:
 
 ```text
-Created my-app from github.com/acme/platform@v1.2.3
+Created my-app with dependency github.com/acme/platform@v1.2.3
 Configuration scaffolded
-Generated, checked, built, and locally verified
+Generated and tested
 
 Next:
   cd my-app
@@ -820,19 +820,12 @@ Next:
 ```
 
 The concise output names the result and next action without exposing absolute
-paths, internal resolution detail, or an unavailable command. This ordinary
-dependency workflow includes automatic read-only Go package tests and
-builds plus isolated startup, intrinsic health verification, and clean shutdown.
-When the generated Project has a JavaScript SDK, creation also runs the package
-manager workflow `npm install --ignore-scripts --no-audit --no-fund`,
-`npm run typecheck`, `npm run build`, and `npm pack --dry-run --json`. The
-install resolves the generated package's pinned Buf and Connect runtime
-dependencies, so type checking covers the actual descriptor-backed transport
-rather than an unused dependency declaration. The
-validation-only `node_modules/` and `dist/` directories are removed before the
-target is installed. Complete public `plystra dev` and `plystra build` workflows
-remain future acceptance work; `--template` itself does not qualify or activate
-the selected dependency.
+paths or internal resolution detail. Creation generates the selected Project
+and runs its Go package tests before installation. It does not claim a separate
+build, startup health check, or JavaScript SDK qualification. Those checks can
+be run independently where applicable. Complete public `plystra dev` and
+`plystra build` workflows remain future acceptance work; `--template` itself
+does not qualify or activate the selected dependency.
 
 ## Transaction safety
 

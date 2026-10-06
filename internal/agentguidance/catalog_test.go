@@ -155,7 +155,6 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"the selected current-Project document",
 		"An interfaces.require sequence replaces the complete lower explicit requirement set; [] clears it",
 		"In an environment overlay, omission and {} keep the root set",
-		"A later sparse overlay preserves an earlier complete-set boundary",
 		"Root and complete replacement documents reject sparse requirement forms",
 		"Validated Secret fields exclude reference kind and target from public identity",
 		"Later overlay values or tombstones replace lower references",

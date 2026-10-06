@@ -11,5 +11,5 @@ const (
 	GoRequirement = "1.26"
 	// SpecificationRevision is the core-philosophy revision implemented by the
 	// installed release guidance catalog.
-	SpecificationRevision = "b959f277b7661c0725660f394b84f7175c8df54b"
+	SpecificationRevision = "5eff10a43cc8bcf426deeb4f0b520a4968e552be"
 )

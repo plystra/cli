@@ -303,9 +303,9 @@ Template creation instead reports the Project result and immediate next action
 without an absolute path or internal resolution detail:
 
 ```text
-Created orders from example.com/acme/platform@v1.2.3
+Created orders with dependency example.com/acme/platform@v1.2.3
 Configuration scaffolded
-Generated, checked, built, and locally verified
+Generated and tested
 
 Next:
   cd orders
@@ -322,14 +322,10 @@ the same document. Invalid invocation, validation, missing-prerequisite,
 cancellation, and execution-failure outcomes use exit classes `2`, `3`, `4`,
 `5`, and `8` respectively.
 
-Creation with `--template` proves read-only Go package tests and builds, isolated runtime
-startup, intrinsic health, and clean shutdown. When a generated JavaScript SDK
-is present, creation also runs `npm install --ignore-scripts --no-audit --no-fund`,
-`npm run typecheck`, `npm run build`, and `npm pack --dry-run --json`, then
-removes validation-only `node_modules/` and `dist/` output before installation.
-The generated package declares pinned Buf and Connect runtime dependencies, so
-this checks the real descriptor-backed transport rather than an unused package
-entry.
+Creation with `--template` generates the selected Project and runs Go package
+tests before installation. It does not run a separate build, startup health
+check, or JavaScript SDK qualification; run those checks independently when
+applicable.
 The complete public creation acceptance suite still needs `plystra dev` and
 `plystra build` workflows. `--template` records an ordinary dependency and does
 not qualify or activate that dependency.
