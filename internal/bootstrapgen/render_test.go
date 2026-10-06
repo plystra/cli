@@ -69,7 +69,7 @@ token: {type: secret}
 		"os.OpenRoot(selection.configurationRoot)",
 		"inspectRuntimeConfigurationPath",
 		"sameRuntimeConfigurationPathStates",
-		"composeRuntimeTemplateDocument",
+		"composeRuntimeDocument",
 		`"acme.audit": {`,
 		`"acme.records": {`,
 		`"headers":    runtimeConfigurationObject`,
@@ -113,6 +113,7 @@ token: {type: secret}
 		}
 	}
 	for _, forbidden := range []string{
+		"composeRuntimeTemplateDocument",
 		"compiledConfigurationSelectionProvenanceJSON",
 		"compiledConfigurationSelectionProvenanceDigest",
 		strconv.Quote(string(options.ConfigurationProvenance.CanonicalJSON())),
@@ -225,13 +226,12 @@ func TestRenderRejectsInvalidOptions(t *testing.T) {
 func bootstrapConfigurationProvenance(t testing.TB, mode generation.ConfigurationMode) transportprovenance.Provenance {
 	t.Helper()
 	input := transportprovenance.Input{
-		Mode:                        mode,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  bootstrapDigest("1"),
-		SelectedPath:                "plystra.yaml",
-		SelectedDigest:              bootstrapDigest("1"),
-		DependencyCompositionDigest: bootstrapDigest("2"),
-		ApplicationModelDigest:      bootstrapDigest("3"),
+		Mode:                   mode,
+		RootPath:               "plystra.yaml",
+		RootDigest:             bootstrapDigest("1"),
+		SelectedPath:           "plystra.yaml",
+		SelectedDigest:         bootstrapDigest("1"),
+		ApplicationModelDigest: bootstrapDigest("3"),
 	}
 	switch mode {
 	case generation.ConfigurationModeEnvironment:

@@ -3,7 +3,6 @@ package command_test
 import (
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +17,7 @@ func TestPublicGenerationCompilesRetryPoliciesAcrossSelections(t *testing.T) {
 	writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "interfaces: {policies: {email.send/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}}\n")
 	mod := string(readCommandFile(t, root, "go.mod"))
 	writeCommandFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/policy-export v1.0.0\nreplace example.com/policy-export => "+filepath.ToSlash(dependency)+"\n")
-	configuration := "template: example.com/policy-export\ninterfaces: {require: [email.send/v1]}\n"
+	configuration := "interfaces: {require: [email.send/v1], policies: {email.send/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}}\n"
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), configuration)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {policies: {email.send/v1: {timeout: 5s, retry: {eligibility: replay_safe, max_attempts: 3, backoff: 25ms}}}}\n")
 	writeCommandFile(t, filepath.Join(root, "deploy/customer.yaml"), "interfaces: {require: [email.send/v1], policies: {email.send/v1: {timeout: 5s, retry: {eligibility: replay_safe, max_attempts: 16}}}}\n")
@@ -31,7 +30,7 @@ func TestPublicGenerationCompilesRetryPoliciesAcrossSelections(t *testing.T) {
 		attempts     int
 		backoff      time.Duration
 	}{
-		{name: "template defaults", attempts: 2},
+		{name: "root defaults", attempts: 2},
 		{name: "environment", selector: []string{"--env", "production"}, attempts: 3, backoff: 25 * time.Millisecond},
 		{name: "replacement", selector: []string{"--config", "deploy/customer.yaml"}, attempts: 16},
 		{name: "ambient environment", sameAs: "environment", environment: map[string]string{"PLYSTRA_ENV": "production"}, attempts: 3, backoff: 25 * time.Millisecond},
@@ -62,10 +61,7 @@ func TestPublicGenerationCompilesRetryPoliciesAcrossSelections(t *testing.T) {
 			}
 		})
 	}
-	// Root ownership replaces the entire template entry, including its retry.
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), strings.Replace(configuration, "require: [email.send/v1]", "require: [email.send/v1], policies: {email.send/v1: {timeout: 5s}}", 1))
-	assertCommandTimeoutPolicy(t, root, nil, commandGoEnvironment(), 5*time.Second)
 	if !reflect.DeepEqual(commandTree(t, dependency), dependencyBefore) {
-		t.Fatal("retry generation changed template source")
+		t.Fatal("retry generation changed dependency source")
 	}
 }

@@ -325,15 +325,15 @@ func (*service) Run(context.Context, runv1.Request) (runv1.Response,error) {retu
 	})
 }
 
-func TestGeneratedBootstrapLoadsTemplateTypedConfiguration(t *testing.T) {
-	for _, module := range []string{"example.com/template-runtime-config", "my-app"} {
+func TestGeneratedBootstrapLoadsCurrentProjectTypedConfiguration(t *testing.T) {
+	for _, module := range []string{"example.com/current-runtime-config", "my-app"} {
 		for _, state := range []string{"active", "dormant"} {
-			t.Run(module+"/"+state, func(t *testing.T) { testGeneratedTemplateConfiguration(t, module, state == "dormant") })
+			t.Run(module+"/"+state, func(t *testing.T) { testGeneratedCurrentProjectConfiguration(t, module, state == "dormant") })
 		}
 	}
 }
 
-func testGeneratedTemplateConfiguration(t *testing.T, module string, dormant bool) {
+func testGeneratedCurrentProjectConfiguration(t *testing.T, module string, dormant bool) {
 	t.Helper()
 	root := t.TempDir()
 	writeApplicationModule(t, root, module)
@@ -344,15 +344,12 @@ func testGeneratedTemplateConfiguration(t *testing.T, module string, dormant boo
 	if dormant {
 		interfaces = "interfaces: {use: {configuration.owner/v1: " + owner + "}}"
 	}
-	const templateModule = "example.com/runtime-template"
-	templateRoot := t.TempDir()
-	writeModule(t, templateRoot, templateModule, "")
-	writeFile(t, filepath.Join(templateRoot, "plystra.yaml"), interfaces+"\nconfig:\n  "+owner+": {label: private-template-value}\n")
-	writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+templateModule+" v1.0.0\nreplace "+templateModule+" => "+filepath.ToSlash(templateRoot)+"\n")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "template: "+templateModule+"\n")
-	selected := "{}\n"
-	writeFile(t, filepath.Join(root, "plystra.test.yaml"), selected)
-	writeFile(t, filepath.Join(root, "selected.yaml"), selected)
+	rootConfiguration := interfaces + "\nconfig:\n  " + owner + ": {label: private-root-value}\n"
+	overlayConfiguration := "config:\n  " + owner + ": {label: private-overlay-value}\n"
+	replacementConfiguration := interfaces + "\nconfig:\n  " + owner + ": {label: private-replacement-value}\n"
+	writeFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
+	writeFile(t, filepath.Join(root, "plystra.test.yaml"), overlayConfiguration)
+	writeFile(t, filepath.Join(root, "selected.yaml"), replacementConfiguration)
 	for _, selector := range [][]string{nil, {"--env", "test"}, {"--config", "selected.yaml"}} {
 		var stdout, stderr bytes.Buffer
 		if code := command.RunIn(append([]string{"generate"}, selector...), &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
@@ -365,17 +362,19 @@ func testGeneratedTemplateConfiguration(t *testing.T, module string, dormant boo
 			t.Fatalf("generate --check %v = %d: %s\n%s", selector, code, stdout.Bytes(), stderr.Bytes())
 		}
 		if !reflect.DeepEqual(before, snapshotTree(t, root)) {
-			t.Fatal("template check changed project inputs")
+			t.Fatal("current-project configuration check changed project inputs")
 		}
 	}
 	process := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", root, "--runtime-baseline", "dist/runtime-baseline.json")
 	process.Dir, process.Env = root, goEnvironment(nil)
 	output, err := process.CombinedOutput()
 	if err != nil {
-		t.Fatalf("template startup = %v\n%s", err, output)
+		t.Fatalf("current-project startup = %v\n%s", err, output)
 	}
-	if bytes.Contains(output, []byte("private-template-value")) {
-		t.Fatal("error leaked template value")
+	for _, private := range []string{"private-root-value", "private-overlay-value", "private-replacement-value"} {
+		if bytes.Contains(output, []byte(private)) {
+			t.Fatalf("error leaked current-project value %q", private)
+		}
 	}
 	runtimeTest := strings.ReplaceAll(`package application_test
 import (
@@ -383,46 +382,48 @@ import (
  "os"
  "path/filepath"
  "testing"
- "example.com/template-runtime-config/configowner"
- "example.com/template-runtime-config/generated/go/bootstrap"
+ "example.com/current-runtime-config/configowner"
+ "example.com/current-runtime-config/generated/go/bootstrap"
 )
-func TestTemplateConfiguration(t *testing.T) {
+func TestCurrentProjectConfiguration(t *testing.T) {
  baseline,err:=filepath.Abs("dist/runtime-baseline.json");if err!=nil{t.Fatal(err)}
- const relationship="template: example.com/runtime-template\n"
- const current="config: {example.com/template-runtime-config/configowner.New: {label: private-live-current}}\n"
+ const interfaces="PROJECT_INTERFACES"
+ const rootDocument=interfaces+"\nconfig: {example.com/current-runtime-config/configowner.New: {label: private-live-current}}\n"
+ const overlayDocument="config: {example.com/current-runtime-config/configowner.New: {label: private-live-current}}\n"
+ const replacementDocument=rootDocument
  for _,mode:=range []string{"default","environment","replacement"} {
   t.Run(mode,func(t *testing.T){
    root:=t.TempDir()
-   document:=relationship+current
+   document:=rootDocument
    args:=[]string{"--configuration-root",root,"--runtime-baseline",baseline}
    if mode=="environment" {
-    document=relationship
-    if err:=os.WriteFile(filepath.Join(root,"plystra.test.yaml"),[]byte(current),0600);err!=nil{t.Fatal(err)}
+    if err:=os.WriteFile(filepath.Join(root,"plystra.test.yaml"),[]byte(overlayDocument),0600);err!=nil{t.Fatal(err)}
     args=append(args,"--env","test")
    }
    if mode=="replacement" {
-    document=relationship+"interfaces: {require: [missing.inert/v1]}\nconfig: {example.com/template-runtime-config/configowner.New: {label: wrong}}\n"
-    if err:=os.WriteFile(filepath.Join(root,"selected.yaml"),[]byte(current),0600);err!=nil{t.Fatal(err)}
+    if err:=os.WriteFile(filepath.Join(root,"selected.yaml"),[]byte(replacementDocument),0600);err!=nil{t.Fatal(err)}
     args=append(args,"--config","selected.yaml")
    }
    if err:=os.WriteFile(filepath.Join(root,"plystra.yaml"),[]byte(document),0600);err!=nil{t.Fatal(err)}
    app,err:=bootstrap.New(context.Background(),bootstrap.RuntimeOptions{Arguments:args,Environment:[]string{}})
    if err!=nil{t.Fatal(err)}
-   if configowner.Last.Label!="private-live-current"{t.Fatal("template configuration did not compose with the live selected layer")}
+   if configowner.Last.Label!="private-live-current"{t.Fatal("current-project configuration did not reach the constructor")}
    if err:=app.Stop(context.Background());err!=nil{t.Fatal(err)}
   })
  }
 }
-`, "example.com/template-runtime-config", module)
+	`, "example.com/current-runtime-config", module)
 	if dormant {
-		runtimeTest = strings.ReplaceAll(runtimeTest, "interfaces: {require: [configuration.owner/v1]}", interfaces)
-		runtimeTest = strings.ReplaceAll(runtimeTest, `configowner.Last.Label!="private-live-current"`, `configowner.Last.Label!=""`)
+		runtimeTest = strings.ReplaceAll(runtimeTest, "PROJECT_INTERFACES", interfaces)
+		runtimeTest = strings.ReplaceAll(runtimeTest, `if configowner.Last.Label!="private-live-current"`, `if configowner.Last.Label!=""`)
+	} else {
+		runtimeTest = strings.ReplaceAll(runtimeTest, "PROJECT_INTERFACES", interfaces)
 	}
-	writeFile(t, filepath.Join(root, "template_test.go"), runtimeTest)
+	writeFile(t, filepath.Join(root, "configuration_test.go"), runtimeTest)
 	process = exec.CommandContext(t.Context(), "go", "test", "-race", "-mod=readonly", ".")
 	process.Dir, process.Env = root, goEnvironment(nil)
 	if output, err := process.CombinedOutput(); err != nil {
-		t.Fatalf("template runtime: %v\n%s", err, output)
+		t.Fatalf("current-project typed runtime: %v\n%s", err, output)
 	}
 }
 

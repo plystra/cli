@@ -14,7 +14,6 @@ import (
 	"github.com/plystra/cli/internal/capabilityid"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
-	"github.com/plystra/cli/internal/modulepath"
 )
 
 var (
@@ -35,8 +34,9 @@ var (
 	ErrConfigurationRequired = errors.New("required constructor configuration field is missing")
 )
 
-// Dependency is one template root and its effective Go Module identity.
-// Compose consumes dependencies in explicit oldest-to-nearest order.
+// Dependency retains the internal shape used by configuration-maintenance
+// callers. Ordinary Go Module dependencies never contribute application
+// configuration to Compose.
 type Dependency struct {
 	ModulePath    string
 	ModuleVersion string
@@ -73,7 +73,7 @@ func (p Provenance) Path() string { return p.path }
 // Digest returns the normalized public identity, excluding Secret targets.
 func (p Provenance) Digest() string { return p.digest }
 
-// Removed reports whether this baseline record is an explicit typed
+// Removed reports whether this composition record is an explicit typed
 // tombstone rather than a contributed value.
 func (p Provenance) Removed() bool { return p.removed }
 
@@ -82,15 +82,14 @@ func (p Provenance) Removed() bool { return p.removed }
 func (p Provenance) Sources() []string { return append([]string(nil), p.sources...) }
 
 // Composition is one immutable effective Manifest plus its complete
-// dependency-derived non-secret provenance.
+// current-project non-secret provenance.
 type Composition struct {
 	current           Manifest
 	currentLayers     []Manifest
 	manifest          Manifest
-	templateLayers    []TemplateLayer
 	provenance        []Provenance
 	resolutionSources []Provenance
-	dependencyDigest  string
+	compositionDigest string
 	prepared          bool
 }
 
@@ -110,44 +109,9 @@ func (Composition) LogValue() slog.Value {
 	return slog.StringValue("<redacted-application-composition>")
 }
 
-// TemplateLayer is one public-safe authored template layer. Its position in
-// TemplateLayers is precedence, not Implementation discovery priority.
-type TemplateLayer struct {
-	ModulePath    string
-	ModuleVersion string
-	Source        string
-	Decisions     []ConfigurationDecision
-}
-
-// TemplateLayers returns every root layer in oldest-to-nearest order,
-// including declarations suppressed by later templates or the current Project.
-func (c Composition) TemplateLayers() []TemplateLayer {
-	if !c.Valid() {
-		return nil
-	}
-	result := append([]TemplateLayer(nil), c.templateLayers...)
-	for index := range result {
-		result[index].Decisions = append([]ConfigurationDecision(nil), result[index].Decisions...)
-	}
-	return result
-}
-
-// DependencyBaseline returns the validated non-secret dependency provenance
-// needed for schema-aware current-project maintenance.
-func (c Composition) DependencyBaseline() DependencyBaseline {
-	if !c.Valid() {
-		return DependencyBaseline{}
-	}
-	return DependencyBaseline{
-		records:  c.Provenance(),
-		digest:   c.dependencyDigest,
-		prepared: true,
-	}
-}
-
 // Valid reports whether the value was produced by Compose.
 func (c Composition) Valid() bool {
-	return c.prepared && validCompositionDigest(c.dependencyDigest)
+	return c.prepared && validCompositionDigest(c.compositionDigest)
 }
 
 // Manifest returns the effective typed application declaration.
@@ -159,7 +123,7 @@ func (c Composition) Manifest() Manifest {
 }
 
 // CurrentManifest returns the selected current-Project declaration before any
-// template contributes its lower-precedence values.
+// environment overlay is applied.
 func (c Composition) CurrentManifest() Manifest {
 	if !c.Valid() {
 		return Manifest{}
@@ -167,8 +131,7 @@ func (c Composition) CurrentManifest() Manifest {
 	return c.current
 }
 
-// Provenance returns defensive path-and-digest-sorted dependency baseline
-// records.
+// Provenance returns defensive path-and-digest-sorted current-project records.
 func (c Composition) Provenance() []Provenance {
 	if !c.Valid() {
 		return nil
@@ -176,7 +139,7 @@ func (c Composition) Provenance() []Provenance {
 	return cloneProvenance(c.provenance)
 }
 
-// ResolutionSources returns the inherited declarations that still contribute
+// ResolutionSources returns the current-project declarations that contribute
 // to the effective model, selected by layer precedence rather than value equality.
 func (c Composition) ResolutionSources() []Provenance {
 	if !c.Valid() {
@@ -185,97 +148,49 @@ func (c Composition) ResolutionSources() []Provenance {
 	return cloneProvenance(c.resolutionSources)
 }
 
-// DependencyDigest returns the stable digest of dependency-derived normalized
-// values and all-source provenance. It contains no configuration values or
-// resolved Secrets.
-func (c Composition) DependencyDigest() string {
+// CompositionDigest returns the stable digest of the normalized current-Project
+// composition and its source provenance. It contains no configuration values
+// or resolved Secrets.
+func (c Composition) CompositionDigest() string {
 	if !c.Valid() {
 		return ""
 	}
-	return c.dependencyDigest
+	return c.compositionDigest
 }
 
-// Compose applies template roots in explicit oldest-to-nearest order, followed
-// by the selected current-project layers. It never ranks Implementation candidates.
-func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) (Composition, error) {
+// Compose applies only the selected current-project layers. Ordinary Go Module
+// dependencies remain visible to discovery but never contribute configuration.
+func Compose(_ []Dependency, current Manifest, schemas SchemaLookup) (Composition, error) {
 	if schemas == nil {
 		return Composition{}, fmt.Errorf("%w: schema lookup is nil", ErrCompose)
 	}
-	seen := make(map[string]bool, len(dependencies)+1)
-	if current.modulePath != "" {
-		seen[current.modulePath] = true
-	}
 	records := make(map[string]*provenanceRecord)
-	var templateLayers []TemplateLayer
 	var currentLayers []Manifest
 	active := make(map[string]Provenance)
 	effective := Manifest{startupTimeout: DefaultStartupTimeout}
 	var corsSources httpCORSCompositionSources
-	apply := func(layer Manifest, owner *Dependency, environmentOverlay bool) error {
+	apply := func(layer Manifest, environmentOverlay bool) error {
 		layer = bindResourceProviders(layer, effective)
 		decisions, err := ConfigurationDecisions(layer, schemas)
 		if err != nil {
 			return err
 		}
-		if owner != nil {
-			templateLayers = append(templateLayers, TemplateLayer{ModulePath: owner.ModulePath, ModuleVersion: owner.ModuleVersion, Source: layer.source, Decisions: append([]ConfigurationDecision(nil), decisions...)})
-		} else {
-			currentLayers = append(currentLayers, layer)
-		}
+		currentLayers = append(currentLayers, layer)
 		clearReplacedResourceSources(active, effective, layer)
 		for _, decision := range decisions {
-			if !decision.dependencyComposable {
-				continue
+			addProvenance(records, decision.path, decision.digest, decision.source, decision.removed)
+			if decision.resolutionRelevant {
+				applyResolutionDecision(active, decision)
 			}
-			if owner != nil {
-				source := dependencySource(*owner, declarationReference(layer, decision))
-				addProvenance(records, decision.path, decision.digest, source, decision.removed)
-			}
-			applyResolutionDecision(active, layer, decision, owner)
-		}
-		if owner != nil {
-			layer = qualifyTemplateSources(layer, *owner)
 		}
 		corsSources.apply(layer, current.modulePath, environmentOverlay)
 		effective, err = applyManifestLayer(effective, layer, schemas)
 		return err
 	}
-	for index, dependency := range dependencies {
-		if len(dependency.ModulePath) > 4096 || modulepath.CheckProject(dependency.ModulePath) != nil {
-			return Composition{}, fmt.Errorf("%w: invalid template module path", ErrCompose)
-		}
-		if seen[dependency.ModulePath] {
-			return Composition{}, fmt.Errorf("%w: template module %q is repeated", ErrCompose, dependency.ModulePath)
-		}
-		seen[dependency.ModulePath] = true
-		if dependency.Manifest.modulePath != "" && dependency.Manifest.modulePath != dependency.ModulePath {
-			return Composition{}, fmt.Errorf("%w: template module %q does not match its declaration owner", ErrCompose, dependency.ModulePath)
-		}
-		if strings.ContainsAny(dependency.ModuleVersion, "\x00\r\n") {
-			return Composition{}, fmt.Errorf("%w: invalid template module version", ErrCompose)
-		}
-		manifest, err := WithProjectModule(dependency.Manifest, dependency.ModulePath)
-		if err != nil {
-			return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
-		}
-		path := fmt.Sprintf("template.ancestry[%d]", index)
-		source := manifest.source
-		if source == "" {
-			source = "plystra.yaml"
-		}
-		addProvenance(records, path, digestStrings("template.ancestry/v1", dependency.ModulePath, dependency.ModuleVersion, source, manifest.template), dependencySource(dependency, source), false)
-		for _, layer := range manifestLayers(manifest) {
-			layer.httpAddress, layer.hasHTTPAddress, layer.removeHTTPAddress = "", false, false
-			layer.startupTimeout, layer.hasStartupTimeout, layer.removeStartupTimeout = DefaultStartupTimeout, false, false
-			if err := apply(layer, &dependency, false); err != nil {
-				return Composition{}, fmt.Errorf("%w: template %s: %w", ErrCompose, dependencyIdentity(dependency), err)
-			}
-		}
-	}
 	for index, layer := range manifestLayers(current) {
 		// ApplyOverlay retains the selected base followed by its overlay layers.
 		// A replacement document is the base, regardless of its filename.
-		if err := apply(layer, nil, index > 0); err != nil {
+		if err := apply(layer, index > 0); err != nil {
 			return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 		}
 	}
@@ -301,7 +216,6 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
 	effective.modulePath, effective.source = current.modulePath, current.source
-	effective.template, effective.templateSource = current.template, current.templateSource
 	effective.layers = nil
 	provenance := finalizeProvenance(records)
 	digest, err := digestProvenance(provenance)
@@ -310,28 +224,11 @@ func Compose(dependencies []Dependency, current Manifest, schemas SchemaLookup) 
 	}
 	return Composition{
 		current: current, currentLayers: currentLayers, manifest: effective, provenance: provenance,
-		templateLayers:    templateLayers,
-		resolutionSources: activeResolutionSources(active), dependencyDigest: digest, prepared: true,
+		resolutionSources: activeResolutionSources(active), compositionDigest: digest, prepared: true,
 	}, nil
 }
 
-func declarationReference(layer Manifest, decision ConfigurationDecision) string {
-	// Typed configuration keeps per-object source references; ordinary decisions
-	// expose document names and get their canonical path appended here.
-	source := decision.source
-	if source == "" {
-		source = layer.source
-	}
-	if source == "" {
-		source = "plystra.yaml"
-	}
-	if strings.Contains(source, " ") {
-		return source
-	}
-	return source + " " + decision.path
-}
-
-func applyResolutionDecision(active map[string]Provenance, layer Manifest, decision ConfigurationDecision, owner *Dependency) {
+func applyResolutionDecision(active map[string]Provenance, decision ConfigurationDecision) {
 	path := decision.path
 	clear := func(prefix string) {
 		for key := range active {
@@ -347,11 +244,7 @@ func applyResolutionDecision(active map[string]Provenance, layer Manifest, decis
 		clear(path + "[")
 		clear(path + ".")
 	}
-	// Empty sources mark current ownership and suppress inherited attribution.
-	record := Provenance{path: path, digest: decision.digest, removed: decision.removed}
-	if owner != nil {
-		record.sources = []string{dependencySource(*owner, declarationReference(layer, decision))}
-	}
+	record := Provenance{path: path, digest: decision.digest, removed: decision.removed, sources: []string{decision.source}}
 	active[path] = record
 }
 
@@ -365,7 +258,7 @@ func activeResolutionSources(active map[string]Provenance) []Provenance {
 			if !strings.HasPrefix(record.path, "config[") {
 				addProvenance(records, record.path, record.digest, source, false)
 			}
-			// Configuration ownership includes surviving inherited fixed-struct
+			// Configuration ownership includes surviving lower-layer fixed-struct
 			// fields even when a nearer layer supplied the object container.
 			if strings.HasPrefix(record.path, "config[") {
 				root := record.path

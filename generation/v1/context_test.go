@@ -28,7 +28,7 @@ func TestNewContextBuildsDeterministicImmutableViews(t *testing.T) {
 		t.Fatalf("APIVersion = %q", context.APIVersion())
 	}
 	provenance, exists := context.ConfigurationProvenance()
-	if !exists || provenance.Mode() != generation.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.production.yaml" || !digestPattern.MatchString(provenance.RootDigest()) || !digestPattern.MatchString(provenance.SelectedDigest()) || !digestPattern.MatchString(provenance.DependencyCompositionDigest()) {
+	if !exists || provenance.Mode() != generation.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.production.yaml" || !digestPattern.MatchString(provenance.RootDigest()) || !digestPattern.MatchString(provenance.SelectedDigest()) {
 		t.Fatalf("ConfigurationProvenance = %#v, %t", provenance, exists)
 	}
 
@@ -415,9 +415,6 @@ func TestNewContextRejectsInconsistentOrUnsafeInput(t *testing.T) {
 		"invalid selected configuration digest": func(input *generation.Input) {
 			input.ConfigurationProvenance.SelectedDigest = "sha256:" + strings.Repeat("g", 64)
 		},
-		"invalid dependency composition digest": func(input *generation.Input) {
-			input.ConfigurationProvenance.DependencyCompositionDigest = ""
-		},
 		"default selection mismatch": func(input *generation.Input) {
 			input.ConfigurationProvenance.Mode = generation.ConfigurationModeDefault
 			input.ConfigurationProvenance.Environment = ""
@@ -543,13 +540,12 @@ func validInput() generation.Input {
 	orderContract := json.RawMessage(`{"id":"order.create/v1","request":{"space_id":{"type":"string","required":true}},"response":{},"errors":["invalid_state"],"semantics":{"kind":"query","effects":"none","idempotency":{"mode":"inherent"},"retry":{"safety":"safe"},"cancellation":{"mode":"best-effort"},"completion":{"mode":"completed-before-return"},"ordering":{"mode":"none"},"data":{"request":"public","response":"public"}},"extensions":{"authn":{"authenticated":true},"authz":{"permission":"order.create","space":"request.space_id"}}}`)
 	return generation.Input{
 		ConfigurationProvenance: &generation.ConfigurationProvenanceInput{
-			Mode:                        generation.ConfigurationModeEnvironment,
-			Environment:                 "production",
-			RootPath:                    "plystra.yaml",
-			RootDigest:                  "sha256:" + strings.Repeat("1", 64),
-			SelectedPath:                "plystra.production.yaml",
-			SelectedDigest:              "sha256:" + strings.Repeat("2", 64),
-			DependencyCompositionDigest: "sha256:" + strings.Repeat("3", 64),
+			Mode:           generation.ConfigurationModeEnvironment,
+			Environment:    "production",
+			RootPath:       "plystra.yaml",
+			RootDigest:     "sha256:" + strings.Repeat("1", 64),
+			SelectedPath:   "plystra.production.yaml",
+			SelectedDigest: "sha256:" + strings.Repeat("2", 64),
 		},
 		Plugins: []generation.PluginInput{
 			{

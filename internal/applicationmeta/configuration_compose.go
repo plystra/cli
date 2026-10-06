@@ -660,7 +660,7 @@ func renderConstructorConfigNode(node *renderedConstructorConfigNode, preserveRe
 	switch node.decision.kind {
 	case constructorConfigRemoval:
 		if preserveRemoval {
-			return removalYAMLNode(), true, nil
+			return configurationRemovalYAMLNode(), true, nil
 		}
 		return nil, false, nil
 	case constructorConfigValue:

@@ -179,7 +179,7 @@ func TestSelectionInputsExposeRawInvalidConfigWithoutRelaxingComposition(t *test
 	if err := inputs.ValidateCandidate(composition); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []any{inputs, inputs.RootSnapshot(), inputs.SelectedSnapshot(), inputs.ModuleMetadata(), inputs.RootManifest(), inputs.TemplateDependencies()} {
+	for _, value := range []any{inputs, inputs.RootSnapshot(), inputs.SelectedSnapshot(), inputs.ModuleMetadata(), inputs.RootManifest()} {
 		formatted := fmt.Sprintf("%v %+v %#v", value, value, value)
 		if strings.Contains(formatted, "PRIVATE_WRONG_TYPE") || strings.Contains(formatted, root) {
 			t.Fatal("selection input formatting disclosed private data")
@@ -201,7 +201,7 @@ func TestSelectionInputsExposeRawInvalidConfigWithoutRelaxingComposition(t *test
 
 func TestSelectionInputsStrictSyntaxAndGoValidation(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"syntax", "schema", "Go", "replacement-root-template"} {
+	for _, scenario := range []string{"syntax", "schema", "Go"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			root := writeResourceConsumerProject(t, "direct")
@@ -213,9 +213,6 @@ func TestSelectionInputsStrictSyntaxAndGoValidation(t *testing.T) {
 				writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: PRIVATE_INVALID_SHAPE\n")
 			case "Go":
 				writeFile(t, filepath.Join(root, "consumer/service.go"), "package consumer\n//plystra:implements app.resource/v1\nfunc New() bool { return false }\n")
-			case "replacement-root-template":
-				options.ConfigurationPath = "plystra.yaml"
-				writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/resource-template\n")
 			}
 			before := snapshotTree(t, root)
 			_, err := applicationresolve.DiscoverSelectionInputs(t.Context(), options)
@@ -255,65 +252,6 @@ func TestSelectionInputsRejectEmptyAndCancelledCalls(t *testing.T) {
 	}
 }
 
-func TestSelectionInputsIdentityCompositionStripsEveryConfigLayer(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []string{"default", "environment", "replacement"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
-			root := writeResourceConsumerProject(t, "direct")
-			writeResourceProvider(t, root)
-			options := selectionOptions(root)
-			inherited := "resources: {instances: {database.primary: {use: example.com/resource-consumer/provider.New, config: {value: [PRIVATE_TEMPLATE_WRONG_TYPE]}}}}\n"
-			writeFile(t, filepath.Join(root, "base/plystra.yaml"), inherited)
-			rootData := "template: example.com/resource-template\nresources: {instances: {database.primary: {config: {value: [PRIVATE_ROOT_WRONG_TYPE]}}}}\n"
-			selected := rootData
-			switch mode {
-			case "environment":
-				options.EnvironmentName = "test"
-				selected = "resources: {instances: {database.primary: {config: {value: [PRIVATE_OVERLAY_WRONG_TYPE]}}}}\n"
-				writeFile(t, filepath.Join(root, "plystra.test.yaml"), selected)
-			case "replacement":
-				options.ConfigurationPath = "selected.yaml"
-				selected = "resources: {instances: {database.primary: {config: {value: [PRIVATE_REPLACEMENT_WRONG_TYPE]}}}}\n"
-				writeFile(t, filepath.Join(root, "selected.yaml"), selected)
-			}
-			writeFile(t, filepath.Join(root, "plystra.yaml"), rootData)
-			before := snapshotTree(t, root)
-			inputs, err := applicationresolve.DiscoverSelectionInputs(t.Context(), options)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for range 2 {
-				if _, err := inputs.ComposeCandidate([]byte(selected)); !errors.Is(err, applicationmeta.ErrConfigurationValues) {
-					t.Fatalf("real Config accepted: %v", err)
-				}
-				composition, err := inputs.ComposeSelectionCandidate([]byte(selected))
-				if err != nil {
-					t.Fatal(err)
-				}
-				instances := composition.Manifest().ResourceInstances()
-				if len(instances) != 1 || instances[0].Provider().String() != "example.com/resource-consumer/provider.New" || instances[0].ProviderDeclarationSource().ModulePath() != "example.com/resource-template" || instances[0].HasConfiguration() {
-					t.Fatal("identity projection lost inherited provider/source or kept Config")
-				}
-				if len(composition.Manifest().Configurations()) != 0 {
-					t.Fatal("identity projection retained Implementation Config")
-				}
-			}
-			// A valid edited current value must not bypass invalid template Config.
-			candidate := "resources: {instances: {database.primary: {config: {value: fixed}}}}\n"
-			if mode == "default" {
-				candidate = "template: example.com/resource-template\n" + candidate
-			}
-			if _, err := inputs.ComposeCandidate([]byte(candidate)); !errors.Is(err, applicationmeta.ErrConfigurationValues) {
-				t.Fatalf("planning weakened lower-layer validation: %v", err)
-			}
-			if !reflect.DeepEqual(before, snapshotTree(t, root)) {
-				t.Fatal("planning projection mutated input")
-			}
-		})
-	}
-}
-
 func TestSelectionInputsPreservePartialOwnersAndMissingInterfaceSources(t *testing.T) {
 	t.Parallel()
 	root := writeResourceConsumerProject(t, "transitive")
@@ -338,7 +276,7 @@ func TestSelectionInputsPreservePartialOwnersAndMissingInterfaceSources(t *testi
 	}
 }
 
-func TestSelectionInputsReuseTemplateSelectorAndLegacyExposurePolicies(t *testing.T) {
+func TestSelectionInputsUseCurrentProjectLayersAndIgnoreDependencyConfiguration(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"default", "environment", "replacement", "ambient"} {
 		t.Run(mode, func(t *testing.T) {
@@ -349,27 +287,27 @@ func TestSelectionInputsReuseTemplateSelectorAndLegacyExposurePolicies(t *testin
 				writeModule(t, filepath.Join(parent, name), "example.com/"+name)
 			}
 			writeFile(t, filepath.Join(root, "go.mod"), "module example.com/app\ngo 1.26\nrequire (\n example.com/oldest v1.0.0\n example.com/nearest v1.0.0\n example.com/ordinary v1.0.0\n)\nreplace example.com/oldest => ../oldest\nreplace example.com/nearest => ../nearest\nreplace example.com/ordinary => ../ordinary\n")
-			writeFile(t, filepath.Join(parent, "oldest/plystra.yaml"), "interfaces: {require: [kernel.info/v1, kernel.health/v1]}\n")
-			writeFile(t, filepath.Join(parent, "nearest/plystra.yaml"), "template: example.com/oldest\ninterfaces: {require: {remove: [kernel.info/v1]}}\n")
-			writeFile(t, filepath.Join(parent, "ordinary/plystra.yaml"), "config: PRIVATE_INACTIVE_WRONG_TYPE\n")
-			writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/nearest\ninterfaces: {require: {remove: [kernel.health/v1]}}\n")
+			writeFile(t, filepath.Join(parent, "oldest/plystra.yaml"), "config: PRIVATE_INACTIVE_OLDEST\n")
+			writeFile(t, filepath.Join(parent, "nearest/plystra.yaml"), "config: PRIVATE_INACTIVE_NEAREST\n")
+			writeFile(t, filepath.Join(parent, "ordinary/plystra.yaml"), "config: PRIVATE_INACTIVE_ORDINARY\n")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [kernel.info/v1]}\n")
 			writePlugin(t, root, "legacy", "id: example.legacy\nprovides: [legacy.run/v1]\ngeneration:\n  api: v1\n  package: ./generation\n  activations:\n    - namespace: legacy\n      capability: legacy.run/v1\n")
 			writeFile(t, filepath.Join(root, "legacy/generation/generate.go"), "package generation\nfunc init() { panic(\"MUST_NOT_EXECUTE_LEGACY\") }\n")
 			options := selectionOptions(root)
 			selected := "http: {expose: {legacy.run/v1: {transport: connect}}}\n"
 			switch mode {
 			case "default":
-				writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/nearest\n"+selected)
+				writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [kernel.info/v1]}\n"+selected)
 			case "environment", "ambient":
-				writeFile(t, filepath.Join(root, "plystra.test.yaml"), selected)
+				writeFile(t, filepath.Join(root, "plystra.test.yaml"), "interfaces: {require: {add: [kernel.health/v1]}}\n"+selected)
 				if mode == "ambient" {
 					options.Environment = append(options.Environment, "PLYSTRA_ENV=test")
 				} else {
 					options.EnvironmentName = "test"
 				}
 			case "replacement":
-				writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/nearest\nconfig: PRIVATE_EXCLUDED_WRONG_TYPE\n")
-				writeFile(t, filepath.Join(root, "selected.yaml"), selected)
+				writeFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [kernel.info/v1]}\nconfig: PRIVATE_EXCLUDED_WRONG_TYPE\n")
+				writeFile(t, filepath.Join(root, "selected.yaml"), "interfaces: {require: [kernel.health/v1]}\n"+selected)
 				options.ConfigurationPath = "selected.yaml"
 			}
 			before := snapshotTree(t, parent)
@@ -377,15 +315,11 @@ func TestSelectionInputsReuseTemplateSelectorAndLegacyExposurePolicies(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			templates := inputs.TemplateDependencies()
-			if len(templates) != 2 || templates[0].ModulePath != "example.com/oldest" || templates[1].ModulePath != "example.com/nearest" {
-				t.Fatal("template ancestry not oldest-nearest or ordinary dependency became active")
-			}
-			wantLayers, wantLower := 1, 2
+			wantLayers := 1
 			if mode == "environment" || mode == "ambient" {
-				wantLayers, wantLower = 2, 3
+				wantLayers = 2
 			}
-			if len(inputs.CurrentLayers()) != wantLayers || len(inputs.LowerLayers()) != wantLower || len(inputs.ModuleMetadata()) != 4 {
+			if len(inputs.CurrentLayers()) != wantLayers || len(inputs.ModuleMetadata()) != 4 {
 				t.Fatal("captured layers or module read set incomplete")
 			}
 			composition, err := inputs.ComposeCandidate(inputs.SelectedSnapshot().Data())
@@ -397,15 +331,17 @@ func TestSelectionInputsReuseTemplateSelectorAndLegacyExposurePolicies(t *testin
 				t.Fatalf("legacy exposure was treated as an authored Interface: %v", err)
 			}
 			wantRoots := 1
-			if wantLayers == 2 {
-				wantRoots = 0
+			if mode == "environment" || mode == "ambient" {
+				wantRoots = 2
+			}
+			if mode == "replacement" {
+				wantRoots = 1
 			}
 			if len(composition.Manifest().InterfaceRequirements()) != wantRoots || len(result.Graph().Roots()) != 0 {
-				t.Fatalf("selected requirements lost layer removals or legacy exposure became a root")
+				t.Fatalf("current-project requirements or legacy exposure changed")
 			}
-			templates[0].ModulePath = "mutated"
-			if inputs.TemplateDependencies()[0].ModulePath != "example.com/oldest" || !reflect.DeepEqual(before, snapshotTree(t, parent)) {
-				t.Fatal("discovery exposed mutable layers or changed files")
+			if !reflect.DeepEqual(before, snapshotTree(t, parent)) {
+				t.Fatal("discovery changed authored files")
 			}
 		})
 	}

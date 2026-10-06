@@ -20,7 +20,6 @@ func TestGenerateIsDeterministicAcrossEffectiveGraphPermutations(t *testing.T) {
 
 	var expectedConfiguration []byte
 	var expectedGenerated []treeEntry
-	var expectedDependencyDigest string
 	var expectedApplicationDigest string
 	for index, order := range orders {
 		root := t.TempDir()
@@ -52,15 +51,15 @@ config:
 		goModPath := filepath.Join(appRoot, "go.mod")
 		goMod := string(readAbsoluteFile(t, goModPath)) + permutationModuleDirectives(order, dependencyRoots)
 		writeFile(t, goModPath, goMod)
-		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# stable current Project\ntemplate: example.com/platform/a\nhttp: {address: \":8080\"}\n")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# stable current Project\n{}\n")
 
 		result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start:       appRoot,
 			Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
 			Validate:    func(context.Context, string) error { return nil },
 		})
-		if err != nil || result.ConfigurationChanged() || !result.Report().Clean() {
-			t.Fatalf("Generate(permutation %d %v) = configuration changed %t, report %#v, %v", index, order, result.ConfigurationChanged(), result.Report().Changes(), err)
+		if err != nil || !result.Report().Clean() {
+			t.Fatalf("Generate(permutation %d %v) = report %#v, %v", index, order, result.Report().Changes(), err)
 		}
 		configuration := readFile(t, appRoot, "plystra.yaml")
 		generated := snapshotGenerated(t, appRoot)
@@ -68,28 +67,17 @@ config:
 		if err != nil {
 			t.Fatalf("DecodeManifestProvenance(permutation %d): %v", index, err)
 		}
-		dependencyDigest := provenance.DependencyBaseline().Digest()
 		applicationDigest := provenance.ApplicationModelDigest()
-		if dependencyDigest == "" || applicationDigest == "" {
-			t.Fatalf("permutation %d has empty provenance digests", index)
-		}
-		sources := baselineSources(provenance)
-		if !strings.Contains(sources, "example.com/platform/a@v1.0.0") {
-			t.Fatalf("permutation %d baseline omits template owner: %s", index, sources)
-		}
-		for _, inert := range []string{"example.com/platform/b@v1.0.0", "example.com/platform/c@v1.0.0"} {
-			if strings.Contains(sources, inert) {
-				t.Fatalf("permutation %d baseline includes inert dependency configuration %s: %s", index, inert, sources)
-			}
+		if applicationDigest == "" {
+			t.Fatalf("permutation %d has empty application model digest", index)
 		}
 		if strings.Contains(string(configuration), "ignored.environment/v1") {
-			t.Fatalf("permutation %d inherited a dependency environment overlay:\n%s", index, configuration)
+			t.Fatalf("permutation %d used a dependency environment overlay:\n%s", index, configuration)
 		}
 
 		if index == 0 {
 			expectedConfiguration = configuration
 			expectedGenerated = generated
-			expectedDependencyDigest = dependencyDigest
 			expectedApplicationDigest = applicationDigest
 			continue
 		}
@@ -99,8 +87,8 @@ config:
 		if !reflect.DeepEqual(generated, expectedGenerated) {
 			t.Fatalf("permutation %d changed generated tree:\nwant: %#v\ngot:  %#v", index, expectedGenerated, generated)
 		}
-		if dependencyDigest != expectedDependencyDigest || applicationDigest != expectedApplicationDigest {
-			t.Fatalf("permutation %d changed digests: dependency %s application %s; want %s %s", index, dependencyDigest, applicationDigest, expectedDependencyDigest, expectedApplicationDigest)
+		if applicationDigest != expectedApplicationDigest {
+			t.Fatalf("permutation %d changed application digest: %s; want %s", index, applicationDigest, expectedApplicationDigest)
 		}
 	}
 }
@@ -182,7 +170,6 @@ func TestGenerateProducesByteIdenticalOutputForEqualNormalizedInputs(t *testing.
 				identity := normalizedGenerationIdentity{
 					rootDigest:        provenance.RootDigest(),
 					selectedDigest:    provenance.SelectedDigest(),
-					dependencyDigest:  provenance.DependencyBaseline().Digest(),
 					applicationDigest: provenance.ApplicationModelDigest(),
 					interfaceDigest:   provenance.InterfaceProvenance().Digest(),
 					toolchainDigest:   provenance.TransportToolchain().Digest(),
@@ -202,8 +189,8 @@ func TestGenerateProducesByteIdenticalOutputForEqualNormalizedInputs(t *testing.
 				checkOptions.Check = true
 				checkOptions.Validate = nil
 				check, err := applicationgenerate.Generate(t.Context(), checkOptions)
-				if err != nil || !check.Checked() || check.ConfigurationChanged() || !check.Report().Clean() {
-					t.Fatalf("Generate --check(%s, variant %d) = checked %t configuration changed %t report %#v, %v", test.name, index, check.Checked(), check.ConfigurationChanged(), check.Report().Changes(), err)
+				if err != nil || !check.Checked() || !check.Report().Clean() {
+					t.Fatalf("Generate --check(%s, variant %d) = checked %t report %#v, %v", test.name, index, check.Checked(), check.Report().Changes(), err)
 				}
 				if afterCheck := snapshotTree(t, root); !reflect.DeepEqual(afterCheck, beforeCheck) {
 					t.Fatalf("Generate --check(%s, variant %d) modified the Project", test.name, index)
@@ -231,7 +218,6 @@ func TestGenerateProducesByteIdenticalOutputForEqualNormalizedInputs(t *testing.
 type normalizedGenerationIdentity struct {
 	rootDigest        string
 	selectedDigest    string
-	dependencyDigest  string
 	applicationDigest string
 	interfaceDigest   string
 	toolchainDigest   string
@@ -406,14 +392,6 @@ func permutationModuleDirectives(order []string, roots map[string]string) string
 	}
 	result.WriteString(")\n")
 	return result.String()
-}
-
-func baselineSources(provenance applicationgen.ManifestProvenance) string {
-	var sources []string
-	for _, record := range provenance.DependencyBaseline().Records() {
-		sources = append(sources, record.Sources...)
-	}
-	return strings.Join(sources, "\n")
 }
 
 func modulePermutations(values []string) [][]string {

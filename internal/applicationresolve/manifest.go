@@ -9,13 +9,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/generatedfiles"
-	"github.com/plystra/cli/internal/moduledependency"
 )
 
 const applicationManifestName = "plystra.yaml"
@@ -123,7 +121,7 @@ func (s ManifestSnapshot) Path() string { return s.path }
 func (s ManifestSnapshot) Data() []byte { return append([]byte(nil), s.data...) }
 
 func loadConfiguration(modulePath, moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
-	return loadConfigurationWithParser(modulePath, moduleRoot, relativePath, applicationmeta.ParseSource)
+	return loadConfigurationWithParser(modulePath, moduleRoot, relativePath, applicationmeta.ParseCompleteSource)
 }
 
 func loadProjectManifestSnapshot(modulePath, moduleRoot string) (ManifestSnapshot, error) {
@@ -148,14 +146,11 @@ func parseProjectManifestSnapshot(modulePath string, snapshot ManifestSnapshot, 
 	parse := applicationmeta.ParseSource
 	if metadataOnly {
 		parse = applicationmeta.ParseRootMetadataSource
+	} else {
+		parse = applicationmeta.ParseCompleteSource
 	}
 	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
-		var template *applicationmeta.TemplateMetadataError
-		if errors.As(err, &template) {
-			source := template.Source()
-			return applicationmeta.Manifest{}, configurationSourceError(modulePath, snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: %w", ErrManifest, ErrTemplate, err))
-		}
 		return applicationmeta.Manifest{}, manifestSourceError(
 			modulePath,
 			snapshot.path,
@@ -169,14 +164,6 @@ func parseProjectManifestSnapshot(modulePath string, snapshot ManifestSnapshot, 
 
 func loadEnvironmentOverlay(modulePath, moduleRoot, relativePath string) (ManifestSnapshot, applicationmeta.Manifest, error) {
 	return loadConfigurationWithParser(modulePath, moduleRoot, relativePath, applicationmeta.ParseOverlaySource)
-}
-
-func validateReplacementMetadata(modulePath string, manifest applicationmeta.Manifest) error {
-	if manifest.Template() == "" {
-		return nil
-	}
-	source := manifest.TemplateSource()
-	return configurationSourceError(modulePath, source.Path(), source.Line(), source.Column(), fmt.Errorf("%w: %w: template cannot be declared in a replacement document", ErrManifest, ErrTemplate))
 }
 
 func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, parse func(string, []byte) (applicationmeta.Manifest, error)) (ManifestSnapshot, applicationmeta.Manifest, error) {
@@ -207,11 +194,6 @@ func loadConfigurationWithParser(modulePath, moduleRoot, relativePath string, pa
 func parseConfigurationSnapshot(modulePath string, snapshot ManifestSnapshot, parse func(string, []byte) (applicationmeta.Manifest, error)) (applicationmeta.Manifest, error) {
 	manifest, err := parse(snapshot.path, snapshot.data)
 	if err != nil {
-		var template *applicationmeta.TemplateMetadataError
-		if errors.As(err, &template) {
-			source := template.Source()
-			return applicationmeta.Manifest{}, configurationSourceError(modulePath, snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: %w", ErrManifest, ErrTemplate, err))
-		}
 		return applicationmeta.Manifest{}, configurationSourceError(
 			modulePath,
 			snapshot.path,
@@ -221,89 +203,6 @@ func parseConfigurationSnapshot(modulePath string, snapshot ManifestSnapshot, pa
 		)
 	}
 	return manifest, nil
-}
-
-type dependencyManifestSnapshot struct {
-	modulePath string
-	version    string
-	template   string
-	identity   string
-	root       string
-	snapshot   ManifestSnapshot
-}
-
-func loadTemplateManifests(currentModule string, root applicationmeta.Manifest, dependencies moduledependency.Index) ([]dependencyManifestSnapshot, []applicationmeta.Dependency, error) {
-	var snapshots []dependencyManifestSnapshot
-	var manifests []applicationmeta.Dependency
-	seen := map[string]bool{currentModule: true}
-	chain := []string{currentModule}
-	var sources []applicationmeta.ConfigurationDeclarationSource
-	for owner := root; owner.Template() != ""; {
-		target := owner.Template()
-		chain = append(chain, target)
-		sources = append(sources, owner.TemplateSource())
-		if seen[target] {
-			return nil, nil, newTemplateError(ErrTemplateCycle, chain, sources)
-		}
-		seen[target] = true
-		dependency, exists := dependencies.ByPath(target)
-		if !exists {
-			return nil, nil, newTemplateError(ErrTemplateNotFound, chain, sources)
-		}
-		if !dependency.Project() {
-			return nil, nil, newTemplateError(ErrTemplateNotProject, chain, sources)
-		}
-		snapshot, err := ReadManifestSnapshot(dependency.Root())
-		if err != nil {
-			sourceError := manifestSourceError
-			if errors.Is(err, ErrConcurrentChange) {
-				sourceError = configurationSourceError
-			}
-			return nil, nil, sourceError(
-				dependency.Path(),
-				applicationManifestName,
-				0,
-				0,
-				fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err),
-			)
-		}
-		manifest, err := applicationmeta.ParseTemplateSource(snapshot.path, snapshot.data)
-		if err != nil {
-			var template *applicationmeta.TemplateMetadataError
-			if errors.As(err, &template) {
-				source := template.Source()
-				return nil, nil, configurationSourceError(dependency.Path(), snapshot.path, source.Line(), source.Column(), fmt.Errorf("%w: %w: template Project %s: %w", ErrManifest, ErrTemplate, dependencyIdentity(dependency), err))
-			}
-			return nil, nil, manifestSourceError(
-				dependency.Path(),
-				snapshot.path,
-				1,
-				1,
-				fmt.Errorf("%w: dependency Project %s: %w", ErrManifest, dependencyIdentity(dependency), err),
-			)
-		}
-		manifest, err = applicationmeta.WithProjectModule(manifest, dependency.Path())
-		if err != nil {
-			return nil, nil, err
-		}
-		snapshots = append(snapshots, dependencyManifestSnapshot{
-			modulePath: dependency.Path(),
-			version:    dependency.SelectedVersion(),
-			template:   manifest.Template(),
-			identity:   dependencyIdentity(dependency),
-			root:       dependency.Root(),
-			snapshot:   snapshot,
-		})
-		manifests = append(manifests, applicationmeta.Dependency{
-			ModulePath:    dependency.Path(),
-			ModuleVersion: dependency.SelectedVersion(),
-			Manifest:      manifest,
-		})
-		owner = manifest
-	}
-	slices.Reverse(snapshots)
-	slices.Reverse(manifests)
-	return snapshots, manifests, nil
 }
 
 func manifestSourceError(modulePath, sourcePath string, line, column int, cause error) error {
@@ -343,39 +242,6 @@ func newManifestSourceError(modulePath, sourcePath, sourceKind string, line, col
 		column:     column,
 		cause:      cause,
 	}
-}
-
-func recheckDependencyManifests(snapshots []dependencyManifestSnapshot) error {
-	for _, before := range snapshots {
-		after, err := ReadManifestSnapshot(before.root)
-		if err != nil {
-			return configurationSourceError(
-				before.modulePath,
-				before.snapshot.path,
-				0,
-				0,
-				fmt.Errorf("%w: dependency Project %s plystra.yaml cannot be rechecked", ErrConcurrentChange, before.identity),
-			)
-		}
-		if !sameManifestSnapshot(before.snapshot, after) {
-			return configurationSourceError(
-				before.modulePath,
-				before.snapshot.path,
-				0,
-				0,
-				fmt.Errorf("%w: dependency Project %s plystra.yaml changed before resolution completed", ErrConcurrentChange, before.identity),
-			)
-		}
-	}
-	return nil
-}
-
-func dependencyIdentity(dependency moduledependency.Module) string {
-	version := dependency.SelectedVersion()
-	if version == "" {
-		version = "workspace"
-	}
-	return dependency.Path() + "@" + version
 }
 
 // ReadManifestSnapshot safely reads the root plystra.yaml without following a

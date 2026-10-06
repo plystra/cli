@@ -76,3 +76,22 @@ func TestPublicInvalidAnonymousConfigurationTypeRedactsDefaults(t *testing.T) {
 		}
 	}
 }
+
+func writeCommandPointerConfigurationImplementation(t testing.TB, root string) {
+	t.Helper()
+	writeCommandFile(t, filepath.Join(root, "smtp", "implementation.go"), `package smtp
+
+import (
+	"context"
+	contract "example.com/acme/implementation-use/interfaces/email/send/v1"
+)
+
+type Config struct { Settings *struct { First string; Second string } }
+type Service struct{}
+
+//plystra:implements email.send/v1
+func New(Config) (*Service, error) { return &Service{}, nil }
+func (*Service) Send(context.Context, contract.Request) (contract.Response, error) { return contract.Response{}, nil }
+var _ contract.Interface = (*Service)(nil)
+`)
+}

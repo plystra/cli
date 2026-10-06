@@ -71,8 +71,6 @@ var (
 type Options struct {
 	ConstructorInventory      []implementationinventory.Implementation
 	ResourceInventory         []resourceproviderinventory.Provider
-	Template                  string
-	Templates                 []runtimebaseline.Template
 	ModulePath                string
 	JavaScriptPackage         string
 	KernelModuleVersion       string
@@ -122,7 +120,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (R
 		return Result{}, fmt.Errorf("%w: %w: final Alias map is absent or has an invalid digest", ErrRender, ErrResolution)
 	}
 	if !options.Composition.Valid() {
-		return Result{}, fmt.Errorf("%w: %w: dependency configuration composition is absent or invalid", ErrRender, ErrResolution)
+		return Result{}, fmt.Errorf("%w: %w: current-Project configuration composition is absent or invalid", ErrRender, ErrResolution)
 	}
 	if !options.InterfaceCompatibility.Valid() {
 		return Result{}, fmt.Errorf("%w: %w: authored Interface compatibility baseline is absent or invalid", ErrRender, ErrResolution)
@@ -418,8 +416,6 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (R
 		ResourceOrder:                 resourceOrder,
 		ResourceConfigurations:        options.ResourceConfigurations,
 		ResourceBindings:              resourceBindings,
-		Template:                      options.Template,
-		Templates:                     options.Templates,
 		ModulePath:                    options.ModulePath,
 		DefaultStartupTimeout:         applicationmeta.DefaultStartupTimeout,
 		ConfigurationSchemas:          runtimeConfigurationSchemas,
@@ -745,14 +741,13 @@ func selectedTransportProvenance(options Options, context generation.Context, mo
 		return transportprovenance.Provenance{}, errors.New("final generation context omits selected configuration identity")
 	}
 	provenance, err := transportprovenance.New(transportprovenance.Input{
-		Mode:                        selected.Mode(),
-		Environment:                 selected.Environment(),
-		RootPath:                    selected.RootPath(),
-		RootDigest:                  selected.RootDigest(),
-		SelectedPath:                selected.SelectedPath(),
-		SelectedDigest:              selected.SelectedDigest(),
-		DependencyCompositionDigest: selected.DependencyCompositionDigest(),
-		ApplicationModelDigest:      modelDigest,
+		Mode:                   selected.Mode(),
+		Environment:            selected.Environment(),
+		RootPath:               selected.RootPath(),
+		RootDigest:             selected.RootDigest(),
+		SelectedPath:           selected.SelectedPath(),
+		SelectedDigest:         selected.SelectedDigest(),
+		ApplicationModelDigest: modelDigest,
 	})
 	if err != nil {
 		return transportprovenance.Provenance{}, err
@@ -775,9 +770,6 @@ func selectedTransportProvenance(options Options, context generation.Context, mo
 	}
 	if provenance.SelectedDigest() != manifest.SelectedDigest() {
 		return transportprovenance.Provenance{}, errors.New("selected digest disagrees between the final generation context and generated manifest")
-	}
-	if provenance.DependencyCompositionDigest() != options.Composition.DependencyDigest() || provenance.DependencyCompositionDigest() != manifest.DependencyBaseline().Digest() {
-		return transportprovenance.Provenance{}, errors.New("dependency-composition digest disagrees among the final generation context, typed composition, and generated manifest")
 	}
 	if provenance.ApplicationModelDigest() != manifest.ApplicationModelDigest() {
 		return transportprovenance.Provenance{}, errors.New("application-model digest disagrees between transport generation and generated manifest")

@@ -90,9 +90,6 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 		`"capability_aliases":[]`,
 		`"configuration":{"version":8,"mode":"default"`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
-		`"dependency_baselines":[{"mode":"default","path":"plystra.yaml"`,
-		`"dependency_composition_digest":"sha256:`,
-		`"dependency_baseline":[]`,
 		`"dormant_implementation_selections":[]`,
 		`"dormant_implementation_selections_digest":"sha256:`,
 		`"dormant_constructor_configurations":[]`,
@@ -148,7 +145,7 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 		[]byte(`case "--env":`),
 		[]byte(`case "--config":`),
 		[]byte("runtimeRootRelativeConfigurationPath"),
-		[]byte("composeRuntimeTemplateDocument"),
+		[]byte("composeRuntimeDocument"),
 	} {
 		if !bytes.Contains(bootstrap, required) {
 			t.Fatalf("generated bootstrap omits default configuration selection %q:\n%s", required, bootstrap)
@@ -196,8 +193,8 @@ func TestGenerateChecksInstallsAndRunsApplicationWithZeroNonIntrinsicRoots(t *te
 		Check:       true,
 		Environment: environment,
 	})
-	if err != nil || !stable.Report().Clean() || stable.ConfigurationChanged() {
-		t.Fatalf("zero-root deterministic generation check = changes %#v, configuration changed %t, %v", stable.Report().Changes(), stable.ConfigurationChanged(), err)
+	if err != nil || !stable.Report().Clean() {
+		t.Fatalf("zero-root deterministic generation check = changes %#v, %v", stable.Report().Changes(), err)
 	}
 
 	writeFile(t, filepath.Join(root, "generated", "manifest.json"), string(changedTransportToolchainManifest(t, applicationManifest)))
@@ -446,9 +443,6 @@ func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing
 	if manifest.SelectedDigest() != resolved.ConfigurationSelection().Digest() || manifest.SelectedDigest() == baselineProvenance.SelectedDigest() {
 		t.Fatalf("dormant selected-document digest = %q, want %q distinct from %q", manifest.SelectedDigest(), resolved.ConfigurationSelection().Digest(), baselineProvenance.SelectedDigest())
 	}
-	if paths := manifest.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
-		t.Fatalf("dormant current-project provenance paths = %v, want only %s", paths, selectionPath)
-	}
 	selections := manifest.DormantImplementationSelections()
 	if len(selections) != 1 {
 		t.Fatalf("dormant implementation selections = %#v", selections)
@@ -495,9 +489,6 @@ func TestGenerateRecordsDormantSelectionOnlyInConfigurationProvenance(t *testing
 	}
 	if !bytes.Contains(manifestData, []byte(strconv.Quote(selectionPath))) || bytes.Equal(manifestData, baselineManifest) {
 		t.Fatalf("dormant selection intent did not enter generated configuration provenance:\n%s", manifestData)
-	}
-	if manifest.DependencyBaseline().Digest() != baselineProvenance.DependencyBaseline().Digest() {
-		t.Fatalf("dormant current-project selection changed dependency-composition provenance: %q != %q", manifest.DependencyBaseline().Digest(), baselineProvenance.DependencyBaseline().Digest())
 	}
 	if manifest.ApplicationModelDigest() != baselineProvenance.ApplicationModelDigest() {
 		t.Fatalf("dormant selection changed executable application-model digest: %q != %q", manifest.ApplicationModelDigest(), baselineProvenance.ApplicationModelDigest())
@@ -727,9 +718,6 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 			[]string{modulePath, modulePath},
 			[]string{"plystra.yaml", "plystra.production.yaml"})
 		configurationRoot := fmt.Sprintf("config[%q]", overlayConstructor)
-		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{configurationRoot, configurationRoot + `["endpoint"]`, configurationRoot + `["label"]`, selectionPath}) {
-			t.Fatalf("environment root-maintenance paths = %v", paths)
-		}
 		configuration := onlyDormantConstructorConfiguration(t, provenance, overlayConstructor)
 		endpoint := dormantConfigurationField(t, configuration, configurationRoot+`["endpoint"]`)
 		assertDormantConfigurationContributionOwners(t, endpoint, string(resolutionevidence.ConfigurationOwnerEnvironment), []string{
@@ -769,53 +757,9 @@ func TestGenerateRecordsDormantSelectionOwnershipAcrossConfigurationModes(t *tes
 			[]string{string(resolutionevidence.ConfigurationOwnerExplicit)},
 			[]string{modulePath},
 			[]string{"deploy/customer.yaml"})
-		configurationRoot := fmt.Sprintf("config[%q]", constructor)
-		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{configurationRoot, configurationRoot + `["endpoint"]`, selectionPath}) {
-			t.Fatalf("explicit current-project paths = %v", paths)
-		}
 		assertDormantConstructorConfigurationRecord(t, provenance, constructor, modulePath, "local", string(resolutionevidence.ConfigurationOwnerExplicit),
 			[]string{"", "endpoint"}, []string{"object", "string"},
 			[]string{modulePath, modulePath}, []string{"deploy/customer.yaml", "deploy/customer.yaml"})
-	})
-
-	t.Run("dependency composition", func(t *testing.T) {
-		const dependencyModule = "example.com/platform/dormant-selection"
-		root := t.TempDir()
-		dependencyRoot := filepath.Join(root, "platform")
-		applicationRoot := filepath.Join(root, "application")
-		writeApplicationModule(t, dependencyRoot, dependencyModule)
-		constructor := writeConstructorConfigurationOwner(t, dependencyRoot, dependencyModule, false)
-		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), fmt.Sprintf("interfaces: {use: {configuration.owner/v1: %s}}\nconfig: {%s: {endpoint: dependency.internal}}\n", constructor, constructor))
-		writeApplicationModule(t, applicationRoot, "example.com/acme/dormant-dependency")
-		goModPath := filepath.Join(applicationRoot, "go.mod")
-		goMod := string(readAbsoluteFile(t, goModPath)) + fmt.Sprintf("\nrequire %s v1.0.0\n\nreplace %s => %s\n", dependencyModule, dependencyModule, filepath.ToSlash(dependencyRoot))
-		writeFile(t, goModPath, goMod)
-		writeFile(t, filepath.Join(applicationRoot, "plystra.yaml"), fmt.Sprintf("template: %s\nconfig: {%s: {endpoint: application.internal}}\n", dependencyModule, constructor))
-
-		result, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-			Start: applicationRoot, Environment: environment, Validate: validate,
-		})
-		if err != nil || result.ConfigurationChanged() {
-			t.Fatalf("Generate dependency-composed dormant selection = changed %t, %v", result.ConfigurationChanged(), err)
-		}
-		provenance, err := applicationgen.DecodeManifestProvenance(readFile(t, applicationRoot, "generated/manifest.json"))
-		if err != nil {
-			t.Fatalf("DecodeManifestProvenance(dependency): %v", err)
-		}
-		assertDormantSelectionRecord(t, provenance, "configuration.owner/v1", constructor, dependencyModule, "v1.0.0", string(resolutionevidence.ConfigurationOwnerTemplate),
-			[]string{string(resolutionevidence.ConfigurationOwnerTemplate)},
-			[]string{dependencyModule},
-			[]string{"plystra.yaml"})
-		configurationRoot := fmt.Sprintf("config[%q]", constructor)
-		if paths := provenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{configurationRoot, configurationRoot + `["endpoint"]`}) {
-			t.Fatalf("dependency-selected dormant configuration current-project paths = %v", paths)
-		}
-		configuration := onlyDormantConstructorConfiguration(t, provenance, constructor)
-		endpoint := dormantConfigurationField(t, configuration, configurationRoot+`["endpoint"]`)
-		assertDormantConfigurationContributionOwners(t, endpoint, string(resolutionevidence.ConfigurationOwnerRoot), []string{
-			string(resolutionevidence.ConfigurationOwnerTemplate),
-			string(resolutionevidence.ConfigurationOwnerRoot),
-		})
 	})
 
 	t.Run("environment removal", func(t *testing.T) {
@@ -873,7 +817,6 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	constructor := writeConstructorConfigurationOwner(t, root, modulePath, true)
 	const secretTarget = "PLYSTRA_DORMANT_CONFIGURATION_SECRET"
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})
-	selectionPath := `interfaces.use["configuration.owner/v1"]`
 	writeFile(t, filepath.Join(root, "plystra.yaml"), fmt.Sprintf(`interfaces:
   use:
     configuration.owner/v1: %s
@@ -891,9 +834,6 @@ func TestGenerateKeepsDormantConstructorConfigurationOutOfRuntimeBootstrap(t *te
 	baselineProvenance, err := applicationgen.DecodeManifestProvenance(baselineManifest)
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance(dormant selection only): %v", err)
-	}
-	if paths := baselineProvenance.CurrentProjectPaths(); !reflect.DeepEqual(paths, []string{selectionPath}) {
-		t.Fatalf("dormant selection-only provenance paths = %v, want only %s", paths, selectionPath)
 	}
 	baselineArtifactEvidence := snapshotExecutablePublicArtifactEvidence(t, root)
 	baselineProxies := snapshotSubtree(t, root, "generated/go/proxies")
@@ -926,12 +866,12 @@ config:
 		Environment: environment,
 	})
 	wantStale := []string{generatedfiles.ManifestPath, generatedfiles.ApplicationManifestPath}
-	if err != nil || !drift.Checked() || drift.ConfigurationChanged() ||
+	if err != nil || !drift.Checked() ||
 		!reflect.DeepEqual(drift.Report().Stale(), wantStale) ||
 		len(drift.Report().Missing()) != 0 ||
 		len(drift.Report().Unexpected()) != 0 ||
 		len(drift.Report().ManuallyModified()) != 0 {
-		t.Fatalf("Check dormant-only configuration drift = checked %t configuration changed %t changes %#v, %v", drift.Checked(), drift.ConfigurationChanged(), drift.Report().Changes(), err)
+		t.Fatalf("Check dormant-only configuration drift = checked %t changes %#v, %v", drift.Checked(), drift.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, driftBefore) {
 		t.Fatalf("dormant-only check mutated application:\nbefore: %#v\nafter: %#v", driftBefore, after)
@@ -973,18 +913,6 @@ config:
 	ownershipManifest := readFile(t, root, generatedfiles.ManifestPath)
 	if bytes.Equal(manifestJSON, baselineManifest) || bytes.Equal(ownershipManifest, baselineOwnershipManifest) {
 		t.Fatalf("dormant constructor configuration manifest bytes changed = application %t, ownership %t; want both true", !bytes.Equal(manifestJSON, baselineManifest), !bytes.Equal(ownershipManifest, baselineOwnershipManifest))
-	}
-	wantPaths := []string{
-		`config["` + constructor + `"]`,
-		`config["` + constructor + `"]["endpoint"]`,
-		`config["` + constructor + `"]["password"]`,
-		selectionPath,
-	}
-	if paths := manifest.CurrentProjectPaths(); !reflect.DeepEqual(paths, wantPaths) {
-		t.Fatalf("dormant constructor configuration provenance paths = %v, want %v", paths, wantPaths)
-	}
-	if manifest.DependencyBaseline().Digest() != baselineProvenance.DependencyBaseline().Digest() {
-		t.Fatalf("dormant constructor configuration changed dependency-composition provenance: %q != %q", manifest.DependencyBaseline().Digest(), baselineProvenance.DependencyBaseline().Digest())
 	}
 	if manifest.ApplicationModelDigest() != baselineProvenance.ApplicationModelDigest() {
 		t.Fatalf("dormant-only configuration changed application_model_digest: %q != %q", manifest.ApplicationModelDigest(), baselineProvenance.ApplicationModelDigest())
@@ -1185,8 +1113,8 @@ config:
 		Check:       true,
 		Environment: environment,
 	})
-	if err != nil || !stable.Checked() || !stable.Report().Clean() || stable.ConfigurationChanged() {
-		t.Fatalf("activated deterministic generation check = changes %#v, configuration changed %t, %v", stable.Report().Changes(), stable.ConfigurationChanged(), err)
+	if err != nil || !stable.Checked() || !stable.Report().Clean() {
+		t.Fatalf("activated deterministic generation check = changes %#v, %v", stable.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, stableBefore) {
 		t.Fatalf("activated deterministic check mutated Project:\nbefore: %#v\nafter: %#v", stableBefore, after)
@@ -1249,8 +1177,8 @@ config:
 		Check:       true,
 		Environment: environment,
 	})
-	if err != nil || !deactivatedStable.Checked() || !deactivatedStable.Report().Clean() || deactivatedStable.ConfigurationChanged() {
-		t.Fatalf("deactivated deterministic generation check = changes %#v, configuration changed %t, %v", deactivatedStable.Report().Changes(), deactivatedStable.ConfigurationChanged(), err)
+	if err != nil || !deactivatedStable.Checked() || !deactivatedStable.Report().Clean() {
+		t.Fatalf("deactivated deterministic generation check = changes %#v, %v", deactivatedStable.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, root); !reflect.DeepEqual(after, deactivatedStableBefore) {
 		t.Fatalf("deactivated deterministic check mutated Project:\nbefore: %#v\nafter: %#v", deactivatedStableBefore, after)
@@ -2254,8 +2182,8 @@ func TestGenerateIgnoresInertDependencyConfigurationChanges(t *testing.T) {
 		Environment: environment,
 		Validate:    validate,
 	})
-	if err != nil || initial.ConfigurationChanged() || !initial.Report().Clean() {
-		t.Fatalf("initial Generate = changed %t, report %#v, %v", initial.ConfigurationChanged(), initial.Report().Changes(), err)
+	if err != nil || !initial.Report().Clean() {
+		t.Fatalf("initial Generate = report %#v, %v", initial.Report().Changes(), err)
 	}
 	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootConfiguration) || bytes.Contains(current, []byte("kernel.health/v1")) {
 		t.Fatalf("initial generation rewrote current-project configuration:\n%s", current)
@@ -2268,8 +2196,8 @@ func TestGenerateIgnoresInertDependencyConfigurationChanges(t *testing.T) {
 		Check:       true,
 		Environment: environment,
 	})
-	if err != nil || !checked.Checked() || checked.ConfigurationChanged() || !checked.Report().Clean() {
-		t.Fatalf("inert dependency check = checked %t, configuration changed %t, report %#v, %v", checked.Checked(), checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	if err != nil || !checked.Checked() || !checked.Report().Clean() {
+		t.Fatalf("inert dependency check = checked %t, report %#v, %v", checked.Checked(), checked.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
 		t.Fatalf("inert dependency check changed the application:\nbefore: %#v\nafter:  %#v", before, after)
@@ -2280,8 +2208,8 @@ func TestGenerateIgnoresInertDependencyConfigurationChanges(t *testing.T) {
 		Environment: environment,
 		Validate:    validate,
 	})
-	if err != nil || regenerated.ConfigurationChanged() || !regenerated.Report().Clean() {
-		t.Fatalf("inert dependency regeneration = changed %t, report %#v, %v", regenerated.ConfigurationChanged(), regenerated.Report().Changes(), err)
+	if err != nil || !regenerated.Report().Clean() {
+		t.Fatalf("inert dependency regeneration = report %#v, %v", regenerated.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
 		t.Fatalf("inert dependency regeneration changed the application:\nbefore: %#v\nafter:  %#v", before, after)
@@ -2308,8 +2236,8 @@ func TestGenerateIgnoresDependencyExposureChanges(t *testing.T) {
 		Environment: environment,
 		Validate:    validate,
 	})
-	if err != nil || initial.ConfigurationChanged() || !initial.Report().Clean() {
-		t.Fatalf("initial Generate = changed %t, report %#v, %v", initial.ConfigurationChanged(), initial.Report().Changes(), err)
+	if err != nil || !initial.Report().Clean() {
+		t.Fatalf("initial Generate = report %#v, %v", initial.Report().Changes(), err)
 	}
 	before := snapshotTree(t, appRoot)
 	manifest := readFile(t, appRoot, "generated/manifest.json")
@@ -2325,8 +2253,8 @@ func TestGenerateIgnoresDependencyExposureChanges(t *testing.T) {
 		Check:       true,
 		Environment: environment,
 	})
-	if err != nil || !checked.Checked() || checked.ConfigurationChanged() || !checked.Report().Clean() {
-		t.Fatalf("exposure-only dependency check = checked %t, changed %t, report %#v, %v", checked.Checked(), checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	if err != nil || !checked.Checked() || !checked.Report().Clean() {
+		t.Fatalf("exposure-only dependency check = checked %t, report %#v, %v", checked.Checked(), checked.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
 		t.Fatalf("dependency exposure change altered consumer output:\nbefore: %#v\nafter:  %#v", before, after)
@@ -2337,8 +2265,8 @@ func TestGenerateIgnoresDependencyExposureChanges(t *testing.T) {
 		Environment: environment,
 		Validate:    validate,
 	})
-	if err != nil || regenerated.ConfigurationChanged() || !regenerated.Report().Clean() {
-		t.Fatalf("exposure-only dependency regeneration = changed %t, report %#v, %v", regenerated.ConfigurationChanged(), regenerated.Report().Changes(), err)
+	if err != nil || !regenerated.Report().Clean() {
+		t.Fatalf("exposure-only dependency regeneration = report %#v, %v", regenerated.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
 		t.Fatalf("dependency exposure regeneration altered consumer output:\nbefore: %#v\nafter:  %#v", before, after)
@@ -2365,8 +2293,8 @@ func TestGenerateKeepsDefaultAndFullReplacementDocumentsIndependentOfInertDepend
 	validate := func(_ context.Context, _ string) error { return nil }
 
 	defaultResult, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: appRoot, Environment: environment, Validate: validate})
-	if err != nil || defaultResult.ConfigurationPath() != "plystra.yaml" || defaultResult.ConfigurationChanged() {
-		t.Fatalf("default Generate = path %q changed %t, error %v", defaultResult.ConfigurationPath(), defaultResult.ConfigurationChanged(), err)
+	if err != nil || defaultResult.ConfigurationPath() != "plystra.yaml" {
+		t.Fatalf("default Generate = path %q, error %v", defaultResult.ConfigurationPath(), err)
 	}
 	explicitResult, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start:             filepath.Join(appRoot, "deploy"),
@@ -2374,8 +2302,8 @@ func TestGenerateKeepsDefaultAndFullReplacementDocumentsIndependentOfInertDepend
 		Environment:       environment,
 		Validate:          validate,
 	})
-	if err != nil || explicitResult.ConfigurationPath() != "deploy/customer.yaml" || explicitResult.ConfigurationChanged() {
-		t.Fatalf("explicit Generate = path %q changed %t, error %v", explicitResult.ConfigurationPath(), explicitResult.ConfigurationChanged(), err)
+	if err != nil || explicitResult.ConfigurationPath() != "deploy/customer.yaml" {
+		t.Fatalf("explicit Generate = path %q, error %v", explicitResult.ConfigurationPath(), err)
 	}
 	if current := readFile(t, appRoot, "plystra.yaml"); !bytes.Equal(current, rootConfiguration) {
 		t.Fatalf("explicit generation rewrote root configuration:\n%s", current)
@@ -2387,11 +2315,8 @@ func TestGenerateKeepsDefaultAndFullReplacementDocumentsIndependentOfInertDepend
 	if err != nil {
 		t.Fatalf("DecodeManifestProvenance: %v", err)
 	}
-	if _, exists := provenance.BaselineForSelection(applicationgen.ConfigurationModeDefault, "plystra.yaml"); !exists {
-		t.Fatal("generated manifest lost default composition baseline")
-	}
-	if _, exists := provenance.BaselineForSelection(applicationgen.ConfigurationModeExplicit, "deploy/customer.yaml"); !exists {
-		t.Fatal("generated manifest lost explicit composition baseline")
+	if provenance.Mode() != applicationgen.ConfigurationModeExplicit || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "deploy/customer.yaml" {
+		t.Fatalf("generated manifest lost explicit selection identity: mode %q root %q selected %q", provenance.Mode(), provenance.RootPath(), provenance.SelectedPath())
 	}
 
 	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "{}\n")
@@ -2402,8 +2327,8 @@ func TestGenerateKeepsDefaultAndFullReplacementDocumentsIndependentOfInertDepend
 		ConfigurationPath: "deploy/customer.yaml",
 		Environment:       environment,
 	})
-	if err != nil || !checked.Checked() || checked.ConfigurationChanged() || !checked.Report().Clean() {
-		t.Fatalf("explicit inert-dependency check = changed %t report %#v, error %v", checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	if err != nil || !checked.Checked() || !checked.Report().Clean() {
+		t.Fatalf("explicit inert-dependency check = report %#v, error %v", checked.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeCheck) {
 		t.Fatal("explicit generate --check mutated the Project")
@@ -2418,8 +2343,8 @@ func TestGenerateKeepsDefaultAndFullReplacementDocumentsIndependentOfInertDepend
 		Environment:       environment,
 		Validate:          validate,
 	})
-	if err != nil || updated.ConfigurationChanged() || !updated.Report().Clean() {
-		t.Fatalf("explicit current-project update = changed %t report %#v, error %v", updated.ConfigurationChanged(), updated.Report().Changes(), err)
+	if err != nil || !updated.Report().Clean() {
+		t.Fatalf("explicit current-project update = report %#v, error %v", updated.Report().Changes(), err)
 	}
 	if current := readAbsoluteFile(t, selectedPath); !bytes.Equal(current, selectedConfiguration) {
 		t.Fatalf("explicit generation rewrote selected current-project intent:\n%s", current)
@@ -2436,8 +2361,8 @@ func TestGenerateKeepsDefaultAndFullReplacementDocumentsIndependentOfInertDepend
 		ConfigurationPath: "deploy/customer.yaml",
 		Environment:       environment,
 	})
-	if err != nil || !stable.Checked() || stable.ConfigurationChanged() || !stable.Report().Clean() {
-		t.Fatalf("stable explicit check = changed %t report %#v, error %v", stable.ConfigurationChanged(), stable.Report().Changes(), err)
+	if err != nil || !stable.Checked() || !stable.Report().Clean() {
+		t.Fatalf("stable explicit check = report %#v, error %v", stable.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, stableBefore) {
 		t.Fatal("inert dependency change altered the selected Project")
@@ -3023,8 +2948,8 @@ func TestGenerateKeepsDependencyConfigurationInertAndTracksSelectedEnvironmentOv
 		Environment:     environment,
 		Validate:        validate,
 	})
-	if err != nil || generated.ConfigurationChanged() || generated.ConfigurationPath() != "plystra.production.yaml" || generated.ConfigurationMaintenancePath() != "plystra.yaml" || !generated.Report().Clean() {
-		t.Fatalf("Generate environment = selection %q maintenance %q changed %t report %#v, %v", generated.ConfigurationPath(), generated.ConfigurationMaintenancePath(), generated.ConfigurationChanged(), generated.Report().Changes(), err)
+	if err != nil || generated.ConfigurationPath() != "plystra.production.yaml" || !generated.Report().Clean() {
+		t.Fatalf("Generate environment = selection %q report %#v, %v", generated.ConfigurationPath(), generated.Report().Changes(), err)
 	}
 	if current := readAbsoluteFile(t, overlayPath); !bytes.Equal(current, overlayData) {
 		t.Fatalf("environment generation rewrote sparse overlay:\n%s", current)
@@ -3039,10 +2964,8 @@ func TestGenerateKeepsDependencyConfigurationInertAndTracksSelectedEnvironmentOv
 	if provenance.Mode() != applicationgen.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.production.yaml" {
 		t.Fatalf("environment provenance = mode %q environment %q root %q selected %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.SelectedPath())
 	}
-	environmentBaseline, environmentExists := provenance.BaselineForSelection(applicationgen.ConfigurationModeEnvironment, "plystra.production.yaml")
-	defaultBaseline, defaultExists := provenance.BaselineForSelection(applicationgen.ConfigurationModeDefault, "plystra.yaml")
-	if !environmentExists || !defaultExists || environmentBaseline.Digest() != defaultBaseline.Digest() {
-		t.Fatalf("environment baseline = %q/%t default %q/%t", environmentBaseline.Digest(), environmentExists, defaultBaseline.Digest(), defaultExists)
+	if provenance.Mode() != applicationgen.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.production.yaml" {
+		t.Fatalf("environment manifest lost selection identity: mode %q environment %q root %q selected %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.SelectedPath())
 	}
 
 	beforeCheck := snapshotTree(t, appRoot)
@@ -3052,8 +2975,8 @@ func TestGenerateKeepsDependencyConfigurationInertAndTracksSelectedEnvironmentOv
 		EnvironmentName: "production",
 		Environment:     environment,
 	})
-	if err != nil || checked.ConfigurationChanged() || !checked.Report().Clean() {
-		t.Fatalf("clean environment check = changed %t report %#v, %v", checked.ConfigurationChanged(), checked.Report().Changes(), err)
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("clean environment check = report %#v, %v", checked.Report().Changes(), err)
 	}
 	if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, beforeCheck) {
 		t.Fatal("environment generate --check mutated the Project")
@@ -3809,7 +3732,6 @@ func assertDormantSelectionRecord(
 		t.Fatalf("dormant selection contributions = %#v, expectations = %v/%v/%v", contributions, contributionOwners, sourceModules, sourcePaths)
 	}
 	precedence := map[string]int{
-		string(resolutionevidence.ConfigurationOwnerTemplate):    1,
 		string(resolutionevidence.ConfigurationOwnerRoot):        2,
 		string(resolutionevidence.ConfigurationOwnerExplicit):    2,
 		string(resolutionevidence.ConfigurationOwnerEnvironment): 3,

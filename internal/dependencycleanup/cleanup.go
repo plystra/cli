@@ -49,7 +49,7 @@ func Commit(root string, plan Result, operation func(string) error) error {
 }
 
 // Plan discovers the changed application and removes only Resource binding
-// leaves whose consumer no longer declares that exact parameter. Inherited
+// leaves whose consumer no longer declares that exact parameter. Lower-layer
 // leaves become sparse tombstones; local leaves are removed. The caller owns
 // the surrounding filesystem transaction.
 func Plan(ctx context.Context, options Options) (Result, error) {

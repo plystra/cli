@@ -669,7 +669,7 @@ func TestRunGenerateReportsUnsupportedPointerProjectionSourceWithoutMutation(t *
 	}
 }
 
-func TestRunGenerateUsesInheritedPointerExposureSourceForRecovery(t *testing.T) {
+func TestRunGenerateUsesRootPointerExposureSourceForRecovery(t *testing.T) {
 	for _, test := range []struct {
 		name        string
 		arguments   []string
@@ -1158,7 +1158,7 @@ replace github.com/plystra/kernel => %s
 	}
 }
 
-func TestRunGeneratePreservesCurrentProjectInterfaceEditAcrossDependencyBaselineChange(t *testing.T) {
+func TestRunGeneratePreservesCurrentProjectInterfaceEditAcrossDependencyConfigurationChange(t *testing.T) {
 	parent := t.TempDir()
 	applicationRoot := filepath.Join(parent, "application")
 	dependencyRoot := filepath.Join(parent, "platform")
@@ -1264,7 +1264,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 }
 `)
 	initialConfiguration := `# shared application configuration
-template: example.com/platform
+{}
 `
 	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), initialConfiguration)
 	environment := commandGoEnvironment()
@@ -1274,12 +1274,12 @@ template: example.com/platform
 		t.Fatalf("initial generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if got := string(readCommandFile(t, applicationRoot, "plystra.yaml")); got != initialConfiguration {
-		t.Fatalf("initial generate materialized template values into selected configuration:\n%s", got)
+		t.Fatalf("initial generate rewrote selected configuration:\n%s", got)
 	}
 	locallyEdited := `# shared application configuration
 # explicit local selection
-template: example.com/platform
 interfaces:
+  require: [email.send/v1]
   use:
     email.send/v1: example.com/acme/maintenance/local.New
 `
@@ -1297,13 +1297,14 @@ interfaces:
 	}
 	maintained := string(readCommandFile(t, applicationRoot, "plystra.yaml"))
 	if maintained != locallyEdited {
-		t.Fatalf("dependency export update rewrote selected configuration:\n%s", maintained)
+		t.Fatalf("dependency configuration update rewrote selected configuration:\n%s", maintained)
 	}
 	generatedAssembly := readCommandFile(t, applicationRoot, "generated/go/assembly/interfaces_gen.go")
-	for _, selected := range [][]byte{[]byte("example.com/platform/audit.New"), []byte("example.com/acme/maintenance/local.New")} {
-		if !bytes.Contains(generatedAssembly, selected) {
-			t.Fatalf("generated assembly omits selected constructor %q:\n%s", selected, generatedAssembly)
-		}
+	if !bytes.Contains(generatedAssembly, []byte("example.com/acme/maintenance/local.New")) {
+		t.Fatalf("generated assembly omits selected constructor:\n%s", generatedAssembly)
+	}
+	if bytes.Contains(generatedAssembly, []byte("example.com/platform/audit.New")) {
+		t.Fatalf("dependency configuration activated an unrequired constructor:\n%s", generatedAssembly)
 	}
 	beforeCheck := commandTree(t, applicationRoot)
 	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--check"}, applicationRoot, environment)
@@ -1682,7 +1683,7 @@ interfaces:
 			t.Fatalf("remove runtime configuration path alias: %v", err)
 		}
 	}
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: [PRIVATE_INVALID_YAML\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "unknown: [PRIVATE_INVALID_YAML\n")
 	invalidRoot := exec.CommandContext(t.Context(), "go", "run", "./generated/go/application", "--smoke", "--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--config", "deploy/customer.yaml")
 	invalidRoot.Dir, invalidRoot.Env = applicationRoot, environment
 	if output, err := invalidRoot.CombinedOutput(); err == nil || !bytes.Contains(output, []byte("decode plystra.yaml YAML")) || bytes.Contains(output, []byte("PRIVATE_INVALID_YAML")) {
@@ -2202,7 +2203,6 @@ func assertCommandBootstrapExcludesSelectorOnlyProvenance(t testing.TB, root str
 	for _, forbidden := range []string{
 		manifest.RootDigest(),
 		manifest.SelectedDigest(),
-		manifest.DependencyBaseline().Digest(),
 		"compiledConfigurationSelectionProvenanceJSON",
 		"compiledConfigurationSelectionProvenanceDigest",
 	} {

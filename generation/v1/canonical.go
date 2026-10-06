@@ -139,13 +139,12 @@ type canonicalContext struct {
 }
 
 type canonicalConfigurationProvenance struct {
-	Mode                        ConfigurationMode `json:"mode"`
-	Environment                 string            `json:"environment,omitempty"`
-	RootPath                    string            `json:"root_path"`
-	RootDigest                  string            `json:"root_digest"`
-	SelectedPath                string            `json:"selected_path"`
-	SelectedDigest              string            `json:"selected_digest"`
-	DependencyCompositionDigest string            `json:"dependency_composition_digest"`
+	Mode           ConfigurationMode `json:"mode"`
+	Environment    string            `json:"environment,omitempty"`
+	RootPath       string            `json:"root_path"`
+	RootDigest     string            `json:"root_digest"`
+	SelectedPath   string            `json:"selected_path"`
+	SelectedDigest string            `json:"selected_digest"`
 }
 
 type canonicalPlugin struct {
@@ -199,13 +198,12 @@ func encodeContext(provenance *ConfigurationProvenanceView, plugins []PluginView
 	}
 	if provenance != nil {
 		canonical.ConfigurationProvenance = &canonicalConfigurationProvenance{
-			Mode:                        provenance.mode,
-			Environment:                 provenance.environment,
-			RootPath:                    provenance.rootPath,
-			RootDigest:                  provenance.rootDigest,
-			SelectedPath:                provenance.selectedPath,
-			SelectedDigest:              provenance.selectedDigest,
-			DependencyCompositionDigest: provenance.dependencyCompositionDigest,
+			Mode:           provenance.mode,
+			Environment:    provenance.environment,
+			RootPath:       provenance.rootPath,
+			RootDigest:     provenance.rootDigest,
+			SelectedPath:   provenance.selectedPath,
+			SelectedDigest: provenance.selectedDigest,
 		}
 	}
 	for index, plugin := range plugins {

@@ -284,12 +284,11 @@ func syntheticInspectEvidence(t testing.TB, selection, assembly, transports bool
 	contextInput := generation.Input{Capabilities: capabilities}
 	if selection {
 		contextInput.ConfigurationProvenance = &generation.ConfigurationProvenanceInput{
-			Mode:                        generation.ConfigurationModeDefault,
-			RootPath:                    "plystra.yaml",
-			RootDigest:                  inspectDigest("a"),
-			SelectedPath:                "plystra.yaml",
-			SelectedDigest:              inspectDigest("a"),
-			DependencyCompositionDigest: inspectDigest("b"),
+			Mode:           generation.ConfigurationModeDefault,
+			RootPath:       "plystra.yaml",
+			RootDigest:     inspectDigest("a"),
+			SelectedPath:   "plystra.yaml",
+			SelectedDigest: inspectDigest("a"),
 		}
 	}
 	context, err := generation.NewContext(contextInput)

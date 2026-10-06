@@ -92,7 +92,7 @@ func Compose(s Schema, lower, upper *yaml.Node) (*yaml.Node, error) {
 	return ComposeLayers(s, lower, upper)
 }
 
-// ComposeLayers validates and composes partial layers from oldest to nearest.
+// ComposeLayers validates and composes partial layers from lower to higher precedence.
 // Removals remain intent until every layer has been applied. Normalize alone
 // supplies defaults and checks requiredness after this operation.
 func ComposeLayers(s Schema, layers ...*yaml.Node) (*yaml.Node, error) {

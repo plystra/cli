@@ -3,7 +3,6 @@ package applicationmeta_test
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,7 +29,10 @@ func TestConstructorConfigurationNullRequiresNullableCompiledType(t *testing.T) 
 			lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
 				constructorConfigurationSymbol: composeSchema(t, "Field "+test.typeName),
 			})
-			removed := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {field: {$remove: true}}}\n")
+			removed, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("config: {"+constructorConfigurationSymbol+": {field: {$remove: true}}}\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
 			removedDecisions, err := applicationmeta.ConfigurationDecisions(removed, lookup)
 			if err != nil || len(removedDecisions) != 2 || !removedDecisions[1].Removed() {
 				t.Fatalf("declared field rejected removal: %v, %v", removedDecisions, err)
@@ -68,17 +70,13 @@ func TestConstructorConfigurationNullRequiresNullableCompiledType(t *testing.T) 
 func TestConstructorConfigurationSeparatesNestedRemovalFromLiteralNil(t *testing.T) {
 	t.Parallel()
 	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-		constructorConfigurationSymbol: composeSchema(t, `
-		Text string
-		Settings struct { Keep string; Remove string }
-		Pointer *string
-		Items []string
-		Labels map[string]string
-		Token configuration.Secret
-		`),
+		constructorConfigurationSymbol: composeSchema(t, "Text string\nSettings struct { Keep string; Remove string }\nPointer *string\nItems []string\nLabels map[string]string\nToken configuration.Secret\n"),
 	})
 	lower := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {text: lower, settings: {keep: retained, remove: lower}, pointer: lower, items: [lower], labels: {lower: value}, token: {env: PRIVATE_TOKEN}}}\n")
-	upper := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {text: {$remove: true}, settings: {remove: {$remove: true}}, pointer: null, items: null, labels: null, token: {$remove: true}}}\n")
+	upper, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("config: {"+constructorConfigurationSymbol+": {text: {$remove: true}, settings: {remove: {$remove: true}}, pointer: null, items: null, labels: null, token: {$remove: true}}}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	selected, err := applicationmeta.ApplyOverlay(lower, upper, lookup)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +85,7 @@ func TestConstructorConfigurationSeparatesNestedRemovalFromLiteralNil(t *testing
 	if bytes.Count(selectedConfig.YAML(), []byte("$remove: true")) != 3 {
 		t.Fatalf("overlay did not preserve nested tombstones: %s", selectedConfig.YAML())
 	}
-	composed, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/platform", Manifest: lower}}, selected, lookup)
+	composed, err := applicationmeta.Compose(nil, selected, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +110,7 @@ func TestConstructorAtomicValuesRejectReservedRemovalMappings(t *testing.T) {
 		{"struct { Name string }", "{$remove: false}"},
 		{"*string", "{$remove: null}"},
 		{"[]string", "{$remove: 1}"},
-		{"map[string]bool", `{$remove: "true"}`},
+		{"map[string]bool", "{$remove: \"true\"}"},
 		{"map[string]string", "{$remove: private-value}"},
 		{"*struct { Name string }", "{name: {$remove: true}}"},
 		{"[]map[string]bool", "[{$remove: true}]"},
@@ -129,56 +127,5 @@ func TestConstructorAtomicValuesRejectReservedRemovalMappings(t *testing.T) {
 				t.Fatalf("invalid nested marker accepted or exposed: %v", err)
 			}
 		})
-	}
-}
-
-func TestConstructorAtomicValuesPreserveNestedNilAndEmptyCollections(t *testing.T) {
-	t.Parallel()
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-		constructorConfigurationSymbol: composeSchema(t, `
-		Pointer *struct { Items []string; Labels map[string]string; Next *string }
-		Items []map[string]string
-		Labels map[string][]string
-		Literal map[string]bool
-		`),
-	})
-	current := composeManifest(t, "config: {"+constructorConfigurationSymbol+": {pointer: {items: null, labels: {}, next: null}, items: [null, {}], labels: {nil: null, empty: []}, literal: {$remove: true, keep: false}}}\n")
-	composed, err := applicationmeta.Compose(nil, current, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configured, _ := composed.Manifest().Configuration(mustConstructorSymbol(t, constructorConfigurationSymbol))
-	var got map[string]any
-	if err := yaml.Unmarshal(configured.YAML(), &got); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{
-		"pointer": map[string]any{"items": nil, "labels": map[string]any{}, "next": nil},
-		"items":   []any{nil, map[string]any{}},
-		"labels":  map[string]any{"nil": nil, "empty": []any{}},
-		"literal": map[string]any{"$remove": true, "keep": false},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("atomic typed values = %#v, want %#v", got, want)
-	}
-}
-
-func TestNestedConstructorTombstonesRemainAuthoredAcrossDependencyChanges(t *testing.T) {
-	t.Parallel()
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-		constructorConfigurationSymbol: composeSchema(t, "Settings struct { Removed string }; Optional *string"),
-	})
-	data := []byte("config: {" + constructorConfigurationSymbol + ": {settings: {removed: {$remove: true}}, optional: null}}\n")
-	current := composeManifest(t, string(data))
-	before, err := applicationmeta.Compose(nil, current, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, value := range []string{"first", "changed"} {
-		dependencies := []applicationmeta.Dependency{{ModulePath: "example.com/platform", Manifest: composeManifest(t, fmt.Sprintf("config: {%s: {settings: {removed: %s}, optional: %s}}\n", constructorConfigurationSymbol, value, value))}}
-		maintained, err := applicationmeta.MaintainDependencyConfiguration(data, before.DependencyBaseline(), nil, dependencies, lookup)
-		if err != nil || maintained.Changed() || !bytes.Equal(maintained.Data(), data) {
-			t.Fatalf("maintenance changed nested exclusion or nil: %v\n%s", err, maintained.Data())
-		}
 	}
 }

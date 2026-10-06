@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -241,30 +240,34 @@ func TestResourceSelectionRepairsInvalidStartingGraphAndRequiredFields(t *testin
 	}
 }
 
-func TestResourceSelectionOverridesTemplateWithoutEditingOrCopyingIt(t *testing.T) {
+func TestResourceSelectionPreservesSelectedLayerAndSparseOverlay(t *testing.T) {
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			root := writeResourceSelectionProject(t)
-			template := writeSelectionTemplate(t, root, resourceConsumerDocument)
-			options, selected := resourceSelectionLayer(t, root, mode, "template: example.com/selection-template\n")
+			options, selected := resourceSelectionLayer(t, root, mode, resourceConsumerDocument)
 			options.Target, options.Constructor = "database.wrapper", selectionModule+"/resourceone.New"
-			before, inherited := implementationProjectTree(t, root), implementationProjectTree(t, template)
+			before := implementationProjectTree(t, root)
 			if _, err := implementationselect.Select(t.Context(), options); err != nil {
-				t.Fatalf("template provider selection: %v", err)
+				t.Fatalf("lower-layer provider selection: %v", err)
 			}
 			document := readSelectionYAML(t, root, selected)
 			assertSelectionValue(t, document, options.Constructor, "resources", "instances", options.Target, "use")
-			assertSelectionValue(t, document, true, "resources", "bind", "instances", options.Target, "upstream", "$remove")
-			if _, exists := selectionValue(document, "resources", "bind", "instances", options.Target, "Replica"); exists {
-				t.Fatal("unchanged inherited binding was materialized in the selected delta")
+			if mode == "environment" {
+				assertSelectionValue(t, document, true, "resources", "bind", "instances", options.Target, "upstream", "$remove")
+			} else if _, exists := selectionValue(document, "resources", "bind", "instances", options.Target, "upstream"); exists {
+				t.Fatal("root or replacement selection retained an overlay-only binding tombstone")
 			}
-			if _, exists := selectionValue(document, "resources", "instances", "database.replica"); exists {
-				t.Fatal("template baseline was copied into selected delta")
+			if mode == "environment" {
+				if _, exists := selectionValue(document, "resources", "bind", "instances", options.Target, "Replica"); exists {
+					t.Fatal("overlay materialized an unchanged lower-layer binding")
+				}
+				if _, exists := selectionValue(document, "resources", "instances", "database.replica"); exists {
+					t.Fatal("overlay copied an unchanged lower-layer instance")
+				}
 			}
 			manifest := resolveSelectionManifest(t, options)
 			assertSelectionValue(t, manifest, "database.replica", "resources", "bind", "instances", options.Target, "Replica")
 			assertSelectionValue(t, manifest, "PRIVATE_STILL_OWNED", "resources", "instances", "database.still-wrapper", "config", "name")
-			assertSelectionTree(t, template, inherited)
 			assertUnselectedDocuments(t, root, before, selected)
 			assertSelectionGeneratedCurrent(t, options)
 		})
@@ -448,89 +451,6 @@ func TestResourceSelectionRollsBackCleanupAndGeneratedStateOnValidationFailure(t
 	}
 }
 
-func TestUnifiedInterfaceSelectionRetainsSelectedTombstoneAcrossThreeLayers(t *testing.T) {
-	root := writeResourceSelectionProject(t)
-	const owner = "example.com/selection-template/shared.New"
-	template := writeSelectionOwnerTemplate(t, root, "interfaces: {require: [email.send/v1], use: {email.send/v1: "+owner+"}}\nconfig: {"+owner+": {name: PRIVATE_ANCESTOR}}\n")
-	near := t.TempDir()
-	writeImplementationFile(t, filepath.Join(near, "go.mod"), "module example.com/selection-near\n\ngo 1.26\n\nrequire example.com/selection-template v1.0.0\nreplace example.com/selection-template => "+filepath.ToSlash(template)+"\n")
-	writeImplementationFile(t, filepath.Join(near, "marker.go"), "package near\n")
-	writeImplementationFile(t, filepath.Join(near, "plystra.yaml"), "template: example.com/selection-template\nconfig: {"+owner+": {$remove: true}}\n")
-	writeImplementationFile(t, filepath.Join(root, "go.mod"), string(readSelectionFile(t, root, "go.mod"))+"\nrequire example.com/selection-near v1.0.0\nreplace example.com/selection-near => "+filepath.ToSlash(near)+"\n")
-	options, selected := resourceSelectionLayer(t, root, "default", "template: example.com/selection-near\n# Keep independently authored removal intent.\nconfig: {"+owner+": {$remove: true}}\n")
-	options.Target, options.Constructor = "email.send/v1", selectionModule+"/local.New"
-	before, ancestor, nearest := implementationProjectTree(t, root), implementationProjectTree(t, template), implementationProjectTree(t, near)
-	if _, err := implementationselect.Select(t.Context(), options); err != nil {
-		t.Fatalf("select away from last owner hidden by two tombstones: %v", err)
-	}
-	assertSelectionValue(t, readSelectionYAML(t, root, selected), true, "config", owner, "$remove")
-	if _, exists := selectionValue(resolveSelectionManifest(t, options), "config", owner); exists {
-		t.Fatal("ancestor Config resurfaced through an existing selected tombstone")
-	}
-	assertUnselectedDocuments(t, root, before, selected)
-	assertSelectionTree(t, template, ancestor)
-	assertSelectionTree(t, near, nearest)
-	assertSelectionUnchanged(t, options)
-	assertSelectionGeneratedCurrent(t, options)
-}
-
-func TestResourceSelectionRetainsSelectedBindingTombstoneAcrossThreeLayers(t *testing.T) {
-	root := writeResourceSelectionProject(t)
-	template := writeSelectionTemplate(t, root, resourceConsumerDocument)
-	near := t.TempDir()
-	writeImplementationFile(t, filepath.Join(near, "go.mod"), "module example.com/selection-near\n\ngo 1.26\n\nrequire example.com/selection-template v1.0.0\nreplace example.com/selection-template => "+filepath.ToSlash(template)+"\n")
-	writeImplementationFile(t, filepath.Join(near, "marker.go"), "package near\n")
-	const removal = "resources: {bind: {instances: {database.wrapper: {upstream: {$remove: true}}}}}\n"
-	writeImplementationFile(t, filepath.Join(near, "plystra.yaml"), "template: example.com/selection-template\n"+removal)
-	writeImplementationFile(t, filepath.Join(root, "go.mod"), string(readSelectionFile(t, root, "go.mod"))+"\nrequire example.com/selection-near v1.0.0\nreplace example.com/selection-near => "+filepath.ToSlash(near)+"\n")
-	options, selected := resourceSelectionLayer(t, root, "default", "template: example.com/selection-near\n# Preserve authored consumer removal.\n"+removal)
-	options.Target, options.Constructor = "database.wrapper", selectionModule+"/resourceone.New"
-	before, ancestor, nearest := implementationProjectTree(t, root), implementationProjectTree(t, template), implementationProjectTree(t, near)
-	if _, err := implementationselect.Select(t.Context(), options); err != nil {
-		t.Fatalf("replace provider above already-authored binding tombstones: %v", err)
-	}
-	assertSelectionValue(t, readSelectionYAML(t, root, selected), true, "resources", "bind", "instances", options.Target, "upstream", "$remove")
-	manifest := resolveSelectionManifest(t, options)
-	if _, exists := selectionValue(manifest, "resources", "bind", "instances", options.Target, "upstream"); exists {
-		t.Fatal("ancestor binding resurfaced through an existing selected tombstone")
-	}
-	assertSelectionValue(t, manifest, "database.replica", "resources", "bind", "instances", options.Target, "Replica")
-	assertSelectionValue(t, manifest, "database.primary", "resources", "bind", "instances", "database.still-wrapper", "upstream")
-	assertSelectionTree(t, template, ancestor)
-	assertSelectionTree(t, near, nearest)
-	assertUnselectedDocuments(t, root, before, selected)
-	assertSelectionUnchanged(t, options)
-	assertSelectionGeneratedCurrent(t, options)
-}
-
-func TestUnifiedInterfaceSelectionRejectsAncestorOwnershipDriftAfterPlan(t *testing.T) {
-	root := writeResourceSelectionProject(t)
-	const owner = "example.com/selection-template/shared.New"
-	const original = "interfaces:\n  require: [email.send/v1]\n  use: {email.send/v1: " + owner + "}\nconfig: {" + owner + ": {name: PRIVATE_ANCESTOR}}\n"
-	template := writeSelectionOwnerTemplate(t, root, original)
-	options, selected := resourceSelectionLayer(t, root, "default", "template: example.com/selection-template\n")
-	options.Target, options.Constructor = "email.send/v1", owner
-	if _, err := implementationselect.Select(t.Context(), options); err != nil {
-		t.Fatalf("establish template selection: %v", err)
-	}
-	writeImplementationFile(t, filepath.Join(root, "go.mod"), string(readSelectionFile(t, root, "go.mod"))+"\n\n")
-	before, ancestor := implementationProjectTree(t, root), implementationProjectTree(t, template)
-	changed := strings.Replace(original, "use: {email.send/v1: "+owner+"}", "use: {email.send/v1: "+owner+", email.copy/v1: "+owner+"}", 1)
-	options.Constructor = selectionModule + "/local.New"
-	var marker string
-	options.GoCommand, marker = selectionGoWithPostwriteEdit(t, filepath.Join(root, selected), options.Constructor, filepath.Join(template, "plystra.yaml"), changed)
-	_, err := implementationselect.Select(t.Context(), options)
-	if _, markerErr := os.Stat(marker); markerErr != nil {
-		t.Fatalf("ancestor edit did not run after selected YAML installation: %v; Select = %v", markerErr, err)
-	}
-	if !errors.Is(err, implementationselect.ErrSelect) || !errors.Is(err, applicationresolve.ErrConcurrentChange) {
-		t.Errorf("ancestor ownership drift was not rejected as concurrent: %v", err)
-	}
-	ancestor["plystra.yaml"] = []byte(changed)
-	assertSelectionTree(t, template, ancestor)
-	assertSelectionTree(t, root, before)
-}
-
 func TestUnifiedInterfaceSelectionRejectsDeselectedDependencyDriftDuringValidation(t *testing.T) {
 	root := writeResourceSelectionProject(t)
 	writeSelectionInterfaceOwners(t, root)
@@ -619,60 +539,6 @@ type Response struct{}
 	}
 }
 
-func writeSelectionOwnerTemplate(t *testing.T, root, document string) string {
-	t.Helper()
-	template := writeSelectionTemplate(t, root, document)
-	writeSelectionInterfaceOwners(t, template)
-	for _, path := range []string{"interfaces/email/copy/v1/interface.go", "shared/implementation.go", "dependent/implementation.go"} {
-		source := strings.ReplaceAll(string(readSelectionFile(t, template, path)), selectionModule, "example.com/selection-template")
-		if path == "shared/implementation.go" {
-			source = strings.Replace(source, " plystra:\"required\"", "", 1)
-		}
-		writeImplementationFile(t, filepath.Join(template, filepath.FromSlash(path)), source)
-	}
-	return template
-}
-
-func selectionGoWithPostwriteEdit(t *testing.T, selectedPath, constructor, editedPath, replacement string) (string, string) {
-	t.Helper()
-	realGo, err := exec.LookPath("go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := t.TempDir()
-	binary, marker := filepath.Join(root, "go-selection-edit"), filepath.Join(root, "edit-completed")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
-	}
-	// The helper changes authored input only after the planned YAML is installed;
-	// every Go operation still runs through the real toolchain without canned output.
-	writeImplementationFile(t, filepath.Join(root, "main.go"), fmt.Sprintf(`package main
-import ("bytes";"fmt";"os";"os/exec")
-func main() {
- data,err:=os.ReadFile(%q);if err!=nil{fail(err)}
- if bytes.Contains(data,[]byte(%q)) {
-  marker,err:=os.OpenFile(%q,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
-  if err==nil {
-   if err:=os.WriteFile(%q,[]byte(%q),0644);err!=nil{fail(err)}
-   if err:=marker.Close();err!=nil{fail(err)}
-  } else if !os.IsExist(err) {fail(err)}
- }
- command:=exec.Command(%q,os.Args[1:]...)
- command.Stdin,command.Stdout,command.Stderr=os.Stdin,os.Stdout,os.Stderr
- if err:=command.Run();err!=nil {
-  if failure,ok:=err.(*exec.ExitError);ok{os.Exit(failure.ExitCode())};fail(err)
- }
-}
-func fail(err error){fmt.Fprintln(os.Stderr,err);os.Exit(1)}
-`, selectedPath, constructor, marker, editedPath, replacement, realGo))
-	command := exec.CommandContext(t.Context(), realGo, "build", "-o", binary, "main.go")
-	command.Dir, command.Env = root, implementationTestEnvironment()
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("build real Go forwarding helper: %v\n%s", err, output)
-	}
-	return binary, marker
-}
-
 func writeResourceSelectionProject(t *testing.T) string {
 	t.Helper()
 	root := writeTransactionalImplementationProject(t)
@@ -727,10 +593,6 @@ func resourceSelectionLayer(t *testing.T, root, mode, document string) (implemen
 		options.Environment = append(options.Environment, "PLYSTRA_CONFIG=absent.yaml")
 	case "replacement":
 		marker := "interfaces: {require: [absent.interface/v1]}\n"
-		if strings.HasPrefix(document, "template:") {
-			marker = document + marker
-			document = "# Preserve replacement comment.\n{}\n"
-		}
 		writeImplementationFile(t, filepath.Join(root, selected), marker)
 		selected, options.ConfigurationPath = "deploy/customer.yaml", "deploy/customer.yaml"
 		writeImplementationFile(t, filepath.Join(root, selected), document)
@@ -740,34 +602,6 @@ func resourceSelectionLayer(t *testing.T, root, mode, document string) (implemen
 	}
 	writeImplementationFile(t, filepath.Join(root, "plystra.unselected.yaml"), "not: [valid YAML\n")
 	return options, selected
-}
-
-func writeSelectionTemplate(t *testing.T, root, document string) string {
-	t.Helper()
-	const templateModule = "example.com/selection-template"
-	template := writeResourceSelectionProject(t)
-	for path, data := range implementationProjectTree(t, template) {
-		writeImplementationFile(t, filepath.Join(template, filepath.FromSlash(path)), strings.ReplaceAll(string(data), selectionModule, templateModule))
-	}
-	writeImplementationFile(t, filepath.Join(template, "plystra.yaml"), strings.ReplaceAll(document, selectionModule, templateModule))
-	for _, contract := range []string{"database/resource.go", "other/resource.go", "interfaces/email/send/v1/interface.go"} {
-		if err := os.Remove(filepath.Join(root, filepath.FromSlash(contract))); err != nil {
-			t.Fatalf("move fixture contract into template: %v", err)
-		}
-	}
-	for path, data := range implementationProjectTree(t, root) {
-		if !strings.HasSuffix(path, ".go") {
-			continue
-		}
-		source := strings.NewReplacer(
-			selectionModule+"/database", templateModule+"/database",
-			selectionModule+"/other", templateModule+"/other",
-			selectionModule+"/interfaces/", templateModule+"/interfaces/",
-		).Replace(string(data))
-		writeImplementationFile(t, filepath.Join(root, filepath.FromSlash(path)), source)
-	}
-	writeImplementationFile(t, filepath.Join(root, "go.mod"), string(readSelectionFile(t, root, "go.mod"))+"\nrequire example.com/selection-template v1.0.0\nreplace example.com/selection-template => "+filepath.ToSlash(template)+"\n")
-	return template
 }
 
 func writeSelectionInterfaceOwners(t *testing.T, root string) {

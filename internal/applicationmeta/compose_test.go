@@ -37,17 +37,12 @@ func TestComposeDerivesTransportFromEffectiveExposure(t *testing.T) {
 		},
 		{
 			name:    "removed exposure selects no transport",
-			current: "http: {expose: {kernel.health/v1: {$remove: true}}}\n",
+			current: "http: {expose: {}}\n",
 		},
 		{
-			name: "template exposure enables its transport",
-			want: applicationmeta.HTTPTransports{Connect: true},
-			dependencies: []applicationmeta.Dependency{{
-				ModulePath:    "example.com/platform",
-				ModuleVersion: "v1.2.0",
-				Manifest:      composeManifest(t, "http: {expose: {kernel.info/v1: {transport: connect}}}\n"),
-			}},
-			current: "http: {}\n",
+			name:    "current Project exposure enables its transport",
+			want:    applicationmeta.HTTPTransports{Connect: true},
+			current: "http: {expose: {kernel.info/v1: {transport: connect}}}\n",
 		},
 	} {
 		test := test
@@ -111,177 +106,6 @@ func TestComposeRetainsExposureTransportAndSources(t *testing.T) {
 	}
 }
 
-func TestComposeAppliesExactCurrentProjectDeclarationRemovals(t *testing.T) {
-	t.Parallel()
-
-	dependency := applicationmeta.Dependency{
-		ModulePath:    "example.com/platform",
-		ModuleVersion: "v1.4.0",
-		Manifest: composeManifest(t, `
-http:
-  expose: {email.send/v1: {transport: connect}}
-capabilities:
-  require: [audit.write/v1]
-  use: {email.send/v1: acme.smtp}
-  aliases: {mail.send/v1: email.send/v1}
-`),
-	}
-	current := composeManifest(t, `
-http:
-  address: null
-  expose: {email.send/v1: {$remove: true}}
-timeouts: {startup: null}
-capabilities:
-  require: {remove: [audit.write/v1]}
-  use: {email.send/v1: null}
-  aliases: {mail.send/v1: null}
-`)
-	composed, err := applicationmeta.Compose([]applicationmeta.Dependency{dependency}, current, composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatalf("Compose with removals: %v", err)
-	}
-	manifest := composed.Manifest()
-	address, hasAddress := manifest.HTTPAddress()
-	if hasAddress || address != "" || manifest.StartupTimeout() != applicationmeta.DefaultStartupTimeout {
-		t.Fatalf("removed scalars = address %q/%t timeout %s", address, hasAddress, manifest.StartupTimeout())
-	}
-	if len(manifest.HTTPExposures()) != 0 || len(manifest.Requirements()) != 0 || len(manifest.ProviderChoices()) != 0 || len(manifest.Aliases()) != 0 {
-		t.Fatalf("removed declarations remain: exposures %#v requirements %#v choices %#v aliases %#v", manifest.HTTPExposures(), manifest.Requirements(), manifest.ProviderChoices(), manifest.Aliases())
-	}
-	for _, path := range []string{
-		`capabilities.require["audit.write/v1"]`,
-		`capabilities.use["email.send/v1"]`,
-		`capabilities.aliases["mail.send/v1"]`,
-	} {
-		if records := findProvenance(t, composed.Provenance(), path); len(records) != 1 || len(records[0].Sources()) != 1 || !strings.Contains(records[0].Sources()[0], "example.com/platform@v1.4.0/plystra.yaml") {
-			t.Fatalf("provenance for %s = %#v", path, provenanceStrings(records))
-		}
-	}
-	if records := findProvenance(t, composed.Provenance(), `http.expose["email.send/v1"]`); len(records) != 1 {
-		t.Fatalf("dependency-owned exposure entered provenance: %#v", provenanceStrings(records))
-	}
-}
-
-func TestComposeRecursivelyMergesObjectConfigurationAndAppliesTombstones(t *testing.T) {
-	t.Parallel()
-
-	schema := composeSchema(t, `
-	Host string
-	Hosts []string
-	Settings struct {
-		Legacy string
-		Nested struct {
-			Keep string
-			Remove string
-			Other bool
-		}
-		Ratio float64
-		Region string
-		Zone int64
-	}
-	Token configuration.Secret
-`)
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
-	dependencies := []applicationmeta.Dependency{
-		{
-			ModulePath:    "example.com/a",
-			ModuleVersion: "v1.0.0",
-			Manifest: composeManifest(t, `
-config:
-  example.com/acme/smtp.New:
-    host: dependency.example
-    hosts: [smtp-a.example]
-    settings:
-      legacy: old-private-value
-      nested:
-        keep: retained
-        remove: obsolete-private-value
-      ratio: 1
-      region: dependency
-    token: {env: PRIVATE_DEPENDENCY_TOKEN}
-`),
-		},
-		{
-			ModulePath:    "example.com/b",
-			ModuleVersion: "v1.0.0",
-			Manifest: composeManifest(t, `
-config:
-  example.com/acme/smtp.New:
-    hosts: [smtp-b.example]
-    settings:
-      legacy: {$remove: true}
-      nested:
-        other: true
-      ratio: 1.0
-      zone: 3
-`),
-		},
-	}
-	current := composeManifest(t, `
-config:
-  example.com/acme/smtp.New:
-    host: {$remove: true}
-    hosts: [smtp-current.example]
-    settings:
-      legacy: {$remove: true}
-      nested:
-        remove: {$remove: true}
-      region: current
-    token: {$remove: true}
-`)
-	composed, err := applicationmeta.Compose(dependencies, current, lookup)
-	if err != nil {
-		t.Fatalf("Compose recursive configuration: %v", err)
-	}
-	reordered, err := applicationmeta.Compose([]applicationmeta.Dependency{dependencies[1], dependencies[0]}, current, lookup)
-	if err != nil || reordered.DependencyDigest() == composed.DependencyDigest() {
-		t.Fatalf("reordered recursive configuration = %s, %v; want %s", reordered.DependencyDigest(), err, composed.DependencyDigest())
-	}
-	configured, exists := composed.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
-	if !exists {
-		t.Fatal("composed configuration is absent")
-	}
-	reorderedConfiguration, reorderedExists := reordered.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
-	if !reorderedExists || !bytes.Equal(reorderedConfiguration.YAML(), configured.YAML()) {
-		t.Fatalf("recursive configuration depends on order:\nfirst: %s\nsecond: %s", configured.YAML(), reorderedConfiguration.YAML())
-	}
-	for _, expected := range [][]byte{
-		[]byte("hosts:\n  - smtp-current.example"),
-		[]byte("keep: retained"),
-		[]byte("other: true"),
-		[]byte("ratio: 1"),
-		[]byte("region: current"),
-		[]byte("zone: 3"),
-	} {
-		if !bytes.Contains(configured.YAML(), expected) {
-			t.Fatalf("composed configuration omits %q:\n%s", expected, configured.YAML())
-		}
-	}
-	for _, removed := range [][]byte{
-		[]byte("host: dependency.example"),
-		[]byte("legacy:"),
-		[]byte("remove:"),
-		[]byte("PRIVATE_DEPENDENCY_TOKEN"),
-	} {
-		if bytes.Contains(configured.YAML(), removed) {
-			t.Fatalf("composed configuration retained removed value %q:\n%s", removed, configured.YAML())
-		}
-	}
-	records := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["settings"]["legacy"]`)
-	if len(records) != 2 || records[0].Removed() == records[1].Removed() {
-		t.Fatalf("nested removal provenance = %#v", provenanceStrings(records))
-	}
-	for _, record := range records {
-		if len(record.Sources()) != 1 {
-			t.Fatalf("nested removal sources = %#v", provenanceStrings(records))
-		}
-	}
-	ratioRecords := findProvenance(t, composed.Provenance(), `config["example.com/acme/smtp.New"]["settings"]["ratio"]`)
-	if len(ratioRecords) != 1 || ratioRecords[0].Removed() || len(ratioRecords[0].Sources()) != 2 {
-		t.Fatalf("normalized nested ratio provenance = %#v", provenanceStrings(ratioRecords))
-	}
-}
-
 func TestComposeRejectsNestedConfigurationTypeMismatchWithoutValues(t *testing.T) {
 	t.Parallel()
 
@@ -306,7 +130,7 @@ func TestComposeRejectsNestedConfigurationTypeMismatchWithoutValues(t *testing.T
 	}
 }
 
-func TestComposeRejectsInvalidConfigurationAndCrossDocumentAliasChains(t *testing.T) {
+func TestComposeRejectsInvalidConfiguration(t *testing.T) {
 	t.Parallel()
 
 	schema := composeSchema(t, "\tHost string\n")
@@ -319,35 +143,16 @@ func TestComposeRejectsInvalidConfigurationAndCrossDocumentAliasChains(t *testin
 		want         string
 	}{
 		{
-			name:         "unknown configuration field",
-			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: hidden}}\n")}},
-			current:      composeManifest(t, "{}\n"),
-			lookup:       lookup,
-			want:         "unknown constructor configuration field",
+			name:    "unknown configuration field",
+			current: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: hidden}}\n"),
+			lookup:  lookup,
+			want:    "unknown constructor configuration field",
 		},
 		{
-			name:         "unknown removed configuration field",
-			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: {$remove: true}}}\n")}},
-			current:      composeManifest(t, "{}\n"),
-			lookup:       lookup,
-			want:         "unknown constructor configuration field",
-		},
-		{
-			name: "Alias chain",
-			dependencies: []applicationmeta.Dependency{
-				{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {aliases: {orders.submit/v1: order.create/v1}}\n")},
-				{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {aliases: {order.create/v1: order.execute/v1}}\n")},
-			},
-			current: composeManifest(t, "{}\n"),
-			lookup:  composeSchemaLookup(nil),
-			want:    "forbidden Alias chain",
-		},
-		{
-			name:         "require inherited Alias",
-			dependencies: []applicationmeta.Dependency{{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: composeManifest(t, "capabilities: {aliases: {orders.submit/v1: order.create/v1}}\n")}},
-			current:      composeManifest(t, "capabilities: {require: [orders.submit/v1]}\n"),
-			lookup:       composeSchemaLookup(nil),
-			want:         "requirements must name canonical Capabilities",
+			name:    "unknown removed configuration field",
+			current: composeManifest(t, "config: {example.com/acme/smtp.New: {private_unknown: hidden}}\n"),
+			lookup:  lookup,
+			want:    "unknown constructor configuration field",
 		},
 	}
 	for _, test := range tests {
@@ -438,8 +243,8 @@ func FuzzComposeConstructorConfigurationDeterminism(f *testing.F) {
 			}
 			return
 		}
-		if first.DependencyDigest() != second.DependencyDigest() || !reflect.DeepEqual(provenanceStrings(first.Provenance()), provenanceStrings(second.Provenance())) {
-			t.Fatalf("Compose changed provenance on repeat: %s %#v then %s %#v", first.DependencyDigest(), provenanceStrings(first.Provenance()), second.DependencyDigest(), provenanceStrings(second.Provenance()))
+		if first.CompositionDigest() != second.CompositionDigest() || !reflect.DeepEqual(provenanceStrings(first.Provenance()), provenanceStrings(second.Provenance())) {
+			t.Fatalf("Compose changed provenance on repeat: %s %#v then %s %#v", first.CompositionDigest(), provenanceStrings(first.Provenance()), second.CompositionDigest(), provenanceStrings(second.Provenance()))
 		}
 		firstConfig, firstExists := first.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
 		secondConfig, secondExists := second.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))

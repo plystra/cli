@@ -268,7 +268,7 @@
     },
     {
       "path": "generated/go/bootstrap/bootstrap_gen.go",
-      "sha256": "sha256:cf83912fc37be529a5acf8a960a0d20e7ca880f4e6fa799c34f73007ea591aa2",
+      "sha256": "sha256:6716e625daf4e57fd373dc50b1e917df4221f031076048ac36a3992d1ac88e50",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -294,7 +294,7 @@
     },
     {
       "path": "generated/go/internal/constructorconfig/value_gen.go",
-      "sha256": "sha256:e89b0d54da9e12e21964aa7a1445ac1e62a42ec3c609054971f5071af429345d",
+      "sha256": "sha256:e436ecbba84ef64f00632f1de3e971d8604a937b3c535c84ab1e3b5d0d24ef87",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -502,7 +502,7 @@
     },
     {
       "path": "generated/go/internal/runtimebaseline/baseline_gen.go",
-      "sha256": "sha256:0e19cdb1089f2c588c5ae146c4c3a053c7f17230838e78742bf9c69222c516c1",
+      "sha256": "sha256:955291875b46434416f28387019acb54d601a73b223112529b240bf997bb17e5",
       "generator": "plystra.runtime-bootstrap/v1",
       "output_kind": "go-source",
       "input_record_ids": [
@@ -528,13 +528,12 @@
     },
     {
       "path": "generated/manifest.json",
-      "sha256": "sha256:ca0807b723330373ddf7f5a987d20e13f3b3d36409675ef6ebd8a7c3972b8c92",
+      "sha256": "sha256:9639a53a733dad1e80663239196089d8383ff95ee2b3683346726b01d331ed4d",
       "generator": "plystra.application-manifest/v1",
       "output_kind": "application-manifest",
       "input_record_ids": [
         "application-model:sha256:00aef11c149368f1f65a512636997ee7ebccf9cffe6b10c1cc69fa93d63b8d45",
-        "configuration-selection:default:plystra.yaml:sha256:ad55f8a7e3b780c4c840aa05c8c3ba1966369bf223761a1c393203edb7f6143f",
-        "dependency-composition:sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
+        "configuration-selection:default:plystra.yaml:sha256:5c0211261016b06ca54c477ba423f1dcd3e2a645bb1d2498cf62cb078e9b6a41",
         "interface-contract:kernel.health/v1:sha256:ca84c09091802ac047f779c4a63468b09d4c6677e989a0bad96fcd2978a79e53",
         "interface-contract:kernel.info/v1:sha256:3b6011915de82ca6e5e12027ba644a3d24ff765e4f443be871538bc7ae023fa9",
         "interface-provenance:sha256:c2b5f5ea8156665f0d252514e77795ee37db96abe7e7aaace937665fc26671b4",
@@ -633,17 +632,8 @@
       "mode": "default",
       "root": {
         "path": "plystra.yaml",
-        "digest": "sha256:ad55f8a7e3b780c4c840aa05c8c3ba1966369bf223761a1c393203edb7f6143f"
+        "digest": "sha256:5c0211261016b06ca54c477ba423f1dcd3e2a645bb1d2498cf62cb078e9b6a41"
       },
-      "dependency_baselines": [
-        {
-          "mode": "default",
-          "path": "plystra.yaml",
-          "dependency_composition_digest": "sha256:5072e8bcd1314288ae0485b68fec5cc029e29408bbdf3bf5fc34d589c5c32130",
-          "dependency_baseline": [],
-          "current_project_paths": []
-        }
-      ],
       "dormant_implementation_selections": [],
       "dormant_implementation_selections_digest": "sha256:f781509b1c7204b29c108dddeaeba732605c9ea41e0412205c03777d995e6681",
       "dormant_constructor_configurations": [],

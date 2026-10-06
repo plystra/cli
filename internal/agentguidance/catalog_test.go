@@ -55,9 +55,9 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	}
 	project := byPath[Root+"/tasks/project-and-dependencies.md"]
 	for _, phrase := range []string{
-		"records a direct dependency and its exact module path in root plystra.yaml",
-		"Creation immediately inherits the supported Interface and named Resource baseline without copying source or configuration",
-		"Data inheritance remains unsupported",
+		"records the selected Project module as one ordinary direct Go Module dependency",
+		"configuration and source are never copied or activated",
+		"After creation it is indistinguishable from a dependency added with",
 	} {
 		if !bytes.Contains(project, []byte(phrase)) {
 			t.Fatalf("Project guidance omits %q", phrase)
@@ -87,8 +87,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	}
 	interfaces := byPath[Root+"/tasks/interfaces-and-implementations.md"]
 	for _, phrase := range []string{
-		"entries compose from template roots and the selected current-Project delta",
-		"Inherited requirements and exposure create roots immediately without repeated current-Project declarations",
+		"entries come from the selected current-Project configuration",
 		"plystra capability create records.read --query --plugin records",
 		"Capability creation and implementation never prompt by default",
 		"Add `--interactive` only to request a terminal choice",
@@ -134,36 +133,32 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 	for _, phrase := range []string{
 		"Remove exact interfaces.use, interfaces.policies, and http.expose entries only with {$remove: true}",
 		"runtime compatibility version 12",
-		"Remove http.cors or either of its fields with {$remove: true}; null is invalid",
-		"Selected template roots contribute CORS, while ordinary dependencies remain inactive",
+		"Remove http.cors or either of its fields with {$remove: true} in an overlay; null is invalid",
+		"Root and complete replacement documents reject tombstones",
 		"Remove a whole config.<constructor-symbol> entry only with {$remove: true}",
 		"{} remains configuration, not removal",
 		"remove a declared field inside a non-pointer fixed struct with {$remove: true}",
 		"Literal null, ~, and blank values are atomic nil only for pointers, slices, and maps",
 		"CLI and runtime typed normalization reject malformed scalar payloads",
 		"Reserved singleton $remove mappings are invalid inside atomic values",
-		"Required fields are checked after template roots and selected layers compose",
+		"Required fields are checked after the selected root and, when present, environment overlay compose",
 		"Requiredness means presence: zero, empty, and schema-permitted nil values count",
-		"Generated startup applies these rules and compiled scalar defaults to active constructors",
+		"Generated startup applies these rules and compiled scalar defaults after the selected layers compose",
 		"Startup validates effective dormant objects without activating constructors or resolving their Secrets",
 		"a supplied non-null pointer field replaces its complete lower value",
 		"Only non-pointer fixed structs compose field by field",
 		"Generated runtime loading applies the same pointer replacement rules",
-		"Template roots need no source tree or Module Cache at startup",
-		"every selector validates the live root relationship against the private baseline",
+		"Every selector validates the selected document against the private baseline",
 		"dependency module/version membership",
-		"Compatible private inherited-value edits require a refreshed baseline",
-		"Root template ancestry composes oldest to nearest",
-		"overlays and replacements cannot change it",
-		"Replacement excludes root application values but retains the root relationship",
-		"Named Resource instances and bindings are inherited; Data inheritance remains unsupported",
-		"The public runtime contract binds ordered template module/version identities",
+		"Compatible private value edits require a refreshed baseline",
+		"Root `plystra.yaml` is the Project marker",
+		"the selected current-Project document",
 		"An interfaces.require sequence replaces the complete lower explicit requirement set; [] clears it",
-		"Omission and {} inherit",
+		"In an environment overlay, omission and {} keep the root set",
 		"A later sparse overlay preserves an earlier complete-set boundary",
-		"New Projects use require: {} to preserve inherited template requirements",
+		"Root and complete replacement documents reject sparse requirement forms",
 		"Validated Secret fields exclude reference kind and target from public identity",
-		"Later template and current values or tombstones replace lower references",
+		"Later overlay values or tombstones replace lower references",
 		"Public provenance never exposes private reference equality",
 		"Generation compares private root, selected-document, and dependency snapshots",
 		"Validated runtime-only constructor values exclude contents from public identity",
@@ -206,7 +201,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"PLYSTRA_PROJECT_CONCURRENT_CHANGE",
 		"PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED",
 		"declaration-owning `http.expose` document",
-		"inherit that declaration from root `plystra.yaml`",
+		"keep that declaration from root `plystra.yaml`",
 		"leaves authored, generated, module, and compatibility files unchanged",
 		"path as an `agent-guidance` source",
 	} {
@@ -227,7 +222,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"exact parameter_name and one-based parameter_position", "PLYSTRA_IMPLEMENTATION_REQUIRED_RESOURCE_INVALID",
 		"resources.instances.<name>", "1 through 128 ASCII bytes",
 		`[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*`,
-		"A config-only higher layer may inherit use", "Changing use replaces the whole instance and discards old configuration",
+		"A config-only environment overlay may keep the lower provider", "Changing use replaces the whole instance and discards old configuration",
 		"resources.bind.implementations.<constructor>.<parameter>", "resources.bind.instances.<consumer-instance>.<parameter>",
 		"zero is missing and multiple matches are ambiguous", "including dormant Implementation consumers",
 		"PLYSTRA_RESOURCE_METADATA_INVALID", "PLYSTRA_RESOURCE_CONFIGURATION_SCHEMA_INVALID",
@@ -251,7 +246,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 			t.Fatalf("Resource guidance omits %q", phrase)
 		}
 	}
-	for _, forbidden := range []string{"Resource mutation forms of plystra use and plystra implement are not installed", "PLYSTRA_USE_INTERFACE_INVALID", "accepts only Interface Implementation constructors", "TODO", "create a feature branch", "open a pull request", "push the change", "PLYSTRA_RESOURCE_BINDING_UNSUPPORTED", "Resource instance configuration and runtime binding remain unsupported", "Resource and Data inheritance remain unsupported", "inspect resources remains contract-only"} {
+	for _, forbidden := range []string{"Resource mutation forms of plystra use and plystra implement are not installed", "PLYSTRA_USE_INTERFACE_INVALID", "accepts only Interface Implementation constructors", "TODO", "create a feature branch", "open a pull request", "push the change", "PLYSTRA_RESOURCE_BINDING_UNSUPPORTED", "Resource instance configuration and runtime binding remain unsupported", "Resource and Data inheritance remain unsupported", "inspect resources remains contract-only", "template ancestry", "linear chain", "cannot qualify", "qualified template", "PLYSTRA_TEMPLATE_INVALID", "template roots", "template relationship"} {
 		for name, data := range byPath {
 			if strings.Contains(strings.ToLower(string(data)), strings.ToLower(forbidden)) {
 				t.Fatalf("%s contains process guidance %q", name, forbidden)

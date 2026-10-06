@@ -87,7 +87,6 @@ type diagnosticRequirementSources interface {
 }
 
 const (
-	diagnosticTemplateInvalid                      = diagnosticcode.TemplateInvalid
 	diagnosticCapabilityRequirementConflict        = diagnosticcode.CapabilityRequirementConflict
 	diagnosticProviderContractConflict             = diagnosticcode.ProviderContractConflict
 	diagnosticProviderContractMismatch             = diagnosticcode.ProviderContractMismatch
@@ -148,7 +147,6 @@ const (
 	diagnosticAgentGuidanceManifestInvalid         = diagnosticcode.AgentGuidanceManifestInvalid
 	diagnosticCapabilityManifestInvalid            = diagnosticcode.CapabilityManifestInvalid
 	diagnosticProjectConcurrentChange              = diagnosticcode.ProjectConcurrentChange
-	diagnosticConfigurationCompositionDrift        = diagnosticcode.ConfigurationCompositionDrift
 	diagnosticGeneratedDrift                       = diagnosticcode.GeneratedDrift
 	diagnosticResolveUnknownInterface              = diagnosticcode.ResolveUnknownInterface
 	diagnosticResolveUnknownImplementation         = diagnosticcode.ResolveUnknownImplementation
@@ -351,24 +349,6 @@ func actionableDiagnosticSources(err error, code string) []diagnosticjson.Source
 				Module: source.ModulePath(),
 				Path:   source.SourcePath(),
 				Kind:   source.SourceKind(),
-				Line:   source.Line(),
-				Column: source.Column(),
-			})
-		}
-	case diagnosticTemplateInvalid:
-		var ancestry *applicationresolve.TemplateError
-		if !errors.As(err, &ancestry) || ancestry == nil {
-			var located *applicationresolve.ManifestSourceError
-			if !errors.As(err, &located) || located == nil || !errors.Is(err, applicationresolve.ErrTemplate) {
-				return nil
-			}
-			return []diagnosticjson.Source{{Module: located.ModulePath(), Path: located.SourcePath(), Kind: located.SourceKind(), Line: located.Line(), Column: located.Column()}}
-		}
-		for _, source := range ancestry.Sources() {
-			sources = append(sources, diagnosticjson.Source{
-				Module: source.ModulePath(),
-				Path:   source.Path(),
-				Kind:   "configuration-declaration",
 				Line:   source.Line(),
 				Column: source.Column(),
 			})
@@ -1253,9 +1233,6 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, implementationselect.ErrProviderIncompatible):
 		return recoveryDiagnostic(diagnosticUseProviderIncompatible, "Select one visible Resource provider compatible with the existing instance and its surviving dependencies using `plystra use <target> <constructor-symbol>"+context.selectorSuffix()+"`; correct unresolved bindings or required configuration in "+context.configurationTarget()+" without retargeting unrelated consumers.")
 	}
-	if errors.Is(err, applicationresolve.ErrTemplate) {
-		return recoveryDiagnostic(diagnosticTemplateInvalid, "Correct the root template relationship and its Go Module dependency graph; every ancestor must be a Project and the chain must not repeat a module, then rerun the command.")
-	}
 	if diagnostic, found := resourceResolutionRecovery(err, context); found {
 		return diagnostic, true
 	}
@@ -1303,9 +1280,9 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if _, action, found := splitEmbeddedRecovery(err.Error()); found {
-			return recoveryDiagnostic(diagnosticTemplateInvalid, action)
+			return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, action)
 		}
-		return recoveryDiagnostic(diagnosticTemplateInvalid, "Use a corrected published template version whose clean Project passes generation, check, build, and lifecycle validation.")
+		return recoveryDiagnostic(diagnosticProjectCreateTemplateInvalid, "Rerun `plystra new <project-name> --template <go-module-query> [options]` with a query that selects a direct module containing a regular root `plystra.yaml` Project marker.")
 	}
 	var requirementConflict *providerresolution.RequirementConflictError
 	if errors.As(err, &requirementConflict) && requirementConflict != nil {
@@ -1462,7 +1439,7 @@ func primaryActionableDiagnostic(err error, context recoveryContext) (actionable
 	case errors.Is(err, applicationmeta.ErrConfigurationSchema):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationSchemaInvalid, "Correct the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationRequired):
-		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Supply the missing required field in "+context.configurationTarget()+" or a template root, or correct the tombstone that removed it, then rerun the command.")
+		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Supply the missing required field in "+context.configurationTarget()+", or correct the overlay tombstone that removed it, then rerun the command.")
 	case errors.Is(err, applicationmeta.ErrConfigurationValues):
 		return recoveryDiagnostic(diagnosticConstructorConfigurationValuesInvalid, "Correct the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.")
 	case errors.Is(err, applicationresolve.ErrUnownedConstructorConfiguration):

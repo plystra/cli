@@ -69,15 +69,16 @@ const (
 // ConfigurationProvenanceInput carries only stable, normalized, non-secret
 // configuration identity. It never carries YAML values, resolved Secrets,
 // absolute paths, process environment, or generated-output locations.
-// Synthetic contexts may omit it.
+// The identity describes the current Project's root and selected document;
+// ordinary dependencies do not contribute a configuration baseline. Synthetic
+// contexts may omit it.
 type ConfigurationProvenanceInput struct {
-	Mode                        ConfigurationMode `json:"mode"`
-	Environment                 string            `json:"environment,omitempty"`
-	RootPath                    string            `json:"root_path"`
-	RootDigest                  string            `json:"root_digest"`
-	SelectedPath                string            `json:"selected_path"`
-	SelectedDigest              string            `json:"selected_digest"`
-	DependencyCompositionDigest string            `json:"dependency_composition_digest"`
+	Mode           ConfigurationMode `json:"mode"`
+	Environment    string            `json:"environment,omitempty"`
+	RootPath       string            `json:"root_path"`
+	RootDigest     string            `json:"root_digest"`
+	SelectedPath   string            `json:"selected_path"`
+	SelectedDigest string            `json:"selected_digest"`
 }
 
 // PluginInput describes public selected-plugin metadata. BuildMetadataJSON
@@ -353,17 +354,17 @@ func (c Context) Digest() string { return c.digest }
 // separately carry any generated behavior derived from that provenance.
 func (c Context) BuildModelDigest() string { return c.buildModelDigest }
 
-// ConfigurationProvenanceView is immutable selected-configuration identity.
+// ConfigurationProvenanceView is immutable current-project selected-
+// configuration identity. Ordinary dependencies do not appear in this view.
 // Paths are stable Project-relative slash paths and every digest is a
 // canonical lowercase SHA-256 value.
 type ConfigurationProvenanceView struct {
-	mode                        ConfigurationMode
-	environment                 string
-	rootPath                    string
-	rootDigest                  string
-	selectedPath                string
-	selectedDigest              string
-	dependencyCompositionDigest string
+	mode           ConfigurationMode
+	environment    string
+	rootPath       string
+	rootDigest     string
+	selectedPath   string
+	selectedDigest string
 }
 
 // Mode returns default, environment, or explicit-config.
@@ -383,12 +384,6 @@ func (p ConfigurationProvenanceView) SelectedPath() string { return p.selectedPa
 
 // SelectedDigest returns the normalized selected-document digest.
 func (p ConfigurationProvenanceView) SelectedDigest() string { return p.selectedDigest }
-
-// DependencyCompositionDigest returns the normalized template ancestry and
-// its configuration provenance digest.
-func (p ConfigurationProvenanceView) DependencyCompositionDigest() string {
-	return p.dependencyCompositionDigest
-}
 
 // ModuleView contains public Go Module provenance without a local filesystem
 // path. An empty version identifies the current local development module.
@@ -568,9 +563,6 @@ func normalizeConfigurationProvenance(input *ConfigurationProvenanceInput) (*Con
 	if !validSHA256Digest(input.SelectedDigest) {
 		return nil, invalidContext("%s.selected_digest is not a canonical SHA-256 digest", field)
 	}
-	if !validSHA256Digest(input.DependencyCompositionDigest) {
-		return nil, invalidContext("%s.dependency_composition_digest is not a canonical SHA-256 digest", field)
-	}
 	switch input.Mode {
 	case ConfigurationModeDefault:
 		if input.Environment != "" {
@@ -595,13 +587,12 @@ func normalizeConfigurationProvenance(input *ConfigurationProvenanceInput) (*Con
 		return nil, invalidContext("%s.mode %q is not supported", field, input.Mode)
 	}
 	return &ConfigurationProvenanceView{
-		mode:                        input.Mode,
-		environment:                 input.Environment,
-		rootPath:                    input.RootPath,
-		rootDigest:                  input.RootDigest,
-		selectedPath:                input.SelectedPath,
-		selectedDigest:              input.SelectedDigest,
-		dependencyCompositionDigest: input.DependencyCompositionDigest,
+		mode:           input.Mode,
+		environment:    input.Environment,
+		rootPath:       input.RootPath,
+		rootDigest:     input.RootDigest,
+		selectedPath:   input.SelectedPath,
+		selectedDigest: input.SelectedDigest,
 	}, nil
 }
 

@@ -228,14 +228,14 @@ func (s *service) Stop(context.Context) error {
 	}
 }
 
-func TestGeneratedResourceTemplateBinaryIsSourceIndependent(t *testing.T) {
+func TestGeneratedResourceBinaryIsSourceIndependent(t *testing.T) {
 	sources := filepath.Join(t.TempDir(), "sources")
-	root, template := filepath.Join(sources, "application"), filepath.Join(sources, "template")
-	const module, dependency = "example.com/resource-deployment", "example.com/resource-template"
+	root, dependencyRoot := filepath.Join(sources, "application"), filepath.Join(sources, "dependency")
+	const module, dependency = "example.com/resource-deployment", "example.com/resource-provider"
 	writeApplicationModule(t, root, module)
-	writeApplicationModule(t, template, dependency)
-	writeFile(t, filepath.Join(template, "database/resource.go"), "package database\n//plystra:resource storage.database/v1\ntype Resource interface { Value() string }\n")
-	writeFile(t, filepath.Join(template, "provider/provider.go"), strings.ReplaceAll(`package provider
+	writeApplicationModule(t, dependencyRoot, dependency)
+	writeFile(t, filepath.Join(dependencyRoot, "database/resource.go"), "package database\n//plystra:resource storage.database/v1\ntype Resource interface { Value() string }\n")
+	writeFile(t, filepath.Join(dependencyRoot, "provider/provider.go"), strings.ReplaceAll(`package provider
 import ("context";"os";"github.com/plystra/kernel/configuration")
 type Config struct {
  Name string @@yaml:"name" plystra:"required"@@
@@ -247,29 +247,50 @@ type value struct { config Config }
 func New(c Config) (*value,error) {return &value{config:c},nil}
 func (v *value) Value() string {return v.config.Name}
 func (v *value) Start(context.Context) error {
- if v.config.Count!=3 || string(v.config.Password.Bytes())!="resolved-template-secret" {panic("wrong per-instance typed config")}
+ if v.config.Count!=3 || string(v.config.Password.Bytes())!="resolved-provider-secret" {panic("wrong per-instance typed config")}
  file,err:=os.OpenFile(os.Getenv("RESOURCE_DEPLOYMENT_RESULT"),os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600)
  if err!=nil{return err};defer file.Close()
  _,err=file.WriteString(v.config.Name+"\n");return err
 }
-func (*value) Stop(context.Context) error {return nil}
+ func (*value) Stop(context.Context) error {return nil}
 `, "@@", "`"))
-	writeFile(t, filepath.Join(template, "plystra.yaml"), `resources:
+	writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), `resources:
   instances:
     database.primary:
-      use: example.com/resource-template/provider.New
-      config: {name: private-inherited, password: {env: RESOURCE_TEMPLATE_SECRET}}
+      use: example.com/resource-provider/provider.New
+      config: {name: private-dependency, password: {env: RESOURCE_PROVIDER_SECRET}}
     database.replica:
-      use: example.com/resource-template/provider.New
-      config: {name: private-replica, password: {env: RESOURCE_TEMPLATE_SECRET}}
+      use: example.com/resource-provider/provider.New
+      config: {name: private-dependency-replica, password: {env: RESOURCE_PROVIDER_SECRET}}
 `)
-	writeFile(t, filepath.Join(root, "go.mod"), string(readAbsoluteFile(t, filepath.Join(root, "go.mod")))+"\nrequire "+dependency+" v1.0.0\nreplace "+dependency+" => "+filepath.ToSlash(template)+"\n")
-	const relationship = "template: example.com/resource-template\n"
-	const delta = "resources: {instances: {database.primary: {config: {name: private-current}}}}\n"
-	writeFile(t, filepath.Join(root, "plystra.yaml"), relationship+delta)
+	writeFile(t, filepath.Join(root, "go.mod"), string(readAbsoluteFile(t, filepath.Join(root, "go.mod")))+"\nrequire "+dependency+" v1.0.0\nreplace "+dependency+" => "+filepath.ToSlash(dependencyRoot)+"\n")
+	const rootConfiguration = `resources:
+  instances:
+    database.primary:
+      use: example.com/resource-provider/provider.New
+      config: {name: private-current, password: {env: RESOURCE_PROVIDER_SECRET}}
+    database.replica:
+      use: example.com/resource-provider/provider.New
+      config: {name: private-replica, password: {env: RESOURCE_PROVIDER_SECRET}}
+`
+	const overlayConfiguration = `resources:
+  instances:
+    database.primary:
+      config: {name: private-overlay}
+`
+	const replacementConfiguration = `resources:
+  instances:
+    database.primary:
+      use: example.com/resource-provider/provider.New
+      config: {name: private-replacement, password: {env: RESOURCE_PROVIDER_SECRET}}
+    database.replica:
+      use: example.com/resource-provider/provider.New
+      config: {name: private-replacement-replica, password: {env: RESOURCE_PROVIDER_SECRET}}
+`
+	writeFile(t, filepath.Join(root, "plystra.yaml"), rootConfiguration)
 	var stdout, stderr bytes.Buffer
 	if code := command.RunIn([]string{"generate"}, &stdout, &stderr, root, goEnvironment(nil)); code != 0 {
-		t.Fatalf("generate template Resources = %d: %s %s", code, stdout.Bytes(), stderr.Bytes())
+		t.Fatalf("generate Resource Project = %d: %s %s", code, stdout.Bytes(), stderr.Bytes())
 	}
 	deployment := t.TempDir()
 	binary := filepath.Join(deployment, "application")
@@ -289,26 +310,27 @@ func (*value) Stop(context.Context) error {return nil}
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			configRoot := t.TempDir()
-			writeFile(t, filepath.Join(configRoot, "plystra.yaml"), relationship+delta)
+			writeFile(t, filepath.Join(configRoot, "plystra.yaml"), rootConfiguration)
 			args := []string{"--smoke", "--configuration-root", configRoot, "--runtime-baseline", baseline}
+			want := "private-current\nprivate-replica\n"
 			switch mode {
 			case "environment":
-				writeFile(t, filepath.Join(configRoot, "plystra.yaml"), relationship)
-				writeFile(t, filepath.Join(configRoot, "plystra.test.yaml"), delta)
+				writeFile(t, filepath.Join(configRoot, "plystra.test.yaml"), overlayConfiguration)
 				args = append(args, "--env", "test")
+				want = "private-overlay\nprivate-replica\n"
 			case "replacement":
-				writeFile(t, filepath.Join(configRoot, "plystra.yaml"), relationship)
-				writeFile(t, filepath.Join(configRoot, "selected.yaml"), delta)
+				writeFile(t, filepath.Join(configRoot, "selected.yaml"), replacementConfiguration)
 				args = append(args, "--config", "selected.yaml")
+				want = "private-replacement\nprivate-replacement-replica\n"
 			}
 			marker := filepath.Join(t.TempDir(), "resource-values")
 			process := exec.CommandContext(t.Context(), binary, args...)
-			process.Dir, process.Env = t.TempDir(), goEnvironment(map[string]string{"RESOURCE_DEPLOYMENT_RESULT": marker, "RESOURCE_TEMPLATE_SECRET": "resolved-template-secret", "GOMODCACHE": filepath.Join(t.TempDir(), "absent-module-cache")})
+			process.Dir, process.Env = t.TempDir(), goEnvironment(map[string]string{"RESOURCE_DEPLOYMENT_RESULT": marker, "RESOURCE_PROVIDER_SECRET": "resolved-provider-secret", "GOMODCACHE": filepath.Join(t.TempDir(), "absent-module-cache")})
 			if output, err := process.CombinedOutput(); err != nil {
 				t.Fatalf("source-independent Resource runtime: %v\n%s", err, output)
 			}
-			if got := string(readAbsoluteFile(t, marker)); got != "private-current\nprivate-replica\n" {
-				t.Fatalf("selected unconsumed Resource values = %q", got)
+			if got := string(readAbsoluteFile(t, marker)); got != want {
+				t.Fatalf("selected Resource values = %q, want %q", got, want)
 			}
 		})
 	}

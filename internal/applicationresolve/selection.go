@@ -9,7 +9,6 @@ import (
 	"unicode"
 
 	"github.com/plystra/cli/internal/applicationgen"
-	"github.com/plystra/cli/internal/applicationmeta"
 )
 
 const (
@@ -75,19 +74,13 @@ func SelectConfigurationTarget(modulePath, moduleRoot, explicitConfiguration, ex
 		return ConfigurationTarget{}, fmt.Errorf("%w: %w", ErrConfigurationSelection, err)
 	}
 	var snapshot ManifestSnapshot
-	var manifest applicationmeta.Manifest
 	if selector.mode == configurationModeEnvironment {
-		snapshot, manifest, err = loadEnvironmentOverlay(modulePath, moduleRoot, selector.path)
+		snapshot, _, err = loadEnvironmentOverlay(modulePath, moduleRoot, selector.path)
 	} else {
-		snapshot, manifest, err = loadConfiguration(modulePath, moduleRoot, selector.path)
+		snapshot, _, err = loadConfiguration(modulePath, moduleRoot, selector.path)
 	}
 	if err != nil {
 		return ConfigurationTarget{}, fmt.Errorf("%w: %w", ErrConfigurationSelection, err)
-	}
-	if selector.mode == configurationModeExplicit {
-		if err := validateReplacementMetadata(modulePath, manifest); err != nil {
-			return ConfigurationTarget{}, fmt.Errorf("%w: %w", ErrConfigurationSelection, err)
-		}
 	}
 	digestFunction := applicationgen.ConfigurationDigest
 	if selector.mode == configurationModeEnvironment {

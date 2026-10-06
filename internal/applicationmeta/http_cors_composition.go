@@ -11,7 +11,7 @@ type httpCORSCompositionSource struct {
 }
 
 // Keep ownership without evaluating requiredness or cross-field invariants
-// until every template and current-project layer has been applied.
+// until every current-project layer has been applied.
 type httpCORSCompositionSources struct {
 	object, origins, latest *httpCORSCompositionSource
 }

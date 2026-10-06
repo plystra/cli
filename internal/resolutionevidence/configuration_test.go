@@ -25,21 +25,18 @@ func TestSecretReferenceProvenanceDoesNotPublishPrivateEquality(t *testing.T) {
 	for _, local := range []string{"{env: PRIVATE_LOCAL}", "{$remove: true}"} {
 		var first []byte
 		for _, reference := range []string{"{env: PRIVATE_FIRST}", "{env: PRIVATE_SECOND}", "{file: /PRIVATE_FILE}"} {
-			root := manifest(local)
-			composition, err := applicationmeta.Compose([]applicationmeta.Dependency{
-				{ModulePath: "example.com/a", Manifest: manifest("{env: PRIVATE_FIRST}")},
-				{ModulePath: "example.com/b", Manifest: manifest(reference)},
-			}, root, lookup)
+			value := reference
+			if local == "{$remove: true}" {
+				value = local
+			}
+			root := manifest(value)
+			composition, err := applicationmeta.Compose(nil, root, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
 			input := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", composition,
 				[]resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: configurationDecisions(t, root, lookup)}},
-				[]resolutionevidence.ModuleInput{
-					{Path: "example.com/app", Role: resolutionevidence.ModuleRoleCurrent, SourceModulePath: "example.com/app"},
-					{Path: "example.com/a", Role: resolutionevidence.ModuleRoleDependency, Workspace: true, SourceModulePath: "example.com/a"},
-					{Path: "example.com/b", Role: resolutionevidence.ModuleRoleDependency, Workspace: true, SourceModulePath: "example.com/b"},
-				})
+				[]resolutionevidence.ModuleInput{{Path: "example.com/app", Role: resolutionevidence.ModuleRoleCurrent, SourceModulePath: "example.com/app"}})
 			evidence, err := resolutionevidence.Build(input)
 			if err != nil {
 				t.Fatal(err)
@@ -49,8 +46,8 @@ func TestSecretReferenceProvenanceDoesNotPublishPrivateEquality(t *testing.T) {
 				t.Fatal("private equality changed current-Project ownership or removal")
 			}
 			contributors := field.Contributors()
-			if len(contributors) != 3 || contributors[0].Effective() || contributors[1].Effective() || len(contributors[0].Sources()) != 1 || len(contributors[1].Sources()) != 1 || contributors[0].TemplateOrder() != 1 || contributors[1].TemplateOrder() != 2 {
-				t.Fatal("private equality changed ordered template ownership")
+			if len(contributors) != 1 || !contributors[0].Effective() || len(contributors[0].Sources()) != 1 {
+				t.Fatal("private equality changed current-project ownership")
 			}
 			if first != nil && !bytes.Equal(first, evidence.CanonicalJSON()) {
 				t.Fatal("private reference kind, target, or equality changed public provenance")
@@ -60,7 +57,7 @@ func TestSecretReferenceProvenanceDoesNotPublishPrivateEquality(t *testing.T) {
 	}
 }
 
-func TestBuildRecordsConfigurationOwnershipAndReplacementSafeProvenance(t *testing.T) {
+func TestBuildRecordsCurrentProjectConfigurationProvenance(t *testing.T) {
 	t.Parallel()
 
 	lookup := configurationSchemaLookup(t)
@@ -69,10 +66,6 @@ func TestBuildRecordsConfigurationOwnershipAndReplacementSafeProvenance(t *testi
 			ModulePath:    "example.com/platform-a",
 			ModuleVersion: "v1.2.0",
 			Manifest: configurationManifest(t, "plystra.yaml", `
-capabilities: {require: [email.send/v1]}
-interfaces:
-  require: [audit.write/v1]
-  use: {email.send/v1: github.com/acme/smtp.New}
 config:
   example.com/acme/smtp.New:
     host: dependency.private.example
@@ -81,10 +74,6 @@ config:
 		{
 			ModulePath: "example.com/platform-b",
 			Manifest: configurationManifest(t, "plystra.yaml", `
-capabilities: {require: [email.send/v1]}
-interfaces:
-  require: [audit.write/v1]
-  use: {email.send/v1: github.com/acme/smtp.New}
 config:
   example.com/acme/smtp.New:
     host: dependency.private.example
@@ -93,8 +82,6 @@ config:
 	}
 	root := configurationManifest(t, "plystra.yaml", `
 http: {address: ":8080"}
-interfaces:
-  use: {email.send/v1: example.com/app/local.New}
 config:
   example.com/acme/smtp.New:
     host: current.private.example
@@ -110,20 +97,8 @@ config:
 		Decisions: rootDecisions,
 	}}, []resolutionevidence.ModuleInput{
 		{Path: "example.com/app", Role: resolutionevidence.ModuleRoleCurrent, SourceModulePath: "example.com/app"},
-		{
-			Path:             "example.com/platform-a",
-			Role:             resolutionevidence.ModuleRoleDependency,
-			RequiredVersion:  "v1.1.0",
-			SelectedVersion:  "v1.2.0",
-			Direct:           true,
-			SourceModulePath: "corp.example/platform-a",
-			Replacement: &resolutionevidence.ReplacementInput{
-				Kind:       resolutionevidence.ReplacementModule,
-				ModulePath: "corp.example/platform-a",
-				Version:    "v1.2.0",
-			},
-		},
-		{Path: "example.com/platform-b", Role: resolutionevidence.ModuleRoleDependency, Workspace: true, SourceModulePath: "example.com/platform-b"},
+		{Path: "example.com/platform-a", Role: resolutionevidence.ModuleRoleDependency, SelectedVersion: "v1.2.0", SourceModulePath: "example.com/platform-a"},
+		{Path: "example.com/platform-b", Role: resolutionevidence.ModuleRoleDependency, SelectedVersion: "v1.0.0", SourceModulePath: "example.com/platform-b"},
 	})
 	first, err := resolutionevidence.Build(input)
 	if err != nil {
@@ -133,42 +108,21 @@ config:
 		t.Fatal("Build returned invalid evidence")
 	}
 	selection, exists := first.ConfigurationSelection()
-	if !exists || selection.Mode() != generation.ConfigurationModeDefault || selection.Environment() != "" || selection.RootPath() != "plystra.yaml" || selection.SelectedPath() != "plystra.yaml" || selection.SelectedDigest() != selection.RootDigest() || selection.DependencyCompositionDigest() != composition.DependencyDigest() {
+	if !exists || selection.Mode() != generation.ConfigurationModeDefault || selection.Environment() != "" || selection.RootPath() != "plystra.yaml" || selection.SelectedPath() != "plystra.yaml" || selection.SelectedDigest() != selection.RootDigest() {
 		t.Fatalf("configuration selection = %#v, %t", selection, exists)
-	}
-
-	requirement := configurationField(t, first, `capabilities.require["email.send/v1"]`)
-	if !requirement.Effective() || requirement.Owner() != resolutionevidence.ConfigurationOwnerTemplate || requirement.Removed() || requirement.Summary() != "capability" {
-		t.Fatalf("inherited requirement = %#v", requirement)
-	}
-	contributions := requirement.Contributors()
-	if len(contributions) != 2 || contributions[0].Effective() || !contributions[1].Effective() || contributions[0].TemplateOrder() != 1 || contributions[1].TemplateOrder() != 2 || contributions[0].Precedence() != 1 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerTemplate {
-		t.Fatalf("ordered inherited contribution = %#v", contributions)
-	}
-	interfaceRequirement := configurationField(t, first, `interfaces.require["audit.write/v1"]`)
-	if !interfaceRequirement.Effective() || interfaceRequirement.Owner() != resolutionevidence.ConfigurationOwnerTemplate || interfaceRequirement.Summary() != "interface" || len(interfaceRequirement.Contributors()) != 2 || interfaceRequirement.Contributors()[0].Effective() || !interfaceRequirement.Contributors()[1].Effective() {
-		t.Fatalf("inherited Interface requirement = %#v", interfaceRequirement)
-	}
-	implementationChoice := configurationField(t, first, `interfaces.use["email.send/v1"]`)
-	if !implementationChoice.Effective() || implementationChoice.Owner() != resolutionevidence.ConfigurationOwnerRoot || implementationChoice.Summary() != "implementation" || implementationChoice.Removed() || len(implementationChoice.Contributors()) != 3 || implementationChoice.Contributors()[0].Summary() != "implementation" || !implementationChoice.Contributors()[2].Effective() {
-		t.Fatalf("Implementation choice replacement = %#v", implementationChoice)
-	}
-	sources := append(contributions[0].Sources(), contributions[1].Sources()...)
-	if len(sources) != 2 || sources[0].Module() != "corp.example/platform-a" || sources[0].Path() != "plystra.yaml" || sources[0].Kind() != "configuration-value" || sources[1].Module() != "example.com/platform-b" || sources[1].Path() != "plystra.yaml" {
-		t.Fatalf("replacement-safe dependency sources = %#v", sources)
 	}
 
 	host := configurationField(t, first, `config["example.com/acme/smtp.New"]["host"]`)
 	if !host.Effective() || host.Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Summary() != "string" || host.Removed() {
-		t.Fatalf("root replacement = %#v", host)
+		t.Fatalf("current-project host = %#v", host)
 	}
-	contributions = host.Contributors()
-	if len(contributions) != 3 || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerTemplate || contributions[0].Effective() || contributions[1].Effective() || contributions[2].Owner() != resolutionevidence.ConfigurationOwnerRoot || !contributions[2].Effective() || contributions[2].Sources()[0].Path() != "plystra.yaml" {
-		t.Fatalf("root replacement contributions = %#v", contributions)
+	contributions := host.Contributors()
+	if len(contributions) != 1 || !contributions[0].Effective() || contributions[0].Owner() != resolutionevidence.ConfigurationOwnerRoot || len(contributions[0].Sources()) != 1 || contributions[0].Sources()[0].Module() != "example.com/app" || contributions[0].Sources()[0].Path() != "plystra.yaml" {
+		t.Fatalf("current-project configuration contributions = %#v", contributions)
 	}
 	password := configurationField(t, first, `config["example.com/acme/smtp.New"]["password"]`)
 	if password.Summary() != "secret-reference" || password.Owner() != resolutionevidence.ConfigurationOwnerRoot {
-		t.Fatalf("Secret reference evidence = %#v", password)
+		t.Fatalf("secret reference evidence = %#v", password)
 	}
 	address := configurationField(t, first, "http.address")
 	if address.Owner() != resolutionevidence.ConfigurationOwnerRoot || address.Summary() != "string" || len(address.Contributors()) != 1 {
@@ -185,29 +139,25 @@ config:
 	fields[0] = resolutionevidence.ConfigurationField{}
 	contributions = host.Contributors()
 	contributions[0] = resolutionevidence.ConfigurationContribution{}
-	sources = host.Contributors()[0].Sources()
+	sources := host.Contributors()[0].Sources()
 	sources[0] = resolutionevidence.Source{}
-	if configurationField(t, first, host.Path()).Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerTemplate || host.Contributors()[0].Sources()[0].Module() != "corp.example/platform-a" || !first.Valid() {
+	if configurationField(t, first, host.Path()).Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Contributors()[0].Owner() != resolutionevidence.ConfigurationOwnerRoot || host.Contributors()[0].Sources()[0].Module() != "example.com/app" || !first.Valid() {
 		t.Fatal("configuration evidence accessors are not defensive")
 	}
 
 	reversedDependencies := append([]applicationmeta.Dependency(nil), dependencies...)
 	slices.Reverse(reversedDependencies)
 	reversedComposition, err := applicationmeta.Compose(reversedDependencies, root, lookup)
-	if err != nil || reversedComposition.DependencyDigest() == composition.DependencyDigest() {
-		t.Fatalf("reversed Compose = %q, %v", reversedComposition.DependencyDigest(), err)
+	if err != nil {
+		t.Fatalf("reversed Compose: %v", err)
 	}
 	reversedDecisions := append([]applicationmeta.ConfigurationDecision(nil), rootDecisions...)
 	slices.Reverse(reversedDecisions)
-	reversedInput := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", composition, []resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: reversedDecisions}}, append([]resolutionevidence.ModuleInput(nil), input.Modules...))
+	reversedInput := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", reversedComposition, []resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: reversedDecisions}}, append([]resolutionevidence.ModuleInput(nil), input.Modules...))
 	slices.Reverse(reversedInput.Modules)
 	second, err := resolutionevidence.Build(reversedInput)
 	if err != nil || !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) || first.Digest() != second.Digest() {
 		t.Fatalf("input permutation changed evidence:\nfirst: %s\nsecond: %s\nerror: %v", first.CanonicalJSON(), second.CanonicalJSON(), err)
-	}
-	slices.Reverse(reversedInput.Configuration.Templates)
-	if _, err := resolutionevidence.Build(reversedInput); err == nil {
-		t.Fatal("template order changed without matching dependency ancestry evidence")
 	}
 }
 
@@ -268,7 +218,7 @@ config:
 		t.Fatalf("environment selection = %#v, %t", selection, exists)
 	}
 	host := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["host"]`)
-	if host.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || host.Summary() != "string" || len(host.Contributors()) != 3 {
+	if host.Owner() != resolutionevidence.ConfigurationOwnerEnvironment || host.Summary() != "string" || len(host.Contributors()) != 2 {
 		t.Fatalf("environment replacement = %#v", host)
 	}
 	settings := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["settings"]`)
@@ -277,7 +227,6 @@ config:
 	}
 	for _, path := range []string{
 		`config["example.com/acme/smtp.New"]["settings"]["nested"]`,
-		`config["example.com/acme/smtp.New"]["settings"]["nested"]["dependency"]`,
 		`config["example.com/acme/smtp.New"]["settings"]["nested"]["root"]`,
 	} {
 		field := configurationField(t, evidence, path)
@@ -367,20 +316,6 @@ func TestBuildRejectsInvalidConfigurationEvidenceInputs(t *testing.T) {
 		}
 	})
 
-	t.Run("dependency baseline differs from selected model", func(t *testing.T) {
-		dependencyComposition, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/platform", ModuleVersion: "v1.0.0", Manifest: configurationManifest(t, "plystra.yaml", "capabilities: {require: [email.send/v1]}\n")}}, root, lookup)
-		if err != nil {
-			t.Fatalf("Compose dependency: %v", err)
-		}
-		input := valid
-		configuration := *valid.Configuration
-		configuration.DependencyBaseline = dependencyComposition.DependencyBaseline()
-		input.Configuration = &configuration
-		if evidence, err := resolutionevidence.Build(input); err == nil || !strings.Contains(err.Error(), "baseline digest disagrees") || evidence.Valid() {
-			t.Fatalf("Build = %#v, %v", evidence, err)
-		}
-	})
-
 	t.Run("machine-specific current source", func(t *testing.T) {
 		unsafe := configurationManifest(t, "C:/private/plystra.yaml", "http: {address: ':8080'}\n")
 		input := valid
@@ -392,14 +327,19 @@ func TestBuildRejectsInvalidConfigurationEvidenceInputs(t *testing.T) {
 		}
 	})
 
-	t.Run("dependency source is not participating", func(t *testing.T) {
-		dependencyComposition, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/missing", ModuleVersion: "v1.0.0", Manifest: configurationManifest(t, "plystra.yaml", "capabilities: {require: [email.send/v1]}\n")}}, root, lookup)
+	t.Run("ordinary dependency configuration is ignored", func(t *testing.T) {
+		dependency := configurationManifest(t, "plystra.yaml", "capabilities: {require: [email.send/v1]}\n")
+		dependencyComposition, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/missing", ModuleVersion: "v1.0.0", Manifest: dependency}}, root, lookup)
 		if err != nil {
 			t.Fatalf("Compose dependency: %v", err)
 		}
 		input := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", dependencyComposition, []resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: configurationDecisions(t, root, lookup)}}, modules)
-		if evidence, err := resolutionevidence.Build(input); err == nil || !strings.Contains(err.Error(), "does not identify a participating module") || evidence.Valid() {
+		evidence, err := resolutionevidence.Build(input)
+		if err != nil || !evidence.Valid() {
 			t.Fatalf("Build = %#v, %v", evidence, err)
+		}
+		if len(evidence.Requirements()) != 0 {
+			t.Fatalf("ordinary dependency configuration entered evidence: %#v", evidence.Requirements())
 		}
 	})
 }
@@ -420,13 +360,12 @@ func configurationEvidenceInput(
 		selectedDigest = configurationDigest("2")
 	}
 	context, err := generation.NewContext(generation.Input{ConfigurationProvenance: &generation.ConfigurationProvenanceInput{
-		Mode:                        mode,
-		Environment:                 environment,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  rootDigest,
-		SelectedPath:                selectedPath,
-		SelectedDigest:              selectedDigest,
-		DependencyCompositionDigest: composition.DependencyDigest(),
+		Mode:           mode,
+		Environment:    environment,
+		RootPath:       "plystra.yaml",
+		RootDigest:     rootDigest,
+		SelectedPath:   selectedPath,
+		SelectedDigest: selectedDigest,
 	}})
 	if err != nil {
 		t.Fatalf("generation.NewContext: %v", err)
@@ -441,10 +380,8 @@ func configurationEvidenceInput(
 		AliasResolution:    resolveApplicationAliases(t, context),
 		Modules:            append([]resolutionevidence.ModuleInput(nil), modules...),
 		Configuration: &resolutionevidence.ConfigurationInput{
-			Templates:          composition.TemplateLayers(),
-			DependencyBaseline: composition.DependencyBaseline(),
-			Layers:             append([]resolutionevidence.ConfigurationLayerInput(nil), layers...),
-			Effective:          configurationDecisions(t, composition.Manifest(), configurationSchemaLookup(t)),
+			Layers:    append([]resolutionevidence.ConfigurationLayerInput(nil), layers...),
+			Effective: configurationDecisions(t, composition.Manifest(), configurationSchemaLookup(t)),
 		},
 	}
 }

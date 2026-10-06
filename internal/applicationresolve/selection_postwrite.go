@@ -122,7 +122,7 @@ func (s SelectionInputs) ValidatePostwriteSnapshot(ctx context.Context, expected
 			fmt.Errorf("%w: selected configuration does not match the expected postimage", ErrConcurrentChange)))
 	}
 	// Pin the permitted postimages across rediscovery without replacing any of
-	// the original declaration, dependency, template, or workspace evidence.
+	// the original declaration, dependency, or workspace evidence.
 	if s.rootSnapshot.path == s.selectedSnapshot.path {
 		s.rootSnapshot = selected
 	}

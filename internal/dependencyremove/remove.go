@@ -60,7 +60,7 @@ func (r Result) Module() modulelocate.Module { return r.module }
 func (r Result) ModulePath() string { return r.modulePath }
 
 // Remove removes one selected ordinary Go Module with go get <path>@none,
-// recomputes visible declarations and template ancestry, regenerates, tidies,
+// recomputes visible declarations and current-Project configuration, regenerates, tidies,
 // validates, and commits only when the complete Project is consistent. Module
 // metadata and every nested generation-owned change roll back on failure.
 func Remove(ctx context.Context, options Options) (Result, error) {

@@ -15,7 +15,7 @@ import (
 func TestPublicInterfaceTombstonesAcrossSelections(t *testing.T) {
 	removals := "interfaces:\n  require: [email.send/v1]\n  use: {email.send/v1: {$remove: true}, kernel.info/v1: {$remove: true}}\n  policies: {email.send/v1: {$remove: true}}\nhttp: {expose: {email.send/v1: {$remove: true}}}\n"
 	lower := "interfaces:\n  require: [email.send/v1]\n  use: {email.send/v1: example.com/acme/policy/smtp.New}\n  policies: {email.send/v1: {timeout: 5s}}\nhttp: {expose: {email.send/v1: {transport: connect}}}\n"
-	for _, mode := range []string{"default", "environment", "replacement", "template"} {
+	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			root := writeCommandPolicyProject(t)
 			selectedPath := "plystra.yaml"
@@ -28,9 +28,6 @@ func TestPublicInterfaceTombstonesAcrossSelections(t *testing.T) {
 			case "replacement":
 				rootData, selectedPath = lower, "deploy/customer.yaml"
 				selector = []string{"--config", "deploy/customer.yaml"}
-			case "template":
-				relationship, _ := writeCommandTemplate(t, root, "removals", lower)
-				rootData = relationship + removals
 			}
 			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), rootData)
 			if selectedPath != "plystra.yaml" {

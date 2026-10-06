@@ -2,7 +2,6 @@ package applicationgen
 
 import (
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -15,8 +14,6 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 
 	alpha := testDormantImplementationSelection("alpha.read/v1", "alpha")
 	beta := testDormantImplementationSelection("beta.read/v1", "beta")
-	paths := []string{alpha.selectionPath, beta.selectionPath}
-
 	normalized, err := normalizeDormantImplementationSelections([]DormantImplementationSelection{beta, alpha})
 	if err != nil {
 		t.Fatalf("normalizeDormantImplementationSelections: %v", err)
@@ -24,7 +21,7 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 	if len(normalized) != 2 || normalized[0].interfaceID != alpha.interfaceID || normalized[1].interfaceID != beta.interfaceID {
 		t.Fatalf("normalized dormant selections = %#v", normalized)
 	}
-	if err := validateDormantImplementationSelections(normalized, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml", paths); err != nil {
+	if err := validateDormantImplementationSelections(normalized, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml"); err != nil {
 		t.Fatalf("validate normalized dormant selections: %v", err)
 	}
 	firstDigest, err := dormantImplementationSelectionsDigest(normalized)
@@ -41,60 +38,28 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 	}
 
 	reordered := []DormantImplementationSelection{beta, alpha}
-	if err := validateDormantImplementationSelections(reordered, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml", paths); err == nil || !strings.Contains(err.Error(), "canonically ordered") {
+	if err := validateDormantImplementationSelections(reordered, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml"); err == nil || !strings.Contains(err.Error(), "canonically ordered") {
 		t.Fatalf("reordered dormant selections error = %v", err)
 	}
 	if _, err := normalizeDormantImplementationSelections([]DormantImplementationSelection{alpha, alpha}); err == nil || !strings.Contains(err.Error(), "repeats Interface") {
 		t.Fatalf("duplicate dormant selections error = %v", err)
 	}
 
-	withHistory := beta
-	withHistory.contributions = append([]DormantSelectionContribution{
-		{
-			owner:         string(resolutionevidence.ConfigurationOwnerTemplate),
-			precedence:    1,
-			templateOrder: 1,
-			digest:        "sha256:" + strings.Repeat("1", 64),
-			summary:       "redacted",
-			sources: []DormantSelectionSource{{
-				module: "example.com/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1,
-			}},
-		},
-	}, withHistory.contributions...)
-	if err := validateDormantImplementationSelection(withHistory); err != nil {
-		t.Fatalf("validate dormant selection composition history: %v", err)
-	}
-	slices.Reverse(withHistory.contributions)
-	if err := validateDormantImplementationSelection(withHistory); err == nil || !strings.Contains(err.Error(), "canonically ordered") {
-		t.Fatalf("reordered dormant contributions error = %v", err)
-	}
-
 	withRemoval := beta
 	withRemoval.selectionOwner = string(resolutionevidence.ConfigurationOwnerEnvironment)
 	withRemoval.contributions = []DormantSelectionContribution{
 		{
-			owner:         string(resolutionevidence.ConfigurationOwnerTemplate),
-			precedence:    1,
-			templateOrder: 1,
-			digest:        "sha256:" + strings.Repeat("1", 64),
-			summary:       "redacted",
-			sources: []DormantSelectionSource{{
-				module: "example.com/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1,
-			}},
-		},
-		{
 			owner:      string(resolutionevidence.ConfigurationOwnerRoot),
-			precedence: 2,
-			digest:     "sha256:" + strings.Repeat("2", 64),
-			summary:    string(applicationmeta.ConfigurationSummaryRemoval),
-			removed:    true,
+			precedence: 1,
+			digest:     "sha256:" + strings.Repeat("1", 64),
+			summary:    "redacted",
 			sources: []DormantSelectionSource{{
-				module: "example.com/app", path: "plystra.yaml", kind: "configuration-removal", line: 1, column: 1,
+				module: "example.com/app", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1,
 			}},
 		},
 		{
 			owner:      string(resolutionevidence.ConfigurationOwnerEnvironment),
-			precedence: 3,
+			precedence: 2,
 			digest:     withRemoval.selectionDigest,
 			summary:    string(applicationmeta.ConfigurationSummaryImplementation),
 			effective:  true,
@@ -108,13 +73,12 @@ func TestDormantImplementationSelectionsNormalizeAndRejectNoncanonicalRecords(t 
 		ConfigurationModeEnvironment,
 		"plystra.yaml",
 		"plystra.production.yaml",
-		[]string{},
 	); err != nil {
-		t.Fatalf("validate dormant selection with removal history: %v", err)
+		t.Fatalf("validate dormant selection with root and overlay history: %v", err)
 	}
 	restored := restoreDormantImplementationSelections(dormantImplementationSelectionWires([]DormantImplementationSelection{withRemoval}))
-	if !reflect.DeepEqual(restored, []DormantImplementationSelection{withRemoval}) || !restored[0].contributions[1].removed {
-		t.Fatalf("dormant selection removal round trip = %#v", restored)
+	if !reflect.DeepEqual(restored, []DormantImplementationSelection{withRemoval}) {
+		t.Fatalf("dormant selection overlay round trip = %#v", restored)
 	}
 
 	duplicateSource := alpha
@@ -137,14 +101,14 @@ func TestEmptyDormantImplementationSelectionRecordIsCanonical(t *testing.T) {
 	if err != nil || normalized == nil || len(normalized) != 0 {
 		t.Fatalf("normalize empty dormant selections = %#v, %v", normalized, err)
 	}
-	if err := validateDormantImplementationSelections(normalized, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml", []string{}); err != nil {
+	if err := validateDormantImplementationSelections(normalized, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml"); err != nil {
 		t.Fatalf("validate empty dormant selections: %v", err)
 	}
 	digest, err := dormantImplementationSelectionsDigest(normalized)
 	if err != nil || digest != "sha256:f781509b1c7204b29c108dddeaeba732605c9ea41e0412205c03777d995e6681" {
 		t.Fatalf("empty dormant selection digest = %q, %v", digest, err)
 	}
-	if err := validateDormantImplementationSelections(nil, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml", []string{}); err == nil || !strings.Contains(err.Error(), "must be an array") {
+	if err := validateDormantImplementationSelections(nil, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml"); err == nil || !strings.Contains(err.Error(), "must be an array") {
 		t.Fatalf("missing dormant selection array error = %v", err)
 	}
 }
@@ -195,7 +159,7 @@ func testDormantImplementationSelection(interfaceID, packageName string) Dormant
 		selectionOwner:           string(resolutionevidence.ConfigurationOwnerRoot),
 		contributions: []DormantSelectionContribution{{
 			owner:      string(resolutionevidence.ConfigurationOwnerRoot),
-			precedence: 2,
+			precedence: 1,
 			digest:     digest,
 			summary:    string(applicationmeta.ConfigurationSummaryImplementation),
 			effective:  true,

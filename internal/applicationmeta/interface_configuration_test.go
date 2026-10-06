@@ -12,7 +12,7 @@ import (
 func TestParseNormalizesTypedInterfaceConfiguration(t *testing.T) {
 	t.Parallel()
 
-	manifest, err := applicationmeta.ParseSource("deploy/production.yaml", []byte(`
+	manifest, err := applicationmeta.ParseOverlaySource("deploy/production.yaml", []byte(`
 interfaces:
   require:
     add: [email.send/v1, audit.write/v1]
@@ -74,7 +74,7 @@ interfaces:
 	}
 	for _, decision := range decisions {
 		expected, exists := want[decision.Path()]
-		if !exists || decision.Summary() != expected.summary || decision.Removed() != expected.removed || decision.Source() != "deploy/production.yaml" || !decision.DependencyComposable() || decision.Digest() == "" {
+		if !exists || decision.Summary() != expected.summary || decision.Removed() != expected.removed || decision.Source() != "deploy/production.yaml" || !decision.ResolutionRelevant() || decision.Digest() == "" {
 			t.Fatalf("ConfigurationDecision = %#v, expected %#v", decision, expected)
 		}
 	}
@@ -83,7 +83,7 @@ interfaces:
 func TestParsePreservesIntrinsicImplementationChoiceForResolutionValidation(t *testing.T) {
 	t.Parallel()
 
-	manifest, err := applicationmeta.ParseSource("deploy/customer.yaml", []byte(`interfaces:
+	manifest, err := applicationmeta.ParseOverlaySource("deploy/customer.yaml", []byte(`interfaces:
   use:
     kernel.health/v1: example.com/acme/health.New
     kernel.info/v1: {$remove: true}

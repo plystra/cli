@@ -20,7 +20,7 @@ func TestPublicInterfaceRequirementCompleteSets(t *testing.T) {
 			{"sparse removal", "", "interfaces: {require: {remove: [missing.read/v1]}}", 1},
 			{"sparse over complete", "interfaces: {require: []}", "interfaces: {require: {add: [email.send/v1]}}", 1},
 		} {
-			if test.name == "sparse over complete" && mode != "environment" {
+			if (test.name == "sparse over complete" || test.name == "sparse removal") && mode != "environment" {
 				continue
 			}
 			t.Run(mode+"/"+test.name, func(t *testing.T) {
@@ -30,17 +30,20 @@ func TestPublicInterfaceRequirementCompleteSets(t *testing.T) {
 				writeCommandFile(t, filepath.Join(dependency, "plystra.yaml"), "interfaces: {require: [missing.read/v1, email.send/v1]}\n")
 				mod := string(readCommandFile(t, root, "go.mod"))
 				writeCommandFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/requirements v1.0.0\nreplace example.com/requirements => "+filepath.ToSlash(dependency)+"\n")
-				inventory := "template: example.com/requirements\n"
-				rootData := inventory + test.selected + "\n"
+				lower := test.lower
+				if test.name == "sparse removal" {
+					lower = "interfaces: {require: [missing.read/v1, email.send/v1]}"
+				}
+				rootData := test.selected + "\n"
 				selectedData, selectedPath := rootData, "plystra.yaml"
 				var selector []string
 				switch mode {
 				case "environment":
-					rootData = inventory + test.lower + "\n"
+					rootData = lower + "\n"
 					selectedData, selectedPath = test.selected+"\n", "plystra.production.yaml"
 					selector = []string{"--env", "production"}
 				case "replacement":
-					rootData = inventory + "interfaces: {require: [excluded.root/v1]}\n"
+					rootData = "interfaces: {require: [excluded.root/v1]}\n"
 					selectedData, selectedPath = test.selected+"\n", "deploy/customer.yaml"
 					selector = []string{"--config", selectedPath}
 				}
@@ -59,25 +62,19 @@ func TestPublicInterfaceRequirementCompleteSets(t *testing.T) {
 				if len(bindings) != test.bindings {
 					t.Fatalf("effective bindings = %#v, want %d", bindings, test.bindings)
 				}
-				if test.bindings == 1 && test.name != "sparse removal" {
+				if test.bindings == 1 {
 					for _, source := range bindings[0].RootSources() {
 						if strings.Contains(source, "example.com/requirements") {
-							t.Fatalf("suppressed template requirement retained effective ownership: %s", source)
+							t.Fatalf("dependency requirement retained effective ownership: %s", source)
 						}
 					}
 				}
 				before := commandTree(t, root)
-				for _, invocation := range [][]string{{"generate", "--check"}, {"check"}, {"inspect", "interfaces", "--format", "json"}, {"inspect", "configuration", "--format", "json"}, {"explain", "config", `interfaces.require["missing.read/v1"]`, "--format", "json"}} {
+				for _, invocation := range [][]string{{"generate", "--check"}, {"check"}, {"inspect", "interfaces", "--format", "json"}, {"inspect", "configuration", "--format", "json"}} {
 					args := append(append([]string(nil), invocation...), selector...)
 					code, stdout, stderr := runCommand(t, args, root, commandGoEnvironment())
 					if code != 0 {
 						t.Fatalf("%v = %d, %q, %q", args, code, stdout, stderr)
-					}
-					if invocation[0] == "inspect" && invocation[1] == "configuration" && test.name != "sparse removal" {
-						document := decodeInspectGraphCommandEnvelope(t, stdout)
-						if _, exists := findInspectGraphEdge(document.Result.Edges, "suppresses-configuration", "configuration-field:interfaces.require", `configuration-field:interfaces.require["missing.read/v1"]`, "ancestor-replacement"); !exists {
-							t.Fatal("configuration graph omits complete-set suppression")
-						}
 					}
 					if !reflect.DeepEqual(commandTree(t, root), before) {
 						t.Fatalf("%v changed authored or generated files", args)

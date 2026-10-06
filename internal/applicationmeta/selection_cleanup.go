@@ -139,7 +139,7 @@ func removeSelectionLeaf(root *yaml.Node, path []string, tombstone bool) (bool, 
 	if isRemovalMapping(value) {
 		return false, nil
 	}
-	if err := setKeyedMaintenanceDecision(root, path[:len(path)-1], key, removalYAMLNode()); err != nil {
+	if err := setKeyedConfigurationDecision(root, path[:len(path)-1], key, configurationRemovalYAMLNode()); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -168,7 +168,7 @@ func editSelectionDocument(data []byte, overlay bool, operation error, edit func
 	if !changed {
 		return append([]byte(nil), data...), false, nil
 	}
-	updated, err := encodeMaintainedDocument(root)
+	updated, err := encodeConfigurationDocument(root)
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: cannot encode application document", operation)
 	}

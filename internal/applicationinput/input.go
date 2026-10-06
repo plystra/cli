@@ -41,26 +41,19 @@ var (
 	ErrIntrinsicProvider = errors.New("plugin provides intrinsic Capability")
 )
 
-// SourceContext identifies the current and dependency Project modules used to
-// turn parsed configuration references into stable typed requirement sources.
+// SourceContext identifies the current Project and ordinary dependency module
+// identities used to turn parsed configuration references into stable typed
+// requirement sources. Ordinary dependency configuration is never included.
 type SourceContext struct {
-	CurrentModulePath    string
-	Dependencies         []DependencySource
-	DependencyProvenance []DependencyProvenance
-	CurrentProjectPaths  []string
+	CurrentModulePath   string
+	Dependencies        []DependencySource
+	CurrentProjectPaths []string
 }
 
 // DependencySource identifies one effective-graph dependency Project version.
 type DependencySource struct {
 	ModulePath string
 	Version    string
-}
-
-// DependencyProvenance identifies every dependency declaration that matches
-// one effective resolution field after current-project replacement.
-type DependencyProvenance struct {
-	Path    string
-	Sources []string
 }
 
 // ConfigurationSource is one typed stable Project-document location derived
@@ -77,8 +70,8 @@ type ConfigurationSource struct {
 // String returns the bounded stable configuration reference.
 func (s ConfigurationSource) String() string { return s.Reference }
 
-// ConfigurationSources resolves every effective current- or dependency-
-// Project document that contributes one normalized configuration field.
+// ConfigurationSources resolves the current Project document that owns one
+// normalized configuration field.
 func ConfigurationSources(input SourceContext, reference, field string) ([]ConfigurationSource, error) {
 	if err := validateSourceContext(input); err != nil {
 		return nil, fmt.Errorf("source context: %v", err)
@@ -315,29 +308,6 @@ func validateSourceContext(input SourceContext) error {
 		}
 		seen[dependency.ModulePath] = struct{}{}
 	}
-	seenProvenance := make(map[string]struct{}, len(input.DependencyProvenance))
-	for index, provenance := range input.DependencyProvenance {
-		if provenance.Path == "" || strings.ContainsAny(provenance.Path, "\x00\r\n") {
-			return fmt.Errorf("dependency_provenance[%d].path is invalid", index)
-		}
-		if _, duplicate := seenProvenance[provenance.Path]; duplicate {
-			return fmt.Errorf("dependency_provenance[%d] repeats path %q", index, provenance.Path)
-		}
-		if len(provenance.Sources) == 0 {
-			return fmt.Errorf("dependency_provenance[%d].sources is empty", index)
-		}
-		seenSources := make(map[string]struct{}, len(provenance.Sources))
-		for sourceIndex, source := range provenance.Sources {
-			if source == "" || len(source) > maximumSourceSize || !utf8.ValidString(source) || strings.ContainsAny(source, "\x00\r\n") {
-				return fmt.Errorf("dependency_provenance[%d].sources[%d] is invalid", index, sourceIndex)
-			}
-			if _, duplicate := seenSources[source]; duplicate {
-				return fmt.Errorf("dependency_provenance[%d].sources[%d] is duplicated", index, sourceIndex)
-			}
-			seenSources[source] = struct{}{}
-		}
-		seenProvenance[provenance.Path] = struct{}{}
-	}
 	seenCurrentPaths := make(map[string]struct{}, len(input.CurrentProjectPaths))
 	for index, currentPath := range input.CurrentProjectPaths {
 		if currentPath == "" || strings.ContainsAny(currentPath, "\x00\r\n") {
@@ -371,78 +341,19 @@ func configurationRequirementSources(input SourceContext, reference, field strin
 }
 
 func configurationSources(input SourceContext, reference, field string) ([]ConfigurationSource, error) {
-	references := make([]string, 0, 2)
-	for _, currentPath := range input.CurrentProjectPaths {
-		if currentPath == field {
-			references = append(references, reference)
-			break
-		}
+	if len(input.CurrentProjectPaths) != 0 && !containsString(input.CurrentProjectPaths, field) {
+		return nil, fmt.Errorf("configuration field %s has no current-Project source", field)
 	}
-	currentSourceCount := len(references)
-	for _, provenance := range input.DependencyProvenance {
-		if provenance.Path == field {
-			references = append(references, provenance.Sources...)
-			break
-		}
+	source, err := configurationSource(input, reference, field)
+	if err != nil {
+		return nil, err
 	}
-	if len(references) == 0 {
-		references = append(references, reference)
-		currentSourceCount = 1
-	}
-	values := make([]ConfigurationSource, 0, len(references))
-	for index, value := range references {
-		dependencySource := index >= currentSourceCount
-		source, err := configurationSource(input, value, field, dependencySource)
-		if err != nil {
-			return nil, err
-		}
-		values = append(values, source)
-	}
-	return values, nil
+	return []ConfigurationSource{source}, nil
 }
 
 func configurationProviderChoiceSources(input SourceContext, reference, field string) ([]providerresolution.ChoiceSource, error) {
-	for _, currentPath := range input.CurrentProjectPaths {
-		if currentPath != field {
-			continue
-		}
-		source, err := configurationProviderChoiceSource(input, reference, field, providerresolution.ChoiceSourceCurrentProject)
-		if err != nil {
-			return nil, err
-		}
-		return []providerresolution.ChoiceSource{source}, nil
-	}
-	for _, provenance := range input.DependencyProvenance {
-		if provenance.Path != field {
-			continue
-		}
-		values := make([]providerresolution.ChoiceSource, 0, len(provenance.Sources))
-		for _, value := range provenance.Sources {
-			source, err := configurationProviderChoiceSource(input, value, field, providerresolution.ChoiceSourceTemplate)
-			if err != nil {
-				return nil, err
-			}
-			if source.ModulePath == input.CurrentModulePath {
-				return nil, fmt.Errorf("dependency source %q does not identify a discovered dependency Project", value)
-			}
-			values = append(values, source)
-		}
-		sort.Slice(values, func(left, right int) bool {
-			if values[left].ModulePath != values[right].ModulePath {
-				return values[left].ModulePath < values[right].ModulePath
-			}
-			if values[left].Path != values[right].Path {
-				return values[left].Path < values[right].Path
-			}
-			if values[left].Line != values[right].Line {
-				return values[left].Line < values[right].Line
-			}
-			if values[left].Column != values[right].Column {
-				return values[left].Column < values[right].Column
-			}
-			return values[left].Reference < values[right].Reference
-		})
-		return values, nil
+	if len(input.CurrentProjectPaths) != 0 && !containsString(input.CurrentProjectPaths, field) {
+		return nil, fmt.Errorf("provider choice %s has no current-Project source", field)
 	}
 	source, err := configurationProviderChoiceSource(input, reference, field, providerresolution.ChoiceSourceCurrentProject)
 	if err != nil {
@@ -452,7 +363,7 @@ func configurationProviderChoiceSources(input SourceContext, reference, field st
 }
 
 func configurationProviderChoiceSource(input SourceContext, reference, field string, kind providerresolution.ChoiceSourceKind) (providerresolution.ChoiceSource, error) {
-	source, err := configurationSource(input, reference, field, kind == providerresolution.ChoiceSourceTemplate)
+	source, err := configurationSource(input, reference, field)
 	if err != nil {
 		return providerresolution.ChoiceSource{}, err
 	}
@@ -466,42 +377,31 @@ func configurationProviderChoiceSource(input SourceContext, reference, field str
 	}, nil
 }
 
-func configurationSource(input SourceContext, reference, field string, templateSource bool) (ConfigurationSource, error) {
+func configurationSource(input SourceContext, reference, field string) (ConfigurationSource, error) {
 	document, err := configurationDocument(reference, field)
 	if err != nil {
 		return ConfigurationSource{}, err
 	}
-	modulePath := input.CurrentModulePath
 	relativePath := document
-	if templateSource {
-		matched := false
-		for _, dependency := range input.Dependencies {
-			version := dependency.Version
-			if version == "" {
-				version = "workspace"
-			}
-			prefix := dependency.ModulePath + "@" + version + "/"
-			if dependency.ModulePath != input.CurrentModulePath && strings.HasPrefix(document, prefix) {
-				modulePath = dependency.ModulePath
-				relativePath = strings.TrimPrefix(document, prefix)
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return ConfigurationSource{}, fmt.Errorf("template source %q does not identify a discovered dependency Project", reference)
-		}
-	}
 	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath || relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") || strings.Contains(relativePath, "/../") || strings.Contains(relativePath, "\\") || strings.ContainsAny(relativePath, "\x00\r\n") {
 		return ConfigurationSource{}, fmt.Errorf("source %q has an unsafe Project-relative document", reference)
 	}
 	return ConfigurationSource{
 		Reference:  reference,
-		ModulePath: modulePath,
+		ModulePath: input.CurrentModulePath,
 		Path:       relativePath,
 		Line:       1,
 		Column:     1,
 	}, nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func configurationDocument(reference, field string) (string, error) {

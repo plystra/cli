@@ -83,12 +83,12 @@ func TestAddHTTPExposureSortsAndIsByteIdempotent(t *testing.T) {
 	t.Parallel()
 
 	input := []byte("http:\n  address: \":8080\"\n  expose: {records.write/v1: {transport: connect}, records.read/v1: {transport: connect}}\n")
-	updated, changed, err := applicationmeta.AddHTTPExposure(input, mustExposureID(t, "kernel.health/v1"))
+	updated, changed, err := applicationmeta.AddHTTPExposureOverlay(input, mustExposureID(t, "kernel.health/v1"))
 	if err != nil || !changed {
-		t.Fatalf("AddHTTPExposure = changed %t, %v", changed, err)
+		t.Fatalf("AddHTTPExposureOverlay = changed %t, %v", changed, err)
 	}
 	wantOrder := []string{"kernel.health/v1", "records.read/v1", "records.write/v1"}
-	manifest, err := applicationmeta.Parse(updated)
+	manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", updated)
 	if err != nil || len(manifest.HTTPExposures()) != len(wantOrder) {
 		t.Fatalf("Parse(updated) = %#v, %v", manifest.HTTPExposures(), err)
 	}
@@ -118,9 +118,9 @@ http:
     kernel.health/v1: {$remove: true}
     records.read/v1: {$remove: true}
 `)
-	updated, changed, err := applicationmeta.AddHTTPExposure(input, mustExposureID(t, "kernel.health/v1"))
+	updated, changed, err := applicationmeta.AddHTTPExposureOverlay(input, mustExposureID(t, "kernel.health/v1"))
 	if err != nil || !changed {
-		t.Fatalf("AddHTTPExposure = changed %t, %v", changed, err)
+		t.Fatalf("AddHTTPExposureOverlay = changed %t, %v", changed, err)
 	}
 	for _, retained := range [][]byte{
 		[]byte("# Environment-specific exposure decisions."),
@@ -132,7 +132,7 @@ http:
 			t.Fatalf("updated sparse edit omits %q:\n%s", retained, updated)
 		}
 	}
-	manifest, err := applicationmeta.Parse(updated)
+	manifest, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", updated)
 	if err != nil || len(manifest.HTTPExposures()) != 2 {
 		t.Fatalf("Parse(updated) exposures = %#v, %v", manifest.HTTPExposures(), err)
 	}
@@ -173,7 +173,7 @@ capabilities:
 	if err != nil || len(manifest.HTTPExposures()) != 1 || manifest.HTTPExposures()[0].ID().String() != "kernel.health/v1" {
 		t.Fatalf("ParseOverlaySource(updated) exposures = %#v, %v", manifest.HTTPExposures(), err)
 	}
-	if _, err := applicationmeta.ParseSource("plystra.production.yaml", input); err != nil {
+	if _, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", input); err != nil {
 		t.Fatalf("partial reusable CORS must parse before composition: %v", err)
 	}
 }

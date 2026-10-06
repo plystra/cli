@@ -55,7 +55,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 }
 
 func selectResourceProvider(inputs applicationresolve.SelectionInputs, original []byte, target string, constructor constructorsymbol.Symbol, overlay bool) ([]byte, error) {
-	instances, previousBindings, err := applicationmeta.ResourceSelectionIdentities(append(inputs.LowerLayers(), inputs.SelectedManifest()))
+	instances, previousBindings, err := applicationmeta.ResourceSelectionIdentities(inputs.CurrentLayers())
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func cleanupImplementationOwners(inputs applicationresolve.SelectionInputs, befo
 	}
 	var configurations []applicationmeta.ConstructorConfigurationRemoval
 	seen := make(map[constructorsymbol.Symbol]bool)
-	layers := append(inputs.LowerLayers(), inputs.SelectedManifest())
+	layers := inputs.CurrentLayers()
 	for _, layer := range layers {
 		for _, configured := range layer.Configurations() {
 			constructor := configured.Constructor()
@@ -160,7 +160,7 @@ func removeOwnedPaths(inputs applicationresolve.SelectionInputs, updated []byte,
 		cleanup = applicationmeta.CleanupSelectionOwnershipOverlay
 	}
 	// Existing selected-layer exclusions remain authored intent even when a
-	// nearer template also suppresses the same path. Probe only local values.
+	// lower layer also suppresses the same path. Probe only local values.
 	localConfigurations := make([]applicationmeta.ConstructorConfigurationRemoval, 0, len(configurations))
 	for _, removal := range configurations {
 		if _, exists := inputs.SelectedManifest().Configuration(removal.Constructor); exists {
@@ -172,7 +172,7 @@ func removeOwnedPaths(inputs applicationresolve.SelectionInputs, updated []byte,
 		return nil, err
 	}
 	// Test the exact local deletions against the lower layers. Only paths that
-	// would reappear need tombstones; unrelated baseline values stay unmaterialized.
+	// would reappear need tombstones; unrelated lower-layer values stay unmaterialized.
 	lower, err := inputs.ComposeCandidate(deleted)
 	if err != nil {
 		return nil, err

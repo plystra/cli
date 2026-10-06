@@ -1,5 +1,5 @@
 // Package projectcheck owns the reusable read-only Plystra Project validation
-// performed by the public check command and qualified-template creation.
+// performed by the public check command and Project creation.
 package projectcheck
 
 import (
@@ -29,8 +29,8 @@ type Options struct {
 	Environment       []string
 }
 
-// Result identifies the checked Project and any read-only configuration or
-// generated-output drift. Go tests run only when that state is current.
+// Result identifies the checked Project and any read-only generated-output
+// drift. Go tests run only when that state is current.
 type Result struct {
 	generation applicationgenerate.Result
 }
@@ -41,20 +41,10 @@ func (r Result) Module() modulelocate.Module { return r.generation.Module() }
 // Report returns deterministic generated-output drift.
 func (r Result) Report() generatedfiles.Report { return r.generation.Report() }
 
-// ConfigurationChanged reports dependency-composition drift in the selected
-// current-project document.
-func (r Result) ConfigurationChanged() bool { return r.generation.ConfigurationChanged() }
-
-// ConfigurationMaintenancePath returns the Project-relative document whose
-// dependency-derived baseline is stale.
-func (r Result) ConfigurationMaintenancePath() string {
-	return r.generation.ConfigurationMaintenancePath()
-}
-
-// Clean reports whether Project configuration and generated output are
-// current. A clean result has also passed read-only Go package tests.
+// Clean reports whether generated output is current. A clean result has also
+// passed read-only Go package tests.
 func (r Result) Clean() bool {
-	return !r.ConfigurationChanged() && r.Report().Clean()
+	return r.Report().Clean()
 }
 
 // Check resolves and compares the selected application without mutation. A

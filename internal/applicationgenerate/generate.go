@@ -129,9 +129,7 @@ type Result struct {
 	module                  modulelocate.Module
 	report                  generatedfiles.Report
 	checked                 bool
-	configurationChanged    bool
 	configurationPath       string
-	maintenancePath         string
 	interfaceComparison     interfacecompatibility.Comparison
 	metadataComparison      interfacecompatibility.MetadataComparison
 	transportComparison     interfacecompatibility.TransportComparison
@@ -149,19 +147,9 @@ func (r Result) Report() generatedfiles.Report { return r.report }
 // Checked reports whether the operation was the read-only check mode.
 func (r Result) Checked() bool { return r.checked }
 
-// ConfigurationChanged reports dependency-composition drift in the maintained
-// current-project document. Check mode reports it without mutation; install
-// mode reports that the planned three-way update was committed with generated
-// output.
-func (r Result) ConfigurationChanged() bool { return r.configurationChanged }
-
 // ConfigurationPath returns the stable Project-relative current-project
 // document selected for this operation.
 func (r Result) ConfigurationPath() string { return r.configurationPath }
-
-// ConfigurationMaintenancePath returns the dependency-baseline-owned document
-// that changed or would change during this operation.
-func (r Result) ConfigurationMaintenancePath() string { return r.maintenancePath }
 
 // InterfaceShapeComparison returns the authored Interface Go-shape
 // differences observed against the prior owned compatibility baseline.
@@ -230,9 +218,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			module:                  prepared.resolved.Module(),
 			report:                  report,
 			checked:                 true,
-			configurationChanged:    prepared.resolved.ConfigurationMaintenance().Changed(),
 			configurationPath:       prepared.resolved.ConfigurationSelection().Path(),
-			maintenancePath:         prepared.resolved.ConfigurationMaintenancePath(),
 			interfaceComparison:     prepared.interfaceComparison,
 			metadataComparison:      prepared.metadataComparison,
 			transportComparison:     prepared.transportComparison,
@@ -256,14 +242,6 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
-	maintenance := prepared.resolved.ConfigurationMaintenance()
-	if maintenance.Changed() {
-		additional = append(additional, atomicfs.Write{
-			Path:         prepared.resolved.ConfigurationMaintenancePath(),
-			Data:         maintenance.Data(),
-			ExpectedData: prepared.resolved.ConfigurationMaintenanceSource(),
-		})
-	}
 	install := generatedfiles.InstallWithWrites
 	if options.RejectUnexpected {
 		install = generatedfiles.InstallStrictWithWrites
@@ -277,20 +255,10 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			if err != nil {
 				return fmt.Errorf("confirm generation inputs: %w", err)
 			}
-			if prepared.fingerprint != confirmed.fingerprint || !bytes.Equal(prepared.baseline, confirmed.baseline) || len(prepared.resolved.ChangedDependencyConfigurationModules(confirmed.resolved)) != 0 {
+			if prepared.fingerprint != confirmed.fingerprint || !bytes.Equal(prepared.baseline, confirmed.baseline) {
 				return concurrentChangeSourceError(
 					generationFingerprintChangeSources(prepared, confirmed),
 					fmt.Errorf("%w: resolved application or generated output no longer matches the planned snapshot", ErrConcurrentChange),
-				)
-			}
-			if confirmed.resolved.ConfigurationMaintenance().Changed() {
-				return concurrentChangeSourceError(
-					[]ConcurrentChangeSource{concurrentChangeSource(
-						confirmed.resolved.Module().ModulePath(),
-						confirmed.resolved.ConfigurationMaintenancePath(),
-						"configuration-declaration",
-					)},
-					fmt.Errorf("%w: dependency-derived Project configuration remains stale after installation", ErrConcurrentChange),
 				)
 			}
 			if err := validateRuntimeRequirements(confirmed.resolved, confirmed.runtimeRequirements); err != nil {
@@ -317,9 +285,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	return Result{
 		module:                  prepared.resolved.Module(),
 		report:                  report,
-		configurationChanged:    maintenance.Changed(),
 		configurationPath:       prepared.resolved.ConfigurationSelection().Path(),
-		maintenancePath:         prepared.resolved.ConfigurationMaintenancePath(),
 		interfaceComparison:     prepared.interfaceComparison,
 		metadataComparison:      prepared.metadataComparison,
 		transportComparison:     prepared.transportComparison,
@@ -367,7 +333,6 @@ func concurrentSourcesForPaths(resolved applicationresolve.Result, paths []strin
 	}
 	for _, sourcePath := range []string{
 		resolved.ConfigurationSelection().Path(),
-		resolved.ConfigurationMaintenancePath(),
 	} {
 		sourcePath = path.Clean(strings.ReplaceAll(sourcePath, `\`, "/"))
 		if sourcePath != "" && sourcePath != "." {
@@ -413,9 +378,6 @@ func generationFingerprintChangeSources(prepared, confirmed preparedGeneration) 
 		for _, sourcePath := range []string{preparedSelection.Path(), confirmedSelection.Path()} {
 			sources = append(sources, concurrentChangeSource(modulePath, sourcePath, "configuration-declaration"))
 		}
-	}
-	for _, dependency := range prepared.resolved.ChangedDependencyConfigurationModules(confirmed.resolved) {
-		sources = append(sources, concurrentChangeSource(dependency, "plystra.yaml", "configuration-declaration"))
 	}
 	for _, sourcePath := range changedGeneratedOutputPaths(prepared.output, confirmed.output) {
 		sources = append(sources, concurrentChangeSource(modulePath, sourcePath, "generated-artifact"))
@@ -613,12 +575,24 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior Protobuf wire history: %w", err))
 	}
+	previousWireMapDigest := ""
+	previousManifest, previousManifestExists, err := generatedfiles.ReadApplicationManifestRecovery(resolved.Module().Path())
+	if err != nil {
+		return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("read prior generated application manifest: %w", err))
+	}
+	if previousManifestExists {
+		previousProvenance, err := applicationgen.DecodeManifestProvenance(previousManifest)
+		if err != nil {
+			return preparedGeneration{}, generatedManifestSourceError(resolved.Module().ModulePath(), fmt.Errorf("decode prior generated application manifest: %w", err))
+		}
+		previousWireMapDigest = previousProvenance.ProtobufWireMapDigest()
+	}
 	wireMap, err := protobufwiremap.Build(
 		protobufProjection,
 		interfaceProtobufModel,
 		previousWireMap,
 		previousWireMapExists,
-		resolved.PreviousManifestProvenance().ProtobufWireMapDigest(),
+		previousWireMapDigest,
 	)
 	if err != nil {
 		return preparedGeneration{}, protobufWireHistorySourceError(resolved.Module().ModulePath(), err)
@@ -718,7 +692,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		RootDigest:                       resolved.RootConfigurationDigest(),
 		SelectedPath:                     selection.Path(),
 		SelectedDigest:                   selection.Digest(),
-		CurrentProjectPaths:              resolved.ConfigurationMaintenance().LocalPaths(),
 		DormantImplementationSelections:  dormantSelections,
 		DormantConstructorConfigurations: dormantConfigurations,
 		Composition:                      resolved.Composition(),
@@ -726,7 +699,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		ApplicationModelDigest:           modelDigest,
 		InterfaceProvenance:              interfaceProvenance,
 		TransportToolchain:               toolchain,
-		Previous:                         resolved.PreviousManifestProvenance(),
 	})
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("construct application manifest provenance: %w", err)
@@ -741,15 +713,9 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 			constructorConfigurations = append(constructorConfigurations, input)
 		}
 	}
-	templates, err := resolved.RuntimeTemplates()
-	if err != nil {
-		return preparedGeneration{}, err
-	}
 	output, err := applicationgen.Render(applicationgen.Options{
 		ConstructorInventory:      resolved.Implementations().Implementations(),
 		ResourceInventory:         resolved.ResourceProviders().Providers(),
-		Template:                  resolved.Template(),
-		Templates:                 templates,
 		ModulePath:                resolved.Module().ModulePath(),
 		JavaScriptPackage:         javaScriptPackage,
 		KernelModuleVersion:       kernelVersion,

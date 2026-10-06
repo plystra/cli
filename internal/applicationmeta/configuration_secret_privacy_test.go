@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -39,54 +38,6 @@ func TestSecretReferencePublicIdentityExcludesKindAndTarget(t *testing.T) {
 				t.Fatalf("absence or explicit removal lost its public identity: %v", err)
 			}
 		}
-	}
-}
-
-func TestSecretReferenceLinearPrecedencePreservesPublicRedaction(t *testing.T) {
-	t.Parallel()
-	schema := composeSchema(t, "Password configuration.Secret\n")
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{"example.com/acme/smtp.New": schema})
-	manifest := func(reference string) applicationmeta.Manifest {
-		return composeManifest(t, "config: {example.com/acme/smtp.New: {password: "+reference+"}}")
-	}
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: manifest("{env: PRIVATE_FIRST}")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: manifest("{env: PRIVATE_FIRST}")},
-	}
-	empty := composeManifest(t, "{}")
-	identical, err := applicationmeta.Compose(dependencies, empty, lookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := `config["example.com/acme/smtp.New"]["password"]`
-	records := findProvenance(t, identical.Provenance(), path)
-	if len(records) != 1 || len(records[0].Sources()) != 2 {
-		t.Fatal("identical Secret references did not deduplicate with both sources")
-	}
-	for _, reference := range []string{"{env: PRIVATE_SECOND}", "{file: /PRIVATE_FILE}"} {
-		dependencies[1].Manifest = manifest(reference)
-		_, err := applicationmeta.Compose(dependencies, empty, lookup)
-		if err != nil {
-			t.Fatalf("ordered Secret replacement = %v", err)
-		}
-		for _, current := range []string{"{env: PRIVATE_LOCAL}", "{$remove: true}"} {
-			resolved, err := applicationmeta.Compose(dependencies, manifest(current), lookup)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(resolved.DependencyBaseline(), identical.DependencyBaseline()) {
-				t.Fatal("private equality or target leaked through dependency baseline grouping")
-			}
-			configuration, _ := resolved.Manifest().Configuration(mustConstructorSymbol(t, "example.com/acme/smtp.New"))
-			if current != "{$remove: true}" && !bytes.Contains(configuration.YAML(), []byte("PRIVATE_LOCAL")) {
-				t.Fatal("public redaction changed private selected configuration")
-			}
-		}
-	}
-	current := []byte("config: {example.com/acme/smtp.New: {password: {env: PRIVATE_FIRST}}}\n")
-	maintained, err := applicationmeta.MaintainDependencyConfiguration(current, identical.DependencyBaseline(), nil, dependencies, lookup)
-	if err != nil || maintained.Changed() || !bytes.Equal(maintained.Data(), current) {
-		t.Fatalf("public baseline inferred private ownership: %v", err)
 	}
 }
 

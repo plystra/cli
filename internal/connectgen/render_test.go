@@ -606,13 +606,12 @@ func connectConfigurationProvenance(t testing.TB, mode generation.ConfigurationM
 	t.Helper()
 	rootDigest := "sha256:" + strings.Repeat("1", 64)
 	input := transportprovenance.Input{
-		Mode:                        mode,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  rootDigest,
-		SelectedPath:                "plystra.yaml",
-		SelectedDigest:              rootDigest,
-		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
-		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+		Mode:                   mode,
+		RootPath:               "plystra.yaml",
+		RootDigest:             rootDigest,
+		SelectedPath:           "plystra.yaml",
+		SelectedDigest:         rootDigest,
+		ApplicationModelDigest: "sha256:" + strings.Repeat("3", 64),
 	}
 	if mode == generation.ConfigurationModeEnvironment {
 		input.Environment = "production"

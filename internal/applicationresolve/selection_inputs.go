@@ -24,20 +24,18 @@ import (
 // Resolve. It does not establish a valid composed or executable application.
 // Private document bytes are available only through explicit snapshot access.
 type SelectionInputs struct {
-	module               modulelocate.Module
-	dependencies         moduledependency.Index
-	declarations         interfaceinventory.Discovery
-	inventory            plugininventory.Index
-	rootManifest         applicationmeta.Manifest
-	selectedManifest     applicationmeta.Manifest
-	rootSnapshot         ManifestSnapshot
-	selectedSnapshot     ManifestSnapshot
-	selector             configurationSelector
-	dependencySnapshots  []dependencyManifestSnapshot
-	templateDependencies []applicationmeta.Dependency
-	moduleMetadata       []ModuleMetadataSnapshot
-	workspaceSnapshots   []selectionWorkspaceSnapshot
-	dependencyOptions    moduledependency.Options
+	module             modulelocate.Module
+	dependencies       moduledependency.Index
+	declarations       interfaceinventory.Discovery
+	inventory          plugininventory.Index
+	rootManifest       applicationmeta.Manifest
+	selectedManifest   applicationmeta.Manifest
+	rootSnapshot       ManifestSnapshot
+	selectedSnapshot   ManifestSnapshot
+	selector           configurationSelector
+	moduleMetadata     []ModuleMetadataSnapshot
+	workspaceSnapshots []selectionWorkspaceSnapshot
+	dependencyOptions  moduledependency.Options
 }
 
 func (SelectionInputs) String() string   { return "<private-selection-inputs>" }
@@ -56,12 +54,6 @@ func (s SelectionInputs) Dependencies() moduledependency.Index { return s.depend
 // Declarations returns the same validated Go declarations used by Resolve.
 func (s SelectionInputs) Declarations() interfaceinventory.Discovery { return s.declarations }
 
-// TemplateDependencies returns defensive reusable layers, oldest to nearest.
-// Ordinary dependencies remain visible but never become configuration layers.
-func (s SelectionInputs) TemplateDependencies() []applicationmeta.Dependency {
-	return append([]applicationmeta.Dependency(nil), s.templateDependencies...)
-}
-
 // RootManifest returns the root application layer, or only its metadata in
 // replacement mode, matching ordinary resolution's exclusion policy.
 func (s SelectionInputs) RootManifest() applicationmeta.Manifest { return s.rootManifest }
@@ -79,21 +71,6 @@ func (s SelectionInputs) CurrentLayers() []applicationmeta.Manifest {
 		return []applicationmeta.Manifest{s.rootManifest, s.selectedManifest}
 	}
 	return []applicationmeta.Manifest{s.selectedManifest}
-}
-
-// LowerLayers returns raw inherited layers in precedence order: templates
-// oldest to nearest, then the root only in environment mode. Typed composition
-// is deliberately not required; callers may inspect identities and removals
-// before repairing stale Config. Template process-only settings remain inert.
-func (s SelectionInputs) LowerLayers() []applicationmeta.Manifest {
-	var layers []applicationmeta.Manifest
-	for _, dependency := range s.templateDependencies {
-		layers = append(layers, dependency.Manifest)
-	}
-	if s.selector.mode == configurationModeEnvironment {
-		layers = append(layers, s.rootManifest)
-	}
-	return layers
 }
 
 // RootSnapshot returns the original private root document and path identity.
@@ -170,11 +147,6 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 			return SelectionInputs{}, fmt.Errorf("%w: associate selected configuration with Project module: %w", ErrResolve, err)
 		}
 	}
-	if selector.mode == configurationModeExplicit {
-		if err := validateReplacementMetadata(module.ModulePath(), selectedManifest); err != nil {
-			return SelectionInputs{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
-		}
-	}
 	metadata, err := readModuleMetadata(module.ModulePath(), module.Path(), "", true)
 	if err != nil {
 		return SelectionInputs{}, fmt.Errorf("%w: %w", ErrResolve, err)
@@ -205,10 +177,6 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 		}
 		moduleMetadata = append(moduleMetadata, metadata)
 	}
-	dependencySnapshots, dependencyManifests, err := loadTemplateManifests(module.ModulePath(), rootManifest, dependencies)
-	if err != nil {
-		return SelectionInputs{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
 	declarations, err := interfaceinventory.DiscoverApplication(ctx, module, dependencies, interfaceinventory.Options{
 		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...), OutputLimit: options.DependencyOutputLimit,
 	})
@@ -226,7 +194,6 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 		module: module, dependencies: dependencies, declarations: declarations, inventory: inventory,
 		rootManifest: rootManifest, selectedManifest: selectedManifest,
 		rootSnapshot: rootSnapshot, selectedSnapshot: selectedSnapshot, selector: selector,
-		dependencySnapshots: dependencySnapshots, templateDependencies: dependencyManifests,
 		moduleMetadata: moduleMetadata, workspaceSnapshots: workspaceSnapshots, dependencyOptions: dependencyOptions,
 	}, nil
 }
@@ -248,7 +215,7 @@ func (s SelectionInputs) schemaLookup(namespace applicationmeta.ConfigurationNam
 // ComposeCandidate parses replacement bytes for the selected document and uses
 // the captured lower layers and compiled schemas. It neither writes the bytes
 // nor checks graph validity, configuration ownership or required Config values.
-// Changing the root template relationship requires fresh discovery.
+// Changing the root Project or selected document requires fresh discovery.
 func (s SelectionInputs) ComposeCandidate(selected []byte) (applicationmeta.Composition, error) {
 	return s.composeCandidate(selected, false)
 }
@@ -266,7 +233,7 @@ func (s SelectionInputs) composeCandidate(selected []byte, identitiesOnly bool) 
 	if s.module.Path() == "" {
 		return applicationmeta.Composition{}, fmt.Errorf("%w: selection inputs are empty", ErrResolve)
 	}
-	parse := applicationmeta.ParseSource
+	parse := applicationmeta.ParseCompleteSource
 	if s.selector.mode == configurationModeEnvironment {
 		parse = applicationmeta.ParseOverlaySource
 	}
@@ -278,20 +245,9 @@ func (s SelectionInputs) composeCandidate(selected []byte, identitiesOnly bool) 
 	if err != nil {
 		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	if s.selector.mode == configurationModeExplicit {
-		if err := validateReplacementMetadata(s.module.ModulePath(), manifest); err != nil {
-			return applicationmeta.Composition{}, fmt.Errorf("%w: %w: %w", ErrResolve, ErrConfigurationSelection, err)
-		}
-	} else if s.selector.mode == configurationModeDefault && manifest.Template() != s.rootManifest.Template() {
-		return applicationmeta.Composition{}, fmt.Errorf("%w: %w: candidate changes the captured template relationship", ErrResolve, ErrTemplate)
-	}
 	if identitiesOnly {
 		manifest = applicationmeta.WithoutConstructorConfiguration(manifest)
 		s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
-		s.templateDependencies = s.TemplateDependencies()
-		for index := range s.templateDependencies {
-			s.templateDependencies[index].Manifest = applicationmeta.WithoutConstructorConfiguration(s.templateDependencies[index].Manifest)
-		}
 	}
 	_, composition, err := s.composeCurrent(s.rootManifest, manifest)
 	return composition, err
@@ -307,7 +263,7 @@ func (s SelectionInputs) composeCurrent(base, selected applicationmeta.Manifest)
 		}
 	}
 	current = applicationmeta.WithRootMetadata(current, s.rootManifest)
-	composition, err := applicationmeta.Compose(s.templateDependencies, current, s.schemaLookup)
+	composition, err := applicationmeta.Compose(nil, current, s.schemaLookup)
 	if err != nil {
 		return applicationmeta.Manifest{}, applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -394,7 +350,7 @@ func (s SelectionInputs) candidateSourceContext(composition applicationmeta.Comp
 			return applicationinput.SourceContext{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
 		}
 		for _, decision := range decisions {
-			if decision.DependencyComposable() {
+			if decision.ResolutionRelevant() {
 				paths = append(paths, decision.Path())
 			}
 		}

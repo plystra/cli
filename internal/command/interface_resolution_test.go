@@ -97,8 +97,7 @@ replace example.com/roots/alpha => ../alpha-root
 replace example.com/roots/zeta => ../zeta-root
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot)))
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `template: example.com/roots/alpha
-`)
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
 	writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
 
 	writeCommandFile(t, filepath.Join(contractsRoot, "go.mod"), "module example.com/contracts\n\ngo 1.26\n")
@@ -149,10 +148,7 @@ func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error
 		{path: zetaRoot, modulePath: "example.com/roots/zeta"},
 	} {
 		writeCommandFile(t, filepath.Join(root.path, "go.mod"), "module "+root.modulePath+"\n\ngo 1.26\n")
-		writeCommandFile(t, filepath.Join(root.path, "plystra.yaml"), "interfaces: {require: [app.run/v1]}\n")
-		if root.modulePath == "example.com/roots/alpha" {
-			writeCommandFile(t, filepath.Join(root.path, "plystra.yaml"), "template: example.com/roots/zeta\ninterfaces: {require: [app.run/v1]}\n")
-		}
+		writeCommandFile(t, filepath.Join(root.path, "plystra.yaml"), "{}\n")
 	}
 
 	roots := []string{applicationRoot, contractsRoot, appConstructorRoot, auditConstructorRoot, alphaRoot, zetaRoot}
@@ -166,7 +162,7 @@ func (*Service) Write(context.Context, writev1.Request) (writev1.Response, error
 			"",
 			"Source: example.com/constructors/app:service/implementation.go:12:6 (implementation-constructor)",
 			"Source: example.com/constructors/audit:service/implementation.go:12:6 (implementation-constructor)",
-			"Source: example.com/roots/alpha:plystra.yaml:1:1 (declaration)",
+			"Source: example.com/missing-path-consumer:plystra.yaml:1:1 (declaration)",
 			"",
 			"Recovery:",
 			"Create one compatible local Implementation by running `plystra implement storage.read/v1 --package <project-relative-package>`.",
@@ -511,96 +507,6 @@ func TestPublicResolvingCommandsRejectInvalidDormantChoiceWithoutMutation(t *tes
 	}
 }
 
-func TestPublicResolvingCommandsReportEffectiveTemplateInvalidImplementationChoiceSource(t *testing.T) {
-	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
-	for _, command := range commands {
-		command := command
-		t.Run(strings.Join(command, " "), func(t *testing.T) {
-			t.Parallel()
-
-			parent := t.TempDir()
-			kernelRoot := testkernel.Root(t)
-			contractsRoot := filepath.Join(parent, "contracts")
-			alphaRoot := filepath.Join(parent, "alpha")
-			zetaRoot := filepath.Join(parent, "zeta")
-			applicationRoot := filepath.Join(parent, "application")
-			const constructor = "example.com/missing/private.New"
-
-			writeCommandFile(t, filepath.Join(contractsRoot, "go.mod"), "module example.com/contracts\n\ngo 1.26\n")
-			writeCommandFile(t, filepath.Join(contractsRoot, "plystra.yaml"), "{}\n")
-			writeCommandGraphInterface(t, contractsRoot, "email/send/v1", "sendv1", "email.send/v1", "Send")
-			for _, dependency := range []struct {
-				root       string
-				modulePath string
-			}{
-				{root: zetaRoot, modulePath: "example.com/zeta"},
-				{root: alphaRoot, modulePath: "example.com/alpha"},
-			} {
-				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {email.send/v1: "+constructor+"}}\n")
-				if dependency.modulePath == "example.com/alpha" {
-					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "template: example.com/zeta\n"+"interfaces: {use: {email.send/v1: "+constructor+"}}\n")
-				}
-			}
-			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/consumer
-
-go 1.26
-
-require (
-	example.com/alpha v1.0.0
-	example.com/contracts v1.0.0
-	example.com/zeta v1.0.0
-	github.com/plystra/kernel v0.0.0
-)
-
-replace example.com/alpha => ../alpha
-replace example.com/contracts => ../contracts
-replace example.com/zeta => ../zeta
-replace github.com/plystra/kernel => %s
-`, filepath.ToSlash(kernelRoot)))
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `template: example.com/alpha
-`)
-
-			before := map[string]map[string][]byte{
-				"application": commandTree(t, applicationRoot),
-				"contracts":   commandTree(t, contractsRoot),
-				"alpha":       commandTree(t, alphaRoot),
-				"zeta":        commandTree(t, zetaRoot),
-			}
-			exitCode, stdout, stderr := runCommand(t, command, applicationRoot, commandGoEnvironment())
-			wantSuffix := strings.Join([]string{
-				"",
-				"Source: example.com/alpha:plystra.yaml:1:1 (implementation-selection)",
-				"",
-				"Recovery:",
-				"Replace the reported choice with one visible compatible constructor by running `plystra use <interface-id> <constructor-symbol>`.",
-				"",
-				"Diagnostic: " + diagnosticcode.ResolveUnknownImplementation,
-				"",
-			}, "\n")
-			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 {
-				t.Fatalf("%v inherited invalid choice = exit %d stdout %q stderr %q", command, exitCode, stdout, stderr)
-			}
-			for _, privatePath := range []string{parent, filepath.ToSlash(parent), applicationRoot, filepath.ToSlash(applicationRoot), alphaRoot, filepath.ToSlash(alphaRoot), zetaRoot, filepath.ToSlash(zetaRoot)} {
-				if strings.Contains(stderr, privatePath) {
-					t.Fatalf("%v exposed private path %q: %q", command, privatePath, stderr)
-				}
-			}
-			for name, root := range map[string]string{
-				"application": applicationRoot,
-				"contracts":   contractsRoot,
-				"alpha":       alphaRoot,
-				"zeta":        zetaRoot,
-			} {
-				if after := commandTree(t, root); !reflect.DeepEqual(after, before[name]) {
-					t.Fatalf("%v mutated %s Project:\nbefore: %#v\nafter:  %#v", command, name, before[name], after)
-				}
-				assertNoCommandTransactions(t, root)
-			}
-		})
-	}
-}
-
 func TestPublicResolvingCommandsReportIntrinsicImplementationChoiceSources(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -648,78 +554,6 @@ func TestPublicResolvingCommandsReportIntrinsicImplementationChoiceSources(t *te
 				}
 				assertNoCommandTransactions(t, root)
 			}
-		})
-	}
-}
-
-func TestPublicResolvingCommandsReportEffectiveTemplateIntrinsicImplementationChoiceSource(t *testing.T) {
-	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
-	for _, command := range commands {
-		command := command
-		t.Run(strings.Join(command, " "), func(t *testing.T) {
-			t.Parallel()
-
-			parent := t.TempDir()
-			kernelRoot := testkernel.Root(t)
-			alphaRoot := filepath.Join(parent, "alpha")
-			zetaRoot := filepath.Join(parent, "zeta")
-			applicationRoot := filepath.Join(parent, "application")
-			const constructor = "example.com/application/health.New"
-			for _, dependency := range []struct {
-				root       string
-				modulePath string
-			}{
-				{root: zetaRoot, modulePath: "example.com/zeta"},
-				{root: alphaRoot, modulePath: "example.com/alpha"},
-			} {
-				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
-				if dependency.modulePath == "example.com/alpha" {
-					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "template: example.com/zeta\n"+"interfaces: {use: {kernel.health/v1: "+constructor+"}}\n")
-				}
-			}
-			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/intrinsic-consumer
-
-go 1.26
-
-require (
-	example.com/alpha v1.0.0
-	example.com/zeta v1.0.0
-	github.com/plystra/kernel v0.0.0
-)
-
-replace example.com/alpha => ../alpha
-replace example.com/zeta => ../zeta
-replace github.com/plystra/kernel => %s
-`, filepath.ToSlash(kernelRoot)))
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `template: example.com/alpha
-`)
-			writeCommandFile(t, filepath.Join(applicationRoot, "generated", "sentinel.txt"), "must remain unchanged\n")
-			before := commandTree(t, parent)
-
-			exitCode, stdout, stderr := runCommand(t, command, applicationRoot, commandGoEnvironment())
-			wantSuffix := strings.Join([]string{
-				"",
-				"Source: example.com/alpha:plystra.yaml:1:1 (implementation-selection)",
-				"",
-				"Recovery:",
-				"Set the reported interfaces.use entry to {$remove: true} in plystra.yaml to remove the effective selection; Kernel supplies that Interface intrinsically.",
-				"",
-				"Diagnostic: " + diagnosticcode.ResolveIntrinsicInterfaceSelection,
-				"",
-			}, "\n")
-			if exitCode != 1 || stdout != "" || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 {
-				t.Fatalf("%v inherited intrinsic choice = exit %d stdout %q stderr %q", command, exitCode, stdout, stderr)
-			}
-			for _, privatePath := range []string{parent, filepath.ToSlash(parent), alphaRoot, filepath.ToSlash(alphaRoot), zetaRoot, filepath.ToSlash(zetaRoot)} {
-				if strings.Contains(stderr, privatePath) {
-					t.Fatalf("%v exposed private path %q: %q", command, privatePath, stderr)
-				}
-			}
-			if after := commandTree(t, parent); !reflect.DeepEqual(after, before) {
-				t.Fatalf("%v mutated inherited intrinsic-choice Projects:\nbefore: %#v\nafter:  %#v", command, before, after)
-			}
-			assertNoCommandTransactions(t, applicationRoot)
 		})
 	}
 }
@@ -775,18 +609,17 @@ func TestPublicResolvingCommandsReportConstructorConfigurationSchemaSourcesWitho
 	}
 }
 
-func TestPublicResolvingCommandsReportDependencyConstructorConfigurationSchemaSourceWithoutMutation(t *testing.T) {
+func TestPublicResolvingCommandsIgnoreDependencyConstructorConfigurationSchema(t *testing.T) {
 	t.Parallel()
 
-	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
-	for _, arguments := range commands {
-		commandArguments := append([]string(nil), arguments...)
-		t.Run(strings.Join(commandArguments, " "), func(t *testing.T) {
+	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		arguments := append([]string(nil), arguments...)
+		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
 			applicationRoot := writeImplementationSelectionCommandProject(t)
 			dependencyRoot := filepath.Join(t.TempDir(), "dependency")
 			const (
 				dependencyModule = "example.com/dependency"
-				constructor      = "example.com/dependency/missing.New"
+				constructor      = dependencyModule + "/missing.New"
 				privateValue     = "PRIVATE_DEPENDENCY_CONFIGURATION_VALUE"
 			)
 			writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module "+dependencyModule+"\n\ngo 1.26\n")
@@ -795,29 +628,25 @@ func TestPublicResolvingCommandsReportDependencyConstructorConfigurationSchemaSo
 			goMod := string(readCommandFile(t, applicationRoot, "go.mod"))
 			goMod += "\nrequire " + dependencyModule + " v1.0.0\n\nreplace " + dependencyModule + " => " + filepath.ToSlash(dependencyRoot) + "\n"
 			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
-			selected := string(readCommandFile(t, applicationRoot, "plystra.yaml"))
-			selected += "template: " + dependencyModule + "\n"
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), selected)
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces:\n  require: [email.send/v1]\n  use: {email.send/v1: example.com/acme/implementation-use/smtp.New}\n")
 
+			if code, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, commandGoEnvironment()); code != 0 || stderr != "" {
+				t.Fatalf("prepare generation = %d, %q, %q", code, stdout, stderr)
+			}
 			beforeApplication := commandTree(t, applicationRoot)
 			beforeDependency := commandTree(t, dependencyRoot)
-			exitCode, stdout, stderr := runCommand(t, commandArguments, filepath.Join(applicationRoot, "smtp"), commandGoEnvironment())
-			wantSuffix := "\n\nSource: " + dependencyModule + ":plystra.yaml:1:1 (configuration-declaration)\n\nRecovery:\nCorrect the reported owning Project document by using the fully qualified symbol of a discovered constructor with a compiled Go Config schema, or remove that constructor configuration entry, then rerun the command.\n\nDiagnostic: " + diagnosticcode.ConstructorConfigurationSchemaInvalid + "\n"
-			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, constructor) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, privateValue) {
-				t.Fatalf("%v unavailable dependency constructor configuration schema = exit %d stdout %q stderr %q", commandArguments, exitCode, stdout, stderr)
+			code, stdout, stderr := runCommand(t, arguments, filepath.Join(applicationRoot, "smtp"), commandGoEnvironment())
+			if code != 0 || stderr != "" || strings.Contains(stdout, privateValue) {
+				t.Fatalf("%v accepted dependency schema configuration = %d, %q, %q", arguments, code, stdout, stderr)
 			}
-			for _, privatePath := range []string{applicationRoot, filepath.ToSlash(applicationRoot), dependencyRoot, filepath.ToSlash(dependencyRoot)} {
-				if strings.Contains(stderr, privatePath) {
-					t.Fatalf("%v exposed private path %q: %q", commandArguments, privatePath, stderr)
-				}
+			if !reflect.DeepEqual(commandTree(t, applicationRoot), beforeApplication) {
+				t.Fatalf("%v changed the application after preparation", arguments)
 			}
-			if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeApplication) {
-				t.Fatalf("%v mutated application Project:\nbefore: %#v\nafter:  %#v", commandArguments, beforeApplication, after)
-			}
-			if after := commandTree(t, dependencyRoot); !reflect.DeepEqual(after, beforeDependency) {
-				t.Fatalf("%v mutated dependency Project:\nbefore: %#v\nafter:  %#v", commandArguments, beforeDependency, after)
+			if !reflect.DeepEqual(commandTree(t, dependencyRoot), beforeDependency) {
+				t.Fatalf("%v changed the dependency Project", arguments)
 			}
 			assertNoCommandTransactions(t, applicationRoot)
+			assertNoCommandTransactions(t, dependencyRoot)
 		})
 	}
 }
@@ -875,13 +704,12 @@ func TestPublicResolvingCommandsReportConstructorConfigurationValueSourcesWithou
 	}
 }
 
-func TestPublicResolvingCommandsReportDependencyConstructorConfigurationValueSourceWithoutMutation(t *testing.T) {
+func TestPublicResolvingCommandsIgnoreDependencyConstructorConfigurationValues(t *testing.T) {
 	t.Parallel()
 
-	commands := [][]string{{"generate"}, {"generate", "--check"}, {"check"}}
-	for _, arguments := range commands {
-		commandArguments := append([]string(nil), arguments...)
-		t.Run(strings.Join(commandArguments, " "), func(t *testing.T) {
+	for _, arguments := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
+		arguments := append([]string(nil), arguments...)
+		t.Run(strings.Join(arguments, " "), func(t *testing.T) {
 			applicationRoot := writeImplementationSelectionCommandProject(t)
 			dependencyRoot := filepath.Join(t.TempDir(), "dependency")
 			const (
@@ -929,30 +757,25 @@ var _ echov1.Interface = (*Service)(nil)
 			goMod := string(readCommandFile(t, applicationRoot, "go.mod"))
 			goMod += "\nrequire " + dependencyModule + " v1.0.0\n\nreplace " + dependencyModule + " => " + filepath.ToSlash(dependencyRoot) + "\n"
 			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), goMod)
-			selected := string(readCommandFile(t, applicationRoot, "plystra.yaml"))
-			selected += "template: " + dependencyModule + "\n"
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), selected)
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces:\n  require: [email.send/v1]\n  use: {email.send/v1: example.com/acme/implementation-use/smtp.New}\n")
 
+			if code, stdout, stderr := runCommand(t, []string{"generate"}, applicationRoot, commandGoEnvironment()); code != 0 || stderr != "" {
+				t.Fatalf("prepare generation = %d, %q, %q", code, stdout, stderr)
+			}
 			beforeApplication := commandTree(t, applicationRoot)
 			beforeDependency := commandTree(t, dependencyRoot)
-			exitCode, stdout, stderr := runCommand(t, commandArguments, filepath.Join(applicationRoot, "smtp"), commandGoEnvironment())
-			wantField := `config["` + constructor + `"]["endpoint"]`
-			wantSuffix := "\n\nSource: " + dependencyModule + ":plystra.yaml:1:1 (configuration-declaration)\n\nRecovery:\nCorrect the reported constructor configuration field in the owning Project document to match its compiled Go Config field type, then rerun the command.\n\nDiagnostic: " + diagnosticcode.ConstructorConfigurationValuesInvalid + "\n"
-			if exitCode != 1 || stdout != "" || !strings.Contains(stderr, wantField) || !strings.HasSuffix(stderr, wantSuffix) || strings.Count(stderr, "Source: ") != 1 || strings.Contains(stderr, privateValue) || strings.Contains(stderr, "token") {
-				t.Fatalf("%v invalid dependency constructor configuration value = exit %d stdout %q stderr %q", commandArguments, exitCode, stdout, stderr)
+			code, stdout, stderr := runCommand(t, arguments, filepath.Join(applicationRoot, "smtp"), commandGoEnvironment())
+			if code != 0 || stderr != "" || strings.Contains(stdout, privateValue) {
+				t.Fatalf("%v accepted dependency value configuration = %d, %q, %q", arguments, code, stdout, stderr)
 			}
-			for _, privatePath := range []string{applicationRoot, filepath.ToSlash(applicationRoot), dependencyRoot, filepath.ToSlash(dependencyRoot)} {
-				if strings.Contains(stderr, privatePath) {
-					t.Fatalf("%v exposed private path %q: %q", commandArguments, privatePath, stderr)
-				}
+			if !reflect.DeepEqual(commandTree(t, applicationRoot), beforeApplication) {
+				t.Fatalf("%v changed the application after preparation", arguments)
 			}
-			if after := commandTree(t, applicationRoot); !reflect.DeepEqual(after, beforeApplication) {
-				t.Fatalf("%v mutated application Project:\nbefore: %#v\nafter:  %#v", commandArguments, beforeApplication, after)
-			}
-			if after := commandTree(t, dependencyRoot); !reflect.DeepEqual(after, beforeDependency) {
-				t.Fatalf("%v mutated dependency Project:\nbefore: %#v\nafter:  %#v", commandArguments, beforeDependency, after)
+			if !reflect.DeepEqual(commandTree(t, dependencyRoot), beforeDependency) {
+				t.Fatalf("%v changed the dependency Project", arguments)
 			}
 			assertNoCommandTransactions(t, applicationRoot)
+			assertNoCommandTransactions(t, dependencyRoot)
 		})
 	}
 }
@@ -1144,9 +967,7 @@ func TestPublicResolvingCommandsReportEffectiveUnownedConfigurationContributorWi
 			} {
 				writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
 				writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), configuration)
-				if dependency.modulePath == "example.com/alpha" {
-					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "template: example.com/zeta\n"+configuration)
-				}
+				// Dependency configuration is intentionally present but inert.
 			}
 			writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/acme/implementation-use
 
@@ -1162,8 +983,7 @@ replace example.com/zeta => %s
 replace example.com/alpha => %s
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(zetaRoot), filepath.ToSlash(alphaRoot), filepath.ToSlash(kernelRoot)))
-			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `template: example.com/alpha
-`)
+			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 			writeCommandFile(t, filepath.Join(applicationRoot, "plystra.production.yaml"), configuration)
 			writeCommandInterface(t, applicationRoot, "reports/read/v1", "readv1", "reports.read/v1", "Read")
 			writeCommandConfigurableImplementation(t, applicationRoot, "reports", "reports.read/v1", "reports/read/v1", "Read")
@@ -1493,7 +1313,7 @@ func TestPublicResolvingCommandsReportUnknownInterfaceConfigurationSources(t *te
 			},
 		},
 		{
-			name: "inherited requirements",
+			name: "root requirements",
 			setup: func(t testing.TB) fixture {
 				parent := t.TempDir()
 				kernelRoot := testkernel.Root(t)
@@ -1509,9 +1329,7 @@ func TestPublicResolvingCommandsReportUnknownInterfaceConfigurationSources(t *te
 				} {
 					writeCommandFile(t, filepath.Join(dependency.root, "go.mod"), "module "+dependency.modulePath+"\n\ngo 1.26\n")
 					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "interfaces: {require: [records.missing/v1]}\n")
-					if dependency.modulePath == "example.com/alpha" {
-						writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "template: example.com/zeta\n"+"interfaces: {require: [records.missing/v1]}\n")
-					}
+					writeCommandFile(t, filepath.Join(dependency.root, "plystra.yaml"), "{}\n")
 				}
 				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), fmt.Sprintf(`module example.com/unknown-consumer
 
@@ -1527,14 +1345,13 @@ replace example.com/alpha => ../alpha
 replace example.com/zeta => ../zeta
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(kernelRoot)))
-				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), `template: example.com/alpha
-`)
+				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "interfaces: {require: [records.missing/v1]}\n")
 				return fixture{
 					root:          applicationRoot,
 					roots:         []string{applicationRoot, alphaRoot, zetaRoot},
 					configuration: "plystra.yaml",
 					sources: []string{
-						"Source: example.com/alpha:plystra.yaml:1:1 (declaration)",
+						"Source: example.com/unknown-consumer:plystra.yaml:1:1 (declaration)",
 					},
 				}
 			},

@@ -724,9 +724,6 @@ replace example.com/platform => ../platform
 	if got := applicationRequirementIDs(result.Manifest()); !reflect.DeepEqual(got, []string{"kernel.info/v1"}) {
 		t.Fatalf("effective requirements = %v", got)
 	}
-	if result.ConfigurationMaintenance().Changed() || !bytes.Equal(result.ConfigurationMaintenance().Data(), []byte(selectedConfiguration)) {
-		t.Fatalf("selected maintenance = changed %t, data %q", result.ConfigurationMaintenance().Changed(), result.ConfigurationMaintenance().Data())
-	}
 	if !bytes.Equal(result.RootConfigurationData(), []byte(rootConfiguration)) || !bytes.Equal(result.ConfigurationSource(), []byte(selectedConfiguration)) {
 		t.Fatal("root or selected source provenance was not preserved independently")
 	}
@@ -892,9 +889,6 @@ replace example.com/platform-b => ../platform-b
 	selectedProviders := result.ResolutionEvidence().SelectedProviders()
 	if len(selectedProviders) != 1 || selectedProviders[0].Capability() != "kernel.health/v1" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionIntrinsic || !selectedProviders[0].Intrinsic() || selectedProviders[0].ProviderSource().Module() != "github.com/plystra/kernel" || selectedProviders[0].ProviderSource().Path() != "capability/catalog/definitions/kernel.health/v1/capability.yaml" {
 		t.Fatalf("intrinsic Provider evidence = %#v", selectedProviders)
-	}
-	if result.ConfigurationMaintenance().Changed() || result.ConfigurationMaintenancePath() != "plystra.yaml" || !bytes.Equal(result.ConfigurationMaintenanceSource(), []byte(rootConfiguration)) {
-		t.Fatalf("root maintenance = changed %t path %q source %q", result.ConfigurationMaintenance().Changed(), result.ConfigurationMaintenancePath(), result.ConfigurationMaintenanceSource())
 	}
 	if bytes.Contains(result.RootConfigurationData(), []byte("expose:")) || !bytes.Equal(result.ConfigurationSource(), []byte(overlayConfiguration)) {
 		t.Fatal("root or overlay provenance was not preserved independently")
@@ -1199,7 +1193,7 @@ func TestResolveKeepsDependencyConfigurationInertWhileClosingLocalRequirements(t
 	appRoot := filepath.Join(root, "app")
 	providerRoot := filepath.Join(root, "providers")
 	writeModule(t, providerRoot, "example.com/providers")
-	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), `template: example.com/missing-template
+	writeFile(t, filepath.Join(providerRoot, "plystra.yaml"), `private_dependency_field: true
 http:
   address: ":9090"
   expose: {email.send/v1: {transport: connect}}
@@ -1249,10 +1243,17 @@ replace example.com/providers => ../providers
 	if len(dependencies) != 1 || dependencies[0].Path() != "example.com/providers" || dependencies[0].SelectedVersion() != "v1.2.3" {
 		t.Fatalf("Dependencies = %#v", dependencies)
 	}
-	if !first.Composition().Valid() || first.Composition().DependencyDigest() == "" || len(first.Composition().Provenance()) != 0 {
-		t.Fatalf("Composition = %#v", first.Composition())
+	if !first.Composition().Valid() || first.Composition().CompositionDigest() == "" {
+		t.Fatalf("Composition is invalid or lacks current-project provenance = %#v", first.Composition())
 	}
-	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":8080" || first.Manifest().StartupTimeout() != applicationmeta.DefaultStartupTimeout || len(first.CurrentManifest().HTTPExposures()) != 0 || len(first.Manifest().HTTPExposures()) != 0 || first.ConfigurationMaintenance().Changed() {
+	for _, record := range first.Composition().Provenance() {
+		for _, source := range record.Sources() {
+			if strings.Contains(source, "example.com/providers@") {
+				t.Fatalf("dependency configuration entered Composition provenance = %#v", record)
+			}
+		}
+	}
+	if address, exists := first.Manifest().HTTPAddress(); !exists || address != ":8080" || first.Manifest().StartupTimeout() != applicationmeta.DefaultStartupTimeout || len(first.CurrentManifest().HTTPExposures()) != 0 || len(first.Manifest().HTTPExposures()) != 0 {
 		t.Fatalf("composed/current manifests = effective %#v, current %#v", first.Manifest(), first.CurrentManifest())
 	}
 	if got := pluginSummaries(plugins); !reflect.DeepEqual(got, []string{
@@ -1327,12 +1328,12 @@ func TestResolveKeepsDirectAndTransitiveDependencyConfigurationInert(t *testing.
 	ordinaryRoot := filepath.Join(root, "ordinary")
 
 	writeModule(t, transitiveRoot, "example.com/transitive")
-	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), "template: [example.com/invalid-template-list]\ncapabilities: {require: [audit.write/v1]}\n")
+	writeFile(t, filepath.Join(transitiveRoot, "plystra.yaml"), "private_dependency_field: true\ncapabilities: {require: [audit.write/v1]}\n")
 	writePlugin(t, transitiveRoot, "audit", "id: example.audit\nprovides: [audit.write/v1]\n")
 	writeCapability(t, transitiveRoot, "audit", "audit.write/v1", "id: audit.write/v1\nrequest: {}\nresponse: {}\nerrors: []\n")
 
 	writeFile(t, filepath.Join(directRoot, "go.mod"), "module example.com/direct\n\ngo 1.26\n\nrequire example.com/transitive v1.4.0\n")
-	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `template: example.com/direct
+	writeFile(t, filepath.Join(directRoot, "plystra.yaml"), `private_dependency_field: true
 http:
   expose: {email.send/v1: {transport: connect}}
 capabilities:
@@ -1471,13 +1472,11 @@ capabilities:
 		t.Fatalf("resolution evidence contains an absolute root or ordinary dependency: %s", result.ResolutionEvidence().CanonicalJSON())
 	}
 	provenance := result.Composition().Provenance()
-	for _, path := range []string{`capabilities.require["audit.write/v1"]`, `capabilities.use["email.send/v1"]`} {
-		if records := compositionProvenance(provenance, path); len(records) != 0 {
-			t.Fatalf("dependency top-level configuration entered composition for %s: %#v", path, records)
+	for _, path := range []string{`capabilities.require["audit.write/v1"]`, `capabilities.use["email.send/v1"]`, `http.expose["email.send/v1"]`} {
+		records := compositionProvenance(provenance, path)
+		if len(records) != 1 || !reflect.DeepEqual(records[0].Sources(), []string{"plystra.yaml"}) {
+			t.Fatalf("current-project provenance for %s = %#v", path, records)
 		}
-	}
-	if records := compositionProvenance(provenance, `http.expose["email.send/v1"]`); len(records) != 0 {
-		t.Fatalf("dependency-owned exposure entered composition provenance: %#v", records)
 	}
 }
 
@@ -1543,8 +1542,8 @@ replace example.com/b => ../b
 		t.Fatalf("selected replacement Provider = %s, %t", provider, exists)
 	}
 	records := compositionProvenance(result.Composition().Provenance(), `capabilities.use["email.send/v1"]`)
-	if len(records) != 0 {
-		t.Fatalf("dependency top-level choices entered composition provenance = %#v", records)
+	if len(records) != 1 || !reflect.DeepEqual(records[0].Sources(), []string{"plystra.yaml"}) {
+		t.Fatalf("current-project Provider choice provenance = %#v", records)
 	}
 	selectedProviders := result.ResolutionEvidence().SelectedProviders()
 	if len(selectedProviders) != 1 || selectedProviders[0].PluginID() != "example.smtp-a" || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionCurrentProject || len(selectedProviders[0].SelectionSources()) != 1 || selectedProviders[0].SelectionSources()[0].ProjectModule() != "example.com/app" || selectedProviders[0].SelectionSources()[0].Source().Path() != "plystra.yaml" {
@@ -1611,11 +1610,13 @@ require example.com/smtp v1.0.0
 
 replace example.com/smtp => ../smtp
 `)
-	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1], use: {email.send/v1: null}}\n")
+	writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "capabilities: {require: [email.send/v1], use: {email.send/v1: example.smtp}}\n")
+	writeFile(t, filepath.Join(appRoot, "plystra.production.yaml"), "capabilities: {use: {email.send/v1: null}}\n")
 
 	result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
-		Start:       appRoot,
-		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+		Start:           appRoot,
+		EnvironmentName: "production",
+		Environment:     goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
 	})
 	if err != nil {
 		t.Fatalf("Resolve with Provider removal: %v", err)
@@ -1628,8 +1629,18 @@ replace example.com/smtp => ../smtp
 		t.Fatalf("automatic unique Provider = %s, %t", provider, exists)
 	}
 	records := compositionProvenance(result.Composition().Provenance(), `capabilities.use["email.send/v1"]`)
-	if len(records) != 0 {
-		t.Fatalf("dependency top-level Provider choice entered provenance = %#v", records)
+	if len(records) != 2 {
+		t.Fatalf("root and overlay Provider choice provenance = %#v", records)
+	}
+	sources := make(map[string]bool)
+	for _, record := range records {
+		if len(record.Sources()) != 1 {
+			t.Fatalf("Provider choice provenance sources = %#v", records)
+		}
+		sources[record.Sources()[0]] = true
+	}
+	if !sources["plystra.yaml"] || !sources["plystra.production.yaml"] {
+		t.Fatalf("Provider choice provenance lost root or overlay source = %#v", sources)
 	}
 	selectedProviders := result.ResolutionEvidence().SelectedProviders()
 	if len(selectedProviders) != 1 || selectedProviders[0].SelectionReason() != resolutionevidence.ProviderSelectionSoleProvider || len(selectedProviders[0].SelectionSources()) != 0 {
@@ -1701,7 +1712,7 @@ replace example.com/smtp => ../smtp
 	}
 }
 
-func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T) {
+func TestResolveIgnoresMalformedButRejectsUnsafeDependencyProjectManifest(t *testing.T) {
 	t.Run("malformed", func(t *testing.T) {
 		t.Parallel()
 
@@ -1711,18 +1722,15 @@ func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T)
 		writeModule(t, dependencyRoot, "example.com/dependency")
 		writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), "private_unknown_root_field: true\n")
 		writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/dependency v1.2.3\n\nreplace example.com/dependency => ../dependency\n")
-		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "template: example.com/dependency\n")
+		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+		before := snapshotTree(t, root)
 
-		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
-		if !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency@v1.2.3") || !strings.Contains(err.Error(), "unknown root field") {
-			t.Fatalf("Resolve malformed dependency error = %v", err)
+		result, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
+		if err != nil {
+			t.Fatalf("Resolve ignored malformed dependency: %v", err)
 		}
-		var source *applicationresolve.ManifestSourceError
-		if !errors.As(err, &source) || source.ModulePath() != "example.com/dependency" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
-			t.Fatalf("Resolve malformed dependency source = %#v, %v", source, err)
-		}
-		if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), dependencyRoot) || strings.Contains(err.Error(), filepath.ToSlash(dependencyRoot)) {
-			t.Fatalf("Resolve malformed dependency exposed a private key or root: %v", err)
+		if len(result.Composition().Provenance()) != 0 || !reflect.DeepEqual(before, snapshotTree(t, root)) {
+			t.Fatalf("ignored malformed dependency changed resolution input or provenance: %#v", result.Composition().Provenance())
 		}
 	})
 
@@ -1738,6 +1746,7 @@ func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T)
 		}
 		writeFile(t, filepath.Join(appRoot, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/dependency v1.2.3\n\nreplace example.com/dependency => ../dependency\n")
 		writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "{}\n")
+		before := snapshotTree(t, root)
 
 		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: appRoot, Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
 		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, projectlocate.ErrInvalidManifest) || !strings.Contains(err.Error(), "example.com/dependency") {
@@ -1749,6 +1758,9 @@ func TestResolveRejectsMalformedAndUnsafeDependencyProjectManifest(t *testing.T)
 		}
 		if strings.Contains(err.Error(), dependencyRoot) || strings.Contains(err.Error(), filepath.ToSlash(dependencyRoot)) {
 			t.Fatalf("Resolve unsafe dependency exposed root %q: %v", dependencyRoot, err)
+		}
+		if !reflect.DeepEqual(before, snapshotTree(t, root)) {
+			t.Fatal("rejecting unsafe dependency changed input")
 		}
 	})
 }
@@ -1939,6 +1951,23 @@ func TestResolveRejectsMissingUnsafeAndChangingManifest(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "private_unknown_root_field") || strings.Contains(err.Error(), root) || strings.Contains(err.Error(), filepath.ToSlash(root)) {
 			t.Fatalf("Resolve malformed root exposed a private key or root: %v", err)
+		}
+	})
+
+	t.Run("template is an unknown root field", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		writeModule(t, root, "example.com/template-field")
+		writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/template\n")
+
+		_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{Start: root})
+		if !errors.Is(err, applicationresolve.ErrResolve) || !errors.Is(err, applicationresolve.ErrManifest) || !errors.Is(err, applicationmeta.ErrInvalidManifest) || !strings.Contains(err.Error(), "unknown root field") {
+			t.Fatalf("Resolve template root field error = %v", err)
+		}
+		var source *applicationresolve.ManifestSourceError
+		if !errors.As(err, &source) || source.ModulePath() != "example.com/template-field" || source.SourcePath() != "plystra.yaml" || source.SourceKind() != "project-marker" || source.Line() != 1 || source.Column() != 1 {
+			t.Fatalf("Resolve template root field source = %#v, %v", source, err)
 		}
 	})
 
@@ -2257,11 +2286,11 @@ func assertResolvedConfigurationProvenance(t testing.TB, result applicationresol
 		t.Fatal("filesystem-backed resolution omitted configuration provenance")
 	}
 	rootDigest := result.RootConfigurationDigest()
-	if provenance.Mode() != generation.ConfigurationMode(selection.Mode()) || provenance.Environment() != selection.Environment() || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != rootDigest || provenance.SelectedPath() != selection.Path() || provenance.SelectedDigest() != selection.Digest() || provenance.DependencyCompositionDigest() != result.Composition().DependencyDigest() {
-		t.Fatalf("configuration provenance = mode %q environment %q root %q/%q selected %q/%q dependency %q; selection = mode %q environment %q path %q digest %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.RootDigest(), provenance.SelectedPath(), provenance.SelectedDigest(), provenance.DependencyCompositionDigest(), selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
+	if provenance.Mode() != generation.ConfigurationMode(selection.Mode()) || provenance.Environment() != selection.Environment() || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != rootDigest || provenance.SelectedPath() != selection.Path() || provenance.SelectedDigest() != selection.Digest() {
+		t.Fatalf("configuration provenance = mode %q environment %q root %q/%q selected %q/%q; selection = mode %q environment %q path %q digest %q", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.RootDigest(), provenance.SelectedPath(), provenance.SelectedDigest(), selection.Mode(), selection.Environment(), selection.Path(), selection.Digest())
 	}
 	evidenceSelection, evidenceExists := result.ResolutionEvidence().ConfigurationSelection()
-	if !evidenceExists || evidenceSelection.Mode() != provenance.Mode() || evidenceSelection.Environment() != provenance.Environment() || evidenceSelection.RootPath() != provenance.RootPath() || evidenceSelection.RootDigest() != provenance.RootDigest() || evidenceSelection.SelectedPath() != provenance.SelectedPath() || evidenceSelection.SelectedDigest() != provenance.SelectedDigest() || evidenceSelection.DependencyCompositionDigest() != provenance.DependencyCompositionDigest() {
+	if !evidenceExists || evidenceSelection.Mode() != provenance.Mode() || evidenceSelection.Environment() != provenance.Environment() || evidenceSelection.RootPath() != provenance.RootPath() || evidenceSelection.RootDigest() != provenance.RootDigest() || evidenceSelection.SelectedPath() != provenance.SelectedPath() || evidenceSelection.SelectedDigest() != provenance.SelectedDigest() {
 		t.Fatalf("resolution-evidence configuration selection = %#v, %t; context provenance = %#v", evidenceSelection, evidenceExists, provenance)
 	}
 	if result.Resolution().Context().Digest() == result.Resolution().Context().BuildModelDigest() {
@@ -2459,7 +2488,7 @@ import (
 
 func Generate(context generation.GenerationContext) (generation.Output, error) {
 	provenance, exists := context.ConfigurationProvenance()
-	if !exists || provenance.Mode() != generation.ConfigurationModeDefault || provenance.Environment() != "" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.yaml" || provenance.RootDigest() == "" || provenance.SelectedDigest() != provenance.RootDigest() || provenance.DependencyCompositionDigest() == "" {
+	if !exists || provenance.Mode() != generation.ConfigurationModeDefault || provenance.Environment() != "" || provenance.RootPath() != "plystra.yaml" || provenance.SelectedPath() != "plystra.yaml" || provenance.RootDigest() == "" || provenance.SelectedDigest() != provenance.RootDigest() {
 		return generation.Output{}, fmt.Errorf("invalid configuration provenance: present=%t mode=%s environment=%q root=%q selected=%q", exists, provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.SelectedPath())
 	}
 	order, _ := generation.ParseCapabilityID("order.create/v1")

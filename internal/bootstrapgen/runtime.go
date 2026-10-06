@@ -152,7 +152,7 @@ func renderRuntimeConfigurationSupport(schemas []runtimeConfigurationSchema, exe
 	}
 	source.WriteString("}\n\n")
 	source.WriteString(runtimeConfigurationSupport)
-	source.WriteString(runtimeTemplateSupport)
+	source.WriteString(runtimeConfigurationCompositionSupport)
 	source.WriteString(runtimeResourceSupport)
 	return source.String(), nil
 }
@@ -421,7 +421,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 	defer clear(root)
 	switch selection.mode {
 	case runtimeSelectionDefault:
-		document, err := composeRuntimeTemplateDocument(baseline, root, nil, nil)
+		document, err := composeRuntimeDocument(baseline, root, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: default %s: %w", ErrRuntimeConfiguration, defaultRuntimeDocument, err)
 		}
@@ -432,7 +432,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, selection.environment, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(overlay)
-		document, err := composeRuntimeTemplateDocument(baseline, root, nil, overlay)
+		document, err := composeRuntimeDocument(baseline, root, nil, overlay)
 		if err != nil {
 			return nil, fmt.Errorf("%w: apply environment %q from %s: %w", ErrRuntimeConfiguration, selection.environment, filepath.ToSlash(selection.path), err)
 		}
@@ -443,7 +443,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: load full-replacement configuration %s: %w", ErrRuntimeSelector, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(selected)
-		document, err := composeRuntimeTemplateDocument(baseline, root, selected, nil)
+		document, err := composeRuntimeDocument(baseline, root, selected, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: full-replacement configuration %s: %w", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
 		}

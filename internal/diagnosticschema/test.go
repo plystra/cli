@@ -137,16 +137,16 @@ type TestInput struct {
 	Sources     []diagnosticjson.Source
 }
 
-// TestConfigurationIdentity is the complete non-secret identity of the
-// selected configuration used by the test run.
+// TestConfigurationIdentity is the complete non-secret current-project
+// identity of the selected configuration used by the test run. Ordinary
+// dependencies do not form part of this identity.
 type TestConfigurationIdentity struct {
-	Mode                        generation.ConfigurationMode
-	Environment                 string
-	RootPath                    string
-	RootDigest                  string
-	SelectedPath                string
-	SelectedDigest              string
-	DependencyCompositionDigest string
+	Mode           generation.ConfigurationMode
+	Environment    string
+	RootPath       string
+	RootDigest     string
+	SelectedPath   string
+	SelectedDigest string
 }
 
 // TestSlicePlugin is one Plugin constructed by the selected test model.
@@ -244,13 +244,12 @@ type testDocument struct {
 }
 
 type testConfigurationDocument struct {
-	Mode                        generation.ConfigurationMode `json:"mode"`
-	Environment                 string                       `json:"environment,omitempty"`
-	RootPath                    string                       `json:"root_path"`
-	RootDigest                  string                       `json:"root_digest"`
-	SelectedPath                string                       `json:"selected_path"`
-	SelectedDigest              string                       `json:"selected_digest"`
-	DependencyCompositionDigest string                       `json:"dependency_composition_digest"`
+	Mode           generation.ConfigurationMode `json:"mode"`
+	Environment    string                       `json:"environment,omitempty"`
+	RootPath       string                       `json:"root_path"`
+	RootDigest     string                       `json:"root_digest"`
+	SelectedPath   string                       `json:"selected_path"`
+	SelectedDigest string                       `json:"selected_digest"`
 }
 
 type testSliceDocument struct {
@@ -489,13 +488,12 @@ func (r TestResult) ResolutionEvidenceJSON() []byte {
 
 func testConfigurationIdentity(selection resolutionevidence.ConfigurationSelection) TestConfigurationIdentity {
 	return TestConfigurationIdentity{
-		Mode:                        selection.Mode(),
-		Environment:                 selection.Environment(),
-		RootPath:                    selection.RootPath(),
-		RootDigest:                  selection.RootDigest(),
-		SelectedPath:                selection.SelectedPath(),
-		SelectedDigest:              selection.SelectedDigest(),
-		DependencyCompositionDigest: selection.DependencyCompositionDigest(),
+		Mode:           selection.Mode(),
+		Environment:    selection.Environment(),
+		RootPath:       selection.RootPath(),
+		RootDigest:     selection.RootDigest(),
+		SelectedPath:   selection.SelectedPath(),
+		SelectedDigest: selection.SelectedDigest(),
 	}
 }
 

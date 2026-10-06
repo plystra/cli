@@ -13,7 +13,7 @@ import (
 // empty configuration of active Implementation constructors and every selected
 // Resource instance. active contains Implementation symbols only. Partial layers must
 // remain composable without this check. Missing values belong to the selected
-// current document, not to any one contributing template.
+// current-project document after root and overlay composition.
 func (c Composition) ValidateRequiredConfiguration(schemas SchemaLookup, active []constructorsymbol.Symbol, selectedPath string) error {
 	if !c.Valid() || schemas == nil || selectedPath == "" {
 		return fmt.Errorf("%w: required configuration validation needs a composition, schemas, and selected document", ErrCompose)

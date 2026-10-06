@@ -64,7 +64,7 @@ func TestTestV1BuildsExactPluginSliceResult(t *testing.T) {
 		"status":"failed",
 		"failed_outcome_count":1,
 		"selected_model_digest":"`+evidence.SelectedModelDigest()+`",
-		"configuration":{"mode":"environment","environment":"test","root_path":"plystra.yaml","root_digest":"`+inspectDigest("a")+`","selected_path":"plystra.test.yaml","selected_digest":"`+inspectDigest("c")+`","dependency_composition_digest":"`+inspectDigest("b")+`"},
+		"configuration":{"mode":"environment","environment":"test","root_path":"plystra.yaml","root_digest":"`+inspectDigest("a")+`","selected_path":"plystra.test.yaml","selected_digest":"`+inspectDigest("c")+`"},
 		"slice":{
 			"scope":"plugin","target_plugin":"example.orders","digest":"`+slice.Digest+`",
 			"plugins":[
@@ -380,7 +380,7 @@ func resolvedTestEvidence(t testing.TB, reverse bool) resolutionevidence.Evidenc
 		slices.Reverse(providers)
 	}
 	context, err := generation.NewContext(generation.Input{
-		ConfigurationProvenance: &generation.ConfigurationProvenanceInput{Mode: generation.ConfigurationModeEnvironment, Environment: "test", RootPath: "plystra.yaml", RootDigest: inspectDigest("a"), SelectedPath: "plystra.test.yaml", SelectedDigest: inspectDigest("c"), DependencyCompositionDigest: inspectDigest("b")},
+		ConfigurationProvenance: &generation.ConfigurationProvenanceInput{Mode: generation.ConfigurationModeEnvironment, Environment: "test", RootPath: "plystra.yaml", RootDigest: inspectDigest("a"), SelectedPath: "plystra.test.yaml", SelectedDigest: inspectDigest("c")},
 		Plugins:                 plugins, Capabilities: capabilities, Requirements: requirementIDs, Providers: providers,
 	})
 	if err != nil {

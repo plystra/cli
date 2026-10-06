@@ -17,15 +17,15 @@ func TestResourceConfigurationEvidenceComposition(t *testing.T) {
 	for _, test := range []struct {
 		name, root, overlay string
 		sources             int
-		oldConfig           bool
+		passwordEffective   bool
 	}{
-		{name: "config-only layers", root: `resources: {instances: {database.primary: {config: {host: ROOT_PRIVATE}}}}`, overlay: `resources: {instances: {database.primary: {config: {settings: {nested: {root: OVERLAY_PRIVATE}}}}}}`, sources: 4, oldConfig: true},
-		{name: "unchanged provider", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.New}}}`, sources: 2, oldConfig: true},
+		{name: "config-only layers", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.New, config: {password: {env: PRIVATE_SECRET_TARGET}, host: ROOT_PRIVATE}}}}`, overlay: `resources: {instances: {database.primary: {config: {settings: {nested: {root: OVERLAY_PRIVATE}}}}}}`, sources: 2, passwordEffective: true},
+		{name: "unchanged provider", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.New, config: {password: {env: PRIVATE_SECRET_TARGET}, host: ROOT_PRIVATE}}}}`, sources: 1, passwordEffective: true},
 		{name: "replacement", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.Other, config: {host: REPLACEMENT_PRIVATE}}}}`, sources: 1},
 		{name: "replacement without config", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.Other}}}`},
-		{name: "configuration removal", root: `resources: {instances: {database.primary: {config: {$remove: true}}}}`, sources: 1},
-		{name: "instance removal", root: `resources: {instances: {database.primary: {$remove: true}}}`},
-		{name: "revival after removal", root: `resources: {instances: {database.primary: {$remove: true}}}`, overlay: `resources: {instances: {database.primary: {use: example.com/acme/smtp.New, config: {host: REVIVED_PRIVATE}}}}`, sources: 1},
+		{name: "configuration removal", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.New, config: {password: {env: PRIVATE_SECRET_TARGET}, host: ROOT_PRIVATE}}}}`, overlay: `resources: {instances: {database.primary: {config: {$remove: true}}}}`, sources: 1},
+		{name: "instance removal", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.New, config: {password: {env: PRIVATE_SECRET_TARGET}, host: ROOT_PRIVATE}}}}`, overlay: `resources: {instances: {database.primary: {$remove: true}}}`},
+		{name: "overlay provider replacement", root: `resources: {instances: {database.primary: {use: example.com/acme/smtp.New, config: {password: {env: PRIVATE_SECRET_TARGET}, host: ROOT_PRIVATE}}}}`, overlay: `resources: {instances: {database.primary: {use: example.com/acme/smtp.Other, config: {host: REVIVED_PRIVATE}}}}`, sources: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			baseLookup := configurationSchemaLookup(t)
@@ -78,7 +78,7 @@ func TestResourceConfigurationEvidenceComposition(t *testing.T) {
 			}
 			context, err := generation.NewContext(generation.Input{ConfigurationProvenance: &generation.ConfigurationProvenanceInput{
 				Mode: mode, Environment: environment, RootPath: "plystra.yaml", SelectedPath: selected,
-				RootDigest: configurationDigest("1"), SelectedDigest: configurationDigest("1"), DependencyCompositionDigest: composition.DependencyDigest(),
+				RootDigest: configurationDigest("1"), SelectedDigest: configurationDigest("1"),
 			}})
 			if err != nil {
 				t.Fatal(err)
@@ -89,7 +89,7 @@ func TestResourceConfigurationEvidenceComposition(t *testing.T) {
 				{Path: "example.com/oldest", Role: resolutionevidence.ModuleRoleDependency, SourceModulePath: "example.com/oldest", SelectedVersion: "v1.0.0"},
 				{Path: "example.com/nearest", Role: resolutionevidence.ModuleRoleDependency, SourceModulePath: "example.com/nearest", SelectedVersion: "v1.0.0"},
 			}
-			input.Configuration = &resolutionevidence.ConfigurationInput{Templates: composition.TemplateLayers(), DependencyBaseline: composition.DependencyBaseline(), Effective: configurationDecisions(t, composition.Manifest(), lookup)}
+			input.Configuration = &resolutionevidence.ConfigurationInput{Effective: configurationDecisions(t, composition.Manifest(), lookup)}
 			for i, layer := range composition.CurrentLayers() {
 				owner := resolutionevidence.ConfigurationOwnerRoot
 				if i > 0 {
@@ -108,9 +108,11 @@ func TestResourceConfigurationEvidenceComposition(t *testing.T) {
 			if len(sources) != test.sources {
 				t.Fatalf("configuration sources = %#v; want %d", sources, test.sources)
 			}
-			field := configurationField(t, evidence, instance+`.config["password"]`)
-			if field.Effective() != test.oldConfig {
-				t.Fatalf("old provider config effective = %t", field.Effective())
+			if test.passwordEffective {
+				field := configurationField(t, evidence, instance+`.config["password"]`)
+				if !field.Effective() || field.Owner() != resolutionevidence.ConfigurationOwnerRoot {
+					t.Fatalf("current-project password configuration = %#v", field)
+				}
 			}
 			for _, private := range []string{"PRIVATE_SECRET_TARGET", "TEMPLATE_PRIVATE", "NEAREST_PRIVATE", "ROOT_PRIVATE", "OVERLAY_PRIVATE", "REPLACEMENT_PRIVATE", "REVIVED_PRIVATE"} {
 				if bytes.Contains(evidence.CanonicalJSON(), []byte(private)) {

@@ -235,12 +235,10 @@ func (ConstructorConfiguration) LogValue() slog.Value {
 }
 
 // Manifest is the immutable normalized application metadata used by typed
-// Interface selection, template composition, exposure, and runtime input.
+// Interface selection, current-project composition, exposure, and runtime input.
 type Manifest struct {
 	modulePath                    string
 	source                        string
-	template                      string
-	templateSource                ConfigurationDeclarationSource
 	layers                        []Manifest
 	httpAddress                   string
 	hasHTTPAddress                bool
@@ -280,9 +278,6 @@ func WithProjectModule(manifest Manifest, projectModule string) (Manifest, error
 	}
 	manifest.modulePath = projectModule
 	manifest = withResourceModule(manifest, projectModule)
-	if manifest.template != "" {
-		manifest.templateSource.modulePath = projectModule
-	}
 	manifest.layers = append([]Manifest(nil), manifest.layers...)
 	for index := range manifest.layers {
 		layer, err := WithProjectModule(manifest.layers[index], projectModule)
@@ -422,7 +417,14 @@ func Parse(data []byte) (Manifest, error) {
 // ParseSource reads one strict bounded current-project document and retains
 // its stable Project-relative source name for diagnostics.
 func ParseSource(source string, data []byte) (Manifest, error) {
-	return parseSource(source, data, false)
+	return ParseCompleteSource(source, data)
+}
+
+// ParseCompleteSource reads a root or full-replacement current-project
+// document. Complete documents use sequence-form requirements and cannot
+// contain overlay-only removal markers.
+func ParseCompleteSource(source string, data []byte) (Manifest, error) {
+	return parseSourceMode(source, data, false, true)
 }
 
 // ParseOverlaySource reads one sparse bounded environment-overlay document.
@@ -433,6 +435,10 @@ func ParseOverlaySource(source string, data []byte) (Manifest, error) {
 }
 
 func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, error) {
+	return parseSourceMode(source, data, sparseOverlay, !sparseOverlay)
+}
+
+func parseSourceMode(source string, data []byte, sparseOverlay, complete bool) (Manifest, error) {
 	if err := validateConfigurationSource(source); err != nil {
 		return Manifest{}, err
 	}
@@ -444,15 +450,11 @@ func parseSource(source string, data []byte, sparseOverlay bool) (Manifest, erro
 	if err != nil {
 		return Manifest{}, err
 	}
-	return parseManifestNode(source, root, values, sparseOverlay)
+	return parseManifestNode(source, root, values, sparseOverlay, complete)
 }
 
-func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.Node, sparseOverlay bool) (Manifest, error) {
+func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.Node, sparseOverlay, complete bool) (Manifest, error) {
 	if err := validateRootEnvelope(root, values); err != nil {
-		return Manifest{}, err
-	}
-	template, templateSource, err := parseTemplateRelationship(source, root, values["template"], !sparseOverlay && source == "plystra.yaml")
-	if err != nil {
 		return Manifest{}, err
 	}
 	if values["data"] != nil {
@@ -480,8 +482,6 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 	}
 	manifest := Manifest{
 		source:                        source,
-		template:                      template,
-		templateSource:                templateSource,
 		httpAddress:                   address,
 		hasHTTPAddress:                hasAddress,
 		removeHTTPAddress:             removeAddress,
@@ -510,8 +510,32 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 	if err := parseResources(&manifest, values["resources"]); err != nil {
 		return Manifest{}, err
 	}
+	if complete && !sparseOverlay {
+		if err := validateCompleteConfigurationLayer(values, manifest); err != nil {
+			return Manifest{}, err
+		}
+	}
 	rewriteManifestSource(&manifest, source)
 	return manifest, nil
+}
+
+func validateCompleteConfigurationLayer(values map[string]*yaml.Node, manifest Manifest) error {
+	if interfaces := values["interfaces"]; interfaces != nil {
+		fields, err := mapping(interfaces, "interfaces")
+		if err != nil {
+			return err
+		}
+		if requirement := fields["require"]; requirement != nil && requirement.Kind != yaml.SequenceNode {
+			return invalid("interfaces.require must use a complete sequence in root and full-replacement documents")
+		}
+	}
+	if manifest.removeHTTPAddress || manifest.httpCORS.remove || manifest.httpCORS.removeAllowedOrigins || manifest.httpCORS.removeAllowCredentials || manifest.removeStartupTimeout ||
+		len(manifest.removedHTTPExposures) != 0 || len(manifest.removedRequirements) != 0 || len(manifest.removedProviderChoices) != 0 || len(manifest.removedInterfaceReqs) != 0 ||
+		len(manifest.removedImplementationChoices) != 0 || len(manifest.removedInterfacePolicies) != 0 || len(manifest.removedAliases) != 0 || len(manifest.removedConfigurations) != 0 ||
+		len(manifest.removedResourceInstances) != 0 || len(manifest.removedResourceBindings) != 0 {
+		return invalid("removal markers are valid only in environment overlays")
+	}
+	return nil
 }
 
 func parseTimeouts(node *yaml.Node) (time.Duration, bool, bool, error) {

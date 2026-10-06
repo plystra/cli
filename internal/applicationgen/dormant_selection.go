@@ -43,14 +43,13 @@ type applicationManifestDormantImplementationSelection struct {
 }
 
 type applicationManifestDormantSelectionContribution struct {
-	Owner         string                                      `json:"owner"`
-	Precedence    int                                         `json:"precedence"`
-	TemplateOrder int                                         `json:"template_order,omitempty"`
-	Digest        string                                      `json:"digest"`
-	Summary       string                                      `json:"summary"`
-	Removed       bool                                        `json:"removed,omitempty"`
-	Effective     bool                                        `json:"effective"`
-	Sources       []applicationManifestDormantSelectionSource `json:"sources"`
+	Owner      string                                      `json:"owner"`
+	Precedence int                                         `json:"precedence"`
+	Digest     string                                      `json:"digest"`
+	Summary    string                                      `json:"summary"`
+	Removed    bool                                        `json:"removed,omitempty"`
+	Effective  bool                                        `json:"effective"`
+	Sources    []applicationManifestDormantSelectionSource `json:"sources"`
 }
 
 type applicationManifestDormantSelectionSource struct {
@@ -94,23 +93,21 @@ func (s DormantImplementationSelection) Contributions() []DormantSelectionContri
 // DormantSelectionContribution is one normalized authored value or removal
 // that participated in composing an effective dormant interfaces.use choice.
 type DormantSelectionContribution struct {
-	owner         string
-	precedence    int
-	templateOrder int
-	digest        string
-	summary       string
-	removed       bool
-	effective     bool
-	sources       []DormantSelectionSource
+	owner      string
+	precedence int
+	digest     string
+	summary    string
+	removed    bool
+	effective  bool
+	sources    []DormantSelectionSource
 }
 
-func (c DormantSelectionContribution) Owner() string      { return c.owner }
-func (c DormantSelectionContribution) Precedence() int    { return c.precedence }
-func (c DormantSelectionContribution) TemplateOrder() int { return c.templateOrder }
-func (c DormantSelectionContribution) Digest() string     { return c.digest }
-func (c DormantSelectionContribution) Summary() string    { return c.summary }
-func (c DormantSelectionContribution) Removed() bool      { return c.removed }
-func (c DormantSelectionContribution) Effective() bool    { return c.effective }
+func (c DormantSelectionContribution) Owner() string   { return c.owner }
+func (c DormantSelectionContribution) Precedence() int { return c.precedence }
+func (c DormantSelectionContribution) Digest() string  { return c.digest }
+func (c DormantSelectionContribution) Summary() string { return c.summary }
+func (c DormantSelectionContribution) Removed() bool   { return c.removed }
+func (c DormantSelectionContribution) Effective() bool { return c.effective }
 func (c DormantSelectionContribution) Sources() []DormantSelectionSource {
 	return append([]DormantSelectionSource(nil), c.sources...)
 }
@@ -158,8 +155,7 @@ func NewDormantImplementationSelection(
 		})
 		normalized[index] = DormantSelectionContribution{
 			owner: string(contribution.Owner()), precedence: contribution.Precedence(),
-			templateOrder: contribution.TemplateOrder(),
-			digest:        contribution.Digest(), summary: contribution.Summary(),
+			digest: contribution.Digest(), summary: contribution.Summary(),
 			removed: contribution.Removed(), effective: contribution.Effective(), sources: normalizedSources,
 		}
 	}
@@ -211,7 +207,6 @@ func normalizeDormantImplementationSelections(values []DormantImplementationSele
 func validateDormantImplementationSelections(
 	values []DormantImplementationSelection,
 	mode, rootPath, selectedPath string,
-	currentProjectPaths []string,
 ) error {
 	if values == nil || len(values) > maximumDormantImplementationSelections {
 		return fmt.Errorf("dormant implementation selections must be an array with at most %d entries", maximumDormantImplementationSelections)
@@ -222,21 +217,6 @@ func validateDormantImplementationSelections(
 		}
 		if index > 0 && values[index-1].interfaceID >= value.interfaceID {
 			return errors.New("dormant implementation selections must be unique and canonically ordered")
-		}
-		currentOwned := sortedContains(currentProjectPaths, value.selectionPath)
-		switch resolutionevidence.ConfigurationOwner(value.selectionOwner) {
-		case resolutionevidence.ConfigurationOwnerTemplate:
-			if currentOwned {
-				return fmt.Errorf("dormant implementation selection %s template ownership disagrees with current-project paths", value.interfaceID)
-			}
-		case resolutionevidence.ConfigurationOwnerRoot, resolutionevidence.ConfigurationOwnerExplicit:
-			if !currentOwned {
-				return fmt.Errorf("dormant implementation selection %s current-project ownership is absent from maintained paths", value.interfaceID)
-			}
-		case resolutionevidence.ConfigurationOwnerEnvironment:
-			// Environment-overlay paths are selected-layer provenance, not shared
-			// root-maintenance ownership. Their exact owner and source path are
-			// validated below without polluting retained root baseline state.
 		}
 		for contributionIndex, contribution := range value.contributions {
 			if !dormantOwnerAllowed(contribution.owner, mode) {
@@ -304,9 +284,6 @@ func validateDormantImplementationSelection(value DormantImplementationSelection
 }
 
 func validateDormantSelectionContribution(value DormantSelectionContribution) error {
-	if !validDormantTemplateOrder(value) {
-		return errors.New("template order is invalid")
-	}
 	if !validDormantOwner(value.owner) || value.precedence != dormantOwnerPrecedence(value.owner) || !validSHA256(value.digest) {
 		return errors.New("owner, precedence, or digest is invalid")
 	}
@@ -362,8 +339,7 @@ func dormantImplementationSelectionWires(values []DormantImplementationSelection
 			}
 			contributions[contributionIndex] = applicationManifestDormantSelectionContribution{
 				Owner: contribution.owner, Precedence: contribution.precedence,
-				TemplateOrder: contribution.templateOrder,
-				Digest:        contribution.digest, Summary: contribution.summary,
+				Digest: contribution.digest, Summary: contribution.summary,
 				Removed: contribution.removed, Effective: contribution.effective, Sources: sources,
 			}
 		}
@@ -396,8 +372,7 @@ func restoreDormantImplementationSelections(values []applicationManifestDormantI
 			}
 			contributions[contributionIndex] = DormantSelectionContribution{
 				owner: contribution.Owner, precedence: contribution.Precedence,
-				templateOrder: contribution.TemplateOrder,
-				digest:        contribution.Digest, summary: contribution.Summary,
+				digest: contribution.Digest, summary: contribution.Summary,
 				removed: contribution.Removed, effective: contribution.Effective, sources: sources,
 			}
 		}
@@ -439,12 +414,10 @@ func dormantImplementationChoiceDigest(interfaceID, constructor string) string {
 
 func dormantOwnerPrecedence(owner string) int {
 	switch resolutionevidence.ConfigurationOwner(owner) {
-	case resolutionevidence.ConfigurationOwnerTemplate:
-		return 1
 	case resolutionevidence.ConfigurationOwnerRoot, resolutionevidence.ConfigurationOwnerExplicit:
-		return 2
+		return 1
 	case resolutionevidence.ConfigurationOwnerEnvironment:
-		return 3
+		return 2
 	default:
 		return 0
 	}
@@ -454,8 +427,6 @@ func validDormantOwner(owner string) bool { return dormantOwnerPrecedence(owner)
 
 func dormantOwnerAllowed(owner, mode string) bool {
 	switch resolutionevidence.ConfigurationOwner(owner) {
-	case resolutionevidence.ConfigurationOwnerTemplate:
-		return true
 	case resolutionevidence.ConfigurationOwnerRoot:
 		return mode == ConfigurationModeDefault || mode == ConfigurationModeEnvironment
 	case resolutionevidence.ConfigurationOwnerEnvironment:
@@ -469,7 +440,7 @@ func dormantOwnerAllowed(owner, mode string) bool {
 
 func dormantSourcePath(owner, rootPath, selectedPath string) string {
 	switch resolutionevidence.ConfigurationOwner(owner) {
-	case resolutionevidence.ConfigurationOwnerTemplate, resolutionevidence.ConfigurationOwnerRoot:
+	case resolutionevidence.ConfigurationOwnerRoot:
 		return rootPath
 	case resolutionevidence.ConfigurationOwnerEnvironment, resolutionevidence.ConfigurationOwnerExplicit:
 		return selectedPath
@@ -545,21 +516,11 @@ func safeDormantSelectionSourcePath(value string) bool {
 }
 
 func dormantSelectionContributionKey(value DormantSelectionContribution) string {
-	return fmt.Sprintf("%02d\x00%010d\x00%s\x00%s\x00%t\x00%s", value.precedence, value.templateOrder, value.owner, value.digest, value.removed, value.summary)
-}
-
-func validDormantTemplateOrder(value DormantSelectionContribution) bool {
-	return value.templateOrder >= 0 &&
-		(value.owner == string(resolutionevidence.ConfigurationOwnerTemplate)) == (value.templateOrder > 0)
+	return fmt.Sprintf("%02d\x00%s\x00%s\x00%t\x00%s", value.precedence, value.owner, value.digest, value.removed, value.summary)
 }
 
 func dormantSelectionSourceKey(value DormantSelectionSource) string {
 	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d", value.module, value.path, value.kind, value.line, value.column)
-}
-
-func sortedContains(values []string, target string) bool {
-	index := sort.SearchStrings(values, target)
-	return index < len(values) && values[index] == target
 }
 
 func cloneDormantImplementationSelections(values []DormantImplementationSelection) []DormantImplementationSelection {

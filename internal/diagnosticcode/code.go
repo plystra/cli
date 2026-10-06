@@ -68,7 +68,6 @@ const (
 	AgentGuidanceManifestInvalid         = Prefix + "AGENT_GUIDANCE_MANIFEST_INVALID"
 	CapabilityManifestInvalid            = Prefix + "CAPABILITY_MANIFEST_INVALID"
 	ProjectConcurrentChange              = Prefix + "PROJECT_CONCURRENT_CHANGE"
-	ConfigurationCompositionDrift        = Prefix + "CONFIGURATION_COMPOSITION_DRIFT"
 	GeneratedDrift                       = Prefix + "GENERATED_DRIFT"
 	ResolveUnknownInterface              = Prefix + "RESOLVE_UNKNOWN_INTERFACE"
 	ResolveUnknownImplementation         = Prefix + "RESOLVE_UNKNOWN_IMPLEMENTATION"

@@ -23,27 +23,15 @@ const PermissionsVersion = "v0.47.0"
 
 var ErrBaseline = errors.New("invalid private runtime baseline; regenerate and supply the matching owner-private deployment input")
 
-// Template retains a normalized reusable layer and its exact ancestry identity.
-// YAML is private deployment data, never public provenance.
-type Template struct {
-	Module   string `json:"module"`
-	Version  string `json:"version"`
-	Template string `json:"template"`
-	YAML     string `json:"yaml"`
-}
-
 type Document struct {
 	Schema     string                     `json:"schema"`
 	ContractID string                     `json:"runtime_contract"`
 	Contract   json.RawMessage            `json:"contract"`
 	Defaults   map[string]json.RawMessage `json:"defaults"`
-	Templates  []Template                 `json:"template_ancestry"`
 }
 
 func (Document) String() string   { return "<private-runtime-baseline>" }
 func (Document) GoString() string { return "<private-runtime-baseline>" }
-func (Template) String() string   { return "<private-template-baseline>" }
-func (Template) GoString() string { return "<private-template-baseline>" }
 
 // ContractID hashes only the explicitly public contract projection supplied by the compiler.
 func ContractID(contract []byte) string {
@@ -52,7 +40,7 @@ func ContractID(contract []byte) string {
 }
 
 func Encode(document Document) ([]byte, error) {
-	if document.Schema != Schema || !json.Valid(document.Contract) || document.ContractID != ContractID(document.Contract) || document.Defaults == nil || document.Templates == nil {
+	if document.Schema != Schema || !json.Valid(document.Contract) || document.ContractID != ContractID(document.Contract) || document.Defaults == nil {
 		return nil, ErrBaseline
 	}
 	data, err := json.MarshalIndent(document, "", "  ")

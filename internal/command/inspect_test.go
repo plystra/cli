@@ -682,11 +682,9 @@ func TestInspectConfigurationHumanAndJSONAreDeterministicRedactedAndReadOnly(t *
 		inspectProgress + "Configuration graph: ",
 		"Selection: default: plystra.yaml\n",
 		`Field: config["example.com/platform/shared.New"]["host"] (effective string from current-project-root)` + "\n",
-		"  Contribution: template (precedence 1, overridden, string)\n",
-		"    Source: example.com/platform:plystra.yaml:1:1 (configuration-value)\n",
-		"  Contribution: current-project-root (precedence 2, effective, string)\n",
+		"  Contribution: current-project-root (precedence 1, effective, string)\n",
 		"    Source: example.com/app:plystra.yaml:1:1 (configuration-value)\n",
-		`Field: config["example.com/platform/shared.New"]["password"] (effective secret-reference from template)` + "\n",
+		`Field: config["example.com/platform/shared.New"]["password"] (effective secret-reference from current-project-root)` + "\n",
 	} {
 		if !strings.Contains(firstHumanStdout, fragment) {
 			t.Fatalf("human configuration graph omits %q:\n%s", fragment, firstHumanStdout)
@@ -712,18 +710,18 @@ func TestInspectConfigurationHumanAndJSONAreDeterministicRedactedAndReadOnly(t *
 	hostPath := `config["example.com/platform/shared.New"]["host"]`
 	hostNodeID := "configuration-field:" + hostPath
 	hostNode := inspectGraphNodeByID(t, document.Result.Nodes, hostNodeID)
-	if hostNode.Kind != "configuration-field" || hostNode.Label != hostPath || len(hostNode.Sources) != 2 {
+	if hostNode.Kind != "configuration-field" || hostNode.Label != hostPath || len(hostNode.Sources) != 1 {
 		t.Fatalf("configuration host node = %#v", hostNode)
 	}
 	assertInspectGraphEdge(t, document.Result.Edges, "selects-configuration", "module:example.com/app", "configuration-selection:default", "default", "example.com/app", "plystra.yaml", "configuration-selection")
-	assertInspectGraphEdge(t, document.Result.Edges, "composes-configuration", "module:example.com/platform", "configuration-selection:default", "template", "example.com/platform", "plystra.yaml", "configuration-value")
-	assertInspectGraphEdge(t, document.Result.Edges, "contributes-configuration", "module:example.com/platform", hostNodeID, "template", "example.com/platform", "plystra.yaml", "configuration-value")
 	assertInspectGraphEdge(t, document.Result.Edges, "contributes-configuration", "module:example.com/app", hostNodeID, "current-project-root", "example.com/app", "plystra.yaml", "configuration-value")
 	assertInspectGraphEdge(t, document.Result.Edges, "sets-configuration", "module:example.com/app", hostNodeID, "current-project-root", "example.com/app", "plystra.yaml", "configuration-value")
 	passwordNodeID := `configuration-field:config["example.com/platform/shared.New"]["password"]`
-	assertInspectGraphEdge(t, document.Result.Edges, "sets-configuration", "module:example.com/platform", passwordNodeID, "template", "example.com/platform", "plystra.yaml", "configuration-value")
-	if _, exists := findInspectGraphEdge(document.Result.Edges, "sets-configuration", "module:example.com/platform", hostNodeID, "template"); exists {
-		t.Fatalf("overridden dependency host remained effective: %#v", document.Result.Edges)
+	assertInspectGraphEdge(t, document.Result.Edges, "sets-configuration", "module:example.com/app", passwordNodeID, "current-project-root", "example.com/app", "plystra.yaml", "configuration-value")
+	for _, edge := range document.Result.Edges {
+		if strings.HasPrefix(edge.From, "module:example.com/platform") && strings.Contains(edge.To, "configuration-field:") {
+			t.Fatalf("dependency configuration remained visible: %#v", edge)
+		}
 	}
 	assertInspectConfigurationGraphRedacted(t, fixtureRoot, firstHumanStdout, firstStdout)
 	if after := snapshotInspectProject(t, fixtureRoot); !reflect.DeepEqual(after, before) {
@@ -791,12 +789,9 @@ func TestInspectConfigurationSelectorsExposeReplacementRemovalAndSuppression(t *
 				passwordSourceKind = "configuration-removal"
 			}
 			assertInspectGraphEdge(t, document.Result.Edges, test.passwordKind, "module:example.com/app", passwordNodeID, test.owner, "example.com/app", test.sourcePath, passwordSourceKind)
-			if _, exists := findInspectGraphEdge(document.Result.Edges, "sets-configuration", "module:example.com/platform", hostNodeID, "template"); exists {
-				t.Fatalf("selected host retained the dependency contribution as effective: %#v", document.Result.Edges)
-			}
 			if test.mode == "explicit-config" {
 				for _, edge := range document.Result.Edges {
-					if edge.Kind == "contributes-configuration" && edge.Reason == "current-project-root" && edge.To != "configuration-field:template" {
+					if edge.Kind == "contributes-configuration" && edge.Reason == "current-project-root" {
 						t.Fatalf("full replacement retained root configuration: %#v", edge)
 					}
 				}
@@ -817,15 +812,15 @@ func TestInspectConfigurationSelectorsExposeReplacementRemovalAndSuppression(t *
 	suppressed := decodeInspectGraphCommandEnvelope(t, suppressedStdout)
 	objectNodeID := `configuration-field:config["example.com/platform/shared.New"]`
 	assertInspectGraphEdge(t, suppressed.Result.Edges, "removes-configuration", "module:example.com/app", objectNodeID, "current-project-environment", "example.com/app", "plystra.suppressed.yaml", "configuration-removal")
-	assertInspectGraphEdge(t, suppressed.Result.Edges, "suppresses-configuration", objectNodeID, hostNodeID, "ancestor-removal", "example.com/app", "plystra.suppressed.yaml", "configuration-removal")
-	assertInspectGraphEdge(t, suppressed.Result.Edges, "suppresses-configuration", objectNodeID, passwordNodeID, "ancestor-removal", "example.com/app", "plystra.suppressed.yaml", "configuration-removal")
+	assertInspectGraphEdge(t, suppressed.Result.Edges, "suppresses-configuration", objectNodeID, hostNodeID, "configuration-removal", "example.com/app", "plystra.suppressed.yaml", "configuration-removal")
+	assertInspectGraphEdge(t, suppressed.Result.Edges, "suppresses-configuration", objectNodeID, passwordNodeID, "configuration-removal", "example.com/app", "plystra.suppressed.yaml", "configuration-removal")
 	for _, edge := range suppressed.Result.Edges {
 		if (edge.Kind == "sets-configuration" || edge.Kind == "removes-configuration") && (edge.To == hostNodeID || edge.To == passwordNodeID) {
 			t.Fatalf("suppressed descendant retained effective state: %#v", edge)
 		}
 	}
 	humanExit, humanStdout, humanStderr := runCommand(t, []string{"inspect", "configuration", "--env", "suppressed"}, nested, environment)
-	if humanExit != 0 || humanStderr != "" || !strings.Contains(humanStdout, `Field: config["example.com/platform/shared.New"] (removed by current-project-environment)`+"\n") || !strings.Contains(humanStdout, `Field: config["example.com/platform/shared.New"]["host"] (suppressed by current-project-environment at config["example.com/platform/shared.New"] through ancestor removal)`+"\n") {
+	if humanExit != 0 || humanStderr != "" || !strings.Contains(humanStdout, `Field: config["example.com/platform/shared.New"] (removed by current-project-environment)`+"\n") || !strings.Contains(humanStdout, `Field: config["example.com/platform/shared.New"]["host"] (suppressed by current-project-environment at config["example.com/platform/shared.New"] through configuration removal)`+"\n") {
 		t.Fatalf("suppressed human configuration graph = exit %d, stdout %q, stderr %q", humanExit, humanStdout, humanStderr)
 	}
 	assertInspectConfigurationGraphRedacted(t, fixtureRoot, humanStdout, suppressedStdout)
@@ -851,7 +846,7 @@ require example.com/platform v1.0.0
 
 replace example.com/platform v1.0.0 => corp.example/configuration-platform v1.1.0
 `)
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/platform\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	nested := filepath.Join(root, "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%s): %v", nested, err)
@@ -880,10 +875,11 @@ replace example.com/platform v1.0.0 => corp.example/configuration-platform v1.1.
 	if replacementNode.Label != "example.com/platform" || len(replacementNode.Sources) != 1 || replacementNode.Sources[0].Module != "corp.example/configuration-platform" || replacementNode.Sources[0].Path != "plystra.yaml" {
 		t.Fatalf("replacement module node = %#v", replacementNode)
 	}
-	fieldNodeID := `configuration-field:interfaces.require["kernel.health/v1"]`
-	assertInspectGraphEdge(t, document.Result.Edges, "composes-configuration", "module:example.com/platform", "configuration-selection:default", "template", "corp.example/configuration-platform", "plystra.yaml", "configuration-value")
-	assertInspectGraphEdge(t, document.Result.Edges, "contributes-configuration", "module:example.com/platform", fieldNodeID, "template", "corp.example/configuration-platform", "plystra.yaml", "configuration-value")
-	assertInspectGraphEdge(t, document.Result.Edges, "sets-configuration", "module:example.com/platform", fieldNodeID, "template", "corp.example/configuration-platform", "plystra.yaml", "configuration-value")
+	for _, edge := range document.Result.Edges {
+		if strings.HasPrefix(edge.From, "module:example.com/platform") && strings.Contains(edge.To, "configuration-field:") {
+			t.Fatalf("dependency replacement configuration remained visible: %#v", edge)
+		}
+	}
 	if strings.Contains(stdout, proxy) || strings.Contains(stdout, root) {
 		t.Fatalf("replacement configuration graph leaked a machine path: %s", stdout)
 	}

@@ -157,7 +157,6 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 		"resource.contract: specified=yes parsed=yes generated=not_applicable executed=not_applicable accepted=yes\n",
 		"resource.provider.discovery: specified=yes parsed=yes generated=not_applicable executed=not_applicable accepted=yes\n",
 		"resource: specified=yes parsed=yes generated=yes executed=yes accepted=no\n",
-		"template.resource-inheritance: specified=yes parsed=yes generated=yes executed=yes accepted=no\n",
 		"data: specified=yes parsed=no generated=no executed=no accepted=no\n",
 		"data.compiler: specified=yes parsed=no generated=no executed=no accepted=no\n",
 		"Support stages are independent: parsed, generated, or executed support does not establish acceptance.\n",

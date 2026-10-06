@@ -42,7 +42,7 @@ rollback on failure. Compound change plans and --dry-run are not installed.
 An effective choice for an intrinsic kernel.* Interface emits
 PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing
 implementation-selection Source. Set that interfaces.use entry to {$remove: true} in the
-selected current-Project document to remove either a local or template choice.
+selected current-Project document to remove an effective choice.
 
 PLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit
 selector is present; setting both is an error. Explicit --env or --config

@@ -1,7 +1,7 @@
 package applicationmeta
 
-// ConfigurationCompositionError locates the template or selected current
-// document responsible for a final configuration invariant failure.
+// ConfigurationCompositionError locates the current-project document
+// responsible for a final configuration invariant failure.
 type ConfigurationCompositionError struct {
 	source ConfigurationDeclarationSource
 	cause  error

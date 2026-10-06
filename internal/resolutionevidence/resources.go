@@ -46,8 +46,8 @@ func (e Evidence) Resources() []interfaceprovenance.ResourceInput {
 	return result
 }
 
-// ResourceConfigurationSources returns every effective configuration contributor
-// for one instance, including config-only template and current-project layers.
+// ResourceConfigurationSources returns every effective current-project
+// configuration contributor for one instance.
 // It exposes coordinates only, not configuration keys, digests or values.
 func (e Evidence) ResourceConfigurationSources(instanceName string) []interfaceprovenance.ResourceSource {
 	prefix := "resources.instances[" + strconv.Quote(instanceName) + "].config"

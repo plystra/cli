@@ -16,7 +16,6 @@ import (
 func TestSetResourceProviderPreservesExactUnrelatedIntent(t *testing.T) {
 	t.Parallel()
 	const input = `# Project choices.
-template: example.com/base
 interfaces:
   require: {add: [app.run/v1], remove: [old.run/v1]}
   use: {app.run/v1: example.com/service.New}
@@ -46,7 +45,7 @@ resources:
 `
 	provider := mustImplementationChoiceConstructor(t, replacementResourceProvider)
 	removals := []applicationmeta.ResourceParameterRemoval{{ParameterName: "local"}, {ParameterName: "inherited", Tombstone: true}}
-	for _, overlay := range []bool{false, true} {
+	for _, overlay := range []bool{true} {
 		t.Run(fmt.Sprint(overlay), func(t *testing.T) {
 			data := []byte(input)
 			if overlay {
@@ -133,25 +132,24 @@ func TestSetResourceProviderRevivesOnlySelectedInstance(t *testing.T) {
 func TestSetResourceProviderComposesReplacementWithoutOldConfiguration(t *testing.T) {
 	t.Parallel()
 	lookup := resourceLookup(t, "Value string; Other string")
-	lower := applicationmeta.Dependency{ModulePath: "example.com/base", Manifest: composeManifest(t, `resources:
+	rootData := []byte(`resources:
   instances:
-    database.primary: {use: example.com/database.New, config: {value: inherited, other: inherited}}
+    database.primary: {config: {value: local}}
     database.replica: {use: example.com/database.New, config: {value: sibling}}
   bind:
     instances:
       database.primary: {old: database.replica, retained: database.replica}
-`)}
-	root := []byte(resourceDocument("{config: {value: local}}"))
+`)
 	for _, replacement := range []bool{false, true} {
 		symbol := resourceProvider
 		if replacement {
 			symbol = replacementResourceProvider
 		}
-		updated, _, err := applicationmeta.SetResourceProvider(root, "database.primary", mustImplementationChoiceConstructor(t, symbol), replacement, []applicationmeta.ResourceParameterRemoval{{ParameterName: "old", Tombstone: true}})
+		updated, _, err := applicationmeta.SetResourceProvider(rootData, "database.primary", mustImplementationChoiceConstructor(t, symbol), replacement, []applicationmeta.ResourceParameterRemoval{{ParameterName: "old"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		composition, err := applicationmeta.Compose([]applicationmeta.Dependency{lower}, resourceManifest(t, "plystra.yaml", string(updated)), lookup)
+		composition, err := applicationmeta.Compose(nil, resourceManifest(t, "plystra.yaml", string(updated)), lookup)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +159,7 @@ func TestSetResourceProviderComposesReplacementWithoutOldConfiguration(t *testin
 				t.Fatal("old provider configuration crossed replacement boundary")
 			}
 		} else {
-			assertResourceYAML(t, primary, "{value: local, other: inherited}")
+			assertResourceYAML(t, primary, "{value: local}")
 		}
 		assertResourceYAML(t, resourceConfig(t, composition.Manifest(), "database.replica"), "{value: sibling}")
 		bindings := composition.Manifest().ResourceBindings()

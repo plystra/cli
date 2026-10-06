@@ -7,8 +7,9 @@ import (
 )
 
 // CurrentLayers returns defensive selected-current-project layers in authored
-// order. Inherited Resource providers are attached as schema context, without
-// becoming authored use decisions or copying lower configuration into a delta.
+// order. Lower-layer Resource providers are attached as schema context,
+// without becoming authored use decisions or copying lower configuration into
+// an overlay delta.
 // Use these layers for typed decisions and digests after Compose.
 func (c Composition) CurrentLayers() []Manifest {
 	if !c.Valid() {
@@ -195,7 +196,7 @@ func finalizeResources(manifest Manifest, schemas SchemaLookup) (Manifest, error
 func resourceConfigurationDecisions(manifest Manifest, schemas SchemaLookup, opaque bool) ([]ConfigurationDecision, error) {
 	var result []ConfigurationDecision
 	add := func(path, value string, summary ConfigurationDecisionSummary, removed bool, source string) {
-		result = append(result, ConfigurationDecision{path: path, digest: digestStrings("resource.declaration/v1", path, value), summary: summary, removed: removed, source: source, dependencyComposable: true})
+		result = append(result, ConfigurationDecision{path: path, digest: digestStrings("resource.declaration/v1", path, value), summary: summary, removed: removed, source: source, resolutionRelevant: true})
 	}
 	for _, instance := range manifest.resourceInstances {
 		path := resourceInstancePath(instance.name)

@@ -50,7 +50,7 @@ func addHTTPExposure(data []byte, id interfaceid.Identifier, parse func([]byte) 
 		return nil, false, fmt.Errorf("%w: %w", ErrAddHTTPExposure, err)
 	}
 	exposure := HTTPExposure{id: id, transport: HTTPTransportConnect}
-	if err := setKeyedMaintenanceDecision(document, []string{"http", "expose"}, id.String(), httpExposureYAML(exposure)); err != nil {
+	if err := setKeyedConfigurationDecision(document, []string{"http", "expose"}, id.String(), httpExposureYAML(exposure)); err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrAddHTTPExposure, err)
 	}
 

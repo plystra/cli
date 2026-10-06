@@ -3,7 +3,6 @@ package applicationmeta_test
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -69,27 +68,6 @@ func TestConstructorValuePublicVisibility(t *testing.T) {
 			}
 			if len(test.private) < 2 {
 				return
-			}
-			dependencies := []applicationmeta.Dependency{
-				{ModulePath: "example.com/a", Manifest: manifest(test.private[0])},
-				{ModulePath: "example.com/b", Manifest: manifest(test.private[0])},
-			}
-			identical, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}"), lookup)
-			if err != nil {
-				t.Fatal(err)
-			}
-			dependencies[1].Manifest = manifest(test.private[1])
-			if _, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}"), lookup); err != nil {
-				t.Fatalf("ordered private replacement = %v", err)
-			}
-			for _, local := range []string{test.private[0], "{$remove: true}"} {
-				resolved, err := applicationmeta.Compose(dependencies, manifest(local), lookup)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !reflect.DeepEqual(resolved.DependencyBaseline(), identical.DependencyBaseline()) {
-					t.Fatal("suppressed private equality entered public baseline")
-				}
 			}
 		})
 	}

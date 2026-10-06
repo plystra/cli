@@ -68,8 +68,8 @@ canonical module-relative Source lines first.
   plystra add <go-module-query>
 
 Adds one ordinary Go Module dependency, regenerates, tidies, and validates the
-complete Project in one rollback boundary. Dependency Project configuration
-remains inert unless reached through the root Project's template ancestry.
+complete Project in one rollback boundary. Dependency Project configuration is
+inert; dependency Project roots are used only as ordinary discovery markers.
 
 Malformed queries emit PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID before Project
 discovery or mutation.
@@ -79,7 +79,7 @@ discovery or mutation.
 
 Removes one ordinary Go Module dependency, regenerates, tidies, and validates
 the complete Project in one rollback boundary. Dependency Project configuration
-remains inert unless reached through the root Project's template ancestry.
+is inert; dependency Project roots are used only as ordinary discovery markers.
 
 Malformed paths emit PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID before Project
 discovery or mutation.
@@ -91,8 +91,8 @@ before mutation.
 
 Updates one selected ordinary Go Module dependency, regenerates, tidies, and
 validates the complete Project in one rollback boundary. Dependency Project
-configuration remains inert unless the selected current Project explicitly
-selects it through the root template ancestry.
+configuration is inert; dependency Project roots are used only as ordinary
+discovery markers.
 
 Malformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project
 discovery or mutation.
@@ -131,7 +131,8 @@ diagnostic.
 A normalized Project-contained selected document that cannot be loaded reports
 one span-less configuration-selection source; conflicting or unsafe selectors
 report none.
-Template Project roots compose oldest to nearest below the current Project delta.
+Configuration composes only the current Project root with one selected overlay,
+or uses one complete current-Project replacement document.
 Generation does not rewrite the selected current-Project configuration document.
 PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
 installed CLI/Kernel pair both generates and executes it. The diagnostic reports
@@ -253,8 +254,7 @@ stable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.
 A normalized Project-contained selected document that cannot be loaded reports
 one span-less configuration-selection source; conflicting or unsafe selectors
 report none.
-Invalid template ancestry and invalid or unselected constructor configuration
-failures emit module-relative
+Invalid or unselected constructor configuration failures emit module-relative
 configuration-declaration sources before selector-aware recovery.
 PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
 installed CLI/Kernel pair both generates and executes it. The diagnostic reports
@@ -431,9 +431,9 @@ catalog entries, governed proxies, or transports. Use selects a compatible
 provider for an existing named instance without a kind flag. Implement creates
 unfinished Interface or Resource scaffolds without activation. Data, full
 Resource acceptance, and compound change plans remain unsupported.
-The configuration view retains the selected current-Project layer, selected
-template ancestry, redacted field summaries, ownership and precedence, effective
-and overridden contributions, explicit removals, and ancestor suppression.
+The configuration view retains the selected current-Project layer, redacted
+field summaries, ownership and precedence, effective and overridden
+contributions, explicit removals, and configuration suppression.
 PLYSTRA_ENV and PLYSTRA_CONFIG
 supply equivalent selectors when no explicit selector is present; setting both
 is an error. Explicit --env or --config overrides both variables, and the two
@@ -674,10 +674,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		if !result.Clean() {
 			heading := "generated output is not current"
-			if result.ConfigurationChanged() {
-				heading = "Project configuration or generated output is not current"
-			}
-			writeGenerationReport(stderr, heading, result.Module().ModulePath(), result.ConfigurationChanged(), result.ConfigurationMaintenancePath(), result.Report(), commandRecoveryContext(check.configurationPath, check.environmentName, environment))
+			writeGenerationReport(stderr, heading, result.Module().ModulePath(), result.Report(), commandRecoveryContext(check.configurationPath, check.environmentName, environment))
 			return 1
 		}
 		_, _ = fmt.Fprintf(stdout, "Project checks passed for %s in %s\n", result.Module().ModulePath(), result.Module().Path())
@@ -735,16 +732,12 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 			writeCommandFailure(stderr, "", err, commandRecoveryContext(generate.configurationPath, generate.environmentName, environment))
 			return 1
 		}
-		configurationDrift := result.Checked() && result.ConfigurationChanged()
-		if configurationDrift || !result.Report().Clean() {
+		if !result.Report().Clean() {
 			heading := "generated output remains inconsistent after installation"
 			if result.Checked() {
 				heading = "generated output is not current"
-				if configurationDrift {
-					heading = "Project configuration or generated output is not current"
-				}
 			}
-			writeGenerationReport(stderr, heading, result.Module().ModulePath(), configurationDrift, result.ConfigurationMaintenancePath(), result.Report(), commandRecoveryContext(generate.configurationPath, generate.environmentName, environment))
+			writeGenerationReport(stderr, heading, result.Module().ModulePath(), result.Report(), commandRecoveryContext(generate.configurationPath, generate.environmentName, environment))
 			return 1
 		}
 		if result.Checked() {
@@ -851,33 +844,19 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 	return result, true
 }
 
-func writeGenerationReport(writer io.Writer, heading, modulePath string, configurationDrift bool, configurationPath string, report generatedfiles.Report, context recoveryContext) {
+func writeGenerationReport(writer io.Writer, heading, modulePath string, report generatedfiles.Report, context recoveryContext) {
 	_, _ = fmt.Fprintf(writer, "%s:\n", heading)
-	if configurationDrift {
-		_, _ = fmt.Fprintf(writer, "  changed %s (configuration composition)\n", configurationPath)
-	}
 	for _, change := range report.Changes() {
 		_, _ = fmt.Fprintf(writer, "  %s %s\n", change.Kind(), change.Path())
 	}
 	action := "Run `plystra generate" + context.selectorSuffix() + "` to restore the selected generated output."
 	code := diagnosticGeneratedDrift
-	if configurationDrift {
-		code = diagnosticConfigurationCompositionDrift
-	}
 	if len(report.Unexpected()) > 0 {
 		action = "Move every unexpected unowned path outside generated/, then run `plystra generate" + context.selectorSuffix() + "`."
 		code = diagnosticGeneratedUnexpectedOutput
 	}
 	var sourceInputs []diagnosticjson.Source
 	switch code {
-	case diagnosticConfigurationCompositionDrift:
-		sourceInputs = []diagnosticjson.Source{{
-			Module: modulePath,
-			Path:   configurationPath,
-			Kind:   "configuration-declaration",
-			Line:   1,
-			Column: 1,
-		}}
 	case diagnosticGeneratedDrift:
 		for _, change := range report.Changes() {
 			sourceInputs = append(sourceInputs, diagnosticjson.Source{

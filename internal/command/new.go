@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
@@ -22,7 +21,7 @@ const newUsage = `Usage:
 
 Options:
   --module <go-module-path> Set the Go Module path; defaults to the project name.
-  --template <module-query> Create from one public, portable Plystra Project dependency.
+  --template <module-query> Add one resolved Plystra Project as a direct dependency.
   --plugin <name>           Create an initial root-level plugin.
   --git                     Initialize a Git repository; default is off.
   --github-ci               Include GitHub Actions CI; default is off.
@@ -38,14 +37,10 @@ JSON success nests one plystra.project-created/v1 payload with the Go Module
 path and relative created directory. Enter payload.directory and run
 plystra check independently before treating creation as complete.
 
-Creation records --template as a direct dependency and root template relationship.
-Its linear ancestry immediately supplies the supported Interface and named
-Resource baseline, including CORS, without copying source or configuration or
-ranking candidates. Data inheritance remains unsupported.
-
-Invalid inherited declarations retain their owning source and specific
-diagnostic with exit 3. Ambiguous Implementation choices require a decision
-with exit 4. Both failures leave the requested target absent.
+Creation records --template as an ordinary direct Go Module dependency. The
+selected module must be a Plystra Project so its root marker can be checked,
+but its configuration, source tree, and generated output are never copied or
+activated.
 
 Invalid Project names, explicit Go Module paths, and template queries emit
 PLYSTRA_PROJECT_CREATE_NAME_INVALID, PLYSTRA_PROJECT_CREATE_MODULE_INVALID,
@@ -62,11 +57,9 @@ Unavailable Git emits PLYSTRA_PROJECT_CREATE_GIT_UNAVAILABLE. Git processes
 that start but fail initialization emit
 PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED. Both leave no target Project.
 
-Template dependencies must be public, portable, and generation-stable. Creation
-rejects the staged Project unless immediate generation checking, applicable
-JavaScript SDK dependency installation plus typecheck/build/package validation,
-Project checks, the read-only Go package build, and an isolated lifecycle health
-smoke all succeed. Validation-only npm output is removed before installation.
+The selected dependency is installed and the new Project is generated and
+tested through the ordinary dependency workflow. A dependency Project remains
+ordinary graph input after creation.
 `
 
 var (
@@ -215,7 +208,7 @@ func runNewCommand(arguments []string, stdout, stderr io.Writer, workingDirector
 		if options.template != "" {
 			_, _ = fmt.Fprintf(
 				output.resultWriter(),
-				"Created %s from %s\nConfiguration scaffolded\nGenerated, checked, built, and locally verified\n\nNext:\n  cd %s\n  plystra check\n",
+				"Created %s with dependency %s\nConfiguration scaffolded\nGenerated and tested\n\nNext:\n  cd %s\n  plystra check\n",
 				options.projectName,
 				options.template,
 				options.projectName,
@@ -492,10 +485,10 @@ func classifyNewFailure(err error) (commandschema.Status, string, string) {
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateModuleInvalid, "The Go Module path is invalid."
 	case errors.Is(err, newproject.ErrInvalidTemplateQuery):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateTemplateInvalid, "The Project template input is invalid."
-	case errors.Is(err, applicationresolve.ErrTemplate), errors.Is(err, newproject.ErrInvalidTemplate):
-		return commandschema.StatusValidationFailed, diagnosticcode.TemplateInvalid, "The resolved Project template is invalid."
+	case errors.Is(err, newproject.ErrInvalidTemplate):
+		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreateTemplateInvalid, "The selected dependency is not a valid Plystra Project."
 	case errors.Is(err, interfaceresolution.ErrAmbiguousImplementation):
-		return commandschema.StatusDecisionRequired, diagnosticcode.ResolveMultipleImplementations, "The Project template requires an explicit Interface implementation choice."
+		return commandschema.StatusDecisionRequired, diagnosticcode.ResolveMultipleImplementations, "The new Project requires an explicit Interface implementation choice."
 	case errors.Is(err, newproject.ErrInvalidPluginName):
 		return commandschema.StatusValidationFailed, diagnosticcode.ProjectCreatePluginNameInvalid, "The initial Plugin name is invalid."
 	case errors.Is(err, newproject.ErrInvalidPluginID):
@@ -505,37 +498,7 @@ func classifyNewFailure(err error) (commandschema.Status, string, string) {
 	case errors.Is(err, newproject.ErrGitInitialization):
 		return commandschema.StatusExecutionFailed, diagnosticcode.ProjectCreateGitInitializationFailed, "Git repository initialization failed."
 	}
-	if diagnostic, found := primaryActionableDiagnostic(err, recoveryContext{operation: "new"}); found && newTemplateValidationCode(diagnostic.code) {
-		return commandschema.StatusValidationFailed, diagnostic.code, "The resolved Project template contains invalid application declarations."
-	}
 	return commandschema.StatusExecutionFailed, diagnosticcode.ProjectCreateFailed, "Project creation failed."
-}
-
-func newTemplateValidationCode(code string) bool {
-	switch code {
-	case diagnosticProjectManifestInvalid, diagnosticConfigurationInvalid,
-		diagnosticConstructorConfigurationSchemaInvalid, diagnosticConstructorConfigurationValuesInvalid,
-		diagnosticConstructorConfigurationUnselected, diagnosticPolicyNotEnforced,
-		diagnosticResolveUnknownInterface, diagnosticResolveUnknownImplementation,
-		diagnosticResolveIncompatibleImplementation, diagnosticResolveMissingImplementation,
-		diagnosticResolveConstructorCycle, diagnosticResolveReservedInterface,
-		diagnosticResolveIntrinsicInterfaceSelection, diagnosticImplementationDeclarationInvalid,
-		diagnosticImplementationConfigInvalid, diagnosticImplementationRequiredInvalid,
-		diagnosticcode.ImplementationResourceInvalid,
-		diagnosticImplementationOptionalInvalid, diagnosticImplementationResultInvalid,
-		diagnosticImplementationConformanceInvalid, diagnosticInterfaceDeclarationInvalid,
-		diagnosticInterfaceContractInvalid, diagnosticInterfaceMetadataInvalid,
-		diagnosticInterfaceIDDuplicate, diagnosticAuthoredPackageInvalid,
-		diagnosticcode.ResourceDeclarationInvalid, diagnosticcode.ResourceProviderDeclarationInvalid,
-		diagnosticcode.ResourceProviderInvalid, diagnosticcode.ResourceContractInvalid,
-		diagnosticcode.ResourceIDDuplicate, diagnosticcode.ResourceInstanceInvalid,
-		diagnosticcode.ResourceBindingInvalid, diagnosticcode.ResourceBindingMissing,
-		diagnosticcode.ResourceBindingAmbiguous, diagnosticcode.ResourceMetadataInvalid,
-		diagnosticcode.ResourceConfigurationSchemaInvalid, diagnosticcode.ResourceConfigurationValuesInvalid:
-		return true
-	default:
-		return false
-	}
 }
 
 func newFailureRecovery(code string) (commandschema.Recovery, error) {
@@ -556,7 +519,7 @@ func newFailureRecovery(code string) (commandschema.Recovery, error) {
 		id, targetKind, targetID, precondition = "correct-project-name", "argument", "project-name", "canonical_project_name"
 	case diagnosticcode.ProjectCreateModuleInvalid:
 		id, targetKind, targetID, precondition = "correct-project-module", "argument", "module", "valid_module_path"
-	case diagnosticcode.ProjectCreateTemplateInvalid, diagnosticcode.TemplateInvalid, diagnosticcode.ResolveMultipleImplementations:
+	case diagnosticcode.ProjectCreateTemplateInvalid:
 		id, targetKind, targetID, precondition = "correct-project-template", "argument", "template", "valid_template_input"
 	case diagnosticcode.ProjectCreatePluginNameInvalid:
 		id, targetKind, targetID, precondition = "correct-project-plugin-name", "argument", "plugin", "canonical_plugin_name"
@@ -568,10 +531,6 @@ func newFailureRecovery(code string) (commandschema.Recovery, error) {
 		id, targetKind, targetID, precondition = "correct-git-initialization", "tool", "git", "git_initialization_ready"
 	case diagnosticcode.ProjectCreateCancelled:
 		id, targetKind, targetID, precondition = "retry-project-creation", "command", "new", "intent_confirmed"
-	default:
-		if newTemplateValidationCode(code) {
-			id, targetKind, targetID, precondition = "correct-project-template", "argument", "template", "valid_template_input"
-		}
 	}
 	return commandschema.NewRecovery(commandschema.RecoveryInput{
 		ID:            id,

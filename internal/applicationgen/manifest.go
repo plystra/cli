@@ -46,13 +46,6 @@ const (
 	ConfigurationModeExplicit = "explicit-config"
 )
 
-type applicationManifestProvenance struct {
-	Path    string   `json:"path"`
-	Digest  string   `json:"digest"`
-	Removed bool     `json:"removed,omitempty"`
-	Sources []string `json:"sources"`
-}
-
 type applicationManifestDocumentReference struct {
 	Path   string `json:"path"`
 	Digest string `json:"digest"`
@@ -65,21 +58,12 @@ type applicationManifestConfiguration struct {
 	Root                                   applicationManifestDocumentReference                 `json:"root"`
 	Overlay                                *applicationManifestDocumentReference                `json:"overlay,omitempty"`
 	Selected                               *applicationManifestDocumentReference                `json:"selected,omitempty"`
-	DependencyBaselines                    []applicationManifestSelectionBaseline               `json:"dependency_baselines"`
 	DormantImplementationSelections        []applicationManifestDormantImplementationSelection  `json:"dormant_implementation_selections"`
 	DormantImplementationSelectionsDigest  string                                               `json:"dormant_implementation_selections_digest"`
 	DormantConstructorConfigurations       []applicationManifestDormantConstructorConfiguration `json:"dormant_constructor_configurations"`
 	DormantConstructorConfigurationsDigest string                                               `json:"dormant_constructor_configurations_digest"`
 	ProtobufWireMapDigest                  string                                               `json:"protobuf_wire_map_digest"`
 	ApplicationModelDigest                 string                                               `json:"application_model_digest"`
-}
-
-type applicationManifestSelectionBaseline struct {
-	Mode                        string                          `json:"mode"`
-	Path                        string                          `json:"path"`
-	DependencyCompositionDigest string                          `json:"dependency_composition_digest"`
-	DependencyBaseline          []applicationManifestProvenance `json:"dependency_baseline"`
-	CurrentProjectPaths         []string                        `json:"current_project_paths"`
 }
 
 type applicationManifestDocument struct {
@@ -101,7 +85,6 @@ type ManifestProvenanceOptions struct {
 	RootDigest                       string
 	SelectedPath                     string
 	SelectedDigest                   string
-	CurrentProjectPaths              []string
 	DormantImplementationSelections  []DormantImplementationSelection
 	DormantConstructorConfigurations []DormantConstructorConfiguration
 	Composition                      applicationmeta.Composition
@@ -109,7 +92,6 @@ type ManifestProvenanceOptions struct {
 	ApplicationModelDigest           string
 	InterfaceProvenance              interfaceprovenance.Provenance
 	TransportToolchain               transporttoolchain.Identity
-	Previous                         ManifestProvenance
 }
 
 // ManifestProvenance is one immutable validated generated-manifest
@@ -121,7 +103,6 @@ type ManifestProvenance struct {
 	rootDigest                             string
 	selectedPath                           string
 	selectedDigest                         string
-	baselines                              []manifestSelectionBaseline
 	dormantImplementationSelections        []DormantImplementationSelection
 	dormantImplementationSelectionsDigest  string
 	dormantConstructorConfigurations       []DormantConstructorConfiguration
@@ -132,21 +113,10 @@ type ManifestProvenance struct {
 	transportToolchain                     transporttoolchain.Identity
 }
 
-type manifestSelectionBaseline struct {
-	mode                string
-	path                string
-	baseline            applicationmeta.DependencyBaseline
-	currentProjectPaths []string
-}
-
 // NewManifestProvenance constructs the only supported generated-manifest
 // provenance schema from already normalized typed configuration-layer
 // identities.
 func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenance, error) {
-	currentProjectPaths, err := normalizeCurrentProjectPaths(options.CurrentProjectPaths)
-	if err != nil {
-		return ManifestProvenance{}, err
-	}
 	dormantSelections, err := normalizeDormantImplementationSelections(options.DormantImplementationSelections)
 	if err != nil {
 		return ManifestProvenance{}, err
@@ -163,34 +133,6 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 	if err != nil {
 		return ManifestProvenance{}, fmt.Errorf("digest dormant constructor configurations: %w", err)
 	}
-	baselines := make([]manifestSelectionBaseline, 0, len(options.Previous.baselines)+1)
-	if validateManifestProvenance(options.Previous) == nil {
-		baselines = cloneSelectionBaselines(options.Previous.baselines)
-	}
-	baselineMode, baselinePath := dependencyBaselineSelection(options.Mode, options.RootPath, options.SelectedPath)
-	current := manifestSelectionBaseline{
-		mode:                baselineMode,
-		path:                baselinePath,
-		baseline:            options.Composition.DependencyBaseline(),
-		currentProjectPaths: currentProjectPaths,
-	}
-	replaced := false
-	for index := range baselines {
-		if baselines[index].mode == current.mode && baselines[index].path == current.path {
-			baselines[index] = current
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		baselines = append(baselines, current)
-	}
-	sort.Slice(baselines, func(left, right int) bool {
-		if baselines[left].mode != baselines[right].mode {
-			return baselines[left].mode < baselines[right].mode
-		}
-		return baselines[left].path < baselines[right].path
-	})
 	provenance := ManifestProvenance{
 		mode:                                   options.Mode,
 		environment:                            options.Environment,
@@ -198,7 +140,6 @@ func NewManifestProvenance(options ManifestProvenanceOptions) (ManifestProvenanc
 		rootDigest:                             options.RootDigest,
 		selectedPath:                           options.SelectedPath,
 		selectedDigest:                         options.SelectedDigest,
-		baselines:                              baselines,
 		dormantImplementationSelections:        dormantSelections,
 		dormantImplementationSelectionsDigest:  dormantSelectionsDigest,
 		dormantConstructorConfigurations:       dormantConfigurations,
@@ -231,47 +172,6 @@ func (p ManifestProvenance) SelectedPath() string { return p.selectedPath }
 
 // SelectedDigest returns the normalized semantic selected-document digest.
 func (p ManifestProvenance) SelectedDigest() string { return p.selectedDigest }
-
-// DependencyBaseline returns the typed dependency-composition baseline.
-func (p ManifestProvenance) DependencyBaseline() applicationmeta.DependencyBaseline {
-	baseline, _ := p.BaselineForSelection(p.mode, p.selectedPath)
-	return baseline
-}
-
-// BaselineForSelection returns retained dependency ownership for one exact
-// selection mode and Project-relative path.
-func (p ManifestProvenance) BaselineForSelection(mode, selectedPath string) (applicationmeta.DependencyBaseline, bool) {
-	mode, selectedPath = dependencyBaselineSelection(mode, p.rootPath, selectedPath)
-	index := sort.Search(len(p.baselines), func(index int) bool {
-		return p.baselines[index].mode > mode ||
-			(p.baselines[index].mode == mode && p.baselines[index].path >= selectedPath)
-	})
-	if index >= len(p.baselines) || p.baselines[index].mode != mode || p.baselines[index].path != selectedPath {
-		return applicationmeta.DependencyBaseline{}, false
-	}
-	return p.baselines[index].baseline, true
-}
-
-// CurrentProjectPaths returns the schema paths explicitly owned by the active
-// current-project configuration layer rather than its dependency baseline.
-func (p ManifestProvenance) CurrentProjectPaths() []string {
-	paths, _ := p.CurrentProjectPathsForSelection(p.mode, p.selectedPath)
-	return paths
-}
-
-// CurrentProjectPathsForSelection returns the persisted current-project
-// ownership paths for one exact dependency-baseline selection.
-func (p ManifestProvenance) CurrentProjectPathsForSelection(mode, selectedPath string) ([]string, bool) {
-	mode, selectedPath = dependencyBaselineSelection(mode, p.rootPath, selectedPath)
-	index := sort.Search(len(p.baselines), func(index int) bool {
-		return p.baselines[index].mode > mode ||
-			(p.baselines[index].mode == mode && p.baselines[index].path >= selectedPath)
-	})
-	if index >= len(p.baselines) || p.baselines[index].mode != mode || p.baselines[index].path != selectedPath {
-		return nil, false
-	}
-	return append([]string(nil), p.baselines[index].currentProjectPaths...), true
-}
 
 // DormantImplementationSelections returns exact authored choices that remain
 // outside executable binding and artifact provenance.
@@ -326,9 +226,7 @@ func (p ManifestProvenance) MatchesSelection(mode, selectedPath string) bool {
 }
 
 func (p ManifestProvenance) matches(composition applicationmeta.Composition, protobufWireMapDigest, applicationModelDigest string) bool {
-	baseline := p.DependencyBaseline()
 	return validateManifestProvenance(p) == nil && composition.Valid() &&
-		baseline.Digest() == composition.DependencyBaseline().Digest() &&
 		p.protobufWireMapDigest == protobufWireMapDigest &&
 		p.applicationModelDigest == applicationModelDigest
 }
@@ -351,26 +249,6 @@ func RenderManifest(aliasJSON []byte, context generation.Context, provenance Man
 	if err := json.Unmarshal(aliasJSON, &aliases); err != nil || !jsonArray(aliases.CapabilityAliases) {
 		return nil, fmt.Errorf("%w: final Alias manifest is invalid", ErrResolution)
 	}
-	baselines := make([]applicationManifestSelectionBaseline, len(provenance.baselines))
-	for baselineIndex, selection := range provenance.baselines {
-		records := selection.baseline.Records()
-		serialized := make([]applicationManifestProvenance, len(records))
-		for index, record := range records {
-			serialized[index] = applicationManifestProvenance{
-				Path:    record.Path,
-				Digest:  record.Digest,
-				Removed: record.Removed,
-				Sources: append([]string(nil), record.Sources...),
-			}
-		}
-		baselines[baselineIndex] = applicationManifestSelectionBaseline{
-			Mode:                        selection.mode,
-			Path:                        selection.path,
-			DependencyCompositionDigest: selection.baseline.Digest(),
-			DependencyBaseline:          serialized,
-			CurrentProjectPaths:         append([]string{}, selection.currentProjectPaths...),
-		}
-	}
 	document := applicationManifestDocument{
 		CapabilityAliases:    aliases.CapabilityAliases,
 		ConstraintProjection: constraintProjection,
@@ -384,7 +262,6 @@ func RenderManifest(aliasJSON []byte, context generation.Context, provenance Man
 				Path:   provenance.rootPath,
 				Digest: provenance.rootDigest,
 			},
-			DependencyBaselines:                    baselines,
 			DormantImplementationSelections:        dormantImplementationSelectionWires(provenance.dormantImplementationSelections),
 			DormantImplementationSelectionsDigest:  provenance.dormantImplementationSelectionsDigest,
 			DormantConstructorConfigurations:       dormantConstructorConfigurationWires(provenance.dormantConstructorConfigurations),
@@ -453,37 +330,6 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 	default:
 		return ManifestProvenance{}, errors.New("generated application manifest configuration mode is invalid")
 	}
-	if configuration.DependencyBaselines == nil {
-		return ManifestProvenance{}, errors.New("generated application manifest configuration dependency_baselines must be an array")
-	}
-	baselines := make([]manifestSelectionBaseline, len(configuration.DependencyBaselines))
-	for baselineIndex, selection := range configuration.DependencyBaselines {
-		if selection.DependencyBaseline == nil {
-			return ManifestProvenance{}, fmt.Errorf("generated application manifest dependency_baselines[%d].dependency_baseline must be an array", baselineIndex)
-		}
-		if selection.CurrentProjectPaths == nil {
-			return ManifestProvenance{}, fmt.Errorf("generated application manifest dependency_baselines[%d].current_project_paths must be an array", baselineIndex)
-		}
-		records := make([]applicationmeta.BaselineRecord, len(selection.DependencyBaseline))
-		for index, record := range selection.DependencyBaseline {
-			records[index] = applicationmeta.BaselineRecord{
-				Path:    record.Path,
-				Digest:  record.Digest,
-				Removed: record.Removed,
-				Sources: append([]string(nil), record.Sources...),
-			}
-		}
-		baseline, err := applicationmeta.RestoreDependencyBaseline(selection.DependencyCompositionDigest, records)
-		if err != nil {
-			return ManifestProvenance{}, fmt.Errorf("generated application manifest dependency_baselines[%d]: %w", baselineIndex, err)
-		}
-		baselines[baselineIndex] = manifestSelectionBaseline{
-			mode:                selection.Mode,
-			path:                selection.Path,
-			baseline:            baseline,
-			currentProjectPaths: append([]string{}, selection.CurrentProjectPaths...),
-		}
-	}
 	selectedPath := configuration.Root.Path
 	selectedDigest := configuration.Root.Digest
 	switch configuration.Mode {
@@ -505,7 +351,6 @@ func DecodeManifestProvenance(data []byte) (ManifestProvenance, error) {
 		rootDigest:                             configuration.Root.Digest,
 		selectedPath:                           selectedPath,
 		selectedDigest:                         selectedDigest,
-		baselines:                              baselines,
 		dormantImplementationSelections:        restoreDormantImplementationSelections(configuration.DormantImplementationSelections),
 		dormantImplementationSelectionsDigest:  configuration.DormantImplementationSelectionsDigest,
 		dormantConstructorConfigurations:       restoreDormantConstructorConfigurations(configuration.DormantConstructorConfigurations),
@@ -1120,45 +965,11 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	if provenance.mode == ConfigurationModeDefault && provenance.rootDigest != provenance.selectedDigest {
 		return errors.New("default root and selected document digests must match")
 	}
-	if len(provenance.baselines) == 0 {
-		return errors.New("dependency configuration baseline history is absent")
-	}
-	activeMode, activePath := dependencyBaselineSelection(provenance.mode, provenance.rootPath, provenance.selectedPath)
-	active := 0
-	var activeCurrentProjectPaths []string
-	for index, selection := range provenance.baselines {
-		if selection.mode != ConfigurationModeDefault && selection.mode != ConfigurationModeExplicit {
-			return fmt.Errorf("dependency baseline %d has an invalid selection mode", index)
-		}
-		if !safeManifestPath(selection.path) || !selection.baseline.Valid() {
-			return fmt.Errorf("dependency baseline %d has an invalid selection path or baseline", index)
-		}
-		if !validCurrentProjectPaths(selection.currentProjectPaths) {
-			return fmt.Errorf("dependency baseline %d has invalid current-project ownership paths", index)
-		}
-		if selection.mode == ConfigurationModeDefault && selection.path != rootConfigurationPath {
-			return fmt.Errorf("dependency baseline %d default selection must use %q", index, rootConfigurationPath)
-		}
-		if index > 0 {
-			previous := provenance.baselines[index-1]
-			if previous.mode > selection.mode || (previous.mode == selection.mode && previous.path >= selection.path) {
-				return errors.New("dependency baseline selections must be unique and canonically ordered")
-			}
-		}
-		if selection.mode == activeMode && selection.path == activePath {
-			active++
-			activeCurrentProjectPaths = selection.currentProjectPaths
-		}
-	}
-	if active != 1 {
-		return errors.New("dependency baseline history must contain the active selection exactly once")
-	}
 	if err := validateDormantImplementationSelections(
 		provenance.dormantImplementationSelections,
 		provenance.mode,
 		provenance.rootPath,
 		provenance.selectedPath,
-		activeCurrentProjectPaths,
 	); err != nil {
 		return err
 	}
@@ -1205,7 +1016,6 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 		provenance.mode,
 		provenance.rootPath,
 		provenance.selectedPath,
-		activeCurrentProjectPaths,
 	); err != nil {
 		return err
 	}
@@ -1216,54 +1026,10 @@ func validateManifestProvenance(provenance ManifestProvenance) error {
 	return nil
 }
 
-func dependencyBaselineSelection(mode, rootPath, selectedPath string) (string, string) {
-	if mode == ConfigurationModeEnvironment {
-		return ConfigurationModeDefault, rootPath
-	}
-	return mode, selectedPath
-}
-
 func validEnvironmentName(value string) bool {
 	return value != "" && len(value) <= 200 && value != "." && value != ".." &&
 		!strings.ContainsAny(value, `/\\<>:"|?*`) && strings.IndexFunc(value, unicode.IsControl) < 0 &&
 		path.Base(value) == value
-}
-
-func normalizeCurrentProjectPaths(values []string) ([]string, error) {
-	result := append([]string{}, values...)
-	sort.Strings(result)
-	if !validCurrentProjectPaths(result) {
-		return nil, errors.New("current-project ownership paths must be nonempty, bounded, unique, and canonical")
-	}
-	return result, nil
-}
-
-func validCurrentProjectPaths(values []string) bool {
-	if values == nil {
-		return false
-	}
-	for index, value := range values {
-		if value == "" || len(value) > 4096 || strings.IndexFunc(value, unicode.IsControl) >= 0 {
-			return false
-		}
-		if index > 0 && values[index-1] >= value {
-			return false
-		}
-	}
-	return true
-}
-
-func cloneSelectionBaselines(values []manifestSelectionBaseline) []manifestSelectionBaseline {
-	result := make([]manifestSelectionBaseline, len(values))
-	for index, value := range values {
-		result[index] = manifestSelectionBaseline{
-			mode:                value.mode,
-			path:                value.path,
-			baseline:            value.baseline,
-			currentProjectPaths: append([]string{}, value.currentProjectPaths...),
-		}
-	}
-	return result
 }
 
 func safeManifestPath(value string) bool {

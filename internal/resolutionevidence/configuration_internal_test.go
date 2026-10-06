@@ -7,11 +7,13 @@ import (
 	generation "github.com/plystra/cli/generation/v1"
 )
 
-func TestValidConfigurationFieldPathAcceptsCompositionEvidence(t *testing.T) {
+func TestValidConfigurationFieldPathRejectsRemovedCompositionMetadata(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]bool{
-		`template`:                        true,
+		`http.address`:                    true,
+		`interfaces.require`:              true,
+		`template`:                        false,
 		`composition.exports["defaults"]`: false,
 		`composition.adopt["example.com/acme/platform#defaults"]`: false,
 		`composition.exports["Bad"]`:                              false,
@@ -31,13 +33,12 @@ func TestValidateConfigurationSelectionRejectsMalformedProvenance(t *testing.T) 
 
 	valid := func() ConfigurationSelection {
 		return ConfigurationSelection{
-			mode:             generation.ConfigurationModeEnvironment,
-			environment:      "production",
-			rootPath:         "plystra.yaml",
-			rootDigest:       internalConfigurationDigest("1"),
-			selectedPath:     "plystra.production.yaml",
-			selectedDigest:   internalConfigurationDigest("2"),
-			dependencyDigest: internalConfigurationDigest("3"),
+			mode:           generation.ConfigurationModeEnvironment,
+			environment:    "production",
+			rootPath:       "plystra.yaml",
+			rootDigest:     internalConfigurationDigest("1"),
+			selectedPath:   "plystra.production.yaml",
+			selectedDigest: internalConfigurationDigest("2"),
 		}
 	}
 	tests := []struct {
@@ -50,7 +51,6 @@ func TestValidateConfigurationSelectionRejectsMalformedProvenance(t *testing.T) 
 		{name: "selected path", mutate: func(value *ConfigurationSelection) { value.selectedPath = `C:/private/plystra.production.yaml` }},
 		{name: "root digest", mutate: func(value *ConfigurationSelection) { value.rootDigest = "sha256:ABC" }},
 		{name: "selected digest", mutate: func(value *ConfigurationSelection) { value.selectedDigest = "" }},
-		{name: "dependency digest", mutate: func(value *ConfigurationSelection) { value.dependencyDigest = internalConfigurationDigest("g") }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -131,21 +131,20 @@ func TestValidateConfigurationFieldsRejectsMalformedEvidence(t *testing.T) {
 
 	t.Run("contributor order", func(t *testing.T) {
 		field := internalValidConfigurationField()
-		dependency := ConfigurationContribution{
-			owner:         ConfigurationOwnerTemplate,
-			precedence:    1,
-			templateOrder: 1,
-			digest:        internalConfigurationDigest("2"),
-			summary:       "redacted",
+		environment := ConfigurationContribution{
+			owner:      ConfigurationOwnerEnvironment,
+			precedence: 2,
+			digest:     internalConfigurationDigest("2"),
+			summary:    "redacted",
 			sources: []Source{{
-				module: "corp.example/platform",
-				path:   "plystra.yaml",
+				module: "example.com/app",
+				path:   "plystra.production.yaml",
 				kind:   "configuration-value",
 				line:   1,
 				column: 1,
 			}},
 		}
-		field.contributors = append(field.contributors, dependency)
+		field.contributors = append(field.contributors, environment)
 		if err := validateConfigurationFields([]ConfigurationField{field}, modules, selection, true); err == nil {
 			t.Fatal("reversed contribution order was accepted")
 		}
@@ -154,19 +153,18 @@ func TestValidateConfigurationFieldsRejectsMalformedEvidence(t *testing.T) {
 	t.Run("source order", func(t *testing.T) {
 		field := internalValidConfigurationField()
 		field.path = `config["acme.smtp"]["host"]`
-		field.owner = ConfigurationOwnerTemplate
+		field.owner = ConfigurationOwnerEnvironment
 		field.digest = internalConfigurationDigest("2")
 		field.summary = "redacted"
 		field.contributors = []ConfigurationContribution{{
-			owner:         ConfigurationOwnerTemplate,
-			precedence:    1,
-			templateOrder: 1,
-			digest:        field.digest,
-			summary:       field.summary,
-			effective:     true,
+			owner:      ConfigurationOwnerEnvironment,
+			precedence: 2,
+			digest:     field.digest,
+			summary:    field.summary,
+			effective:  true,
 			sources: []Source{
-				{module: "corp.example/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1},
-				{module: "aaa.example/platform", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1},
+				{module: "example.com/app", path: "plystra.production.yaml", kind: "configuration-value", line: 1, column: 1},
+				{module: "example.com/app", path: "plystra.yaml", kind: "configuration-value", line: 1, column: 1},
 			},
 		}}
 		if err := validateConfigurationFields([]ConfigurationField{field}, modules, selection, true); err == nil {
@@ -213,7 +211,7 @@ func internalValidConfigurationField() ConfigurationField {
 		effective: true,
 		contributors: []ConfigurationContribution{{
 			owner:      ConfigurationOwnerRoot,
-			precedence: 2,
+			precedence: 1,
 			digest:     digest,
 			summary:    "string",
 			effective:  true,
@@ -231,12 +229,11 @@ func internalValidConfigurationField() ConfigurationField {
 func internalConfigurationSelection() ConfigurationSelection {
 	digest := internalConfigurationDigest("1")
 	return ConfigurationSelection{
-		mode:             generation.ConfigurationModeDefault,
-		rootPath:         "plystra.yaml",
-		rootDigest:       digest,
-		selectedPath:     "plystra.yaml",
-		selectedDigest:   digest,
-		dependencyDigest: internalConfigurationDigest("3"),
+		mode:           generation.ConfigurationModeDefault,
+		rootPath:       "plystra.yaml",
+		rootDigest:     digest,
+		selectedPath:   "plystra.yaml",
+		selectedDigest: digest,
 	}
 }
 

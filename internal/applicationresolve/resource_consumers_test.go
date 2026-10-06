@@ -13,7 +13,7 @@ import (
 
 func TestResolveResourceConsumersRemainDormantUntilReached(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"default", "environment", "replacement", "template"} {
+	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			for _, activation := range []string{"unselected", "dormant", "direct", "transitive", "optional-absent", "optional-present"} {
@@ -40,13 +40,6 @@ func TestResolveResourceConsumersRemainDormantUntilReached(t *testing.T) {
 						path, options.EnvironmentName = "plystra.production.yaml", "production"
 					case "replacement":
 						path, options.ConfigurationPath = "deploy/customer.yaml", "deploy/customer.yaml"
-					case "template":
-						owner = "example.com/resource-template"
-						base := filepath.Join(root, "base")
-						writeModule(t, base, owner)
-						writeFile(t, filepath.Join(base, "plystra.yaml"), configuration)
-						writeFile(t, filepath.Join(root, "plystra.yaml"), "template: "+owner+"\n")
-						configuration = "template: " + owner + "\n"
 					}
 					writeFile(t, filepath.Join(root, filepath.FromSlash(path)), configuration)
 					before := snapshotTree(t, root)
@@ -114,10 +107,10 @@ func TestResolveResourceConsumersRemainDormantUntilReached(t *testing.T) {
 func writeResourceConsumerProject(t testing.TB, activation string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/resource-consumer\ngo 1.26\nrequire (\ngithub.com/plystra/kernel v0.0.0\nexample.com/resource-template v1.0.0\n)\nreplace github.com/plystra/kernel => ./kernel\nreplace example.com/resource-template => ./base\n")
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/resource-consumer\ngo 1.26\nrequire (\ngithub.com/plystra/kernel v0.0.0\nexample.com/resource-dependency v1.0.0\n)\nreplace github.com/plystra/kernel => ./kernel\nreplace example.com/resource-dependency => ./base\n")
 	writeModule(t, filepath.Join(root, "kernel"), "github.com/plystra/kernel")
 	writeFile(t, filepath.Join(root, "kernel", "optional.go"), "package plystra\ntype Optional[T any] struct{}\n")
-	writeModule(t, filepath.Join(root, "base"), "example.com/resource-template")
+	writeModule(t, filepath.Join(root, "base"), "example.com/resource-dependency")
 	writeFile(t, filepath.Join(root, "base", "plystra.yaml"), "{}\n")
 	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeResolvedInterface(t, root, "app/resource/v1", "resourcev1", "app.resource/v1", "Run")

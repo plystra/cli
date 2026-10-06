@@ -367,13 +367,12 @@ func parseConfig(t testing.TB, source string) manifest.Config {
 func assemblyBootstrapProvenance(t testing.TB) transportprovenance.Provenance {
 	t.Helper()
 	provenance, err := transportprovenance.New(transportprovenance.Input{
-		Mode:                        generation.ConfigurationModeDefault,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  "sha256:" + strings.Repeat("1", 64),
-		SelectedPath:                "plystra.yaml",
-		SelectedDigest:              "sha256:" + strings.Repeat("1", 64),
-		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
-		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+		Mode:                   generation.ConfigurationModeDefault,
+		RootPath:               "plystra.yaml",
+		RootDigest:             "sha256:" + strings.Repeat("1", 64),
+		SelectedPath:           "plystra.yaml",
+		SelectedDigest:         "sha256:" + strings.Repeat("1", 64),
+		ApplicationModelDigest: "sha256:" + strings.Repeat("3", 64),
 	})
 	if err != nil {
 		t.Fatalf("transportprovenance.New: %v", err)

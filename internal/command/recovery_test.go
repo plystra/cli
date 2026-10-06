@@ -87,7 +87,6 @@ func TestUseRecoveryPreservesOnlySafeSelectors(t *testing.T) {
 		}
 	}
 }
-
 func TestPrimaryActionableDiagnosticScopesCancellationToNew(t *testing.T) {
 	t.Parallel()
 
@@ -111,16 +110,6 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 		want    string
 		code    string
 	}{
-		{
-			name: "invalid template with nested Provider ambiguity",
-			err: fmt.Errorf(
-				"%w: template cannot qualify: %w; correction: publish a corrected template version",
-				newproject.ErrInvalidTemplate,
-				ambiguous,
-			),
-			want: "publish a corrected template version",
-			code: diagnosticTemplateInvalid,
-		},
 		{
 			name: "missing Provider",
 			err:  missing,
@@ -154,13 +143,6 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			code: diagnosticProviderContractConflict,
 		},
 		{
-			name:    "template ancestry",
-			err:     fmt.Errorf("resolve template: %w", applicationresolve.ErrTemplate),
-			context: commandRecoveryContext("", "test", nil),
-			want:    "Correct the root template relationship and its Go Module dependency graph; every ancestor must be a Project and the chain must not repeat a module, then rerun the command.",
-			code:    diagnosticTemplateInvalid,
-		},
-		{
 			name:    "constructor configuration schema",
 			err:     fmt.Errorf("compose configuration: %w", applicationmeta.ErrConfigurationSchema),
 			context: commandRecoveryContext("", "test", nil),
@@ -178,7 +160,7 @@ func TestWriteCommandFailureAddsOnePrimaryRecoveryForCommonTypedFailures(t *test
 			name:    "missing required constructor configuration",
 			err:     fmt.Errorf("validate configuration: %w: %w", applicationmeta.ErrConfigurationValues, applicationmeta.ErrConfigurationRequired),
 			context: commandRecoveryContext("deploy/customer.yaml", "", nil),
-			want:    "Supply the missing required field in deploy/customer.yaml or a template root, or correct the tombstone that removed it, then rerun the command.",
+			want:    "Supply the missing required field in deploy/customer.yaml or the selected root document, or correct the tombstone that removed it, then rerun the command.",
 			code:    diagnosticConstructorConfigurationValuesInvalid,
 		},
 		{
@@ -358,18 +340,6 @@ func TestWriteCommandFailureReportsProviderContractMismatchSources(t *testing.T)
 		"Diagnostic: " + diagnosticProviderContractMismatch + "\n"
 	if !strings.HasSuffix(got, wantSuffix) || strings.Count(got, "Source: ") != 2 {
 		t.Fatalf("Provider contract mismatch output = %q, want suffix %q", got, wantSuffix)
-	}
-}
-
-func TestWriteCommandFailureReportsTemplateFailureWithoutInventingSources(t *testing.T) {
-	t.Parallel()
-	for _, cause := range []error{applicationresolve.ErrTemplateCycle, applicationresolve.ErrTemplateNotFound, applicationresolve.ErrTemplateNotProject} {
-		var output strings.Builder
-		writeCommandFailure(&output, "check Plystra Project", fmt.Errorf("%w: %w", applicationresolve.ErrTemplate, cause), recoveryContext{})
-		got := output.String()
-		if !strings.HasSuffix(got, "Diagnostic: "+diagnosticTemplateInvalid+"\n") || strings.Contains(got, "Source: ") || !strings.Contains(got, "Correct the root template relationship") {
-			t.Fatalf("template failure = %q", got)
-		}
 	}
 }
 
@@ -650,19 +620,6 @@ func TestWriteCommandFailureCanonicalizesConflictingActivationSources(t *testing
 	}
 }
 
-func TestTemplateDiagnosticPrecedesCreationAndManifestWrappers(t *testing.T) {
-	t.Parallel()
-	for _, wrapper := range []error{newproject.ErrCreate, newproject.ErrInvalidTemplate, applicationresolve.ErrManifest, applicationmeta.ErrInvalidManifest} {
-		err := fmt.Errorf("%w: %w: %w", wrapper, applicationresolve.ErrTemplate, applicationresolve.ErrTemplateCycle)
-		var output strings.Builder
-		writeCommandFailure(&output, "resolve application", err, recoveryContext{})
-		got := output.String()
-		if !strings.HasSuffix(got, "Diagnostic: "+diagnosticTemplateInvalid+"\n") || strings.Count(got, "Recovery:") != 1 || !strings.Contains(got, "Correct the root template relationship") {
-			t.Fatalf("wrapped template diagnostic = %s", got)
-		}
-	}
-}
-
 func TestImplementationAmbiguityDiagnosticPrecedesCreationWrapper(t *testing.T) {
 	t.Parallel()
 	for _, err := range []error{
@@ -680,7 +637,7 @@ func TestImplementationAmbiguityDiagnosticPrecedesCreationWrapper(t *testing.T) 
 		diagnostic, ok := primaryActionableDiagnostic(cause, recoveryContext{operation: "new"})
 		want := diagnosticProjectCreateFailed
 		if errors.Is(cause, newproject.ErrInvalidTemplate) {
-			want = diagnosticTemplateInvalid
+			want = diagnosticcode.ProjectCreateTemplateInvalid
 		}
 		if !ok || diagnostic.code != want {
 			t.Fatalf("other creation failure changed classification: %#v, %t; want %s", diagnostic, ok, want)
@@ -969,7 +926,6 @@ func TestPrimaryActionableDiagnosticAssignsStableCodes(t *testing.T) {
 		code string
 	}{
 		{name: "Project manifest", err: applicationresolve.ErrManifest, code: diagnosticcode.ProjectManifestInvalid},
-		{name: "template ancestry", err: applicationresolve.ErrTemplate, code: diagnosticcode.TemplateInvalid},
 		{name: "constructor configuration schema", err: applicationmeta.ErrConfigurationSchema, code: diagnosticcode.ConstructorConfigurationSchemaInvalid},
 		{name: "constructor configuration values", err: applicationmeta.ErrConfigurationValues, code: diagnosticcode.ConstructorConfigurationValuesInvalid},
 		{name: "unselected constructor configuration", err: applicationresolve.ErrUnownedConstructorConfiguration, code: diagnosticcode.ConstructorConfigurationUnselected},

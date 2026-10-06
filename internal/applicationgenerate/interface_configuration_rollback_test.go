@@ -18,24 +18,20 @@ func TestGenerateRollsBackInterfaceConfigurationForEverySelectionMode(t *testing
 		environmentName string
 		configuration   string
 		selectedPath    string
-		maintenancePath string
 	}{
 		{
-			name:            "default",
-			selectedPath:    "plystra.yaml",
-			maintenancePath: "plystra.yaml",
+			name:         "default",
+			selectedPath: "plystra.yaml",
 		},
 		{
 			name:            "environment",
 			environmentName: "production",
 			selectedPath:    "plystra.production.yaml",
-			maintenancePath: "plystra.yaml",
 		},
 		{
-			name:            "full replacement",
-			configuration:   "deploy/customer.yaml",
-			selectedPath:    "deploy/customer.yaml",
-			maintenancePath: "deploy/customer.yaml",
+			name:          "full replacement",
+			configuration: "deploy/customer.yaml",
+			selectedPath:  "deploy/customer.yaml",
 		},
 	}
 
@@ -44,7 +40,7 @@ func TestGenerateRollsBackInterfaceConfigurationForEverySelectionMode(t *testing
 			parent := t.TempDir()
 			appRoot := filepath.Join(parent, "app")
 			dependencyRoot := filepath.Join(parent, "platform")
-			writeInterfaceRollbackDependency(t, dependencyRoot, "example.com/platform/smtp.New")
+			writeInterfaceRollbackDependency(t, dependencyRoot)
 			writeApplicationModule(t, appRoot, "example.com/acme/rollback")
 
 			goModPath := filepath.Join(appRoot, "go.mod")
@@ -54,15 +50,14 @@ require example.com/platform v1.0.0
 replace example.com/platform => %s
 `, filepath.ToSlash(dependencyRoot))
 			writeFile(t, goModPath, goMod)
-			relationship := "template: example.com/platform\n"
-			writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n"+relationship)
+			writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n{}\n")
 			switch {
 			case test.environmentName != "":
-				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Sparse production configuration.\n{}\n")
+				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Production configuration.\n"+interfaceRollbackConfiguration("example.com/platform/smtp.New"))
 			case test.configuration != "":
-				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Complete customer configuration.\n{}\n")
+				writeFile(t, filepath.Join(appRoot, test.selectedPath), "# Complete customer configuration.\n"+interfaceRollbackConfiguration("example.com/platform/smtp.New"))
 			default:
-				writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n"+relationship)
+				writeFile(t, filepath.Join(appRoot, "plystra.yaml"), "# Shared root configuration.\n"+interfaceRollbackConfiguration("example.com/platform/smtp.New"))
 			}
 
 			environment := goEnvironment(map[string]string{
@@ -78,15 +73,16 @@ replace example.com/platform => %s
 				Validate:          func(context.Context, string) error { return nil },
 			}
 			initial, err := applicationgenerate.Generate(t.Context(), options)
-			if err != nil || !initial.Report().Clean() || initial.ConfigurationChanged() {
-				t.Fatalf("initial Generate = changes %#v configuration changed %t, %v", initial.Report().Changes(), initial.ConfigurationChanged(), err)
+			if err != nil || !initial.Report().Clean() {
+				t.Fatalf("initial Generate = changes %#v, %v", initial.Report().Changes(), err)
 			}
-			if initial.ConfigurationPath() != test.selectedPath || initial.ConfigurationMaintenancePath() != test.maintenancePath {
-				t.Fatalf("initial selection = selected %q maintenance %q", initial.ConfigurationPath(), initial.ConfigurationMaintenancePath())
+			if initial.ConfigurationPath() != test.selectedPath {
+				t.Fatalf("initial selection = selected %q", initial.ConfigurationPath())
 			}
 
 			before := snapshotTree(t, appRoot)
-			writeFile(t, filepath.Join(dependencyRoot, "plystra.yaml"), interfaceRollbackConfiguration("example.com/platform/memory.New"))
+			writeFile(t, filepath.Join(appRoot, test.selectedPath), interfaceRollbackConfiguration("example.com/platform/memory.New"))
+			expectedAfterEdit := snapshotTree(t, appRoot)
 			validationFailure := errors.New("reject changed Interface selection")
 			sawUpdatedTransaction := false
 			options.Validate = func(_ context.Context, updatedRoot string) error {
@@ -103,15 +99,15 @@ replace example.com/platform => %s
 			if !sawUpdatedTransaction {
 				t.Fatal("validation did not observe the recomposed configuration and generated Interface assembly")
 			}
-			if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, before) {
-				t.Fatalf("failed generation did not restore the complete Project:\nbefore: %#v\nafter:  %#v", before, after)
+			if after := snapshotTree(t, appRoot); !reflect.DeepEqual(after, expectedAfterEdit) {
+				t.Fatalf("failed generation did not restore the complete Project after the source edit:\nbefore: %#v\nafter:  %#v", before, after)
 			}
 			assertNoTransactions(t, appRoot)
 		})
 	}
 }
 
-func writeInterfaceRollbackDependency(t testing.TB, root, selectedConstructor string) {
+func writeInterfaceRollbackDependency(t testing.TB, root string) {
 	t.Helper()
 	writeModule(t, root, "example.com/platform", "")
 	writeGenerationGraphInterface(t, root, "email/send/v1", "sendv1", "email.send/v1", "Send")
@@ -134,7 +130,7 @@ func (*Service) Send(context.Context, sendv1.Request) (sendv1.Response, error) {
 }
 `, implementation))
 	}
-	writeFile(t, filepath.Join(root, "plystra.yaml"), interfaceRollbackConfiguration(selectedConstructor))
+	writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 }
 
 func interfaceRollbackConfiguration(selectedConstructor string) string {

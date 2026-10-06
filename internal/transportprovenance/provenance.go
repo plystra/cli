@@ -28,42 +28,41 @@ var ErrInvalid = errors.New("invalid transport configuration provenance")
 // It intentionally has no field capable of carrying YAML values, Secret
 // references, resolved Secrets, absolute paths, or generated-output paths.
 type Input struct {
-	Mode                        generation.ConfigurationMode
-	Environment                 string
-	RootPath                    string
-	RootDigest                  string
-	SelectedPath                string
-	SelectedDigest              string
-	DependencyCompositionDigest string
-	ApplicationModelDigest      string
+	Mode                   generation.ConfigurationMode
+	Environment            string
+	RootPath               string
+	RootDigest             string
+	SelectedPath           string
+	SelectedDigest         string
+	ApplicationModelDigest string
 }
 
-// Provenance is one immutable, validated configuration identity tied to the
-// final build-affecting application model supplied to transport renderers.
+// Provenance is one immutable, validated current-project configuration
+// identity tied to the final build-affecting application model supplied to
+// transport renderers. Ordinary dependencies do not form a configuration
+// baseline here.
 type Provenance struct {
-	mode                        generation.ConfigurationMode
-	environment                 string
-	rootPath                    string
-	rootDigest                  string
-	selectedPath                string
-	selectedDigest              string
-	dependencyCompositionDigest string
-	applicationModelDigest      string
-	canonicalJSON               []byte
-	digest                      string
-	prepared                    bool
+	mode                   generation.ConfigurationMode
+	environment            string
+	rootPath               string
+	rootDigest             string
+	selectedPath           string
+	selectedDigest         string
+	applicationModelDigest string
+	canonicalJSON          []byte
+	digest                 string
+	prepared               bool
 }
 
 type canonicalProvenance struct {
-	Version                     int                          `json:"version"`
-	Mode                        generation.ConfigurationMode `json:"mode"`
-	Environment                 string                       `json:"environment,omitempty"`
-	RootPath                    string                       `json:"root_path"`
-	RootDigest                  string                       `json:"root_digest"`
-	SelectedPath                string                       `json:"selected_path"`
-	SelectedDigest              string                       `json:"selected_digest"`
-	DependencyCompositionDigest string                       `json:"dependency_composition_digest"`
-	ApplicationModelDigest      string                       `json:"application_model_digest"`
+	Version                int                          `json:"version"`
+	Mode                   generation.ConfigurationMode `json:"mode"`
+	Environment            string                       `json:"environment,omitempty"`
+	RootPath               string                       `json:"root_path"`
+	RootDigest             string                       `json:"root_digest"`
+	SelectedPath           string                       `json:"selected_path"`
+	SelectedDigest         string                       `json:"selected_digest"`
+	ApplicationModelDigest string                       `json:"application_model_digest"`
 }
 
 // New validates and canonicalizes one transport configuration identity.
@@ -76,17 +75,16 @@ func New(input Input) (Provenance, error) {
 		return Provenance{}, fmt.Errorf("%w: encode canonical input: %v", ErrInvalid, err)
 	}
 	return Provenance{
-		mode:                        input.Mode,
-		environment:                 input.Environment,
-		rootPath:                    input.RootPath,
-		rootDigest:                  input.RootDigest,
-		selectedPath:                input.SelectedPath,
-		selectedDigest:              input.SelectedDigest,
-		dependencyCompositionDigest: input.DependencyCompositionDigest,
-		applicationModelDigest:      input.ApplicationModelDigest,
-		canonicalJSON:               canonical,
-		digest:                      digest(canonical),
-		prepared:                    true,
+		mode:                   input.Mode,
+		environment:            input.Environment,
+		rootPath:               input.RootPath,
+		rootDigest:             input.RootDigest,
+		selectedPath:           input.SelectedPath,
+		selectedDigest:         input.SelectedDigest,
+		applicationModelDigest: input.ApplicationModelDigest,
+		canonicalJSON:          canonical,
+		digest:                 digest(canonical),
+		prepared:               true,
 	}, nil
 }
 
@@ -121,12 +119,6 @@ func (p Provenance) SelectedPath() string { return p.selectedPath }
 // SelectedDigest returns the normalized selected-document digest.
 func (p Provenance) SelectedDigest() string { return p.selectedDigest }
 
-// DependencyCompositionDigest returns the normalized dependency baseline and
-// all-source provenance digest.
-func (p Provenance) DependencyCompositionDigest() string {
-	return p.dependencyCompositionDigest
-}
-
 // ApplicationModelDigest returns the final build-affecting model identity.
 func (p Provenance) ApplicationModelDigest() string { return p.applicationModelDigest }
 
@@ -140,14 +132,13 @@ func (p Provenance) Digest() string { return p.digest }
 
 func (p Provenance) input() Input {
 	return Input{
-		Mode:                        p.mode,
-		Environment:                 p.environment,
-		RootPath:                    p.rootPath,
-		RootDigest:                  p.rootDigest,
-		SelectedPath:                p.selectedPath,
-		SelectedDigest:              p.selectedDigest,
-		DependencyCompositionDigest: p.dependencyCompositionDigest,
-		ApplicationModelDigest:      p.applicationModelDigest,
+		Mode:                   p.mode,
+		Environment:            p.environment,
+		RootPath:               p.rootPath,
+		RootDigest:             p.rootDigest,
+		SelectedPath:           p.selectedPath,
+		SelectedDigest:         p.selectedDigest,
+		ApplicationModelDigest: p.applicationModelDigest,
 	}
 }
 
@@ -163,9 +154,6 @@ func validateInput(input Input) error {
 	}
 	if !validDigest(input.SelectedDigest) {
 		return errors.New("selected digest is not a canonical SHA-256 digest")
-	}
-	if !validDigest(input.DependencyCompositionDigest) {
-		return errors.New("dependency-composition digest is not a canonical SHA-256 digest")
 	}
 	if !validDigest(input.ApplicationModelDigest) {
 		return errors.New("application-model digest is not a canonical SHA-256 digest")
@@ -198,15 +186,14 @@ func validateInput(input Input) error {
 
 func encode(input Input) ([]byte, error) {
 	return json.Marshal(canonicalProvenance{
-		Version:                     schemaVersion,
-		Mode:                        input.Mode,
-		Environment:                 input.Environment,
-		RootPath:                    input.RootPath,
-		RootDigest:                  input.RootDigest,
-		SelectedPath:                input.SelectedPath,
-		SelectedDigest:              input.SelectedDigest,
-		DependencyCompositionDigest: input.DependencyCompositionDigest,
-		ApplicationModelDigest:      input.ApplicationModelDigest,
+		Version:                schemaVersion,
+		Mode:                   input.Mode,
+		Environment:            input.Environment,
+		RootPath:               input.RootPath,
+		RootDigest:             input.RootDigest,
+		SelectedPath:           input.SelectedPath,
+		SelectedDigest:         input.SelectedDigest,
+		ApplicationModelDigest: input.ApplicationModelDigest,
 	})
 }
 

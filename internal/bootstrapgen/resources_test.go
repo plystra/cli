@@ -2,28 +2,21 @@ package bootstrapgen
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationmeta"
-	"github.com/plystra/cli/internal/constructorconfig"
-	"github.com/plystra/cli/internal/constructorsymbol"
-	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/resourceproviderdecl"
 	"github.com/plystra/cli/internal/resourceproviderinventory"
-	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/transportprovenance"
-	"go.yaml.in/yaml/v3"
 )
 
 type resourcePackages map[string]*types.Package
@@ -85,7 +78,7 @@ func resourceOptions(t *testing.T) Options {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options := Options{ModulePath: "example.com/app", ResourceInventory: inventory.Providers(), Template: "example.com/near", ExecutableConstructors: []string{"example.com/consumer.New"}, ExecutableInterfaceChoices: []string{"records.read/v1"}}
+	options := Options{ModulePath: "example.com/app", ResourceInventory: inventory.Providers(), ExecutableConstructors: []string{"example.com/consumer.New"}, ExecutableInterfaceChoices: []string{"records.read/v1"}}
 	options.ResourceInstances = []ResourceInstanceInput{{"database.secondary", "example.com/provider.New"}, {"database.primary", "example.com/provider.New"}, {"cache", "example.com/cached.New"}}
 	options.ResourceOrder = []string{"database.secondary", "database.primary", "cache"}
 	options.ResourceBindings = []ResourceBindingInput{{"instances", "cache", "database", "database.primary"}, {"implementations", "example.com/consumer.New", "database", "database.primary"}}
@@ -111,34 +104,8 @@ func resourceOptions(t *testing.T) Options {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.Templates = []runtimebaseline.Template{{Module: "example.com/near", Version: "v1.0.0", YAML: resourceTemplate}}
 	return options
 }
-
-const resourceTemplate = `interfaces:
-  require: [records.read/v1]
-  use: {records.read/v1: example.com/consumer.New}
-resources:
-  instances:
-    database.primary:
-      use: example.com/provider.New
-      config:
-        value: inherited-primary
-        nested: {left: inherited, right: inherited}
-        pointer: {left: inherited, right: inherited}
-        labels: {lower: discarded}
-        items: [lower]
-        token: {env: RESOURCE_PRIMARY_SECRET}
-    database.secondary:
-      use: example.com/provider.New
-      config: {value: inherited-secondary, token: {env: RESOURCE_SECONDARY_SECRET}}
-    cache: {use: example.com/cached.New}
-  bind:
-    implementations:
-      example.com/consumer.New: {database: database.primary}
-    instances:
-      cache: {database: database.primary}
-`
 
 func TestResourceBaselineAndPublicDigest(t *testing.T) {
 	options := resourceOptions(t)
@@ -224,7 +191,7 @@ func TestResourceTargetsFollowRenderedOrder(t *testing.T) {
 	digest := options.ApplicationModelCompatibility.ApplicationModelDigest()
 	var err error
 	options.ConfigurationProvenance, err = transportprovenance.New(transportprovenance.Input{
-		Mode: generation.ConfigurationModeDefault, RootPath: "plystra.yaml", RootDigest: digest, SelectedPath: "plystra.yaml", SelectedDigest: digest, DependencyCompositionDigest: digest, ApplicationModelDigest: digest,
+		Mode: generation.ConfigurationModeDefault, RootPath: "plystra.yaml", RootDigest: digest, SelectedPath: "plystra.yaml", SelectedDigest: digest, ApplicationModelDigest: digest,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -276,142 +243,4 @@ func TestResourceCompatibilityUsesResolvedNamedGraph(t *testing.T) {
 	if base.Digest() != options.ApplicationModelCompatibility.Digest() {
 		t.Fatal("WithResources mutated the original")
 	}
-}
-
-func TestGeneratedResourceRuntimeWithoutSourceTree(t *testing.T) {
-	options := resourceOptions(t)
-	baseline, err := RuntimeBaseline(options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The helper test compiles only Config targets, so add discovery-equivalent
-	// consumers without linking application constructors into this focused binary.
-	var contract map[string]json.RawMessage
-	if err := json.Unmarshal(baseline.Contract, &contract); err != nil {
-		t.Fatal(err)
-	}
-	contract["constructor_inventory"], err = json.Marshal([]baselineConstructor{
-		{Symbol: "example.com/consumer.New", Interfaces: []string{"records.read/v1"}, Dependencies: []baselineResourceDependency{{"database", "data.database/v1"}}},
-		{Symbol: "example.com/dormant.New", Interfaces: []string{"records.dormant/v1"}, Dependencies: []baselineResourceDependency{{"database", "data.database/v1"}}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseline.Contract, err = json.Marshal(contract)
-	if err != nil {
-		t.Fatal(err)
-	}
-	baseline.ContractID = runtimebaseline.ContractID(baseline.Contract)
-	encoded, err := runtimebaseline.Encode(baseline)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtimeSource, err := renderRuntimeConfigurationSupport(nil, options.ExecutableInterfaceChoices, options.ExecutableConstructors)
-	if err != nil {
-		t.Fatal(err)
-	}
-	constructors, err := renderConstructorConfiguration(nil, nil, options.ResourceConfigurations, options.ResourceInstances, options.ResourceOrder)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(constructors, "configuration.ResourceConfig0") || !strings.Contains(constructors, "configuration.ResourceConfig1") || strings.Contains(constructors, "configuration.ResourceConfig2") || strings.Contains(constructors, "PRIVATE_DEFAULT") {
-		t.Fatal("incorrect or private typed targets")
-	}
-	assembly := "package assembly\nimport \"github.com/plystra/kernel/configuration\"\n" + resourceConfigSource + "type ConstructorConfiguration struct { ResourceConfig0, ResourceConfig1 Config }\n"
-	source := runtimeTestHeader +
-		"const compiledRuntimeContract = " + strconv.Quote(baseline.ContractID) + "\n" +
-		"const compiledApplicationModelDigest = " + strconv.Quote(options.ApplicationModelCompatibility.ApplicationModelDigest()) + "\n" +
-		"const compiledApplicationModelCompatibilityDigest = " + strconv.Quote(options.ApplicationModelCompatibility.Digest()) + "\n" +
-		"const initialBaseline = " + strconv.Quote(string(encoded)) + "\n" +
-		"const compilerResourceParity = " + strconv.Quote(resourceParityCases(t, options)) + "\n" +
-		runtimeSource + runtimeBaselineSupport + constructors
-	runEmittedRuntime(t, assembly, source, resourceRuntimeTests)
-}
-
-func resourceParityCases(t *testing.T, options Options) string {
-	t.Helper()
-	type instance struct{ Name, Provider, Configuration string }
-	type scenario struct {
-		Lower, Upper string
-		Accepted     bool
-		Instances    []instance
-	}
-	providers := make(map[string]resourceproviderinventory.Provider)
-	for _, provider := range options.ResourceInventory {
-		providers[provider.Symbol().String()] = provider
-	}
-	lookup := func(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
-		if namespace != applicationmeta.ConfigurationNamespaceResource {
-			return implementationinventory.Configuration{}, false
-		}
-		return providers[symbol.String()].Configuration()
-	}
-	base, err := applicationmeta.ParseSource("template.yaml", []byte(resourceTemplate))
-	if err != nil {
-		t.Fatal(err)
-	}
-	document := func(entry string) string { return "resources: {instances: {pending: " + entry + "}}\n" }
-	cases := []scenario{}
-	for _, lower := range []string{
-		"{}", "{config: {PRIVATE_UNBOUND_KEY: PRIVATE_UNBOUND_VALUE}}", "{config: {$remove: true}}",
-		"{use: example.com/provider.New, config: {value: lower, nested: {left: lower, right: lower}, pointer: {left: lower}}}",
-		"{use: example.com/provider.New, config: {value: [PRIVATE_SENTINEL]}}",
-		"{use: example.com/empty.New}",
-	} {
-		for _, upper := range []string{
-			"{}", "{$remove: true}", "{config: {value: upper, nested: {right: upper}, pointer: {right: upper}}}",
-			"{use: example.com/provider.New, config: {value: upper}}", "{use: example.com/alternate.New, config: {value: upper}}",
-			"{use: example.com/empty.New}", "{config: {value: {$remove: true}}}",
-		} {
-			item := scenario{Lower: document(lower), Upper: document(upper)}
-			root, err := applicationmeta.ParseSource("plystra.yaml", []byte(item.Lower))
-			if err != nil {
-				t.Fatal(err)
-			}
-			overlay, err := applicationmeta.ParseOverlaySource("plystra.prod.yaml", []byte(item.Upper))
-			if err != nil {
-				t.Fatal(err)
-			}
-			selected, err := applicationmeta.ApplyOverlay(root, overlay, lookup)
-			if err == nil {
-				composition, composeErr := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/near", Manifest: base}}, selected, lookup)
-				err = composeErr
-				if err == nil {
-					err = composition.ValidateRequiredConfiguration(lookup, nil, "plystra.prod.yaml")
-				}
-				if err == nil {
-					for _, resource := range composition.Manifest().ResourceInstances() {
-						result := instance{Name: resource.Name(), Provider: resource.Provider().String()}
-						if schema, exists := lookup(applicationmeta.ConfigurationNamespaceResource, resource.Provider()); exists {
-							var parsed yaml.Node
-							var node *yaml.Node
-							if data := resource.ConfigurationYAML(); len(data) > 0 {
-								if err := yaml.Unmarshal(data, &parsed); err != nil {
-									t.Fatal(err)
-								}
-								node = parsed.Content[0]
-							}
-							normalized, normalizeErr := constructorconfig.Normalize(constructorconfig.Schema{Kind: "object", Fields: compileConstructorFields(schema.Fields())}, node)
-							if normalizeErr != nil {
-								t.Fatal(normalizeErr)
-							}
-							data, marshalErr := yaml.Marshal(normalized)
-							if marshalErr != nil {
-								t.Fatal(marshalErr)
-							}
-							result.Configuration = string(data)
-						}
-						item.Instances = append(item.Instances, result)
-					}
-				}
-			}
-			item.Accepted = err == nil
-			cases = append(cases, item)
-		}
-	}
-	data, err := json.Marshal(cases)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
 }

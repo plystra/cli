@@ -8,7 +8,7 @@ import (
 	"github.com/plystra/cli/internal/resolutionevidence"
 )
 
-func TestConfigurationEvidenceRetainsSuppressedRequirementSources(t *testing.T) {
+func TestConfigurationEvidenceRetainsSuppressedCurrentProjectRequirementSources(t *testing.T) {
 	t.Parallel()
 	lookup := configurationSchemaLookup(t)
 	dependencies := []applicationmeta.Dependency{{
@@ -16,7 +16,7 @@ func TestConfigurationEvidenceRetainsSuppressedRequirementSources(t *testing.T) 
 		Manifest: configurationManifest(t, "plystra.yaml", "interfaces: {require: [audit.write/v1, email.send/v1]}"),
 	}}
 	for _, overlayData := range []string{"interfaces: {require: []}", "interfaces: {require: [email.send/v1]}"} {
-		root := configurationManifest(t, "plystra.yaml", "interfaces: {require: {add: [cache.read/v1]}}")
+		root := configurationManifest(t, "plystra.yaml", "interfaces: {require: [audit.write/v1, cache.read/v1, email.send/v1]}")
 		overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(overlayData))
 		if err != nil {
 			t.Fatal(err)
@@ -48,7 +48,11 @@ func TestConfigurationEvidenceRetainsSuppressedRequirementSources(t *testing.T) 
 		for _, path := range []string{`interfaces.require["audit.write/v1"]`, `interfaces.require["cache.read/v1"]`} {
 			field := configurationField(t, evidence, path)
 			if field.Effective() || len(field.Contributors()) != 1 || field.Contributors()[0].Effective() || len(field.Contributors()[0].Sources()) != 1 {
-				t.Fatalf("suppressed requirement lost source or remained effective: %#v", field)
+				t.Fatalf("suppressed current-project requirement lost source or remained effective: %#v", field)
+			}
+			source := field.Contributors()[0].Sources()[0]
+			if source.Module() != "example.com/app" || source.Path() != "plystra.yaml" {
+				t.Fatalf("suppressed requirement source = %#v", source)
 			}
 		}
 		email := configurationField(t, evidence, `interfaces.require["email.send/v1"]`)

@@ -4,14 +4,11 @@ package newproject
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
@@ -37,13 +34,10 @@ import (
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugininventory"
-	"github.com/plystra/cli/internal/projectcheck"
 	"github.com/plystra/cli/internal/projectlocate"
-	"github.com/plystra/cli/internal/projectsmoke"
 	"github.com/plystra/cli/internal/protobufdescriptor"
 	"github.com/plystra/cli/internal/protobufmodel"
 	"github.com/plystra/cli/internal/protobufwiremap"
-	"github.com/plystra/cli/internal/providerresolution"
 	"github.com/plystra/cli/internal/runtimebaseline"
 	"github.com/plystra/cli/internal/transporttoolchain"
 	"github.com/plystra/cli/internal/version"
@@ -78,9 +72,9 @@ var (
 	// ErrGitUnavailable reports that requested Git repository setup could not
 	// start because the configured Git executable was unavailable.
 	ErrGitUnavailable = errors.New("git executable unavailable")
-	// ErrInvalidTemplate reports a resolved module that cannot serve as a
-	// Plystra Project template dependency.
-	ErrInvalidTemplate = errors.New("invalid Plystra Project template")
+	// ErrInvalidTemplate reports a resolved module that cannot serve as the
+	// selected Plystra Project dependency.
+	ErrInvalidTemplate = errors.New("invalid selected Plystra Project dependency")
 )
 
 // Options contains the explicit inputs and process environment for creation.
@@ -198,11 +192,16 @@ func Create(ctx context.Context, options Options) (Result, error) {
 			}); err != nil {
 				return err
 			}
-		} else if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
-			return err
+		} else if templateQuery == "" {
+			if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
+				return err
+			}
 		}
 		if templateQuery != "" {
-			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, options.NPMCommand, environment); err != nil {
+			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, environment); err != nil {
+				return err
+			}
+			if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
 				return err
 			}
 		}
@@ -225,7 +224,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: modulePath, directory: options.ProjectName, path: target}, nil
 }
 
-func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand, npmCommand string, environment []string) error {
+func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand string, environment []string) error {
 	return modulemutation.Change(ctx, root, modulemutation.ChangeOptions{
 		GoCommand:          goCommand,
 		Environment:        environment,
@@ -241,7 +240,7 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 			Environment: environment,
 		})
 		if err != nil {
-			return fmt.Errorf("%w: inspect resolved template %q: %w", ErrInvalidTemplate, query, err)
+			return fmt.Errorf("%w: inspect resolved dependency %q: %w", ErrInvalidTemplate, query, err)
 		}
 		template, exists := dependencies.ByPath(modulePath)
 		if !exists {
@@ -253,25 +252,6 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 		if !template.Project() {
 			return fmt.Errorf("%w: resolved module %q has no regular root plystra.yaml", ErrInvalidTemplate, modulePath)
 		}
-		if err := rejectPrivateTemplateDependencies(ctx, root, query, goCommand, environment, dependencies); err != nil {
-			return err
-		}
-		if err := rejectRelativeTemplateReplacements(query, dependencies); err != nil {
-			return err
-		}
-		rootBytes, err := os.ReadFile(filepath.Join(root, "plystra.yaml"))
-		if err != nil {
-			return fmt.Errorf("%w: read staged Project marker: %w", ErrInvalidTemplate, err)
-		}
-		configuration, err := applicationmeta.SetTemplate(rootBytes, template.Path())
-		if err != nil {
-			return fmt.Errorf("%w: record template relationship: %w", ErrInvalidTemplate, err)
-		}
-		if err := atomicfs.WriteFiles(root, []atomicfs.Write{{
-			Path: "plystra.yaml", Data: configuration, ExpectedData: rootBytes,
-		}}, func(string) error { return nil }); err != nil {
-			return fmt.Errorf("%w: install template relationship: %w", ErrInvalidTemplate, err)
-		}
 		if _, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 			Start:            root,
 			GoCommand:        goCommand,
@@ -279,309 +259,10 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 			MutateModule:     mutate,
 			RejectUnexpected: true,
 		}); err != nil {
-			if errors.Is(err, providerresolution.ErrAmbiguousProvider) {
-				return fmt.Errorf(
-					"%w: template %q cannot qualify because its default Provider model is ambiguous: %w; correction: the template publisher must add the listed capabilities.use choices to its root plystra.yaml and publish a corrected module version",
-					ErrInvalidTemplate,
-					query,
-					err,
-				)
-			}
-			return fmt.Errorf("generate Project from template dependency %q: %w", query, err)
-		}
-		checked, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
-			Start:       root,
-			Check:       true,
-			GoCommand:   goCommand,
-			Environment: environment,
-		})
-		if err != nil {
-			return fmt.Errorf(
-				"%w: template %q cannot qualify because generated stability checking failed immediately after installation: %w; correction: the template publisher must make generation deterministic, run plystra generate followed by plystra generate --check in a fresh Project directory, and publish a corrected module version",
-				ErrInvalidTemplate,
-				query,
-				err,
-			)
-		}
-		if checked.ConfigurationChanged() || !checked.Report().Clean() {
-			return fmt.Errorf(
-				"%w: template %q cannot qualify because generated output is not stable immediately after installation: %s; correction: the template publisher must make generation deterministic, run plystra generate followed by plystra generate --check in a fresh Project directory, and publish a corrected module version",
-				ErrInvalidTemplate,
-				query,
-				strings.Join(templateGenerationDrift(checked.ConfigurationChanged(), checked.ConfigurationMaintenancePath(), checked.Report()), ", "),
-			)
-		}
-		if err := validateGeneratedJavaScriptSDK(ctx, root, query, npmCommand, environment); err != nil {
-			return err
-		}
-		qualified, err := projectcheck.Check(ctx, projectcheck.Options{
-			Start:       root,
-			GoCommand:   goCommand,
-			Environment: environment,
-		})
-		if err != nil {
-			return fmt.Errorf(
-				"%w: template %q cannot qualify because plystra check failed during creation: %w; correction: the template publisher must run plystra check successfully in a fresh Project directory and publish a corrected module version",
-				ErrInvalidTemplate,
-				query,
-				err,
-			)
-		}
-		if !qualified.Clean() {
-			return fmt.Errorf(
-				"%w: template %q cannot qualify because plystra check reported stale Project state during creation: %s; correction: the template publisher must run plystra generate followed by plystra check successfully in a fresh Project directory and publish a corrected module version",
-				ErrInvalidTemplate,
-				query,
-				strings.Join(templateGenerationDrift(qualified.ConfigurationChanged(), qualified.ConfigurationMaintenancePath(), qualified.Report()), ", "),
-			)
-		}
-		if err := gocommand.Run(ctx, gocommand.Options{
-			Command:     goCommand,
-			Directory:   root,
-			Environment: environment,
-		}, "build", "-mod=readonly", "./..."); err != nil {
-			return fmt.Errorf(
-				"%w: template %q cannot qualify because the staged Project build failed: %w; correction: the template publisher must make go build -mod=readonly ./... pass in a fresh Project directory and publish a corrected module version",
-				ErrInvalidTemplate,
-				query,
-				err,
-			)
-		}
-		if err := projectsmoke.Run(ctx, projectsmoke.Options{
-			Root:        root,
-			GoCommand:   goCommand,
-			Environment: environment,
-		}); err != nil {
-			return fmt.Errorf(
-				"%w: template %q cannot qualify because the staged Project lifecycle smoke failed: %w; correction: the template publisher must make the generated application start, return healthy from kernel.health/v1, and stop cleanly in a fresh Project directory without go.work, then publish a corrected module version",
-				ErrInvalidTemplate,
-				query,
-				err,
-			)
+			return fmt.Errorf("generate Project after dependency %q: %w", query, err)
 		}
 		return nil
 	})
-}
-
-const generatedJavaScriptSDKPath = "generated/sdk/javascript"
-
-// validateGeneratedJavaScriptSDK qualifies the optional generated SDK through
-// npm using the scripts and dependencies in package.json. Validation artifacts
-// are disposable and are removed before the staged Project is installed.
-func validateGeneratedJavaScriptSDK(ctx context.Context, root, query, npmCommand string, environment []string) error {
-	sdkRoot := filepath.Join(root, filepath.FromSlash(generatedJavaScriptSDKPath))
-	info, err := os.Lstat(sdkRoot)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("%w: inspect generated JavaScript SDK for template %q: %v", ErrInvalidTemplate, query, err)
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%w: template %q generated %s is not a regular directory", ErrInvalidTemplate, query, generatedJavaScriptSDKPath)
-	}
-	packagePath := filepath.Join(sdkRoot, "package.json")
-	packageInfo, err := os.Lstat(packagePath)
-	if err != nil {
-		return fmt.Errorf("%w: template %q generated JavaScript SDK is missing %s: %v", ErrInvalidTemplate, query, filepath.ToSlash(filepath.Join(generatedJavaScriptSDKPath, "package.json")), err)
-	}
-	if !packageInfo.Mode().IsRegular() || packageInfo.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%w: template %q generated JavaScript SDK package.json is not a regular file", ErrInvalidTemplate, query)
-	}
-	packageData, err := os.ReadFile(packagePath)
-	if err != nil {
-		return fmt.Errorf("%w: read generated JavaScript SDK package.json for template %q: %v", ErrInvalidTemplate, query, err)
-	}
-	var packageManifest struct {
-		Scripts map[string]string `json:"scripts"`
-	}
-	decoder := json.NewDecoder(strings.NewReader(string(packageData)))
-	decodeErr := decoder.Decode(&packageManifest)
-	if decodeErr == nil {
-		var trailing json.RawMessage
-		decodeErr = decoder.Decode(&trailing)
-		if errors.Is(decodeErr, io.EOF) {
-			decodeErr = nil
-		}
-	}
-	if decodeErr != nil || strings.TrimSpace(packageManifest.Scripts["typecheck"]) == "" || strings.TrimSpace(packageManifest.Scripts["build"]) == "" {
-		return fmt.Errorf("%w: template %q generated JavaScript SDK package.json must declare typecheck and build scripts", ErrInvalidTemplate, query)
-	}
-	if npmCommand == "" {
-		npmCommand = "npm"
-	}
-	commands := [][]string{
-		{"install", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false"},
-		{"run", "typecheck"},
-		{"run", "build"},
-		{"pack", "--dry-run", "--json"},
-	}
-	for _, arguments := range commands {
-		if err := runNPM(ctx, npmCommand, sdkRoot, environment, arguments...); err != nil {
-			return fmt.Errorf("%w: template %q cannot qualify because generated JavaScript SDK validation failed at npm %s: %w; correction: the template publisher must make `npm install --ignore-scripts --no-audit --no-fund`, `npm run typecheck`, `npm run build`, and `npm pack --dry-run --json` pass in a fresh Project directory", ErrInvalidTemplate, query, strings.Join(arguments, " "), err)
-		}
-	}
-	for _, name := range []string{"package-lock.json", "npm-shrinkwrap.json"} {
-		path := filepath.Join(sdkRoot, name)
-		if _, err := os.Lstat(path); err == nil {
-			return fmt.Errorf("%w: template %q generated unexpected %s after npm validation; correction: keep package-lock generation disabled with the generated .npmrc and publish a corrected template version", ErrInvalidTemplate, query, filepath.ToSlash(filepath.Join(generatedJavaScriptSDKPath, name)))
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%w: inspect generated JavaScript SDK validation output %s: %v", ErrInvalidTemplate, query, err)
-		}
-	}
-	if err := removeJavaScriptValidationOutput(sdkRoot); err != nil {
-		return fmt.Errorf("%w: template %q cannot remove temporary JavaScript SDK validation output: %v", ErrInvalidTemplate, query, err)
-	}
-	return nil
-}
-
-func runNPM(ctx context.Context, command, directory string, environment []string, arguments ...string) error {
-	if environment == nil {
-		environment = os.Environ()
-	}
-	process := exec.CommandContext(ctx, command, arguments...)
-	process.Dir = directory
-	process.Env = append([]string(nil), environment...)
-	output, err := process.CombinedOutput()
-	if err == nil {
-		return nil
-	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return ctxErr
-	}
-	message := gocommand.SanitizeOutput(string(output), directory)
-	if len(message) > 4096 {
-		message = message[:4096] + "..."
-	}
-	if message == "" {
-		return errors.New("npm command failed")
-	}
-	return errors.New(message)
-}
-
-func removeJavaScriptValidationOutput(sdkRoot string) error {
-	for _, name := range []string{"node_modules", "dist"} {
-		path := filepath.Join(sdkRoot, name)
-		info, err := os.Lstat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%s is symbolic", filepath.ToSlash(filepath.Join(generatedJavaScriptSDKPath, name)))
-		}
-		if info.IsDir() {
-			if err := os.RemoveAll(path); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := os.Remove(path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func templateGenerationDrift(configurationChanged bool, maintenancePath string, report generatedfiles.Report) []string {
-	details := make([]string, 0, len(report.Changes())+1)
-	if configurationChanged {
-		details = append(details, fmt.Sprintf("changed %s (configuration composition)", maintenancePath))
-	}
-	for _, change := range report.Changes() {
-		details = append(details, fmt.Sprintf("%s %s", change.Kind(), change.Path()))
-	}
-	return details
-}
-
-func rejectPrivateTemplateDependencies(ctx context.Context, root, query, goCommand string, environment []string, dependencies moduledependency.Index) error {
-	output, err := gocommand.Output(ctx, gocommand.Options{
-		Command:     goCommand,
-		Directory:   root,
-		Environment: environment,
-		OutputLimit: maximumGoEnvironmentValueBytes,
-	}, "env", "GOPRIVATE")
-	if err != nil {
-		return fmt.Errorf("%w: inspect Go privacy configuration while qualifying template %q: %w", ErrInvalidTemplate, query, err)
-	}
-	patterns := strings.TrimSpace(string(output))
-	if patterns == "" {
-		return nil
-	}
-
-	private := make([]string, 0)
-	for _, dependency := range dependencies.Modules() {
-		modulePrivate := module.MatchPrefixPatterns(patterns, dependency.Path())
-		replacement, replaced := dependency.Replacement()
-		replacementPrivate := replaced && !replacement.Local() && module.MatchPrefixPatterns(patterns, replacement.Path())
-		if !modulePrivate && !replacementPrivate {
-			continue
-		}
-		reference := selectedModuleReference(dependency)
-		if replacementPrivate {
-			reference += " => " + replacement.Path() + "@" + replacement.Version()
-		}
-		private = append(private, reference)
-	}
-	if len(private) == 0 {
-		return nil
-	}
-	return fmt.Errorf(
-		"%w: template %q cannot qualify because its effective Go Module graph requires private modules matched by GOPRIVATE: %s; correction: qualified templates must use only public modules; publish or replace the listed dependencies, or correct an overbroad GOPRIVATE setting, then retry",
-		ErrInvalidTemplate,
-		query,
-		strings.Join(private, ", "),
-	)
-}
-
-func rejectRelativeTemplateReplacements(query string, dependencies moduledependency.Index) error {
-	findings := make([]string, 0)
-	for _, dependency := range dependencies.Projects() {
-		parsed, err := modfile.Parse("go.mod", dependency.ProjectGoMod(), nil)
-		if err != nil {
-			return fmt.Errorf("%w: inspect dependency Project %s go.mod while qualifying template %q: %v", ErrInvalidTemplate, selectedModuleReference(dependency), query, err)
-		}
-		for _, replacement := range parsed.Replace {
-			if replacement.New.Version != "" || !relativeReplacementPath(replacement.New.Path) {
-				continue
-			}
-			old := replacement.Old.Path
-			if replacement.Old.Version != "" {
-				old += "@" + replacement.Old.Version
-			}
-			findings = append(findings, fmt.Sprintf(
-				"%s/go.mod: replace %s => %s",
-				selectedModuleReference(dependency),
-				old,
-				replacement.New.Path,
-			))
-		}
-	}
-	if len(findings) == 0 {
-		return nil
-	}
-	sort.Strings(findings)
-	return fmt.Errorf(
-		"%w: template %q cannot qualify because dependency Plystra Projects declare relative Go Module replacements: %s; correction: publish every required module version and remove each relative replace from the listed go.mod before publishing a corrected template version",
-		ErrInvalidTemplate,
-		query,
-		strings.Join(findings, "; "),
-	)
-}
-
-func selectedModuleReference(dependency moduledependency.Module) string {
-	version := dependency.SelectedVersion()
-	if version == "" {
-		version = "workspace"
-	}
-	return dependency.Path() + "@" + version
-}
-
-func relativeReplacementPath(value string) bool {
-	normalized := strings.ReplaceAll(value, `\`, "/")
-	return normalized == "." || normalized == ".." || strings.HasPrefix(normalized, "./") || strings.HasPrefix(normalized, "../")
 }
 
 func populate(ctx context.Context, root, modulePath, name string, githubCI, agentGuidance bool) error {
@@ -601,12 +282,11 @@ func populate(ctx context.Context, root, modulePath, name string, githubCI, agen
 		return fmt.Errorf("digest initial Project configuration: %w", err)
 	}
 	input, err := applicationinput.Build(currentManifest, plugininventory.Index{}, applicationinput.SourceContext{CurrentModulePath: modulePath}, &generation.ConfigurationProvenanceInput{
-		Mode:                        generation.ConfigurationModeDefault,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  configurationDigest,
-		SelectedPath:                "plystra.yaml",
-		SelectedDigest:              configurationDigest,
-		DependencyCompositionDigest: composition.DependencyDigest(),
+		Mode:           generation.ConfigurationModeDefault,
+		RootPath:       "plystra.yaml",
+		RootDigest:     configurationDigest,
+		SelectedPath:   "plystra.yaml",
+		SelectedDigest: configurationDigest,
 	}, generationexec.BuildOptions{})
 	if err != nil {
 		return fmt.Errorf("build initial application model: %w", err)

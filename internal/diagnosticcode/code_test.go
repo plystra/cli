@@ -72,7 +72,6 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.AgentGuidanceManifestInvalid,
 		diagnosticcode.CapabilityManifestInvalid,
 		diagnosticcode.ProjectConcurrentChange,
-		diagnosticcode.ConfigurationCompositionDrift,
 		diagnosticcode.GeneratedDrift,
 		diagnosticcode.ResolveUnknownInterface,
 		diagnosticcode.ResolveUnknownImplementation,

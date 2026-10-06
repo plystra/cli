@@ -14,11 +14,11 @@ import (
 var ErrApplyOverlay = errors.New("apply current-project configuration overlay")
 
 // ApplyOverlay applies one sparse higher-precedence current-project Manifest
-// over a lower current-project Manifest. It preserves explicit removals so the
-// result can still suppress dependency-derived declarations during Compose.
-// Resource deltas without a local provider retain their sparse layers until
-// Compose supplies template schema context. Use Composition.Manifest for the
-// effective Resource state and Composition.CurrentLayers for its authored evidence.
+// over the root current-project Manifest. It preserves explicit removals until
+// the effective current-project model is finalized. Resource deltas without a
+// local provider retain their sparse layers until Compose supplies schema
+// context. Use Composition.Manifest for effective Resource state and
+// Composition.CurrentLayers for authored evidence.
 func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, applyErr error) {
 	defer func() {
 		if errors.Is(applyErr, ErrApplyOverlay) {
@@ -28,9 +28,6 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 
 	if schemas == nil {
 		return Manifest{}, fmt.Errorf("%w: schema lookup is nil", ErrApplyOverlay)
-	}
-	if overlay.template != "" {
-		return Manifest{}, fmt.Errorf("%w: overlay cannot declare template metadata", ErrApplyOverlay)
 	}
 	projectModule := base.modulePath
 	if projectModule == "" {
@@ -44,7 +41,6 @@ func ApplyOverlay(base, overlay Manifest, schemas SchemaLookup) (_ Manifest, app
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
 	}
 	result.modulePath = projectModule
-	result.template, result.templateSource = base.template, base.templateSource
 	result.layers = append(append([]Manifest(nil), manifestLayers(base)...), manifestLayers(overlay)...)
 	return result, nil
 }
@@ -93,8 +89,6 @@ func applyManifestLayer(base, overlay Manifest, schemas SchemaLookup) (Manifest,
 	return Manifest{
 		modulePath:                    overlay.modulePath,
 		source:                        base.source,
-		template:                      base.template,
-		templateSource:                base.templateSource,
 		httpAddress:                   httpAddress,
 		hasHTTPAddress:                hasHTTPAddress,
 		removeHTTPAddress:             removeHTTPAddress,

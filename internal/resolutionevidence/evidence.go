@@ -93,9 +93,6 @@ const (
 	// ProviderSelectionCurrentProject identifies an explicit replacement in the
 	// selected current-Project configuration layer.
 	ProviderSelectionCurrentProject ProviderSelectionReason = "current-project-replacement"
-	// ProviderSelectionTemplate identifies the surviving Provider choice from
-	// the explicit template ancestry.
-	ProviderSelectionTemplate ProviderSelectionReason = "template-selection"
 	// ProviderSelectionIntrinsic identifies a Kernel-owned intrinsic
 	// implementation outside ordinary Plugin Provider selection.
 	ProviderSelectionIntrinsic ProviderSelectionReason = "intrinsic-kernel"
@@ -130,7 +127,7 @@ type PublicExposureSourceKind string
 
 const (
 	// PublicExposureSourceHTTPExpose identifies an effective http.expose
-	// declaration in a current or dependency Project.
+	// declaration in the current Project.
 	PublicExposureSourceHTTPExpose PublicExposureSourceKind = "http-expose"
 	// PublicExposureSourceAliasApplication identifies an application Alias
 	// declaration whose final exposure retains a public surface.
@@ -140,21 +137,17 @@ const (
 	PublicExposureSourceAliasGeneration PublicExposureSourceKind = "alias-generation-extension"
 )
 
-// ConfigurationOwner identifies the layer that owns one effective typed
-// configuration decision. Templates are always lower precedence than
-// the selected current-project layer.
+// ConfigurationOwner identifies the current Project layer that owns one
+// effective typed configuration decision.
 type ConfigurationOwner string
 
 const (
-	ConfigurationOwnerTemplate    ConfigurationOwner = "template"
 	ConfigurationOwnerRoot        ConfigurationOwner = "current-project-root"
 	ConfigurationOwnerEnvironment ConfigurationOwner = "current-project-environment"
 	ConfigurationOwnerExplicit    ConfigurationOwner = "current-project-config"
 )
 
-// ConfigurationLayerInput carries one authored current-project layer. The
-// dependency layer is reconstructed from the validated composition baseline so
-// its provenance cannot diverge from the resolver's source of truth.
+// ConfigurationLayerInput carries one authored current-project layer.
 type ConfigurationLayerInput struct {
 	Owner     ConfigurationOwner
 	Decisions []applicationmeta.ConfigurationDecision
@@ -164,10 +157,8 @@ type ConfigurationLayerInput struct {
 // is deliberately separate from the generated runtime configuration and never
 // carries YAML or Secret values.
 type ConfigurationInput struct {
-	Templates          []applicationmeta.TemplateLayer
-	DependencyBaseline applicationmeta.DependencyBaseline
-	Layers             []ConfigurationLayerInput
-	Effective          []applicationmeta.ConfigurationDecision
+	Layers    []ConfigurationLayerInput
+	Effective []applicationmeta.ConfigurationDecision
 }
 
 // AssemblyPluginInput is the exact non-secret selected-package identity used
@@ -540,9 +531,8 @@ func (p SelectedProvider) SelectionReason() ProviderSelectionReason {
 	return p.selectionReason
 }
 
-// SelectionSources returns the winning current-Project declaration or every
-// compatible inherited dependency declaration. Automatic and intrinsic
-// decisions return nil.
+// SelectionSources returns the winning current-Project declaration.
+// Automatic and intrinsic decisions return nil.
 func (p SelectedProvider) SelectionSources() []ProviderSelectionSource {
 	return append([]ProviderSelectionSource(nil), p.selectionSources...)
 }
@@ -854,8 +844,8 @@ func (f ConfigurationField) Owner() ConfigurationOwner { return f.owner }
 // configuration rather than being suppressed by an ancestor.
 func (f ConfigurationField) Effective() bool { return f.effective }
 
-// Contributors returns all deterministic lower- and higher-precedence typed
-// contributions for this path.
+// Contributors returns all deterministic current-project contributions for
+// this path.
 func (f ConfigurationField) Contributors() []ConfigurationContribution {
 	result := make([]ConfigurationContribution, len(f.contributors))
 	for index := range f.contributors {
@@ -866,29 +856,23 @@ func (f ConfigurationField) Contributors() []ConfigurationContribution {
 }
 
 // ConfigurationContribution is one normalized value or explicit removal from
-// one configuration layer. Template layers retain their individual precedence
-// even when their public-safe value digests are identical.
+// one current-project configuration layer.
 type ConfigurationContribution struct {
-	owner         ConfigurationOwner
-	precedence    int
-	templateOrder int
-	digest        string
-	summary       string
-	removed       bool
-	effective     bool
-	sources       []Source
+	owner      ConfigurationOwner
+	precedence int
+	digest     string
+	summary    string
+	removed    bool
+	effective  bool
+	sources    []Source
 }
 
 // Owner returns the layer that authored the contribution.
 func (c ConfigurationContribution) Owner() ConfigurationOwner { return c.owner }
 
-// Precedence returns the closed numeric layer precedence (dependency 1, root
-// or explicit configuration 2, environment overlay 3).
+// Precedence returns the closed numeric layer precedence (root or explicit
+// configuration 1, environment overlay 2).
 func (c ConfigurationContribution) Precedence() int { return c.precedence }
-
-// TemplateOrder is the one-based oldest-to-nearest template position, or zero
-// for a current-Project declaration.
-func (c ConfigurationContribution) TemplateOrder() int { return c.templateOrder }
 
 // Digest returns the normalized non-secret contribution digest.
 func (c ConfigurationContribution) Digest() string { return c.digest }
@@ -908,15 +892,14 @@ func (c ConfigurationContribution) Sources() []Source {
 }
 
 // ConfigurationSelection is the stable non-secret identity of the selected
-// current-project configuration mode and dependency baseline.
+// current-project configuration mode.
 type ConfigurationSelection struct {
-	mode             generation.ConfigurationMode
-	environment      string
-	rootPath         string
-	rootDigest       string
-	selectedPath     string
-	selectedDigest   string
-	dependencyDigest string
+	mode           generation.ConfigurationMode
+	environment    string
+	rootPath       string
+	rootDigest     string
+	selectedPath   string
+	selectedDigest string
 }
 
 // Mode returns default, environment, or explicit-config.
@@ -936,12 +919,6 @@ func (s ConfigurationSelection) SelectedPath() string { return s.selectedPath }
 
 // SelectedDigest returns the normalized selected-document digest.
 func (s ConfigurationSelection) SelectedDigest() string { return s.selectedDigest }
-
-// DependencyCompositionDigest returns the normalized template layer and
-// all-source provenance digest.
-func (s ConfigurationSelection) DependencyCompositionDigest() string {
-	return s.dependencyDigest
-}
 
 // StaticAssembly is the immutable selected constructor and canonical catalog
 // membership that generated assembly compiles into one application binary.
@@ -1245,14 +1222,13 @@ type canonicalPublicExposureSource struct {
 }
 
 type canonicalConfigurationContribution struct {
-	Owner         ConfigurationOwner `json:"owner"`
-	Precedence    int                `json:"precedence"`
-	TemplateOrder int                `json:"template_order,omitempty"`
-	Digest        string             `json:"digest"`
-	Summary       string             `json:"summary"`
-	Removed       bool               `json:"removed,omitempty"`
-	Effective     bool               `json:"effective"`
-	Sources       []canonicalSource  `json:"sources"`
+	Owner      ConfigurationOwner `json:"owner"`
+	Precedence int                `json:"precedence"`
+	Digest     string             `json:"digest"`
+	Summary    string             `json:"summary"`
+	Removed    bool               `json:"removed,omitempty"`
+	Effective  bool               `json:"effective"`
+	Sources    []canonicalSource  `json:"sources"`
 }
 
 type canonicalConfigurationField struct {
@@ -1266,13 +1242,12 @@ type canonicalConfigurationField struct {
 }
 
 type canonicalConfigurationSelection struct {
-	Mode                        generation.ConfigurationMode `json:"mode"`
-	Environment                 string                       `json:"environment,omitempty"`
-	RootPath                    string                       `json:"root_path"`
-	RootDigest                  string                       `json:"root_digest"`
-	SelectedPath                string                       `json:"selected_path"`
-	SelectedDigest              string                       `json:"selected_digest"`
-	DependencyCompositionDigest string                       `json:"dependency_composition_digest"`
+	Mode           generation.ConfigurationMode `json:"mode"`
+	Environment    string                       `json:"environment,omitempty"`
+	RootPath       string                       `json:"root_path"`
+	RootDigest     string                       `json:"root_digest"`
+	SelectedPath   string                       `json:"selected_path"`
+	SelectedDigest string                       `json:"selected_digest"`
 }
 
 type canonicalAssemblyPlugin struct {
@@ -2057,14 +2032,13 @@ func encode(e Evidence) ([]byte, error) {
 				}
 			}
 			contributors[contributorIndex] = canonicalConfigurationContribution{
-				Owner:         contribution.owner,
-				Precedence:    contribution.precedence,
-				TemplateOrder: contribution.templateOrder,
-				Digest:        contribution.digest,
-				Summary:       contribution.summary,
-				Removed:       contribution.removed,
-				Effective:     contribution.effective,
-				Sources:       sources,
+				Owner:      contribution.owner,
+				Precedence: contribution.precedence,
+				Digest:     contribution.digest,
+				Summary:    contribution.summary,
+				Removed:    contribution.removed,
+				Effective:  contribution.effective,
+				Sources:    sources,
 			}
 		}
 		configurationFields[index] = canonicalConfigurationField{
@@ -2080,13 +2054,12 @@ func encode(e Evidence) ([]byte, error) {
 	var configurationSelection *canonicalConfigurationSelection
 	if e.hasConfigurationSelection {
 		configurationSelection = &canonicalConfigurationSelection{
-			Mode:                        e.configurationSelection.mode,
-			Environment:                 e.configurationSelection.environment,
-			RootPath:                    e.configurationSelection.rootPath,
-			RootDigest:                  e.configurationSelection.rootDigest,
-			SelectedPath:                e.configurationSelection.selectedPath,
-			SelectedDigest:              e.configurationSelection.selectedDigest,
-			DependencyCompositionDigest: e.configurationSelection.dependencyDigest,
+			Mode:           e.configurationSelection.mode,
+			Environment:    e.configurationSelection.environment,
+			RootPath:       e.configurationSelection.rootPath,
+			RootDigest:     e.configurationSelection.rootDigest,
+			SelectedPath:   e.configurationSelection.selectedPath,
+			SelectedDigest: e.configurationSelection.selectedDigest,
 		}
 	}
 	var staticAssembly *canonicalStaticAssembly
@@ -2942,8 +2915,6 @@ func selectedProvidersFromResolution(
 			switch choiceSources[0].Kind {
 			case providerresolution.ChoiceSourceCurrentProject:
 				value.selectionReason = ProviderSelectionCurrentProject
-			case providerresolution.ChoiceSourceTemplate:
-				value.selectionReason = ProviderSelectionTemplate
 			default:
 				return nil, fmt.Errorf("explicit Provider selection %s has invalid source kind %q", identifier, choiceSources[0].Kind)
 			}
@@ -2956,8 +2927,8 @@ func selectedProvidersFromResolution(
 				if choiceSource.Kind == providerresolution.ChoiceSourceCurrentProject && project.role != ModuleRoleCurrent {
 					return nil, fmt.Errorf("provider selection %s current-Project source belongs to dependency %q", identifier, choiceSource.ModulePath)
 				}
-				if choiceSource.Kind == providerresolution.ChoiceSourceTemplate && project.role != ModuleRoleDependency {
-					return nil, fmt.Errorf("provider selection %s template source has an invalid Project role", identifier)
+				if choiceSource.Kind != providerresolution.ChoiceSourceCurrentProject {
+					return nil, fmt.Errorf("provider selection %s source kind %q is not current-project", identifier, choiceSource.Kind)
 				}
 				value.selectionSources = append(value.selectionSources, ProviderSelectionSource{
 					projectModule: choiceSource.ModulePath,
@@ -3053,10 +3024,6 @@ func validateSelectedProviders(values []SelectedProvider, modules []Module, cand
 			if len(value.selectionSources) != 1 {
 				return fmt.Errorf("selected_providers[%d] current-project replacement requires one source", index)
 			}
-		case ProviderSelectionTemplate:
-			if len(value.selectionSources) == 0 {
-				return fmt.Errorf("selected_providers[%d] template selection requires sources", index)
-			}
 		default:
 			return fmt.Errorf("selected_providers[%d].selection_reason %q is invalid", index, value.selectionReason)
 		}
@@ -3067,9 +3034,6 @@ func validateSelectedProviders(values []SelectedProvider, modules []Module, cand
 			}
 			if value.selectionReason == ProviderSelectionCurrentProject && sourceProject.role != ModuleRoleCurrent {
 				return fmt.Errorf("selected_providers[%d] current-project source belongs to a dependency", index)
-			}
-			if value.selectionReason == ProviderSelectionTemplate && sourceProject.role != ModuleRoleDependency {
-				return fmt.Errorf("selected_providers[%d] template source has an invalid Project role", index)
 			}
 			if sourceIndex > 0 && providerSelectionSourceKey(value.selectionSources[sourceIndex-1]) >= providerSelectionSourceKey(selectionSource) {
 				return fmt.Errorf("selected_providers[%d].selection_sources are not in unique canonical order", index)

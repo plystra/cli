@@ -40,7 +40,6 @@ const (
 	javaScriptGenerator               = javascriptgen.GeneratorVersion
 	documentationGenerator            = apidocgen.GeneratorVersion
 	applicationModelInputPrefix       = "application-model:"
-	dependencyCompositionInputPrefix  = "dependency-composition:"
 	interfaceProvenanceInputPrefix    = "interface-provenance:"
 	transportToolchainInputPrefix     = "transport-toolchain:"
 	configurationSelectionInputPrefix = "configuration-selection:"
@@ -89,11 +88,10 @@ func newArtifactEvidenceIndex(provenance ManifestProvenance) (artifactEvidenceIn
 	}
 	base = canonicalArtifactEvidence(base)
 	configuration := artifactEvidence{inputs: []string{
-		dependencyCompositionInputPrefix + provenance.DependencyBaseline().Digest(),
 		configurationSelectionInputPrefix + provenance.Mode() + ":" + provenance.SelectedPath() + ":" + provenance.SelectedDigest(),
-	}}
-	for _, record := range provenance.DependencyBaseline().Records() {
-		configuration.sources = append(configuration.sources, record.Sources...)
+	}, sources: []string{provenance.SelectedPath()}}
+	if provenance.Mode() == ConfigurationModeEnvironment {
+		configuration.sources = append(configuration.sources, provenance.RootPath())
 	}
 	index := artifactEvidenceIndex{
 		base:          base,

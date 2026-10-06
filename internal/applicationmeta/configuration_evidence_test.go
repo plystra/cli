@@ -93,8 +93,8 @@ config:
 			t.Fatalf("decision %s = summary %q removed %t source %q digest %q", decision.Path(), decision.Summary(), decision.Removed(), decision.Source(), decision.Digest())
 		}
 		_, currentProjectOwned := nonComposable[decision.Path()]
-		if decision.DependencyComposable() == currentProjectOwned {
-			t.Fatalf("decision %s dependency-composable = %t, current-Project-owned = %t", decision.Path(), decision.DependencyComposable(), currentProjectOwned)
+		if decision.ResolutionRelevant() == currentProjectOwned {
+			t.Fatalf("decision %s resolution-relevant = %t, current-Project-owned = %t", decision.Path(), decision.ResolutionRelevant(), currentProjectOwned)
 		}
 		bounded.WriteString(decision.Path())
 		bounded.WriteString(string(decision.Summary()))
@@ -367,14 +367,23 @@ func TestConfigurationLayerDigestUnvalidatedValuesNeverEnterPublicIdentity(t *te
 					t.Fatal("unvalidated field names, values, or Secret targets entered public identity")
 				}
 			}
-			for _, data := range []string{"{}", "config: {example.com/other/root.New: {password: PRIVATE_FIRST}}", "config: {example.com/excluded/root.New: {$remove: true}}"} {
-				manifest, err := applicationmeta.Parse([]byte(data))
+			for _, testData := range []struct {
+				data  string
+				parse func([]byte) (applicationmeta.Manifest, error)
+			}{
+				{data: "{}", parse: applicationmeta.Parse},
+				{data: "config: {example.com/other/root.New: {password: PRIVATE_FIRST}}", parse: applicationmeta.Parse},
+				{data: "config: {example.com/excluded/root.New: {$remove: true}}", parse: func(value []byte) (applicationmeta.Manifest, error) {
+					return applicationmeta.ParseOverlaySource("plystra.production.yaml", value)
+				}},
+			} {
+				manifest, err := testData.parse([]byte(testData.data))
 				if err != nil {
 					t.Fatal(err)
 				}
 				digest, err := applicationmeta.ConfigurationLayerDigest(manifest, test.lookup)
 				if err != nil || digest == first {
-					t.Fatalf("constructor identity, absence, or removal was lost: %s, %v", data, err)
+					t.Fatalf("constructor identity, absence, or removal was lost: %s, %v", testData.data, err)
 				}
 			}
 		})

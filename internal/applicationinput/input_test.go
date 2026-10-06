@@ -57,12 +57,11 @@ capabilities:
 `)
 	environment := []string{"GOENV=off", "GOWORK=off"}
 	provenance := &generation.ConfigurationProvenanceInput{
-		Mode:                        generation.ConfigurationModeDefault,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  "sha256:" + strings.Repeat("1", 64),
-		SelectedPath:                "plystra.yaml",
-		SelectedDigest:              "sha256:" + strings.Repeat("1", 64),
-		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
+		Mode:           generation.ConfigurationModeDefault,
+		RootPath:       "plystra.yaml",
+		RootDigest:     "sha256:" + strings.Repeat("1", 64),
+		SelectedPath:   "plystra.yaml",
+		SelectedDigest: "sha256:" + strings.Repeat("1", 64),
 	}
 	input, err := applicationinput.Build(manifest, inventory, applicationInputSourceContext(dependency{path: "example.com/providers", version: "v1.2.0"}), provenance, generationexec.BuildOptions{BuildEnvironment: environment})
 	if err != nil {
@@ -196,7 +195,7 @@ generation:
 	}
 }
 
-func TestBuildPreservesEffectiveDependencySourcesAndSparseOverlayLocations(t *testing.T) {
+func TestBuildPreservesCurrentProjectOverlayLocations(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -221,32 +220,18 @@ capabilities:
 			{ModulePath: "example.com/a", Version: "v1.0.0"},
 			{ModulePath: "example.com/b", Version: "v2.0.0"},
 		},
-		DependencyProvenance: []applicationinput.DependencyProvenance{{
-			Path: "capabilities.require[\"kernel.info/v1\"]",
-			Sources: []string{
-				`example.com/a@v1.0.0/plystra.yaml capabilities.require["kernel.info/v1"]`,
-				`example.com/b@v2.0.0/plystra.yaml capabilities.require["kernel.info/v1"]`,
-			},
-		}},
-		CurrentProjectPaths: []string{`capabilities.require["kernel.info/v1"]`, `capabilities.use["email.send/v1"]`},
+		CurrentProjectPaths: []string{`http.expose["kernel.health/v1"]`, `capabilities.require["kernel.info/v1"]`, `capabilities.use["email.send/v1"]`},
 	}
 	input, err := applicationinput.Build(manifest, inventory, sourceContext, nil, generationexec.BuildOptions{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if len(input.Requirements) != 3 {
+	if len(input.Requirements) != 1 {
 		t.Fatalf("Requirements = %#v", input.Requirements)
 	}
 	localSource := input.Requirements[0].Source
 	if localSource.Kind != providerresolution.RequirementDeclaration || localSource.ModulePath != "example.com/app" || localSource.Path != "plystra.production.yaml" || localSource.String() != `plystra.production.yaml capabilities.require.add["kernel.info/v1"]` {
 		t.Fatalf("local overlay requirement source = %#v", localSource)
-	}
-	for index, modulePath := range []string{"example.com/a", "example.com/b"} {
-		index++
-		source := input.Requirements[index].Source
-		if source.Kind != providerresolution.RequirementDeclaration || source.ModulePath != modulePath || source.Path != "plystra.yaml" || source.Line != 1 || source.Column != 1 {
-			t.Fatalf("Requirements[%d].Source = %#v", index, source)
-		}
 	}
 	if len(input.ApplicationHTTPExposures) != 1 || len(input.ApplicationHTTPExposures[0].Sources) != 1 {
 		t.Fatalf("ApplicationHTTPExposures = %#v", input.ApplicationHTTPExposures)
@@ -260,33 +245,19 @@ capabilities:
 	}
 
 	invalidContext := sourceContext
-	invalidContext.DependencyProvenance = []applicationinput.DependencyProvenance{{
-		Path:    `capabilities.require["kernel.info/v1"]`,
-		Sources: []string{`example.com/unlisted@v1.0.0/plystra.yaml capabilities.require["kernel.info/v1"]`},
-	}}
+	invalidContext.Dependencies = append(invalidContext.Dependencies, applicationinput.DependencySource{ModulePath: "example.com/a", Version: "v1.0.0"})
 	invalid, err := applicationinput.Build(manifest, inventory, invalidContext, nil, generationexec.BuildOptions{})
-	if !errors.Is(err, applicationinput.ErrBuild) || !strings.Contains(err.Error(), "template source") || !strings.Contains(err.Error(), "does not identify a discovered dependency Project") || len(invalid.Requirements) != 0 {
-		t.Fatalf("Build(unlisted dependency source) = %#v, %v", invalid, err)
+	if !errors.Is(err, applicationinput.ErrBuild) || !strings.Contains(err.Error(), `dependencies[2] repeats module "example.com/a"`) || len(invalid.Requirements) != 0 {
+		t.Fatalf("Build(duplicate dependency source) = %#v, %v", invalid, err)
 	}
 }
 
-func TestConfigurationSourcesPreserveTypedCurrentAndDependencyLocations(t *testing.T) {
+func TestConfigurationSourcesPreserveTypedCurrentProjectLocations(t *testing.T) {
 	t.Parallel()
 
 	const field = `interfaces.require["app.run/v1"]`
 	context := applicationinput.SourceContext{
-		CurrentModulePath: "example.com/app",
-		Dependencies: []applicationinput.DependencySource{
-			{ModulePath: "example.com/a", Version: "v1.0.0"},
-			{ModulePath: "example.com/b", Version: ""},
-		},
-		DependencyProvenance: []applicationinput.DependencyProvenance{{
-			Path: field,
-			Sources: []string{
-				`example.com/a@v1.0.0/plystra.yaml interfaces.require["app.run/v1"]`,
-				`example.com/b@workspace/plystra.yaml interfaces.require["app.run/v1"]`,
-			},
-		}},
+		CurrentModulePath:   "example.com/app",
 		CurrentProjectPaths: []string{field},
 	}
 	sources, err := applicationinput.ConfigurationSources(context, `plystra.production.yaml interfaces.require.add["app.run/v1"]`, field)
@@ -295,8 +266,6 @@ func TestConfigurationSourcesPreserveTypedCurrentAndDependencyLocations(t *testi
 	}
 	want := []applicationinput.ConfigurationSource{
 		{Reference: `plystra.production.yaml interfaces.require.add["app.run/v1"]`, ModulePath: "example.com/app", Path: "plystra.production.yaml", Line: 1, Column: 1},
-		{Reference: `example.com/a@v1.0.0/plystra.yaml interfaces.require["app.run/v1"]`, ModulePath: "example.com/a", Path: "plystra.yaml", Line: 1, Column: 1},
-		{Reference: `example.com/b@workspace/plystra.yaml interfaces.require["app.run/v1"]`, ModulePath: "example.com/b", Path: "plystra.yaml", Line: 1, Column: 1},
 	}
 	if !reflect.DeepEqual(sources, want) {
 		t.Fatalf("ConfigurationSources = %#v, want %#v", sources, want)
@@ -308,66 +277,9 @@ func TestConfigurationSourcesPreserveTypedCurrentAndDependencyLocations(t *testi
 	}
 
 	invalid := context
-	invalid.DependencyProvenance = []applicationinput.DependencyProvenance{{
-		Path:    field,
-		Sources: []string{`example.com/unlisted@v1.0.0/plystra.yaml interfaces.require["app.run/v1"]`},
-	}}
-	if values, err := applicationinput.ConfigurationSources(invalid, `plystra.production.yaml interfaces.require.add["app.run/v1"]`, field); err == nil || values != nil || !strings.Contains(err.Error(), "template source") || !strings.Contains(err.Error(), "does not identify a discovered dependency Project") {
-		t.Fatalf("ConfigurationSources(unlisted dependency) = %#v, %v", values, err)
-	}
-	invalid.DependencyProvenance[0].Sources = []string{`example.com/app@workspace/plystra.yaml interfaces.require["app.run/v1"]`}
-	if _, err := applicationinput.ConfigurationSources(invalid, `plystra.production.yaml interfaces.require.add["app.run/v1"]`, field); err == nil {
-		t.Fatal("current Project cannot contribute template provenance")
-	}
-}
-
-func TestBuildPreservesEveryCompatibleInheritedProviderChoiceSource(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	writeModule(t, root, "example.com/app")
-	inventory := configureInventory(t, root)
-	manifest, err := applicationmeta.ParseSource("example.com/a@v1.0.0/plystra.yaml", []byte(`capabilities:
-  use:
-    email.send/v1: example.email
-`))
-	if err != nil {
-		t.Fatalf("ParseSource: %v", err)
-	}
-	context := applicationinput.SourceContext{
-		CurrentModulePath: "example.com/app",
-		Dependencies: []applicationinput.DependencySource{
-			{ModulePath: "example.com/a", Version: "v1.0.0"},
-			{ModulePath: "example.com/b", Version: ""},
-		},
-		DependencyProvenance: []applicationinput.DependencyProvenance{{
-			Path: `capabilities.use["email.send/v1"]`,
-			Sources: []string{
-				`example.com/b@workspace/plystra.yaml capabilities.use["email.send/v1"]`,
-				`example.com/a@v1.0.0/plystra.yaml capabilities.use["email.send/v1"]`,
-			},
-		}},
-	}
-	input, err := applicationinput.Build(manifest, inventory, context, nil, generationexec.BuildOptions{})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	if len(input.Choices) != 1 || len(input.Choices[0].Sources) != 2 {
-		t.Fatalf("Choices = %#v", input.Choices)
-	}
-	sources := input.Choices[0].Sources
-	if sources[0].Kind != providerresolution.ChoiceSourceTemplate || sources[0].ModulePath != "example.com/a" || sources[0].Path != "plystra.yaml" || sources[1].Kind != providerresolution.ChoiceSourceTemplate || sources[1].ModulePath != "example.com/b" || sources[1].Path != "plystra.yaml" {
-		t.Fatalf("inherited Provider choice sources = %#v", sources)
-	}
-
-	invalidContext := context
-	invalidContext.DependencyProvenance = []applicationinput.DependencyProvenance{{
-		Path:    `capabilities.use["email.send/v1"]`,
-		Sources: []string{`example.com/unlisted@v1.0.0/plystra.yaml capabilities.use["email.send/v1"]`},
-	}}
-	invalid, err := applicationinput.Build(manifest, inventory, invalidContext, nil, generationexec.BuildOptions{})
-	if !errors.Is(err, applicationinput.ErrBuild) || !strings.Contains(err.Error(), "template source") || !strings.Contains(err.Error(), "does not identify a discovered dependency Project") || len(invalid.Choices) != 0 {
-		t.Fatalf("Build(unlisted Provider source) = %#v, %v", invalid, err)
+	invalid.CurrentProjectPaths = []string{"http.address"}
+	if values, err := applicationinput.ConfigurationSources(invalid, `plystra.production.yaml interfaces.require.add["app.run/v1"]`, field); err == nil || values != nil || !strings.Contains(err.Error(), "has no current-Project source") {
+		t.Fatalf("ConfigurationSources(without current-project field) = %#v, %v", values, err)
 	}
 }
 

@@ -60,8 +60,8 @@ func readModuleMetadata(modulePath, root, version string, required bool) (Module
 	return ModuleMetadataSnapshot{modulePath: modulePath, root: root, version: version, required: required, snapshot: snapshot}, nil
 }
 
-// ValidateSnapshot rechecks the captured root, selected document, template
-// documents, module metadata, effective Go Module graph, and rediscovered
+// ValidateSnapshot rechecks the captured root, selected document, module
+// metadata, effective Go Module graph, and rediscovered
 // declaration semantics (including dependency parameters and Config schemas).
 // It performs no writes or application execution. It is not a lock or a byte
 // snapshot of function bodies/generated artifacts; the enclosing transaction
@@ -120,9 +120,6 @@ func (s SelectionInputs) recheckSnapshots() error {
 			return configurationSourceError(s.module.ModulePath(), before.path, 0, 0,
 				fmt.Errorf("%w: configuration %s changed before resolution completed", ErrConcurrentChange, before.path))
 		}
-	}
-	if err := recheckDependencyManifests(s.dependencySnapshots); err != nil {
-		return err
 	}
 	return s.recheckModuleMetadata()
 }

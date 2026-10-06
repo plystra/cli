@@ -521,13 +521,12 @@ func inputFromContext(context generation.Context) generation.Input {
 	var configurationProvenance *generation.ConfigurationProvenanceInput
 	if provenance, exists := context.ConfigurationProvenance(); exists {
 		configurationProvenance = &generation.ConfigurationProvenanceInput{
-			Mode:                        provenance.Mode(),
-			Environment:                 provenance.Environment(),
-			RootPath:                    provenance.RootPath(),
-			RootDigest:                  provenance.RootDigest(),
-			SelectedPath:                provenance.SelectedPath(),
-			SelectedDigest:              provenance.SelectedDigest(),
-			DependencyCompositionDigest: provenance.DependencyCompositionDigest(),
+			Mode:           provenance.Mode(),
+			Environment:    provenance.Environment(),
+			RootPath:       provenance.RootPath(),
+			RootDigest:     provenance.RootDigest(),
+			SelectedPath:   provenance.SelectedPath(),
+			SelectedDigest: provenance.SelectedDigest(),
 		}
 	}
 	pluginViews := context.Plugins()

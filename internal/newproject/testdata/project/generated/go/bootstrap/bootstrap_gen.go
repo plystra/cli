@@ -26,7 +26,6 @@ import (
 
 	applicationassembly "example.com/acme/my-app/generated/go/assembly"
 	constructorconfig "example.com/acme/my-app/generated/go/internal/constructorconfig"
-	modulepath "example.com/acme/my-app/generated/go/internal/modulepath"
 	runtimebaseline "example.com/acme/my-app/generated/go/internal/runtimebaseline"
 	kernelconfiguration "github.com/plystra/kernel/configuration"
 	kernellifecycle "github.com/plystra/kernel/lifecycle"
@@ -35,7 +34,7 @@ import (
 )
 
 const (
-	compiledRuntimeContract = "sha256:0b64750171cc2d3f2ae993e9be6848c5a165aefaaebe8de84d2b12f825418b7f"
+	compiledRuntimeContract = "sha256:6bdf231126c6559389db023b60724912c25defb19a6bf90bcc1f53546cca9627"
 	defaultRuntimeDocument  = "plystra.yaml"
 	defaultStartupTimeout   = time.Duration(120000000000)
 	// compiledApplicationModelCompatibilityJSON records the non-secret YAML projection associated with the complete compiled model.
@@ -662,7 +661,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 	defer clear(root)
 	switch selection.mode {
 	case runtimeSelectionDefault:
-		document, err := composeRuntimeTemplateDocument(baseline, root, nil, nil)
+		document, err := composeRuntimeDocument(baseline, root, nil, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: default %s: %w", ErrRuntimeConfiguration, defaultRuntimeDocument, err)
 		}
@@ -673,7 +672,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: environment %q requires %s; create that sparse overlay or select an existing environment: %w", ErrRuntimeSelector, selection.environment, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(overlay)
-		document, err := composeRuntimeTemplateDocument(baseline, root, nil, overlay)
+		document, err := composeRuntimeDocument(baseline, root, nil, overlay)
 		if err != nil {
 			return nil, fmt.Errorf("%w: apply environment %q from %s: %w", ErrRuntimeConfiguration, selection.environment, filepath.ToSlash(selection.path), err)
 		}
@@ -684,7 +683,7 @@ func loadRuntimeDocument(options RuntimeOptions) ([]byte, error) {
 			return nil, fmt.Errorf("%w: load full-replacement configuration %s: %w", ErrRuntimeSelector, filepath.ToSlash(selection.path), err)
 		}
 		defer clear(selected)
-		document, err := composeRuntimeTemplateDocument(baseline, root, selected, nil)
+		document, err := composeRuntimeDocument(baseline, root, selected, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w: full-replacement configuration %s: %w", ErrRuntimeConfiguration, filepath.ToSlash(selection.path), err)
 		}
@@ -2077,51 +2076,46 @@ func runtimeConfigurationError(format string, arguments ...any) error {
 	return fmt.Errorf("%w: %s", ErrRuntimeConfiguration, fmt.Sprintf(format, arguments...))
 }
 
-// Apply each raw layer only after its lower ancestry. Normalizing a delta first
-// would discard tombstones and complete-set boundaries needed by that ancestry.
-func composeRuntimeTemplateDocument(baseline runtimebaseline.Document, rootData, selectedData, overlayData []byte) ([]byte, error) {
+// Compose the current Project root with one selected overlay, or use one
+// complete replacement as the only application configuration layer.
+func composeRuntimeDocument(baseline runtimebaseline.Document, rootData, selectedData, overlayData []byte) ([]byte, error) {
 	root, err := decodeRuntimeDocument(rootData, defaultRuntimeDocument)
 	if err != nil {
 		return nil, err
 	}
-	rootFields, err := runtimeMapping(root, "root configuration", runtimeKeySet("template", "http", "timeouts", "capabilities", "interfaces", "config", "resources", "data"))
+	rootFields, err := runtimeMapping(root, "root configuration", runtimeKeySet("http", "timeouts", "capabilities", "interfaces", "config", "resources", "data"))
 	if err != nil {
 		return nil, err
 	}
-	relationship := ""
-	if node := rootFields["template"]; node != nil {
-		relationship, err = runtimeString(node)
-		if err != nil || modulepath.CheckProject(relationship) != nil {
-			return nil, runtimeConfigurationError("template must be an exact Project module path")
-		}
-	}
-	layers, err := runtimeTemplateLayers(baseline, relationship)
-	if err != nil {
-		return nil, err
-	}
-	delete(rootFields, "template")
 	current := runtimeMappingNode(rootFields)
+	layers := make([]map[string]*yaml.Node, 0, 2)
 	if selectedData != nil {
 		current, err = decodeRuntimeDocument(selectedData, "replacement configuration")
 		if err != nil {
 			return nil, err
 		}
-	}
-	currentFields, err := runtimeApplicationLayer(current, false)
-	if err != nil {
-		return nil, err
-	}
-	layers = append(layers, currentFields)
-	if overlayData != nil {
-		overlay, err := decodeRuntimeDocument(overlayData, "environment overlay")
+		currentFields, err := runtimeApplicationLayer(current)
 		if err != nil {
 			return nil, err
 		}
-		fields, err := runtimeApplicationLayer(overlay, false)
+		layers = append(layers, currentFields)
+	} else {
+		currentFields, err := runtimeApplicationLayer(current)
 		if err != nil {
 			return nil, err
 		}
-		layers = append(layers, fields)
+		layers = append(layers, currentFields)
+		if overlayData != nil {
+			overlay, err := decodeRuntimeDocument(overlayData, "environment overlay")
+			if err != nil {
+				return nil, err
+			}
+			fields, err := runtimeApplicationLayer(overlay)
+			if err != nil {
+				return nil, err
+			}
+			layers = append(layers, fields)
+		}
 	}
 	result := runtimeMappingNode(nil)
 	configurations := make([]*yaml.Node, 0, len(layers))
@@ -2153,7 +2147,7 @@ func composeRuntimeTemplateDocument(baseline runtimebaseline.Document, rootData,
 	if err != nil {
 		return nil, err
 	}
-	fields["config"], err = composeRuntimeTemplateConfigurations(configurations, inventory, owners)
+	fields["config"], err = composeRuntimeConfigurations(configurations, inventory, owners)
 	if err != nil {
 		return nil, err
 	}
@@ -2168,67 +2162,13 @@ func composeRuntimeTemplateDocument(baseline runtimebaseline.Document, rootData,
 	return encodeRuntimeDocument(runtimeMappingNode(fields))
 }
 
-func runtimeTemplateLayers(baseline runtimebaseline.Document, relationship string) ([]map[string]*yaml.Node, error) {
-	var contract struct {
-		Module    string
-		Template  string
-		Templates []struct {
-			Module   string
-			Version  string
-			Template string
-		} `json:"template_ancestry"`
-	}
-	if json.Unmarshal(baseline.Contract, &contract) != nil || modulepath.CheckProject(contract.Module) != nil || contract.Templates == nil || len(contract.Templates) != len(baseline.Templates) {
-		return nil, runtimebaseline.ErrBaseline
-	}
-	if relationship != contract.Template {
-		return nil, fmt.Errorf("%w: root template relationship changed; regenerate and rebuild with the same selector", ErrRuntimeCompatibility)
-	}
-	seen := map[string]bool{contract.Module: true}
-	previous := ""
-	layers := make([]map[string]*yaml.Node, 0, len(baseline.Templates))
-	for i, template := range baseline.Templates {
-		expected := contract.Templates[i]
-		if template.Module != expected.Module || template.Version != expected.Version || template.Template != expected.Template || modulepath.CheckProject(template.Module) != nil || seen[template.Module] || template.Template != previous {
-			return nil, runtimebaseline.ErrBaseline
-		}
-		seen[template.Module] = true
-		previous = template.Module
-		document, err := decodeRuntimeDocument([]byte(template.YAML), "private template baseline")
-		if err != nil {
-			return nil, runtimebaseline.ErrBaseline
-		}
-		fields, err := runtimeApplicationLayer(document, true)
-		if err != nil {
-			return nil, err
-		}
-		layers = append(layers, fields)
-	}
-	if contract.Template != previous {
-		return nil, runtimebaseline.ErrBaseline
-	}
-	return layers, nil
-}
-
-func runtimeApplicationLayer(document *yaml.Node, inherited bool) (map[string]*yaml.Node, error) {
+func runtimeApplicationLayer(document *yaml.Node) (map[string]*yaml.Node, error) {
 	fields, err := runtimeMapping(document, "application configuration", runtimeKeySet("http", "timeouts", "interfaces", "config", "resources", "data"))
 	if err != nil {
 		return nil, err
 	}
 	if fields["data"] != nil {
 		return nil, runtimeConfigurationError("Data is not supported by this runtime")
-	}
-	if inherited {
-		if fields["timeouts"] != nil {
-			return nil, runtimeConfigurationError("private template baseline cannot contain process settings")
-		}
-		http, err := runtimeOptionalMapping(fields["http"], "template http", runtimeKeySet("cors", "expose"))
-		if err != nil {
-			return nil, err
-		}
-		if fields["http"] != nil {
-			fields["http"] = runtimeMappingNode(http)
-		}
 	}
 	return fields, nil
 }
@@ -2266,7 +2206,7 @@ func runtimeConfigurationOwners(interfaces *yaml.Node, inventory map[string]runt
 	return owners, nil
 }
 
-func composeRuntimeTemplateConfigurations(layers []*yaml.Node, inventory map[string]runtimeConstructorInventoryEntry, owners map[string]bool) (*yaml.Node, error) {
+func composeRuntimeConfigurations(layers []*yaml.Node, inventory map[string]runtimeConstructorInventoryEntry, owners map[string]bool) (*yaml.Node, error) {
 	objects := make(map[string][]*yaml.Node)
 	for i, layer := range layers {
 		entries, err := runtimeOptionalMapping(layer, "config", nil)

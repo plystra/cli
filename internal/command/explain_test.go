@@ -482,12 +482,12 @@ func TestExplainConfigurationReportsTypedOwnershipReplacementAndRemoval(t *testi
 		changeField  string
 	}{
 		{
-			name:         "dependency Secret reference",
+			name:         "root Secret reference",
 			arguments:    []string{"explain", "config", `config["example.com/platform/shared.New"]["password"]`, "--format", "json"},
 			mode:         "default",
 			outcome:      "effective",
-			reason:       "template",
-			sourceModule: "example.com/platform",
+			reason:       "current-project-root",
+			sourceModule: "example.com/app",
 			sourcePath:   "plystra.yaml",
 			changePath:   "plystra.yaml",
 			changeField:  `config["example.com/platform/shared.New"]["password"]`,
@@ -595,13 +595,13 @@ func TestExplainConfigurationCanonicalPathProducesDeterministicJSON(t *testing.T
 	assertConfigurationExplanationRedacted(t, firstStdout, root)
 }
 
-func TestExplainConfigurationReportsAncestorSuppression(t *testing.T) {
+func TestExplainConfigurationReportsOverlaySuppression(t *testing.T) {
 	t.Parallel()
 
 	root, nested := createExplainDependencyPluginProject(t)
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "config", `config["example.com/platform/shared.New"]["settings"]["nested"]`, "--format", "json", "--env", "suppressed"}, nested, inspectCommandEnvironment(nil))
 	document := decodeExplainCommandEnvelope(t, stdout)
-	if exitCode != 0 || stderr != "" || document.ConfigurationMode != "environment" || document.Result.Decision.Outcome != "suppressed" || document.Result.Reason.Code != "ancestor-removal" {
+	if exitCode != 0 || stderr != "" || document.ConfigurationMode != "environment" || document.Result.Decision.Outcome != "suppressed" || document.Result.Reason.Code != "configuration-removal" {
 		t.Fatalf("suppressed configuration explanation = exit %d, stderr %q, result %#v", exitCode, stderr, document.Result)
 	}
 	if document.Result.Subject.ID != `config["example.com/platform/shared.New"]["settings"]["nested"]` || len(document.Result.Reason.Sources) != 1 || document.Result.Reason.Sources[0].Module != "example.com/app" || document.Result.Reason.Sources[0].Path != "plystra.suppressed.yaml" || document.Result.Reason.Sources[0].Kind != "configuration-removal" {
@@ -649,9 +649,9 @@ func TestExplainConfigurationHumanOutputNamesPluginAndVerboseEvidence(t *testing
 	exitCode, stdout, stderr := runCommand(t, []string{"explain", "config", `config["example.com/platform/shared.New"]["password"]`, "--verbose"}, root, inspectCommandEnvironment(nil))
 	for _, fragment := range []string{
 		`Configuration: config["example.com/platform/shared.New"]["password"]`,
-		"Decision: effective secret-reference from template (template order 1, oldest to nearest)\n",
-		"Reason: template\n",
-		"Source: example.com/platform:plystra.yaml:1:1 (configuration-value)\n",
+		"Decision: effective secret-reference from current-project-root\n",
+		"Reason: current-project-root\n",
+		"Source: example.com/app:plystra.yaml:1:1 (configuration-value)\n",
 		`Change: edit plystra.yaml at config["example.com/platform/shared.New"]["password"]`,
 		"Resolution evidence:\n  {\n",
 		`    "configuration_fields": [`,
@@ -1279,8 +1279,7 @@ require (
 replace example.com/platform => %s
 replace github.com/plystra/kernel => %s
 `, filepath.ToSlash(platformRoot), filepath.ToSlash(kernelRoot)))
-	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `template: example.com/platform
-capabilities:
+	writeCommandFile(t, filepath.Join(appRoot, "plystra.yaml"), `capabilities:
   require: [email.send/v1, reports.read/v1]
   use: {email.send/v1: example.shared}
 http:
@@ -1288,6 +1287,9 @@ http:
 config:
   example.com/platform/shared.New:
     host: root-private.example
+    password: {env: EXPLAIN_PRIVATE_PASSWORD}
+    settings:
+      nested: root-private
 `)
 	writeCommandFile(t, filepath.Join(appRoot, "plystra.production.yaml"), `capabilities:
   use: {email.send/v1: example.alternative}

@@ -41,12 +41,6 @@ func TestDormantConstructorConfigurationsNormalizeRoundTripAndDefendStorage(t *t
 			t.Fatalf("configuration fields are not canonical: %#v", configuration.fields)
 		}
 	}
-	paths := []string{
-		alpha.fields[0].path,
-		alpha.fields[1].path,
-		beta.fields[0].path,
-		beta.fields[1].path,
-	}
 	if err := validateDormantConstructorConfigurations(
 		normalized,
 		[]DormantImplementationSelection{alphaSelection, betaSelection},
@@ -54,7 +48,6 @@ func TestDormantConstructorConfigurationsNormalizeRoundTripAndDefendStorage(t *t
 		ConfigurationModeDefault,
 		"plystra.yaml",
 		"plystra.yaml",
-		paths,
 	); err != nil {
 		t.Fatalf("validate normalized dormant constructor configurations: %v", err)
 	}
@@ -94,27 +87,22 @@ func TestDormantConstructorConfigurationsRejectMalformedOrInconsistentRecords(t 
 
 	selection := testDormantImplementationSelection("alpha.read/v1", "alpha")
 	configuration := testDormantConstructorConfiguration(selection)
-	paths := []string{configuration.fields[0].path, configuration.fields[1].path}
-	validate := func(values []DormantConstructorConfiguration, selections []DormantImplementationSelection, active map[string]struct{}, currentPaths []string) error {
-		return validateDormantConstructorConfigurations(values, selections, active, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml", currentPaths)
+	validate := func(values []DormantConstructorConfiguration, selections []DormantImplementationSelection, active map[string]struct{}) error {
+		return validateDormantConstructorConfigurations(values, selections, active, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml")
 	}
 
-	if err := validate(nil, []DormantImplementationSelection{selection}, map[string]struct{}{}, paths); err == nil || !strings.Contains(err.Error(), "must be an array") {
+	if err := validate(nil, []DormantImplementationSelection{selection}, map[string]struct{}{}); err == nil || !strings.Contains(err.Error(), "must be an array") {
 		t.Fatalf("missing dormant constructor configuration array error = %v", err)
 	}
 	if _, err := normalizeDormantConstructorConfigurations([]DormantConstructorConfiguration{configuration, configuration}); err == nil || !strings.Contains(err.Error(), "repeats constructor") {
 		t.Fatalf("duplicate dormant constructor configuration error = %v", err)
 	}
-	if err := validate([]DormantConstructorConfiguration{configuration}, nil, map[string]struct{}{}, paths); err == nil || !strings.Contains(err.Error(), "no dormant explicit selection") {
+	if err := validate([]DormantConstructorConfiguration{configuration}, nil, map[string]struct{}{}); err == nil || !strings.Contains(err.Error(), "no dormant explicit selection") {
 		t.Fatalf("orphan dormant constructor configuration error = %v", err)
 	}
-	if err := validate([]DormantConstructorConfiguration{configuration}, []DormantImplementationSelection{selection}, map[string]struct{}{selection.constructor: {}}, paths); err == nil || !strings.Contains(err.Error(), "duplicates active reachable constructor") {
+	if err := validate([]DormantConstructorConfiguration{configuration}, []DormantImplementationSelection{selection}, map[string]struct{}{selection.constructor: {}}); err == nil || !strings.Contains(err.Error(), "duplicates active reachable constructor") {
 		t.Fatalf("active dormant constructor configuration error = %v", err)
 	}
-	if err := validate([]DormantConstructorConfiguration{configuration}, []DormantImplementationSelection{selection}, map[string]struct{}{}, paths[:1]); err == nil || !strings.Contains(err.Error(), "current-project ownership") {
-		t.Fatalf("missing dormant current-project ownership error = %v", err)
-	}
-
 	reordered := cloneDormantConstructorConfigurations([]DormantConstructorConfiguration{configuration})[0]
 	slices.Reverse(reordered.fields)
 	if err := validateDormantConstructorConfiguration(reordered); err == nil || !strings.Contains(err.Error(), "canonically ordered") {
@@ -139,7 +127,7 @@ func TestEmptyDormantConstructorConfigurationRecordIsCanonical(t *testing.T) {
 	if err != nil || normalized == nil || len(normalized) != 0 {
 		t.Fatalf("normalize empty dormant constructor configurations = %#v, %v", normalized, err)
 	}
-	if err := validateDormantConstructorConfigurations(normalized, nil, map[string]struct{}{}, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml", []string{}); err != nil {
+	if err := validateDormantConstructorConfigurations(normalized, nil, map[string]struct{}{}, ConfigurationModeDefault, "plystra.yaml", "plystra.yaml"); err != nil {
 		t.Fatalf("validate empty dormant constructor configurations: %v", err)
 	}
 	digest, err := dormantConstructorConfigurationsDigest(normalized)
@@ -166,7 +154,7 @@ func testDormantConstructorConfiguration(selection DormantImplementationSelectio
 				path: root, digest: rootDigest, summary: string(applicationmeta.ConfigurationSummaryObject),
 				owner: string(resolutionevidence.ConfigurationOwnerRoot), effective: true,
 				contributions: []DormantConfigurationContribution{{
-					owner: string(resolutionevidence.ConfigurationOwnerRoot), precedence: 2,
+					owner: string(resolutionevidence.ConfigurationOwnerRoot), precedence: 1,
 					digest: rootDigest, summary: string(applicationmeta.ConfigurationSummaryObject), effective: true,
 					sources: []DormantConfigurationSource{rootSource},
 				}},
@@ -175,7 +163,7 @@ func testDormantConstructorConfiguration(selection DormantImplementationSelectio
 				path: root + `["endpoint"]`, digest: fieldDigest, summary: string(applicationmeta.ConfigurationSummaryString),
 				owner: string(resolutionevidence.ConfigurationOwnerRoot), effective: true,
 				contributions: []DormantConfigurationContribution{{
-					owner: string(resolutionevidence.ConfigurationOwnerRoot), precedence: 2,
+					owner: string(resolutionevidence.ConfigurationOwnerRoot), precedence: 1,
 					digest: fieldDigest, summary: string(applicationmeta.ConfigurationSummaryString), effective: true,
 					sources: []DormantConfigurationSource{rootSource},
 				}},

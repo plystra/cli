@@ -36,12 +36,12 @@ const (
 // configuration document. Decisions are construction evidence; they are not
 // a second configuration resolver.
 type ConfigurationDecision struct {
-	path                 string
-	digest               string
-	summary              ConfigurationDecisionSummary
-	removed              bool
-	source               string
-	dependencyComposable bool
+	path               string
+	digest             string
+	summary            ConfigurationDecisionSummary
+	removed            bool
+	source             string
+	resolutionRelevant bool
 }
 
 // Path returns the canonical schema path represented by the decision.
@@ -60,10 +60,9 @@ func (d ConfigurationDecision) Removed() bool { return d.removed }
 // Source returns the stable Project-relative configuration document path.
 func (d ConfigurationDecision) Source() string { return d.source }
 
-// DependencyComposable reports whether this field participates in dependency
-// composition. Current-Project-owned process settings
-// deliberately return false.
-func (d ConfigurationDecision) DependencyComposable() bool { return d.dependencyComposable }
+// ResolutionRelevant reports whether this decision contributes to the
+// application-resolution evidence. Runtime-only process settings return false.
+func (d ConfigurationDecision) ResolutionRelevant() bool { return d.resolutionRelevant }
 
 // ConfigurationDecisions returns deterministic typed decisions for one parsed
 // configuration layer. Values are represented only by a digest and a bounded
@@ -72,59 +71,56 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 	if schemas == nil {
 		return nil, fmt.Errorf("configuration decision schema lookup is nil")
 	}
-	maintenance, err := maintenanceDecisions(manifest, schemas)
+	declarations, err := configurationDecisions(manifest, schemas)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ConfigurationDecision, 0, len(maintenance)+9)
+	result := make([]ConfigurationDecision, 0, len(declarations)+9)
 	source := manifest.source
 	if source == "" {
 		source = "plystra.yaml"
 	}
 	if manifest.completeInterfaceRequirements {
 		result = append(result, ConfigurationDecision{
-			path:                 "interfaces.require",
-			digest:               digestStrings("interfaces.require", "complete-set"),
-			summary:              ConfigurationSummaryCompleteSet,
-			source:               source,
-			dependencyComposable: true,
+			path:               "interfaces.require",
+			digest:             digestStrings("interfaces.require", "complete-set"),
+			summary:            ConfigurationSummaryCompleteSet,
+			source:             source,
+			resolutionRelevant: true,
 		})
 	}
-	for _, decision := range maintenance {
+	for _, decision := range declarations {
 		digest := decision.digest
-		if decision.field == maintenanceConstructorConfig {
+		if decision.field == configurationConstructorConfig {
 			digest = constructorConfigPublicDigest(decision.config)
 		}
 		summary := ConfigurationSummaryRemoval
 		if !decision.removed {
 			switch decision.field {
-			case maintenanceRequirement:
+			case configurationRequirement:
 				summary = ConfigurationSummaryCapability
-			case maintenanceHTTPExposure, maintenanceInterfaceRequirement:
+			case configurationHTTPExposure, configurationInterfaceRequirement:
 				summary = ConfigurationSummaryInterface
-			case maintenanceProvider:
+			case configurationProvider:
 				summary = ConfigurationSummaryProvider
-			case maintenanceImplementationChoice:
+			case configurationImplementationChoice:
 				summary = ConfigurationSummaryImplementation
-			case maintenanceInterfacePolicy:
+			case configurationInterfacePolicy:
 				summary = ConfigurationSummaryObject
-			case maintenanceAlias:
+			case configurationAlias:
 				summary = ConfigurationSummaryAlias
-			case maintenanceConstructorConfig:
+			case configurationConstructorConfig:
 				summary = configurationDecisionSummary(decision.config)
 			}
 		}
 		result = append(result, ConfigurationDecision{
-			path:                 decision.path,
-			digest:               digest,
-			summary:              summary,
-			removed:              decision.removed,
-			source:               source,
-			dependencyComposable: true,
+			path:               decision.path,
+			digest:             digest,
+			summary:            summary,
+			removed:            decision.removed,
+			source:             source,
+			resolutionRelevant: true,
 		})
-	}
-	if manifest.template != "" {
-		result = append(result, ConfigurationDecision{path: "template", digest: digestStrings("template", manifest.template), summary: ConfigurationSummaryString, source: manifest.templateSource.Path()})
 	}
 	result = append(result, processConfigurationDecisions(manifest)...)
 	resources, err := resourceConfigurationDecisions(manifest, schemas, false)
@@ -132,7 +128,7 @@ func ConfigurationDecisions(manifest Manifest, schemas SchemaLookup) ([]Configur
 		return nil, err
 	}
 	result = append(result, resources...)
-	// maintenanceDecisions and the process decision builder are both typed and
+	// configurationDecisions and the process decision builder are both typed and
 	// deterministic, but sort again at this public boundary so future fields do
 	// not accidentally inherit map ordering.
 	for index := range result {
@@ -179,7 +175,7 @@ func ConfigurationLayerDigest(manifest Manifest, schemas SchemaLookup) (string, 
 			decision.digest,
 			string(decision.summary),
 			strconv.FormatBool(decision.removed),
-			strconv.FormatBool(decision.dependencyComposable),
+			strconv.FormatBool(decision.resolutionRelevant),
 		)
 	}
 	return digestStrings(values...), nil
@@ -210,11 +206,11 @@ func configurationLayerDigestDecisions(manifest Manifest, schemas SchemaLookup) 
 			return nil, fmt.Errorf("normalize excluded constructor configuration %q: %w", configured.constructor, ErrConfigurationInvalidValue)
 		}
 		result = append(result, ConfigurationDecision{
-			path:                 constructorConfigPath(configured.constructor, nil),
-			digest:               digestStrings("plystra.unvalidated-constructor-configuration/v2", configured.constructor.String()),
-			summary:              ConfigurationSummaryObject,
-			source:               configured.source,
-			dependencyComposable: true,
+			path:               constructorConfigPath(configured.constructor, nil),
+			digest:             digestStrings("plystra.unvalidated-constructor-configuration/v2", configured.constructor.String()),
+			summary:            ConfigurationSummaryObject,
+			source:             configured.source,
+			resolutionRelevant: true,
 		})
 	}
 	for _, removal := range manifest.removedConfigurations {
@@ -248,12 +244,12 @@ func constructorConfigurationDecision(decision constructorConfigDecision) Config
 		summary = ConfigurationSummaryRemoval
 	}
 	return ConfigurationDecision{
-		path:                 constructorConfigPath(decision.constructor, decision.segments),
-		digest:               constructorConfigPublicDigest(decision),
-		summary:              summary,
-		removed:              removed,
-		source:               decision.source,
-		dependencyComposable: true,
+		path:               constructorConfigPath(decision.constructor, decision.segments),
+		digest:             constructorConfigPublicDigest(decision),
+		summary:            summary,
+		removed:            removed,
+		source:             decision.source,
+		resolutionRelevant: true,
 	}
 }
 
@@ -325,12 +321,12 @@ func processConfigurationDecisions(manifest Manifest) []ConfigurationDecision {
 			summary = ConfigurationSummaryRemoval
 		}
 		result = append(result, ConfigurationDecision{
-			path:                 path,
-			digest:               digest,
-			summary:              summary,
-			removed:              removed,
-			source:               source,
-			dependencyComposable: strings.HasPrefix(path, "http.cors"),
+			path:               path,
+			digest:             digest,
+			summary:            summary,
+			removed:            removed,
+			source:             source,
+			resolutionRelevant: strings.HasPrefix(path, "http.cors"),
 		})
 	}
 	if manifest.hasHTTPAddress || manifest.removeHTTPAddress {

@@ -181,7 +181,7 @@ func TestParseDerivesTransportsFromCanonicalExposure(t *testing.T) {
 		},
 		{
 			name: "removed exposure",
-			data: "http: {expose: {kernel.health/v1: {$remove: true}}}\n",
+			data: "http: {expose: {}}\n",
 			want: applicationmeta.HTTPTransports{},
 		},
 	}
@@ -231,7 +231,6 @@ http:
 
 	for _, data := range []string{
 		"{}\n",
-		"http: {cors: {$remove: true}}\n",
 	} {
 		withoutCORS, err := applicationmeta.Parse([]byte(data))
 		if _, exists := withoutCORS.HTTPCORS(); err != nil || exists {
@@ -333,13 +332,13 @@ func TestParseAllowsEmptyOptionalSections(t *testing.T) {
 		[]byte(`{}`),
 		[]byte("http: {}\n"),
 		[]byte("http: {expose: {}}\n"),
-		[]byte("http: {address: null, expose: {}}\n"),
+		[]byte("http: {expose: {}}\n"),
 		[]byte("capabilities: {}\n"),
 		[]byte("capabilities:\n  aliases: {}\n"),
-		[]byte("capabilities: {require: {add: [], remove: []}, use: {email.send/v1: null}, aliases: {mail.send/v1: null}}\n"),
+		[]byte("capabilities: {require: [], use: {}, aliases: {}}\n"),
 		[]byte("interfaces: {policies: {}}\n"),
-		[]byte("config: {example.com/acme/plugin.New: {$remove: true}}\n"),
-		[]byte("timeouts: {startup: null}\n"),
+		[]byte("config: {}\n"),
+		[]byte("timeouts: {}\n"),
 	} {
 		manifest, err := applicationmeta.Parse(data)
 		address, hasAddress := manifest.HTTPAddress()

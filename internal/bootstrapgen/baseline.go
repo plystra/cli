@@ -11,12 +11,6 @@ import (
 	"github.com/plystra/cli/internal/runtimebaseline"
 )
 
-type baselineTemplate struct {
-	Module   string `json:"module"`
-	Version  string `json:"version"`
-	Template string `json:"template"`
-}
-
 type baselineConstructor struct {
 	Symbol       string                       `json:"symbol"`
 	Interfaces   []string                     `json:"interfaces"`
@@ -92,21 +86,6 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 	if options.ApplicationModelCompatibility.Valid() && (!slices.Equal(projection.ResourceInstances, instances) || !slices.Equal(projection.ResourceBindings, bindings)) {
 		return runtimebaseline.Document{}, ErrInvalidOptions
 	}
-	templates := append([]runtimebaseline.Template{}, options.Templates...)
-	ancestry := make([]baselineTemplate, len(templates))
-	previous := ""
-	modules := map[string]bool{options.ModulePath: true}
-	for i, template := range templates {
-		if modulepath.CheckProject(template.Module) != nil || modules[template.Module] || template.Template != previous {
-			return runtimebaseline.Document{}, ErrInvalidOptions
-		}
-		modules[template.Module] = true
-		previous = template.Module
-		ancestry[i] = baselineTemplate{template.Module, template.Version, template.Template}
-	}
-	if options.Template != previous {
-		return runtimebaseline.Document{}, ErrInvalidOptions
-	}
 	contract, err := json.Marshal(struct {
 		Schema               string                          `json:"baseline_schema"`
 		Module               string                          `json:"module"`
@@ -116,14 +95,12 @@ func RuntimeBaseline(options Options) (runtimebaseline.Document, error) {
 		ConstructorInventory []baselineConstructor           `json:"constructor_inventory"`
 		ResourceInventory    []baselineResourceProvider      `json:"resource_inventory"`
 		Resources            []baselineResourceConfiguration `json:"resource_configurations"`
-		Template             string                          `json:"template"`
-		Templates            []baselineTemplate              `json:"template_ancestry"`
 		RuntimeProcessFields []string                        `json:"runtime_process_fields"`
-	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, inventory, resourceInventory, resourceConfigurations, options.Template, ancestry, []string{"http.address", "timeouts.startup"}})
+	}{runtimebaseline.Schema, options.ModulePath, options.ApplicationModelCompatibility.ApplicationModelDigest(), options.ApplicationModelCompatibility.CanonicalJSON(), constructors, inventory, resourceInventory, resourceConfigurations, []string{"http.address", "timeouts.startup"}})
 	if err != nil {
 		return runtimebaseline.Document{}, ErrInvalidOptions
 	}
-	return runtimebaseline.Document{Schema: runtimebaseline.Schema, ContractID: runtimebaseline.ContractID(contract), Contract: contract, Defaults: defaults, Templates: templates}, nil
+	return runtimebaseline.Document{Schema: runtimebaseline.Schema, ContractID: runtimebaseline.ContractID(contract), Contract: contract, Defaults: defaults}, nil
 }
 
 const runtimeBaselineSupport = `

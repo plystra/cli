@@ -63,20 +63,22 @@ func TestGeneratedReplaySafeRetryExecution(t *testing.T) {
 	if err := os.Remove(filepath.Join(root, "retry_test.go")); err != nil {
 		t.Fatal(err)
 	}
-	dependency := t.TempDir()
-	writeModule(t, dependency, "example.com/retry-policy", "")
-	writeFile(t, filepath.Join(dependency, "plystra.yaml"), "interfaces: {policies: {work.run/v1: {timeout: 5s, retry: {eligibility: replay_safe}}}}\n")
-	mod := string(readFile(t, root, "go.mod"))
-	writeFile(t, filepath.Join(root, "go.mod"), mod+"\nrequire example.com/retry-policy v1.0.0\nreplace example.com/retry-policy => "+filepath.ToSlash(dependency)+"\n")
-	writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/retry-policy\ninterfaces: {require: [work.run/v1]}\n")
-	writeFile(t, filepath.Join(root, "plystra.production.yaml"), "interfaces: {policies: {work.run/v1: {timeout: 5s, retry: {eligibility: replay_safe, max_attempts: 3}}}}\n")
-	writeFile(t, filepath.Join(root, "deploy/customer.yaml"), "interfaces: {require: [work.run/v1], policies: {work.run/v1: {timeout: 5s, retry: {eligibility: replay_safe, max_attempts: 4}}}}\n")
+	defaultConfiguration := strings.Replace(retryConfiguration, "max_attempts: 3", "max_attempts: 2", 1)
+	replacementConfiguration := strings.Replace(retryConfiguration, "max_attempts: 3, backoff: 2s", "max_attempts: 4", 1)
+	writeFile(t, filepath.Join(root, "plystra.yaml"), defaultConfiguration)
+	writeFile(t, filepath.Join(root, "plystra.production.yaml"), `interfaces:
+  policies:
+    work.run/v1:
+      timeout: 5s
+      retry: {eligibility: replay_safe, max_attempts: 3}
+`)
+	writeFile(t, filepath.Join(root, "deploy/customer.yaml"), replacementConfiguration)
 	for _, selected := range []struct {
 		name      string
 		arguments []string
 		attempts  int
 	}{
-		{"template", nil, 2},
+		{"default", nil, 2},
 		{"environment", []string{"--env", "production"}, 3},
 		{"replacement", []string{"--config", "deploy/customer.yaml"}, 4},
 	} {

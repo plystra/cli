@@ -86,18 +86,6 @@ func Current() (commandschema.Capabilities, error) {
 		MaximumConcurrencyLimit:    kernelinvocation.MaximumConcurrencyLimit,
 		Support: append([]commandschema.CapabilitySupportInput{
 			{
-				ID:        "template.interface-inheritance",
-				Specified: commandschema.SupportYes, Parsed: commandschema.SupportYes,
-				Generated: commandschema.SupportYes, Executed: commandschema.SupportYes,
-				Accepted: commandschema.SupportYes,
-			},
-			{
-				ID:        "template.resource-inheritance",
-				Specified: commandschema.SupportYes, Parsed: commandschema.SupportYes,
-				Generated: commandschema.SupportYes, Executed: commandschema.SupportYes,
-				Accepted: commandschema.SupportNo,
-			},
-			{
 				ID:        "invocation.default-concurrency",
 				Specified: commandschema.SupportYes,
 				Parsed:    commandschema.SupportNotApplicable,

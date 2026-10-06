@@ -1,6 +1,6 @@
 # Project and dependencies
 
-Use this task for Project creation, module identity, templates, and ordinary Go Module dependencies.
+Use this task for Project creation, module identity, the `--template` dependency selector, and ordinary Go Module dependencies.
 
 ## Supported operations
 
@@ -16,14 +16,14 @@ Use this task for Project creation, module identity, templates, and ordinary Go 
 
 The positional name is one safe child directory; `--module` sets its independent Go Module identity. A new Project contains root `plystra.yaml`, module files, and committed generated source, but no environment overlay, example configuration, or `go.work`.
 
-`--template` records a direct dependency and its exact module path in root plystra.yaml. Creation immediately inherits the supported Interface and named Resource baseline without copying source or configuration. Data inheritance remains unsupported. Template origin never ranks candidates.
+`--template` records the selected Project module as one ordinary direct Go Module dependency. The dependency must expose a regular root `plystra.yaml` marker, but its configuration and source are never copied or activated. After creation it is indistinguishable from a dependency added with `plystra add`.
 
 `--format json` returns one `plystra.result/v1` document. Success nests `plystra.project-created/v1`; enter `payload.directory` and run `plystra check` independently.
 
 ## Completion checks
 
 1. Confirm `go.mod` has the intended module identity and direct dependencies.
-2. Confirm root `plystra.yaml` is the only automatically created configuration document and contains no copied template configuration.
+2. Confirm root `plystra.yaml` is the only automatically created configuration document and contains only current-Project configuration.
 3. Run `plystra generate --check`, `plystra check`, and the relevant Go tests.
 4. Follow any emitted `Recovery:` action before retrying.
 

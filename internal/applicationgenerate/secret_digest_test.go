@@ -25,7 +25,7 @@ func TestGenerateDetectsConcurrentRuntimeOnlyChanges(t *testing.T) {
 
 func testGenerateDetectsConcurrentPrivateValueChanges(t *testing.T, value string) {
 	t.Helper()
-	for _, mode := range []string{"default", "environment", "replacement", "template", "ordinary-dependency"} {
+	for _, mode := range []string{"default", "environment", "replacement", "ordinary-dependency"} {
 		t.Run(mode, func(t *testing.T) {
 			const modulePath = "example.com/acme/private-secret-reference"
 			root := t.TempDir()
@@ -47,17 +47,14 @@ func testGenerateDetectsConcurrentPrivateValueChanges(t *testing.T, value string
 				sourcePath = options.ConfigurationPath
 				manifestPath = filepath.Join(root, filepath.FromSlash(sourcePath))
 				writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-			case "template", "ordinary-dependency":
-				sourceModule = "example.com/acme/private-secret-template"
+			case "ordinary-dependency":
+				sourceModule = "example.com/acme/private-inert-secret-dependency"
 				dependency := t.TempDir()
 				writeFile(t, filepath.Join(dependency, "go.mod"), "module "+sourceModule+"\n\ngo 1.26\n")
-				writeFile(t, filepath.Join(dependency, "template.go"), "package template\n")
+				writeFile(t, filepath.Join(dependency, "dependency.go"), "package dependency\n")
 				writeFile(t, filepath.Join(root, "dependency.go"), "package app\nimport _ \""+sourceModule+"\"\n")
 				writeFile(t, filepath.Join(root, "go.mod"), string(readFile(t, root, "go.mod"))+"\nrequire "+sourceModule+" v0.0.0\nreplace "+sourceModule+" => "+filepath.ToSlash(dependency)+"\n")
 				selected := "interfaces: {use: {configuration.owner/v1: " + owner + "}}\n"
-				if mode == "template" {
-					selected += "template: " + sourceModule + "\n"
-				}
 				writeFile(t, filepath.Join(root, "plystra.yaml"), selected)
 				manifestPath = filepath.Join(dependency, "plystra.yaml")
 				first = configured
@@ -283,23 +280,22 @@ func collectResolutionDigests(t testing.TB, result applicationresolve.Result) ma
 	if len(interfaces) != 1 {
 		t.Fatalf("discovered Interfaces = %#v", interfaces)
 	}
-	provenance := result.PreviousManifestProvenance()
+	selection := result.ConfigurationSelection()
 	evidence := result.ResolutionEvidence()
 	digests := map[string]string{
-		"application_model":       provenance.ApplicationModelDigest(),
+		"application_model":       result.Resolution().Context().BuildModelDigest(),
 		"configuration_selection": result.ConfigurationSelection().Digest(),
-		"dependency_composition":  result.Composition().DependencyDigest(),
+		"composition":             result.Composition().CompositionDigest(),
 		"interface_contract":      interfaces[0].ContractDigest(),
 		"interface_documentation": interfaces[0].DocumentationDigest(),
 		"interface_examples":      interfaces[0].ExampleDigest(),
 		"private_configuration":   result.Configurations().Digest(),
-		"protobuf_wire_map":       provenance.ProtobufWireMapDigest(),
 		"resolution_aliases":      result.Resolution().AliasResolution().Digest(),
 		"resolution_build_model":  result.Resolution().Context().BuildModelDigest(),
 		"resolution_context":      result.Resolution().Context().Digest(),
 		"resolution_evidence":     evidence.Digest(),
-		"root_configuration":      provenance.RootDigest(),
-		"selected_configuration":  provenance.SelectedDigest(),
+		"root_configuration":      result.RootConfigurationDigest(),
+		"selected_configuration":  selection.Digest(),
 	}
 	for name, digest := range digests {
 		if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {

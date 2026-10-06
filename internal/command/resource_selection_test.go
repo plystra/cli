@@ -137,7 +137,7 @@ func TestRunUseSelectsResourceProviderAcrossSelectors(t *testing.T) {
 				wantInstances = 1
 			}
 			if len(manifest.ResourceInstances()) != wantInstances {
-				t.Fatal("selection deleted an unrelated instance or copied an inherited one")
+				t.Fatal("selection deleted an unrelated instance or copied a root-owned one")
 			}
 			found := false
 			for _, instance := range manifest.ResourceInstances() {

@@ -45,25 +45,6 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		},
 		{
-			name: "malformed-current-template-relationship",
-			setup: func(t *testing.T, parent string) string {
-				applicationRoot := filepath.Join(parent, "application")
-				writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), "module example.com/application\n\ngo 1.26\n")
-				writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: [private-value]\n")
-				return applicationRoot
-			},
-			wantSource: "Source: example.com/application:plystra.yaml:1:1 (configuration-declaration)",
-			wantCode:   diagnosticcode.TemplateInvalid,
-		},
-		{
-			name: "malformed-template-ancestor-relationship",
-			setup: func(t *testing.T, parent string) string {
-				return writeManifestDiagnosticDependencyProject(t, parent, "template: {private-key: private-value}\n", false)
-			},
-			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (configuration-declaration)",
-			wantCode:   diagnosticcode.TemplateInvalid,
-		},
-		{
 			name: "unsupported-current-resource",
 			setup: func(t *testing.T, parent string) string {
 				applicationRoot := filepath.Join(parent, "application")
@@ -72,14 +53,6 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 				return applicationRoot
 			},
 			wantSource: "Source: example.com/application:plystra.yaml:1:44 (configuration-declaration)",
-			wantCode:   diagnosticcode.ResourceMetadataInvalid,
-		},
-		{
-			name: "unsupported-template-resource",
-			setup: func(t *testing.T, parent string) string {
-				return writeManifestDiagnosticDependencyProject(t, parent, "resources: {bind: {private-key: private-value}}\n", false)
-			},
-			wantSource: "Source: example.com/dependency:plystra.yaml:1:20 (configuration-declaration)",
 			wantCode:   diagnosticcode.ResourceMetadataInvalid,
 		},
 		{
@@ -121,13 +94,6 @@ func TestRunReportsProjectManifestSourcesWithoutMutation(t *testing.T) {
 			},
 			wantSource: "Source: example.com/application:plystra.yaml:1:44 (configuration-declaration)",
 			wantCode:   diagnosticcode.ResourceMetadataInvalid,
-		}, manifestCase{
-			name: "invalid-dependency-resource-value/" + value,
-			setup: func(t *testing.T, parent string) string {
-				return writeManifestDiagnosticDependencyProject(t, parent, manifest, false)
-			},
-			wantSource: "Source: example.com/dependency:plystra.yaml:1:1 (project-marker)",
-			wantCode:   diagnosticcode.ProjectManifestInvalid,
 		})
 	}
 	for _, test := range tests {
@@ -173,7 +139,7 @@ func writeManifestDiagnosticDependencyProject(t *testing.T, parent, manifest str
 	applicationRoot := filepath.Join(parent, "application")
 	dependencyRoot := filepath.Join(parent, "dependency")
 	writeCommandFile(t, filepath.Join(applicationRoot, "go.mod"), "module example.com/application\n\ngo 1.26\n\nrequire example.com/dependency v0.0.0\n\nreplace example.com/dependency => ../dependency\n")
-	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "template: example.com/dependency\n")
+	writeCommandFile(t, filepath.Join(applicationRoot, "plystra.yaml"), "{}\n")
 	writeCommandFile(t, filepath.Join(dependencyRoot, "go.mod"), "module example.com/dependency\n\ngo 1.26\n")
 	if unsafe {
 		writeCommandFile(t, filepath.Join(dependencyRoot, "plystra.yaml", "sentinel.txt"), "preserve\n")

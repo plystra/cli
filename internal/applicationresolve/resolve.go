@@ -10,12 +10,10 @@ import (
 	"time"
 
 	generation "github.com/plystra/cli/generation/v1"
-	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/constructorsymbol"
-	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationinventory"
@@ -26,7 +24,6 @@ import (
 	"github.com/plystra/cli/internal/plugininventory"
 	"github.com/plystra/cli/internal/resolutionevidence"
 	"github.com/plystra/cli/internal/resourceproviderinventory"
-	"github.com/plystra/cli/internal/runtimebaseline"
 	"golang.org/x/mod/modfile"
 )
 
@@ -145,11 +142,9 @@ type Options struct {
 // resolution assembled from the same application snapshot.
 type Result struct {
 	module              modulelocate.Module
-	template            string
 	currentManifest     applicationmeta.Manifest
 	composition         applicationmeta.Composition
 	dependencies        moduledependency.Index
-	dependencySnapshots []dependencyManifestSnapshot
 	interfaces          interfaceinventory.Index
 	resources           interfaceinventory.ResourceIndex
 	resourceProviders   resourceproviderinventory.Index
@@ -158,29 +153,23 @@ type Result struct {
 	inventory           plugininventory.Index
 	resolution          generationresolution.ExtensionResult
 	configs             configurationresolve.Result
-	maintenance         applicationmeta.ConfigurationMaintenance
 	selection           ConfigurationSelection
 	evidence            resolutionevidence.Evidence
 	rootData            []byte
 	rootDigest          string
 	configurationSource []byte
-	maintenancePath     string
-	maintenanceSource   []byte
-	previousProvenance  applicationgen.ManifestProvenance
 }
 
 // Module returns the nearest Plystra Project Go Module.
 func (r Result) Module() modulelocate.Module { return r.module }
 
-// Manifest returns the effective dependency-composed application declaration.
+// Manifest returns the effective current-project application declaration.
 func (r Result) Manifest() applicationmeta.Manifest { return r.composition.Manifest() }
 
-// CurrentManifest returns the normalized selected current-project layer before
-// template composition. Environment mode includes root plus its overlay.
+// CurrentManifest returns the normalized selected current-project layer.
 func (r Result) CurrentManifest() applicationmeta.Manifest { return r.currentManifest }
 
-// Composition returns dependency baseline provenance and the effective
-// application declaration.
+// Composition returns the effective current-project application declaration.
 func (r Result) Composition() applicationmeta.Composition { return r.composition }
 
 // Dependencies returns the immutable effective Go Module graph used for
@@ -217,12 +206,6 @@ func (r Result) Resolution() generationresolution.ExtensionResult { return r.res
 // closure. Its values never enter generation-extension input.
 func (r Result) Configurations() configurationresolve.Result { return r.configs }
 
-// ConfigurationMaintenance returns the typed dependency-recomposition update
-// planned against the exact owned configuration snapshot used for resolution.
-func (r Result) ConfigurationMaintenance() applicationmeta.ConfigurationMaintenance {
-	return r.maintenance
-}
-
 // ConfigurationSelection returns the immutable current-project document
 // selection and normalized semantic digest used by this resolution.
 func (r Result) ConfigurationSelection() ConfigurationSelection { return r.selection }
@@ -231,58 +214,14 @@ func (r Result) ConfigurationSelection() ConfigurationSelection { return r.selec
 // from the same normalized application model used for generation and assembly.
 func (r Result) ResolutionEvidence() resolutionevidence.Evidence { return r.evidence }
 
-// RootConfigurationData returns the final root marker document represented by
-// generated provenance. It includes planned root maintenance in default and
-// environment modes.
+// RootConfigurationData returns the root marker document represented by
+// generated provenance.
 func (r Result) RootConfigurationData() []byte { return append([]byte(nil), r.rootData...) }
 
-// SelectedConfigurationData returns the selected document bytes after planned
-// maintenance. These private transaction inputs never enter public provenance.
+// SelectedConfigurationData returns the selected document bytes. These private
+// transaction inputs never enter public provenance.
 func (r Result) SelectedConfigurationData() []byte {
-	if r.selection.Path() == r.maintenancePath {
-		return r.maintenance.Data()
-	}
 	return r.ConfigurationSource()
-}
-
-// Template returns the root relationship, independently of the selected layer.
-func (r Result) Template() string { return r.template }
-
-// RuntimeTemplates returns private normalized reusable layers in oldest-to-
-// nearest order, together with their build-bound ancestry identities.
-func (r Result) RuntimeTemplates() ([]runtimebaseline.Template, error) {
-	result := make([]runtimebaseline.Template, 0, len(r.dependencySnapshots))
-	for _, dependency := range r.dependencySnapshots {
-		inventory, err := applicationmeta.PrivateTemplateYAML(dependency.snapshot.data)
-		if err != nil {
-			return nil, runtimebaseline.ErrBaseline
-		}
-		result = append(result, runtimebaseline.Template{Module: dependency.modulePath, Version: dependency.version, Template: dependency.template, YAML: string(inventory)})
-	}
-	return result, nil
-}
-
-// ChangedDependencyConfigurationModules compares the private dependency inputs
-// of two resolutions and returns only the sorted module identities that changed.
-// Public provenance hashes cannot detect edits to private template values.
-func (r Result) ChangedDependencyConfigurationModules(other Result) []string {
-	before := make(map[string]ManifestSnapshot, len(r.dependencySnapshots))
-	for _, dependency := range r.dependencySnapshots {
-		before[dependency.modulePath] = dependency.snapshot
-	}
-	var changed []string
-	for _, dependency := range other.dependencySnapshots {
-		previous, exists := before[dependency.modulePath]
-		if !exists || !sameManifestSnapshot(previous, dependency.snapshot) {
-			changed = append(changed, dependency.modulePath)
-		}
-		delete(before, dependency.modulePath)
-	}
-	for modulePath := range before {
-		changed = append(changed, modulePath)
-	}
-	sort.Strings(changed)
-	return changed
 }
 
 // RootConfigurationDigest returns the normalized identity of the mandatory
@@ -292,23 +231,6 @@ func (r Result) RootConfigurationDigest() string { return r.rootDigest }
 // ConfigurationSource returns defensive original selected-document bytes.
 func (r Result) ConfigurationSource() []byte {
 	return append([]byte(nil), r.configurationSource...)
-}
-
-// ConfigurationMaintenancePath returns the Project-relative document owned by
-// dependency-baseline maintenance for this selection.
-func (r Result) ConfigurationMaintenancePath() string { return r.maintenancePath }
-
-// ConfigurationMaintenanceSource returns defensive original maintenance-target
-// bytes used as the concurrency precondition for a planned write.
-func (r Result) ConfigurationMaintenanceSource() []byte {
-	return append([]byte(nil), r.maintenanceSource...)
-}
-
-// PreviousManifestProvenance returns validated generated-manifest state used
-// to preserve dependency ownership independently for every configuration
-// selection.
-func (r Result) PreviousManifestProvenance() applicationgen.ManifestProvenance {
-	return r.previousProvenance
 }
 
 // Resolve locates the nearest Project, loads its root plystra.yaml, discovers
@@ -325,40 +247,10 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	module, dependencies, declarations := inputs.module, inputs.dependencies, inputs.declarations
 	rootSnapshot, configurationSnapshot := inputs.rootSnapshot, inputs.selectedSnapshot
 	rootManifest, selectedManifest, selector := inputs.rootManifest, inputs.selectedManifest, inputs.selector
-	dependencySnapshots, dependencyManifests := inputs.dependencySnapshots, inputs.templateDependencies
 	interfaces := declarations.Interfaces()
 	implementations := declarations.Implementations()
 	inventory, schemaLookup := inputs.inventory, inputs.schemaLookup
-	_, previousProvenance, err := loadGeneratedDependencyBaseline(module.Path(), selector)
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, generatedManifestSourceError(module.ModulePath(), err))
-	}
-	maintenanceSnapshot := configurationSnapshot
-	if selector.mode == configurationModeEnvironment {
-		maintenanceSnapshot = rootSnapshot
-	}
-	var maintenance applicationmeta.ConfigurationMaintenance
-	if selector.mode == configurationModeEnvironment {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationSourceWithOverlay(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, selectedManifest, applicationmeta.DependencyBaseline{}, nil, dependencyManifests, schemaLookup)
-	} else {
-		maintenance, err = applicationmeta.MaintainDependencyConfigurationSource(maintenanceSnapshot.data, module.ModulePath(), maintenanceSnapshot.path, applicationmeta.DependencyBaseline{}, nil, dependencyManifests, schemaLookup)
-	}
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	maintainedManifest, err := applicationmeta.ParseSource(maintenanceSnapshot.path, maintenance.Data())
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: maintained application manifest: %w", ErrResolve, err)
-	}
-	maintainedManifest, err = applicationmeta.WithProjectModule(maintainedManifest, module.ModulePath())
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: associate maintained configuration with Project module: %w", ErrResolve, err)
-	}
-	compositionSelected := maintainedManifest
-	if selector.mode == configurationModeEnvironment {
-		compositionSelected = selectedManifest
-	}
-	currentManifest, composition, err := inputs.composeCurrent(maintainedManifest, compositionSelected)
+	currentManifest, composition, err := inputs.composeCurrent(rootManifest, selectedManifest)
 	if err != nil {
 		return Result{}, err
 	}
@@ -367,21 +259,17 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if len(currentLayers) == 0 {
 		return Result{}, fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)
 	}
-	// Composition enriches Resource schema context but root template metadata
-	// must retain its authored owner, never the replacement or overlay document.
-	maintainedLayer := applicationmeta.WithRootMetadata(currentLayers[0], maintainedManifest)
+	// Every selected layer is authored by the current Project. Keep its exact
+	// decision paths available to source validation without inferring ownership
+	// from dependency state or an earlier generated manifest.
 	selectedLayer := applicationmeta.WithRootMetadata(currentLayers[len(currentLayers)-1], selectedManifest)
-	currentProjectPaths := maintenance.LocalPaths()
-	if selector.mode == configurationModeEnvironment {
-		decisions, err := applicationmeta.ConfigurationDecisions(selectedLayer, schemaLookup)
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
-		}
-		for _, decision := range decisions {
-			if decision.DependencyComposable() {
-				currentProjectPaths = append(currentProjectPaths, decision.Path())
-			}
-		}
+	baseLayer := rootManifest
+	if selector.mode == configurationModeExplicit {
+		baseLayer = selectedManifest
+	}
+	currentProjectPaths, err := currentProjectConfigurationPaths(baseLayer, selectedLayer, selector.mode == configurationModeEnvironment, schemaLookup)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
 	}
 	sourceContext := applicationInputSourceContext(module, dependencies, composition, currentProjectPaths)
 	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext)
@@ -392,11 +280,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, err
 	}
 	rootLayerManifest := rootManifest
-	if maintenanceSnapshot.path == applicationManifestName {
-		rootLayerManifest = maintainedLayer
-	}
-	selectedLayerManifest := maintainedLayer
-	if selector.mode == configurationModeEnvironment {
+	selectedLayerManifest := selectedManifest
+	if selector.mode == configurationModeExplicit {
+		rootLayerManifest = selectedManifest
+		selectedLayerManifest = selectedManifest
+	} else if selector.mode == configurationModeEnvironment {
 		selectedLayerManifest = selectedLayer
 	}
 	selectedDigest, err := applicationmeta.ConfigurationLayerDigest(selectedLayerManifest, schemaLookup)
@@ -404,21 +292,17 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
 	}
 	rootData := rootSnapshot.Data()
-	if maintenanceSnapshot.path == applicationManifestName {
-		rootData = maintenance.Data()
-	}
 	rootDigest, err := applicationmeta.ConfigurationLayerDigest(rootLayerManifest, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: digest root configuration %s: %w", ErrResolve, applicationManifestName, err)
 	}
 	configurationProvenance := &generation.ConfigurationProvenanceInput{
-		Mode:                        generation.ConfigurationMode(selector.mode),
-		Environment:                 selector.environment,
-		RootPath:                    applicationManifestName,
-		RootDigest:                  rootDigest,
-		SelectedPath:                selector.path,
-		SelectedDigest:              selectedDigest,
-		DependencyCompositionDigest: composition.DependencyDigest(),
+		Mode:           generation.ConfigurationMode(selector.mode),
+		Environment:    selector.environment,
+		RootPath:       applicationManifestName,
+		RootDigest:     rootDigest,
+		SelectedPath:   selector.path,
+		SelectedDigest: selectedDigest,
 	}
 	input, err := applicationinput.Build(manifest, inventory, sourceContext, configurationProvenance, generationexec.BuildOptions{
 		GoCommand:        options.GoCommand,
@@ -447,7 +331,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
-	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, maintainedLayer, selectedLayer, maintenance, schemaLookup)
+	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, baseLayer, selectedLayer, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
@@ -475,11 +359,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	return Result{
 		module:              module,
-		template:            rootManifest.Template(),
 		currentManifest:     currentManifest,
 		composition:         composition,
 		dependencies:        dependencies,
-		dependencySnapshots: dependencySnapshots,
 		interfaces:          interfaces,
 		resources:           declarations.Resources(),
 		resourceProviders:   declarations.ResourceProviders(),
@@ -488,7 +370,6 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		inventory:           inventory,
 		resolution:          resolution,
 		configs:             configs,
-		maintenance:         maintenance,
 		evidence:            evidence,
 		selection: ConfigurationSelection{
 			mode:        selector.mode,
@@ -499,10 +380,34 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		rootData:            append([]byte(nil), rootData...),
 		rootDigest:          rootDigest,
 		configurationSource: configurationSnapshot.Data(),
-		maintenancePath:     maintenanceSnapshot.path,
-		maintenanceSource:   maintenanceSnapshot.Data(),
-		previousProvenance:  previousProvenance,
 	}, nil
+}
+
+func currentProjectConfigurationPaths(base, selected applicationmeta.Manifest, environment bool, schemas applicationmeta.SchemaLookup) ([]string, error) {
+	paths := make([]string, 0)
+	for _, layer := range []applicationmeta.Manifest{base} {
+		decisions, err := applicationmeta.ConfigurationDecisions(layer, schemas)
+		if err != nil {
+			return nil, err
+		}
+		for _, decision := range decisions {
+			if decision.ResolutionRelevant() {
+				paths = append(paths, decision.Path())
+			}
+		}
+	}
+	if environment {
+		decisions, err := applicationmeta.ConfigurationDecisions(selected, schemas)
+		if err != nil {
+			return nil, err
+		}
+		for _, decision := range decisions {
+			if decision.ResolutionRelevant() {
+				paths = append(paths, decision.Path())
+			}
+		}
+	}
+	return uniqueSortedStrings(paths), nil
 }
 
 func applicationInputSourceContext(module modulelocate.Module, dependencies moduledependency.Index, composition applicationmeta.Composition, currentProjectPaths []string) applicationinput.SourceContext {
@@ -514,19 +419,10 @@ func applicationInputSourceContext(module modulelocate.Module, dependencies modu
 			Version:    dependency.SelectedVersion(),
 		}
 	}
-	provenance := composition.ResolutionSources()
-	configurationSources := make([]applicationinput.DependencyProvenance, len(provenance))
-	for index, record := range provenance {
-		configurationSources[index] = applicationinput.DependencyProvenance{
-			Path:    record.Path(),
-			Sources: record.Sources(),
-		}
-	}
 	return applicationinput.SourceContext{
-		CurrentModulePath:    module.ModulePath(),
-		Dependencies:         values,
-		DependencyProvenance: configurationSources,
-		CurrentProjectPaths:  uniqueSortedStrings(currentProjectPaths),
+		CurrentModulePath:   module.ModulePath(),
+		Dependencies:        values,
+		CurrentProjectPaths: uniqueSortedStrings(currentProjectPaths),
 	}
 }
 
@@ -602,35 +498,17 @@ func resolutionEvidenceConfigurationInput(
 	root applicationmeta.Manifest,
 	maintained applicationmeta.Manifest,
 	selected applicationmeta.Manifest,
-	maintenance applicationmeta.ConfigurationMaintenance,
 	schemas applicationmeta.SchemaLookup,
 ) (resolutionevidence.ConfigurationInput, error) {
-	local := make(map[string]struct{}, len(maintenance.LocalPaths()))
-	for _, path := range maintenance.LocalPaths() {
-		local[path] = struct{}{}
-	}
-	currentDecisions := func(manifest applicationmeta.Manifest, filterMaintained bool) ([]applicationmeta.ConfigurationDecision, error) {
+	currentDecisions := func(manifest applicationmeta.Manifest) ([]applicationmeta.ConfigurationDecision, error) {
 		decisions, err := applicationmeta.ConfigurationDecisions(manifest, schemas)
 		if err != nil {
 			return nil, err
 		}
-		if !filterMaintained {
-			return decisions, nil
-		}
-		result := make([]applicationmeta.ConfigurationDecision, 0, len(decisions))
-		for _, decision := range decisions {
-			if !decision.DependencyComposable() {
-				result = append(result, decision)
-				continue
-			}
-			if _, explicit := local[decision.Path()]; explicit {
-				result = append(result, decision)
-			}
-		}
-		return result, nil
+		return decisions, nil
 	}
 
-	base, err := currentDecisions(maintained, true)
+	base, err := currentDecisions(maintained)
 	if err != nil {
 		return resolutionevidence.ConfigurationInput{}, err
 	}
@@ -639,7 +517,7 @@ func resolutionEvidenceConfigurationInput(
 	case configurationModeDefault:
 		layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: base})
 	case configurationModeEnvironment:
-		overlay, err := currentDecisions(selected, false)
+		overlay, err := currentDecisions(selected)
 		if err != nil {
 			return resolutionevidence.ConfigurationInput{}, err
 		}
@@ -649,19 +527,6 @@ func resolutionEvidenceConfigurationInput(
 		)
 	case configurationModeExplicit:
 		layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerExplicit, Decisions: base})
-		metadata, err := applicationmeta.ConfigurationDecisions(root, schemas)
-		if err != nil {
-			return resolutionevidence.ConfigurationInput{}, err
-		}
-		var declarations []applicationmeta.ConfigurationDecision
-		for _, decision := range metadata {
-			if decision.Path() == "template" {
-				declarations = append(declarations, decision)
-			}
-		}
-		if len(declarations) != 0 {
-			layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: declarations})
-		}
 	default:
 		return resolutionevidence.ConfigurationInput{}, fmt.Errorf("unsupported configuration selection mode %q", selector.mode)
 	}
@@ -670,10 +535,8 @@ func resolutionEvidenceConfigurationInput(
 		return resolutionevidence.ConfigurationInput{}, err
 	}
 	return resolutionevidence.ConfigurationInput{
-		Templates:          composition.TemplateLayers(),
-		DependencyBaseline: composition.DependencyBaseline(),
-		Layers:             layers,
-		Effective:          effective,
+		Layers:    layers,
+		Effective: effective,
 	}, nil
 }
 
@@ -689,32 +552,4 @@ func resolutionEvidenceAssemblyInput(configs configurationresolve.Result) resolu
 		}
 	}
 	return resolutionevidence.StaticAssemblyInput{Plugins: plugins}
-}
-
-func loadGeneratedDependencyBaseline(moduleRoot string, selector configurationSelector) (applicationmeta.DependencyBaseline, applicationgen.ManifestProvenance, error) {
-	recovery, exists, err := generatedfiles.ReadApplicationManifestRecovery(moduleRoot)
-	if err != nil {
-		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
-	}
-	if exists {
-		provenance, err := applicationgen.DecodeManifestProvenance(recovery)
-		if err != nil {
-			return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline recovery: %w", err)
-		}
-		baseline, _ := provenance.BaselineForSelection(selector.mode, selector.path)
-		return baseline, provenance, nil
-	}
-	data, exists, err := readGeneratedApplicationManifest(moduleRoot)
-	if err != nil {
-		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline: %w", err)
-	}
-	if !exists {
-		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, nil
-	}
-	provenance, err := applicationgen.DecodeManifestProvenance(data)
-	if err != nil {
-		return applicationmeta.DependencyBaseline{}, applicationgen.ManifestProvenance{}, fmt.Errorf("load generated dependency baseline: %w", err)
-	}
-	baseline, _ := provenance.BaselineForSelection(selector.mode, selector.path)
-	return baseline, provenance, nil
 }

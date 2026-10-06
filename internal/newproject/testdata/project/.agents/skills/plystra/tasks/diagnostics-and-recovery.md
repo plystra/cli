@@ -35,7 +35,7 @@ Actionable human failures end with one `Recovery:` block and one stable `Diagnos
 
 Agent-guidance drift uses `PLYSTRA_AGENT_GUIDANCE_DRIFT` and reports every affected path as an `agent-guidance` source. An invalid ownership manifest uses `PLYSTRA_AGENT_GUIDANCE_MANIFEST_INVALID`. A manifest or transaction path that changes after inspection uses `PLYSTRA_PROJECT_CONCURRENT_CHANGE` with every deterministically known affected guidance path.
 
-`PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED` reports the declaration-owning `http.expose` document at `1:1` as an `exposure` source when an active Interface needs unavailable pointer-presence wrappers. A sparse environment overlay may inherit that declaration from root `plystra.yaml`, so remove the exposure from the reported source and rerun generation with the same selector. The failed command leaves authored, generated, module, and compatibility files unchanged and does not expose an absolute path or pointer value.
+`PLYSTRA_PROTOBUF_POINTER_PROJECTION_UNSUPPORTED` reports the declaration-owning `http.expose` document at `1:1` as an `exposure` source when an active Interface needs unavailable pointer-presence wrappers. A sparse environment overlay may keep that declaration from root `plystra.yaml`, so remove the exposure from the reported source and rerun generation with the same selector. The failed command leaves authored, generated, module, and compatibility files unchanged and does not expose an absolute path or pointer value.
 
 Never print or persist resolved Secrets, unrestricted configuration values, avoidable absolute paths, or Module Cache paths while diagnosing a Project. Do not edit dependency source in the Module Cache or CLI-owned files under `generated/`.
 

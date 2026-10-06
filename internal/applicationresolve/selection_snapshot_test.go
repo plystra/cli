@@ -13,13 +13,13 @@ import (
 
 func TestSelectionInputsSnapshotRejectsDocumentModuleAndDeclarationDrift(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"root", "selected", "template", "module", "dependency-module", "replacement", "parameter", "provider-schema", "provider-default", "contract", "new-declaration", "invalid-declaration", "legacy-exposure"} {
+	for _, scenario := range []string{"root", "selected", "module", "dependency-module", "replacement", "parameter", "provider-schema", "provider-default", "contract", "new-declaration", "invalid-declaration", "legacy-exposure"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			root := writeResourceConsumerProject(t, "transitive")
 			writeResourceProvider(t, root)
 			writePlugin(t, root, "legacy", "id: example.legacy\nprovides: [legacy.run/v1]\n")
-			writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/resource-template\n")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 			writeFile(t, filepath.Join(root, "plystra.test.yaml"), "{}\n")
 			options := selectionOptions(root)
 			options.EnvironmentName = "test"
@@ -31,8 +31,6 @@ func TestSelectionInputsSnapshotRejectsDocumentModuleAndDeclarationDrift(t *test
 			switch scenario {
 			case "selected":
 				path = "plystra.test.yaml"
-			case "template":
-				path = "base/plystra.yaml"
 			case "module":
 				path = "go.mod"
 			case "dependency-module":
@@ -76,7 +74,7 @@ func TestSelectionInputsSnapshotRejectsDocumentModuleAndDeclarationDrift(t *test
 					t.Fatal(err)
 				}
 				path, data = "plystra.test.yaml", "{}\n"
-			case "root", "selected", "template":
+			case "root", "selected":
 				data += "# concurrent private document edit\n"
 			default:
 				data += "\n// concurrent private module edit\n"

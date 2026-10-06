@@ -1,7 +1,6 @@
 package applicationmeta_test
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -60,53 +59,6 @@ func TestParseRetryPolicyRejectsInvalidForms(t *testing.T) {
 	}
 	if _, err := applicationmeta.Parse([]byte("interfaces: {policies: {email.send/v1: {retry: {eligibility: replay_safe}}}}\n")); !errors.Is(err, applicationmeta.ErrInvalidManifest) {
 		t.Fatalf("retry without timeout = %v", err)
-	}
-}
-
-func TestComposeAndMaintainRetryAsOnePolicyEntry(t *testing.T) {
-	config := func(fields string) applicationmeta.Manifest {
-		return composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 5s, retry: {"+fields+"}}}}\n")
-	}
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", ModuleVersion: "v1.0.0", Manifest: config("eligibility: replay_safe")},
-		{ModulePath: "example.com/b", ModuleVersion: "v1.0.0", Manifest: config("backoff: 0ms, max_attempts: 2, eligibility: replay_safe")},
-	}
-	base, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := `interfaces.policies["email.send/v1"]`
-	if evidence := findProvenance(t, base.Provenance(), path); len(evidence) != 1 || len(evidence[0].Sources()) != 2 {
-		t.Fatalf("normalized retry did not deduplicate: %#v", evidence)
-	}
-	for _, fields := range []string{"eligibility: replay_safe, max_attempts: 3", "eligibility: replay_safe, backoff: 1ns"} {
-		dependencies[1].Manifest = config(fields)
-		if _, err := applicationmeta.Compose(dependencies, composeManifest(t, "{}\n"), composeSchemaLookup(nil)); err != nil {
-			t.Fatalf("ordered retry failed: %v", err)
-		}
-		current := composeManifest(t, "interfaces: {policies: {email.send/v1: {timeout: 2s}}}\n")
-		resolved, err := applicationmeta.Compose(dependencies, current, composeSchemaLookup(nil))
-		if err != nil || resolved.Manifest().InterfacePolicies()[0].RetryMaxAttempts() != 1 {
-			t.Fatalf("whole-entry override retained retry: %v", err)
-		}
-	}
-	dependencies = dependencies[:1]
-	maintained, err := applicationmeta.MaintainDependencyConfiguration([]byte("{}\n"), applicationmeta.DependencyBaseline{}, nil, dependencies, composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(maintained.Data(), []byte("{}\n")) {
-		t.Fatal("inherited retry was materialized")
-	}
-	composition, err := applicationmeta.Compose(dependencies, composeManifest(t, string(maintained.Data())), composeSchemaLookup(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	local := []byte("interfaces: {policies: {email.send/v1: {timeout: 5s, retry: {eligibility: replay_safe, max_attempts: 3}}}}\n")
-	dependencies[0].Manifest = config("eligibility: replay_safe, max_attempts: 4")
-	updated, err := applicationmeta.MaintainDependencyConfiguration(local, composition.DependencyBaseline(), maintained.LocalPaths(), dependencies, composeSchemaLookup(nil))
-	if err != nil || !bytes.Equal(updated.Data(), local) {
-		t.Fatalf("maintenance replaced local retry: %v\n%s", err, updated.Data())
 	}
 }
 

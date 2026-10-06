@@ -17,23 +17,18 @@ import (
 func TestInspectSelectedResourcesAcrossSelectors(t *testing.T) {
 	t.Parallel()
 	for _, selector := range []struct {
-		name     string
-		template bool
-		args     []string
-		env      map[string]string
+		name string
+		args []string
+		env  map[string]string
 	}{
 		{name: "default"},
 		{name: "environment", args: []string{"--env", "production"}},
 		{name: "replacement", args: []string{"--config", "deploy/replacement.yaml"}},
 		{name: "environment-variable", env: map[string]string{"PLYSTRA_ENV": "production"}},
 		{name: "replacement-variable", env: map[string]string{"PLYSTRA_CONFIG": "deploy/replacement.yaml"}},
-		{name: "template", template: true},
-		{name: "template-environment", template: true, args: []string{"--env", "production"}},
-		{name: "template-replacement", template: true, args: []string{"--config", "deploy/replacement.yaml"}},
-		{name: "template-replacement-variable", template: true, env: map[string]string{"PLYSTRA_CONFIG": "deploy/replacement.yaml"}},
 	} {
 		t.Run(selector.name, func(t *testing.T) {
-			root, nested := createInspectSelectedResourceProject(t, selector.template)
+			root, nested := createInspectSelectedResourceProject(t)
 			before := snapshotInspectProject(t, root)
 			for _, view := range []string{"resources", "implementations"} {
 				args := append([]string{"inspect", view, "--format", "json"}, selector.args...)
@@ -61,19 +56,6 @@ func TestInspectSelectedResourcesAcrossSelectors(t *testing.T) {
 						t.Fatalf("inspection exposed %q", private)
 					}
 				}
-				if selector.name == "template-environment" {
-					document := decodeInspectGraphCommandEnvelope(t, output)
-					node := inspectGraphNodeByID(t, document.Result.Nodes, "resource-instance:database.primary")
-					locations := make(map[string]bool)
-					for _, source := range node.ResourceInstance.ConfigurationSources {
-						locations[source.Module+"/"+source.Path] = true
-					}
-					for _, location := range []string{"example.com/base/plystra.yaml", "example.com/acme/inspect/plystra.yaml", "example.com/acme/inspect/plystra.production.yaml"} {
-						if !locations[location] {
-							t.Fatalf("missing config-only contribution %s: %#v", location, locations)
-						}
-					}
-				}
 			}
 			code, output, stderr := runCommand(t, append([]string{"inspect", "interfaces", "--format", "json"}, selector.args...), nested, inspectCommandEnvironment(selector.env))
 			if code != 0 || stderr != inspectProgress {
@@ -99,7 +81,7 @@ func TestBuiltCLIInspectsSelectedResourceInstances(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
-	root, nested := createInspectSelectedResourceProject(t, false)
+	root, nested := createInspectSelectedResourceProject(t)
 	before := snapshotInspectProject(t, root)
 	for _, view := range []string{"resources", "implementations"} {
 		for _, format := range []string{"human", "json"} {
@@ -211,7 +193,7 @@ func assertSelectedResourceGraph(t testing.TB, output, view string) {
 	}
 }
 
-func createInspectSelectedResourceProject(t testing.TB, template bool) (string, string) {
+func createInspectSelectedResourceProject(t testing.TB) (string, string) {
 	t.Helper()
 	root, nested := createInspectCommandProject(t)
 	manifest := `interfaces: {require: [app.run/v1]}
@@ -233,12 +215,6 @@ resources:
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), manifest)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "resources: {instances: {database.primary: {config: {third: PRIVATE_CONFIG_OVERLAY}}}}\n")
 	writeCommandFile(t, filepath.Join(root, "deploy/replacement.yaml"), manifest)
-	if template {
-		writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/inspect\n\ngo 1.26\nrequire example.com/base v1.0.0\nreplace example.com/base => ./base\n")
-		writeCommandFile(t, filepath.Join(root, "base/go.mod"), "module example.com/base\n\ngo 1.26\n")
-		writeCommandFile(t, filepath.Join(root, "base/plystra.yaml"), manifest)
-		writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/base\nresources: {instances: {database.primary: {config: {second: PRIVATE_CONFIG_ROOT}}}}\n")
-	}
 	writeCommandFile(t, filepath.Join(root, "database/resource.go"), "package database\n//plystra:resource data.database/v1\ntype Resource interface{Read()}\n")
 	writeCommandFile(t, filepath.Join(root, "view/resource.go"), "package view\n//plystra:resource data.view/v1\ntype Resource interface{View()}\n")
 	writeCommandGraphInterface(t, root, "run/v1", "runv1", "app.run/v1", "Run")

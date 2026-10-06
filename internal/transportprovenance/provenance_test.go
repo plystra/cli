@@ -56,7 +56,7 @@ func TestProvenanceValidatesEverySelectionModeDeterministically(t *testing.T) {
 			if err != nil || first.Digest() != second.Digest() || !bytes.Equal(first.CanonicalJSON(), second.CanonicalJSON()) {
 				t.Fatalf("repeated New = %q/%s, %q/%s, %v", first.Digest(), first.CanonicalJSON(), second.Digest(), second.CanonicalJSON(), err)
 			}
-			if first.Mode() != test.input.Mode || first.Environment() != test.environment || first.RootPath() != "plystra.yaml" || first.RootDigest() != test.input.RootDigest || first.SelectedPath() != test.selected || first.SelectedDigest() != test.input.SelectedDigest || first.DependencyCompositionDigest() != test.input.DependencyCompositionDigest || first.ApplicationModelDigest() != test.input.ApplicationModelDigest {
+			if first.Mode() != test.input.Mode || first.Environment() != test.environment || first.RootPath() != "plystra.yaml" || first.RootDigest() != test.input.RootDigest || first.SelectedPath() != test.selected || first.SelectedDigest() != test.input.SelectedDigest || first.ApplicationModelDigest() != test.input.ApplicationModelDigest {
 				t.Fatalf("Provenance accessors do not preserve normalized input: %#v", first)
 			}
 			canonical := first.CanonicalJSON()
@@ -95,7 +95,6 @@ func TestProvenanceRejectsUnsafeOrInconsistentIdentity(t *testing.T) {
 		}, want: "Project-relative"},
 		{name: "invalid root digest", mutate: func(input *transportprovenance.Input) { input.RootDigest = "sha256:ABC" }, want: "root digest"},
 		{name: "invalid selected digest", mutate: func(input *transportprovenance.Input) { input.SelectedDigest = testDigest("g") }, want: "selected digest"},
-		{name: "invalid dependency digest", mutate: func(input *transportprovenance.Input) { input.DependencyCompositionDigest = "" }, want: "dependency-composition"},
 		{name: "invalid model digest", mutate: func(input *transportprovenance.Input) { input.ApplicationModelDigest = "" }, want: "application-model"},
 		{name: "unsupported mode", mutate: func(input *transportprovenance.Input) { input.Mode = "profile" }, want: "not supported"},
 		{name: "default environment", mutate: func(input *transportprovenance.Input) { input.Environment = "production" }, want: "environment must be empty"},
@@ -156,13 +155,12 @@ func TestProvenanceCanonicalFormCannotCarryConfigurationOrSecrets(t *testing.T) 
 func defaultInput() transportprovenance.Input {
 	rootDigest := testDigest("1")
 	return transportprovenance.Input{
-		Mode:                        generation.ConfigurationModeDefault,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  rootDigest,
-		SelectedPath:                "plystra.yaml",
-		SelectedDigest:              rootDigest,
-		DependencyCompositionDigest: testDigest("2"),
-		ApplicationModelDigest:      testDigest("3"),
+		Mode:                   generation.ConfigurationModeDefault,
+		RootPath:               "plystra.yaml",
+		RootDigest:             rootDigest,
+		SelectedPath:           "plystra.yaml",
+		SelectedDigest:         rootDigest,
+		ApplicationModelDigest: testDigest("3"),
 	}
 }
 

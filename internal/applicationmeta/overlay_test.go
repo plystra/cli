@@ -226,11 +226,13 @@ config:
 		[]byte("production-a.example"),
 		[]byte("add: production"),
 		[]byte("keep: retained"),
-		[]byte("zone: inherited"),
 	} {
 		if !bytes.Contains(configured.YAML(), expected) {
 			t.Fatalf("effective configuration omits %q:\n%s", expected, configured.YAML())
 		}
+	}
+	if bytes.Contains(configured.YAML(), []byte("zone: inherited")) {
+		t.Fatal("ordinary dependency configuration entered the effective current Project configuration")
 	}
 	for _, forbidden := range [][]byte{[]byte("shared-a.example"), []byte("shared-private-value"), []byte("dependency-private-value")} {
 		if bytes.Contains(configured.YAML(), forbidden) {
@@ -356,9 +358,9 @@ func TestApplyOverlayReportsSelectedEnvironmentDocument(t *testing.T) {
 
 func parseOverlayManifest(t *testing.T, source, data string) applicationmeta.Manifest {
 	t.Helper()
-	manifest, err := applicationmeta.ParseSource(source, []byte(data))
+	manifest, err := applicationmeta.ParseOverlaySource(source, []byte(data))
 	if err != nil {
-		t.Fatalf("ParseSource(%s): %v", source, err)
+		t.Fatalf("ParseOverlaySource(%s): %v", source, err)
 	}
 	return manifest
 }

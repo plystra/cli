@@ -15,20 +15,27 @@ func TestConstructorConfigurationRejectsResourceProviderNamespace(t *testing.T) 
 	t.Parallel()
 	lookup := resourceLookup(t, "Value string; Token configuration.Secret")
 	for _, entry := range []string{"{}", "{value: PRIVATE_VALUE, token: {env: PRIVATE_SECRET}}", "{$remove: true}", "{value: {$remove: true}}"} {
-		for _, mode := range []string{"root", "environment", "replacement", "template", "removed lower", "maintenance"} {
+		for _, mode := range []string{"root", "environment", "replacement", "removed lower"} {
 			t.Run(mode+"/"+entry, func(t *testing.T) {
+				if strings.Contains(entry, "$remove") && mode != "environment" {
+					t.Skip("root and complete replacement documents cannot contain removal markers")
+				}
 				module, source := "example.com/current", "plystra.yaml"
 				switch mode {
 				case "environment":
 					source = "plystra.production.yaml"
 				case "replacement":
 					source = "deploy/selected.yaml"
-				case "template":
-					module = "example.com/template"
 				}
 				data := []byte("config: {" + resourceProvider + ": " + entry + "}\n")
 				original := bytes.Clone(data)
-				manifest, err := applicationmeta.ParseSource(source, data)
+				parse := applicationmeta.ParseSource
+				if mode == "environment" {
+					parse = applicationmeta.ParseOverlaySource
+				} else if mode == "replacement" {
+					parse = applicationmeta.ParseCompleteSource
+				}
+				manifest, err := parse(source, data)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -54,13 +61,9 @@ func TestConstructorConfigurationRejectsResourceProviderNamespace(t *testing.T) 
 				switch mode {
 				case "environment":
 					_, err = applicationmeta.ApplyOverlay(composeManifest(t, "{}"), manifest, lookup)
-				case "template":
-					_, err = applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: module, Manifest: manifest}}, composeManifest(t, "{}"), lookup)
 				case "removed lower":
-					removal := resourceManifest(t, "plystra.production.yaml", "config: {"+resourceProvider+": {$remove: true}}")
+					removal := resourceOverlayManifest(t, "plystra.production.yaml", "config: {"+resourceProvider+": {$remove: true}}")
 					_, err = applicationmeta.ApplyOverlay(manifest, removal, lookup)
-				case "maintenance":
-					_, err = applicationmeta.MaintainDependencyConfigurationSource(data, module, source, applicationmeta.DependencyBaseline{}, nil, nil, lookup)
 				default:
 					_, err = applicationmeta.Compose(nil, manifest, lookup)
 				}
@@ -73,31 +76,7 @@ func TestConstructorConfigurationRejectsResourceProviderNamespace(t *testing.T) 
 	}
 }
 
-func TestResourceConfigurationRejectsOrdinaryConstructorNamespace(t *testing.T) {
-	t.Parallel()
-	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
-		constructorConfigurationSymbol: composeSchema(t, "Value string"),
-	})
-	for _, entry := range []string{"{}", "{value: PRIVATE_VALUE}", "{$remove: true}"} {
-		manifest := resourceManifest(t, "plystra.yaml", resourceDocument("{use: "+constructorConfigurationSymbol+", config: "+entry+"}"))
-		for _, removed := range []bool{false, true} {
-			current := composeManifest(t, "{}")
-			if removed {
-				current = composeManifest(t, resourceDocument("{$remove: true}"))
-			}
-			_, err := applicationmeta.Compose([]applicationmeta.Dependency{{ModulePath: "example.com/current", Manifest: manifest}}, current, lookup)
-			var detail *applicationmeta.ResourceConfigurationError
-			if !errors.Is(err, applicationmeta.ErrConfigurationSchema) || !errors.As(err, &detail) || detail.Provider().String() != constructorConfigurationSymbol || detail.InstanceName() != "database.primary" || detail.SourcePath() != "plystra.yaml" {
-				t.Fatalf("ordinary constructor supplied a Resource Config schema: %v", err)
-			}
-			if strings.Contains(err.Error(), "PRIVATE_") {
-				t.Fatal("namespace error exposed private Resource configuration")
-			}
-		}
-	}
-}
-
-func TestNamespaceLookupPreservesDormantConfigurationAndResourceInheritance(t *testing.T) {
+func TestNamespaceLookupPreservesDormantConfigurationAndResourceOverlay(t *testing.T) {
 	t.Parallel()
 	implementation := composeSchemaLookup(map[string]implementationinventory.Configuration{
 		constructorConfigurationSymbol: composeSchema(t, "Value string `plystra:\"required\"`"),
@@ -109,14 +88,13 @@ func TestNamespaceLookupPreservesDormantConfigurationAndResourceInheritance(t *t
 		}
 		return resources(namespace, symbol)
 	}
-	dependency := applicationmeta.Dependency{ModulePath: "example.com/template", Manifest: composeManifest(t, resourceDocument("{use: "+resourceProvider+", config: {nested: {left: inherited}}}"))}
-	root := resourceManifest(t, "plystra.yaml", "interfaces: {use: {mail.send/v1: "+constructorConfigurationSymbol+"}}\nconfig: {"+constructorConfigurationSymbol+": {value: PRIVATE_DORMANT}}\n"+resourceDocument("{config: {value: PRIVATE_RESOURCE}}"))
-	overlay := resourceManifest(t, "plystra.production.yaml", resourceDocument("{config: {nested: {right: selected}}}"))
+	root := resourceManifest(t, "plystra.yaml", "interfaces: {use: {mail.send/v1: "+constructorConfigurationSymbol+"}}\nconfig: {"+constructorConfigurationSymbol+": {value: PRIVATE_DORMANT}}\n"+resourceDocument("{use: "+resourceProvider+", config: {value: PRIVATE_RESOURCE}}"))
+	overlay := resourceOverlayManifest(t, "plystra.production.yaml", resourceDocument("{config: {nested: {right: selected}}}"))
 	selected, err := applicationmeta.ApplyOverlay(root, overlay, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	composition, err := applicationmeta.Compose([]applicationmeta.Dependency{dependency}, selected, lookup)
+	composition, err := applicationmeta.Compose(nil, selected, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,21 +105,21 @@ func TestNamespaceLookupPreservesDormantConfigurationAndResourceInheritance(t *t
 		t.Fatal("dormant owned Implementation configuration was discarded or activated")
 	}
 	instance := resourceConfig(t, composition.Manifest(), "database.primary")
-	assertResourceYAML(t, instance, "{value: PRIVATE_RESOURCE, nested: {left: inherited, right: selected}}")
-	if instance.ProviderDeclarationSource().ModulePath() != dependency.ModulePath {
-		t.Fatal("config-only layers replaced provider selection provenance")
+	assertResourceYAML(t, instance, "{value: PRIVATE_RESOURCE, nested: {right: selected}}")
+	if instance.ProviderDeclarationSource().ModulePath() != "example.com/current" {
+		t.Fatal("current-project provider selection provenance was lost")
 	}
 	for _, layer := range composition.CurrentLayers() {
 		if _, err := applicationmeta.ConfigurationDecisions(layer, lookup); err != nil {
 			t.Fatal(err)
 		}
 	}
-	removal := resourceManifest(t, "plystra.production.yaml", "config: {"+constructorConfigurationSymbol+": {$remove: true}}\n"+resourceDocument("{config: {value: {$remove: true}}}"))
+	removal := resourceOverlayManifest(t, "plystra.production.yaml", "config: {"+constructorConfigurationSymbol+": {$remove: true}}\n"+resourceDocument("{config: {value: {$remove: true}}}"))
 	selected, err = applicationmeta.ApplyOverlay(root, removal, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	composition, err = applicationmeta.Compose([]applicationmeta.Dependency{dependency}, selected, lookup)
+	composition, err = applicationmeta.Compose(nil, selected, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}

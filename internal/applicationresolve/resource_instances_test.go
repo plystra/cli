@@ -14,7 +14,7 @@ import (
 
 func TestResolveNamedResourcesAcrossSelectedLayers(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"default", "environment", "replacement", "template", "template-environment"} {
+	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			root := writeResourceConsumerProject(t, "direct")
@@ -24,7 +24,7 @@ resources:
   instances:
     database.primary:
       use: example.com/resource-consumer/provider.New
-      config: {value: private-primary, nested: {label: private-inherited}}
+      config: {value: private-primary, nested: {label: private-label}}
     database.replica:
       use: example.com/resource-consumer/provider.New
       config: {value: private-replica}
@@ -39,13 +39,6 @@ resources:
 				path, options.EnvironmentName = "plystra.test.yaml", "test"
 			case "replacement":
 				path, options.ConfigurationPath = "selected.yaml", "selected.yaml"
-			case "template", "template-environment":
-				writeFile(t, filepath.Join(root, "base/plystra.yaml"), document)
-				document = "template: example.com/resource-template\n"
-				if mode == "template-environment" {
-					options.EnvironmentName = "test"
-					writeFile(t, filepath.Join(root, "plystra.test.yaml"), "resources: {instances: {database.primary: {config: {nested: {count: 9}}}}}\n")
-				}
 			}
 			writeFile(t, filepath.Join(root, path), document)
 			before := snapshotTree(t, root)
@@ -69,26 +62,9 @@ resources:
 			if len(evidence.Resources()) != 2 || len(evidence.ResourceBindings()) != 2 {
 				t.Fatal("Resource evidence lost selected instances or bindings")
 			}
-			for _, private := range []string{"private-primary", "private-replica", "private-inherited", "PRIVATE_PROVIDER_ENTRY"} {
+			for _, private := range []string{"private-primary", "private-replica", "private-label", "PRIVATE_PROVIDER_ENTRY"} {
 				if strings.Contains(string(evidence.CanonicalJSON()), private) {
 					t.Fatal("Resource evidence exposed private input")
-				}
-			}
-			if mode == "template-environment" {
-				config := string(result.Manifest().ResourceInstances()[0].ConfigurationYAML())
-				if !strings.Contains(config, "private-inherited") || !strings.Contains(config, "count: 9") {
-					t.Fatal("config-only overlay did not merge typed inherited configuration")
-				}
-				if resources[0].Sources()[0].ModulePath != "example.com/resource-template" {
-					t.Fatal("config-only override stole provider-selection ownership")
-				}
-				inherited, overlay := false, false
-				for _, source := range evidence.Resources()[0].ConfigurationSources {
-					inherited = inherited || source.Module == "example.com/resource-template" && source.Path == "plystra.yaml"
-					overlay = overlay || source.Module == "example.com/resource-consumer" && source.Path == "plystra.test.yaml"
-				}
-				if !inherited || !overlay {
-					t.Fatalf("Resource configuration evidence lost layer sources: %#v", evidence.Resources()[0].ConfigurationSources)
 				}
 			}
 			if !reflect.DeepEqual(before, snapshotTree(t, root)) {
@@ -130,7 +106,7 @@ func TestResolveResourcesValidatesUnconsumedAndDormantBindings(t *testing.T) {
 func TestResolveResourceProviderCannotOwnOrdinaryConfiguration(t *testing.T) {
 	t.Parallel()
 	for _, value := range []string{"{value: PRIVATE_INVALID_OWNER}", "{$remove: true}"} {
-		for _, mode := range []string{"default", "environment", "replacement", "template"} {
+		for _, mode := range []string{"default", "environment", "replacement"} {
 			t.Run(mode+"/"+value, func(t *testing.T) {
 				t.Parallel()
 				root := writeResourceConsumerProject(t, "direct")
@@ -142,14 +118,15 @@ func TestResolveResourceProviderCannotOwnOrdinaryConfiguration(t *testing.T) {
 					options.EnvironmentName, path = "test", "plystra.test.yaml"
 				case "replacement":
 					options.ConfigurationPath, path = "selected.yaml", "selected.yaml"
-				case "template":
-					writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/resource-template\n")
-					path = "base/plystra.yaml"
 				}
 				writeFile(t, filepath.Join(root, path), document)
 				before := snapshotTree(t, root)
 				_, err := applicationresolve.Resolve(t.Context(), options)
-				if !errors.Is(err, applicationmeta.ErrConfigurationSchema) || strings.Contains(err.Error(), "PRIVATE_INVALID_OWNER") {
+				if value == "{$remove: true}" && mode != "environment" {
+					if !errors.Is(err, applicationmeta.ErrInvalidManifest) {
+						t.Fatalf("root or replacement Resource tombstone was not rejected as invalid metadata: %v", err)
+					}
+				} else if !errors.Is(err, applicationmeta.ErrConfigurationSchema) || strings.Contains(err.Error(), "PRIVATE_INVALID_OWNER") {
 					t.Fatalf("Resource provider accepted under ordinary config: %v", err)
 				}
 				if !reflect.DeepEqual(before, snapshotTree(t, root)) {

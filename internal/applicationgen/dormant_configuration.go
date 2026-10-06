@@ -126,8 +126,7 @@ func NewDormantConstructorConfiguration(
 			})
 			normalizedContributions[contributionIndex] = DormantConfigurationContribution{
 				owner: string(contribution.Owner()), precedence: contribution.Precedence(),
-				templateOrder: contribution.TemplateOrder(),
-				digest:        contribution.Digest(), summary: contribution.Summary(),
+				digest: contribution.Digest(), summary: contribution.Summary(),
 				removed: contribution.Removed(), effective: contribution.Effective(), sources: normalizedSources,
 			}
 		}
@@ -193,7 +192,6 @@ func validateDormantConstructorConfigurations(
 	selections []DormantImplementationSelection,
 	activeConstructors map[string]struct{},
 	mode, rootPath, selectedPath string,
-	currentProjectPaths []string,
 ) error {
 	if values == nil || len(values) > maximumDormantConstructorConfigurations {
 		return fmt.Errorf("dormant constructor configurations must be an array with at most %d entries", maximumDormantConstructorConfigurations)
@@ -237,15 +235,9 @@ func validateDormantConstructorConfigurations(
 			return fmt.Errorf("dormant constructor configuration %s disagrees with its selection identity", value.constructor)
 		}
 		for fieldIndex, field := range value.fields {
-			currentOwned := sortedContains(currentProjectPaths, field.path)
-			hasMaintainedContribution := false
 			for contributionIndex, contribution := range field.contributions {
 				if !dormantOwnerAllowed(contribution.owner, mode) {
 					return fmt.Errorf("dormant constructor configuration %s field %d contribution %d has an owner outside the selected configuration mode", value.constructor, fieldIndex, contributionIndex)
-				}
-				if contribution.owner == string(resolutionevidence.ConfigurationOwnerRoot) ||
-					contribution.owner == string(resolutionevidence.ConfigurationOwnerExplicit) {
-					hasMaintainedContribution = true
 				}
 				expectedPath := dormantSourcePath(contribution.owner, rootPath, selectedPath)
 				for _, source := range contribution.sources {
@@ -253,9 +245,6 @@ func validateDormantConstructorConfigurations(
 						return fmt.Errorf("dormant constructor configuration %s field %d source path %q does not match owner %q", value.constructor, fieldIndex, source.path, contribution.owner)
 					}
 				}
-			}
-			if currentOwned != hasMaintainedContribution {
-				return fmt.Errorf("dormant constructor configuration %s field %s current-project ownership disagrees with maintained paths", value.constructor, field.path)
 			}
 		}
 	}
@@ -340,9 +329,6 @@ func validateDormantConfigurationField(value DormantConfigurationField) error {
 }
 
 func validateDormantConfigurationContribution(value DormantConfigurationContribution) error {
-	if !validDormantTemplateOrder(value) {
-		return errors.New("template order is invalid")
-	}
 	if !validDormantOwner(value.owner) || value.precedence != dormantOwnerPrecedence(value.owner) || !validSHA256(value.digest) {
 		return errors.New("owner, precedence, or digest is invalid")
 	}
@@ -440,8 +426,7 @@ func dormantConstructorConfigurationWires(values []DormantConstructorConfigurati
 				}
 				contributions[contributionIndex] = applicationManifestDormantSelectionContribution{
 					Owner: contribution.owner, Precedence: contribution.precedence,
-					TemplateOrder: contribution.templateOrder,
-					Digest:        contribution.digest, Summary: contribution.summary,
+					Digest: contribution.digest, Summary: contribution.summary,
 					Removed: contribution.removed, Effective: contribution.effective, Sources: sources,
 				}
 			}
@@ -482,8 +467,7 @@ func restoreDormantConstructorConfigurations(values []applicationManifestDormant
 				}
 				contributions[contributionIndex] = DormantConfigurationContribution{
 					owner: contribution.Owner, precedence: contribution.Precedence,
-					templateOrder: contribution.TemplateOrder,
-					digest:        contribution.Digest, summary: contribution.Summary,
+					digest: contribution.Digest, summary: contribution.Summary,
 					removed: contribution.Removed, effective: contribution.Effective, sources: sources,
 				}
 			}

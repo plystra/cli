@@ -47,7 +47,7 @@ const (
 func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 	t.Parallel()
 
-	composition := dependencyComposition(t)
+	composition := currentComposition(t)
 	resolution := resolvedApplicationWithComposition(t, `capabilities:
   aliases:
     compat.send/v1:
@@ -185,14 +185,8 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		`"dormant_constructor_configurations":[]`,
 		`"dormant_constructor_configurations_digest":"sha256:`,
 		`"root":{"path":"plystra.yaml","digest":"sha256:`,
-		`"dependency_composition_digest":"sha256:`,
 		`"application_model_digest":"` + options.ManifestProvenance.ApplicationModelDigest() + `"`,
 		`"protobuf_wire_map_digest":"` + options.ManifestProvenance.ProtobufWireMapDigest() + `"`,
-		`"removed":true`,
-		`"path":"config[\"example.com/acme/business.New\"][\"password\"]"`,
-		`"path":"config[\"example.com/acme/business.New\"][\"legacy\"]"`,
-		`"path":"http.expose[\"diagnostics.internal/v1\"]"`,
-		`example.com/platform@v1.2.3/plystra.yaml config[\"example.com/acme/business.New\"][\"password\"]`,
 	} {
 		if !strings.Contains(manifest, required) {
 			t.Fatalf("Alias manifest omits %q:\n%s", required, manifest)
@@ -207,9 +201,8 @@ func TestRenderProducesOneDeterministicCanonicalAndAliasTree(t *testing.T) {
 		}
 	}
 	provenance, err := applicationgen.DecodeManifestProvenance([]byte(manifest))
-	baseline := provenance.DependencyBaseline()
-	if err != nil || !baseline.Valid() || baseline.Digest() != options.Composition.DependencyDigest() || len(baseline.Records()) != len(options.Composition.Provenance()) {
-		t.Fatalf("DecodeManifestProvenance = %#v, %v", baseline.Records(), err)
+	if err != nil || provenance.ApplicationModelDigest() != options.ManifestProvenance.ApplicationModelDigest() {
+		t.Fatalf("DecodeManifestProvenance = %#v, %v", provenance, err)
 	}
 	for _, file := range output.Files() {
 		if filepath.Ext(file.Path()) != ".go" {
@@ -556,13 +549,6 @@ func TestRenderRequiresMatchingTransportConfigurationProvenance(t *testing.T) {
 		t.Fatalf("Render(context/manifest selection mismatch) error = %v", err)
 	}
 
-	composition := dependencyComposition(t)
-	dependencyManifest := resolvedOptions()
-	dependencyManifest.Composition = composition
-	dependencyManifest = withManifestProvenance(t, dependencyManifest, resolution)
-	if _, err := applicationgen.Render(dependencyManifest, resolution); !errors.Is(err, applicationgen.ErrResolution) || !strings.Contains(err.Error(), "dependency-composition digest disagrees") {
-		t.Fatalf("Render(context/composition mismatch) error = %v", err)
-	}
 }
 
 func TestRenderSelectionDriftsManifestButKeepsEqualExecutablePublicOutputStable(t *testing.T) {
@@ -772,13 +758,12 @@ func selectedConfigurationProvenance(t testing.TB, composition applicationmeta.C
 	rootDigest := testConfigurationLayerDigest(t, []byte("{}\n"), false)
 	selectedDigest := testConfigurationLayerDigest(t, selectedData, mode == generation.ConfigurationModeEnvironment)
 	return &generation.ConfigurationProvenanceInput{
-		Mode:                        mode,
-		Environment:                 environment,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  rootDigest,
-		SelectedPath:                selectedPath,
-		SelectedDigest:              selectedDigest,
-		DependencyCompositionDigest: composition.DependencyDigest(),
+		Mode:           mode,
+		Environment:    environment,
+		RootPath:       "plystra.yaml",
+		RootDigest:     rootDigest,
+		SelectedPath:   selectedPath,
+		SelectedDigest: selectedDigest,
 	}
 }
 
@@ -809,14 +794,13 @@ func assertBootstrapExcludesSelectorOnlyProvenance(t testing.TB, output applicat
 	t.Helper()
 	manifest := options.ManifestProvenance
 	provenance, err := transportprovenance.New(transportprovenance.Input{
-		Mode:                        generation.ConfigurationMode(manifest.Mode()),
-		Environment:                 manifest.Environment(),
-		RootPath:                    manifest.RootPath(),
-		RootDigest:                  manifest.RootDigest(),
-		SelectedPath:                manifest.SelectedPath(),
-		SelectedDigest:              manifest.SelectedDigest(),
-		DependencyCompositionDigest: options.Composition.DependencyDigest(),
-		ApplicationModelDigest:      manifest.ApplicationModelDigest(),
+		Mode:                   generation.ConfigurationMode(manifest.Mode()),
+		Environment:            manifest.Environment(),
+		RootPath:               manifest.RootPath(),
+		RootDigest:             manifest.RootDigest(),
+		SelectedPath:           manifest.SelectedPath(),
+		SelectedDigest:         manifest.SelectedDigest(),
+		ApplicationModelDigest: manifest.ApplicationModelDigest(),
 	})
 	if err != nil {
 		t.Fatalf("transportprovenance.New from manifest: %v", err)
@@ -895,18 +879,14 @@ func testComposition() applicationmeta.Composition {
 	return composition
 }
 
-func dependencyComposition(t testing.TB) applicationmeta.Composition {
+func currentComposition(t testing.TB) applicationmeta.Composition {
 	t.Helper()
 	schema := applicationConfigurationSchema(t)
-	dependency, err := applicationmeta.Parse([]byte("http: {expose: {diagnostics.internal/v1: {$remove: true}}}\nconfig: {example.com/acme/business.New: {legacy: {$remove: true}, password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
+	current, err := applicationmeta.ParseSource("plystra.yaml", []byte("config: {example.com/acme/business.New: {password: {env: PRIVATE_APPLICATION_TOKEN}}}\n"))
 	if err != nil {
-		t.Fatalf("applicationmeta.Parse dependency: %v", err)
+		t.Fatalf("applicationmeta.Parse current: %v", err)
 	}
-	composition, err := applicationmeta.Compose([]applicationmeta.Dependency{{
-		ModulePath:    "example.com/platform",
-		ModuleVersion: "v1.2.3",
-		Manifest:      dependency,
-	}}, applicationmeta.Manifest{}, func(namespace applicationmeta.ConfigurationNamespace, constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+	composition, err := applicationmeta.Compose(nil, current, func(namespace applicationmeta.ConfigurationNamespace, constructor constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
 		return schema, namespace == applicationmeta.ConfigurationNamespaceImplementation && constructor.String() == businessModulePath+".New"
 	})
 	if err != nil {

@@ -48,7 +48,7 @@ func TestProcessSettingContentsStayOutOfPublicIdentity(t *testing.T) {
 			t.Fatal("public redaction changed private process settings")
 		}
 		for _, decision := range decisions {
-			if decision.DependencyComposable() || decision.Removed() || decision.Source() != "deploy/customer.yaml" {
+			if decision.ResolutionRelevant() || decision.Removed() || decision.Source() != "deploy/customer.yaml" {
 				t.Fatal("process declaration ownership changed")
 			}
 		}

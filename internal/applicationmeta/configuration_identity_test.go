@@ -24,17 +24,16 @@ func TestResourceSelectionIdentitiesPreserveUnboundEntriesAndExactRemovals(t *te
 `)
 	root := resourceManifest(t, "plystra.yaml", `resources:
   instances:
-    primary: {$remove: true}
     unbound: {config: {unknown: PRIVATE_UNBOUND}}
-    removed: {$remove: true}
-  bind:
-    instances:
-      primary: {old: {$remove: true}}
 `)
 	overlay, err := applicationmeta.ParseOverlaySource("plystra.test.yaml", []byte(`resources:
   instances:
-    primary: {}
+    primary: {$remove: true}
+    removed: {$remove: true}
     unbound: {config: {unknown: PRIVATE_OVERLAY}}
+  bind:
+    instances:
+      primary: {old: {$remove: true}}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -43,8 +42,8 @@ func TestResourceSelectionIdentitiesPreserveUnboundEntriesAndExactRemovals(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	instances, bindings, err := applicationmeta.ResourceSelectionIdentities([]applicationmeta.Manifest{lower, layered})
-	if err != nil || len(instances) != 2 || instances[0].Name() != "primary" || instances[1].Name() != "unbound" {
+	instances, bindings, err := applicationmeta.ResourceSelectionIdentities([]applicationmeta.Manifest{layered})
+	if err != nil || len(instances) != 1 || instances[0].Name() != "unbound" {
 		t.Fatalf("selection identities = %v, %v", instances, err)
 	}
 	for _, instance := range instances {
@@ -52,8 +51,8 @@ func TestResourceSelectionIdentitiesPreserveUnboundEntriesAndExactRemovals(t *te
 			t.Fatal("a removed provider reappeared or planning retained private Config")
 		}
 	}
-	if len(bindings) != 1 || bindings[0].Consumer() != "primary" || bindings[0].ParameterName() != "retained" || bindings[0].Target() != "primary" {
-		t.Fatal("identity planning changed unrelated bindings or ignored an exact tombstone")
+	if len(bindings) != 0 {
+		t.Fatal("identity planning imported bindings from an ordinary dependency")
 	}
 	if instances[0].DeclarationSource().Path() != "plystra.test.yaml" || len(lower.ResourceInstances()[0].ConfigurationYAML()) == 0 {
 		t.Fatal("identity planning lost source or mutated captured layers")
@@ -73,26 +72,24 @@ func TestWithoutConstructorConfigurationPreservesIdentityAndAllSources(t *testin
 		}
 		return ordinary(namespace, symbol)
 	}
-	root := resourceManifest(t, "plystra.yaml", `template: example.com/base
+	root := resourceManifest(t, "plystra.yaml", `
 http: {address: localhost:8080, expose: {app.run/v1: {transport: connect}}}
 timeouts: {startup: 5s}
 interfaces:
-  require: {add: [app.run/v1], remove: [old.run/v1]}
-  use: {app.run/v1: example.com/service.New, old.run/v1: {$remove: true}}
-  policies: {app.run/v1: {timeout: 1s}, old.run/v1: {$remove: true}}
+  require: [app.run/v1]
+  use: {app.run/v1: example.com/service.New}
+  policies: {app.run/v1: {timeout: 1s}}
 config:
   example.com/service.New: {value: PRIVATE_IMPLEMENTATION}
-  example.com/removed.New: {$remove: true}
 resources:
   instances:
     primary: {use: example.com/database.New, config: {value: PRIVATE_RESOURCE}}
-    unconfigured: {use: example.com/alternative.New, config: {$remove: true}}
-    removed: {$remove: true}
+    unconfigured: {use: example.com/alternative.New, config: {value: PRIVATE_UNCONFIGURED}}
   bind:
     instances:
-      primary: {upstream: unconfigured, obsolete: {$remove: true}}
+      primary: {upstream: unconfigured}
     implementations:
-      example.com/service.New: {database: primary, obsolete: {$remove: true}}
+      example.com/service.New: {database: primary}
 `)
 	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`http: {expose: {old.run/v1: {$remove: true}}}
 resources: {instances: {primary: {config: {value: PRIVATE_OVERLAY}}}}
@@ -189,7 +186,7 @@ func TestWithoutConstructorConfigurationAllowsPlanningButNotInvalidFinalState(t 
 	if err != nil || resourceConfig(t, final.Manifest(), "database.primary").HasConfiguration() {
 		t.Fatal("discarded old Config still affected final composition", err)
 	}
-	ordinary := resourceManifest(t, "plystra.yaml", "interfaces: {use: {app.run/v1: example.com/service.New}}\nconfig: {example.com/service.New: {value: PRIVATE_INVALID}, example.com/missing.New: {$remove: true}}\n")
+	ordinary := resourceManifest(t, "plystra.yaml", "interfaces: {use: {app.run/v1: example.com/service.New}}\nconfig: {example.com/service.New: {value: PRIVATE_INVALID}, example.com/missing.New: {value: PRIVATE_INVALID}}\n")
 	if _, err := applicationmeta.Compose(nil, ordinary, lookup); !errors.Is(err, applicationmeta.ErrConfigurationSchema) {
 		t.Fatal("original Implementation Config unexpectedly valid", err)
 	}

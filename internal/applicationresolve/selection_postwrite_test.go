@@ -68,13 +68,13 @@ func TestSelectionPostwriteAcceptsExactSelectedPostimage(t *testing.T) {
 
 func TestSelectionPostwriteRejectsOriginalCleanupEvidenceDrift(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"selected", "root", "template", "module", "dependency-module", "required-interface", "optional-interface", "resource-parameter", "provider-schema", "provider-default", "provider-signature", "contract", "legacy-exposure", "selected-directory"} {
+	for _, scenario := range []string{"selected", "root", "module", "dependency-module", "required-interface", "optional-interface", "resource-parameter", "provider-schema", "provider-default", "provider-signature", "contract", "legacy-exposure", "selected-directory"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			root := writeResourceConsumerProject(t, "transitive")
 			writeResourceProvider(t, root)
 			writePlugin(t, root, "legacy", "id: example.legacy\nprovides: [legacy.run/v1]\n")
-			writeFile(t, filepath.Join(root, "plystra.yaml"), "template: example.com/resource-template\n")
+			writeFile(t, filepath.Join(root, "plystra.yaml"), "http: {address: ':8080'}\n")
 			writeFile(t, filepath.Join(root, "deploy/app.yaml"), "{}\n")
 			options := selectionOptions(root)
 			options.ConfigurationPath = "deploy/app.yaml"
@@ -93,9 +93,7 @@ func TestSelectionPostwriteRejectsOriginalCleanupEvidenceDrift(t *testing.T) {
 			case "selected":
 				path, old, changed = options.ConfigurationPath, "{}", "{http: {address: ':3000'}}"
 			case "root":
-				path, old, changed = "plystra.yaml", "template:", "# PRIVATE_CONCURRENT\ntemplate:"
-			case "template":
-				path, old, changed = "base/plystra.yaml", "{}", "{} # PRIVATE_CONCURRENT"
+				path, old, changed = "plystra.yaml", "address: ':8080'", "address: ':3001' # PRIVATE_CONCURRENT"
 			case "module":
 				path, old, changed = "go.mod", "go 1.26", "go 1.26 // PRIVATE_CONCURRENT"
 			case "dependency-module":
@@ -249,7 +247,7 @@ func TestSelectionTidyRejectsDependencyChanges(t *testing.T) {
 			case "required-version":
 				old, changed = "v1.0.0", "v1.0.1"
 			case "removed-requirement":
-				old, changed = "example.com/resource-template v1.0.0", ""
+				old, changed = "example.com/resource-dependency v1.0.0", ""
 			case "replacement":
 				old, changed = "=> ./base", "=> ./added"
 			case "go-version":
@@ -257,7 +255,7 @@ func TestSelectionTidyRejectsDependencyChanges(t *testing.T) {
 			case "toolchain":
 				changed = "go 1.26\ntoolchain go1.26.5"
 			case "exclude":
-				changed = "go 1.26\nexclude example.com/resource-template v0.9.0"
+				changed = "go 1.26\nexclude example.com/resource-dependency v0.9.0"
 			case "godebug":
 				changed = "go 1.26\ngodebug panicnil=1"
 			case "dependency-metadata":
@@ -265,7 +263,7 @@ func TestSelectionTidyRejectsDependencyChanges(t *testing.T) {
 			case "new-project":
 				changed = "go 1.26\nrequire example.com/added v1.0.0"
 			case "demotion":
-				old, changed = "example.com/resource-template v1.0.0", "example.com/resource-template v1.0.0 // indirect"
+				old, changed = "example.com/resource-dependency v1.0.0", "example.com/resource-dependency v1.0.0 // indirect"
 			}
 			replaceSelectionFile(t, root, path, old, changed)
 			before := snapshotTree(t, root)
@@ -317,7 +315,7 @@ func TestSelectionTidyAcceptsEquivalentDirectiveSpelling(t *testing.T) {
 	replaceSelectionFile(t, root, "go.mod", "module example.com/resource-consumer", "module \"example.com/resource-consumer\"")
 	replaceSelectionFile(t, root, "go.mod", "=> ./base", "=> \"./base\"")
 	replaceSelectionFile(t, root, "go.mod", "exclude (\n example.com/z v1.0.0\n example.com/a v1.0.0\n)", "exclude example.com/a v1.0.0\nexclude example.com/z v1.0.0")
-	replaceSelectionFile(t, root, "go.mod", "replace github.com/plystra/kernel => ./kernel\nreplace example.com/resource-template => \"./base\"", "replace (\nexample.com/resource-template => \"./base\"\ngithub.com/plystra/kernel => ./kernel\n)")
+	replaceSelectionFile(t, root, "go.mod", "replace github.com/plystra/kernel => ./kernel\nreplace example.com/resource-dependency => \"./base\"", "replace (\nexample.com/resource-dependency => \"./base\"\ngithub.com/plystra/kernel => ./kernel\n)")
 	tidy, err := inputs.CaptureTidySnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)

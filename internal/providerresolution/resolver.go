@@ -111,17 +111,14 @@ type Candidate struct {
 	DeclarationSource ProviderSource
 }
 
-// ChoiceSourceKind identifies whether one effective capabilities.use source
-// belongs to the selected current-project layer or an inherited template.
+// ChoiceSourceKind identifies the current-project layer that authored one
+// effective capabilities.use source.
 type ChoiceSourceKind string
 
 const (
 	// ChoiceSourceCurrentProject identifies the winning selected-current-project
 	// configuration declaration.
 	ChoiceSourceCurrentProject ChoiceSourceKind = "current-project"
-	// ChoiceSourceTemplate identifies the surviving selection contributed
-	// by the explicit template ancestry.
-	ChoiceSourceTemplate ChoiceSourceKind = "template"
 )
 
 // ChoiceSource is one typed, stable, module-relative source for an effective
@@ -139,8 +136,7 @@ type ChoiceSource struct {
 func (s ChoiceSource) String() string { return s.Reference }
 
 // Choice is one normalized explicit capabilities.use entry. Sources contains
-// either the one winning current-Project declaration or every compatible
-// inherited dependency declaration.
+// the one winning current-Project declaration.
 type Choice struct {
 	Capability string
 	PluginID   string
@@ -248,8 +244,8 @@ func (s Selection) ChoiceSource() string {
 	return s.choiceSources[0].Reference
 }
 
-// ChoiceSources returns the one winning current-Project source or every
-// compatible inherited dependency source. Automatic selections return nil.
+// ChoiceSources returns the one winning current-Project source. Automatic
+// selections return nil.
 func (s Selection) ChoiceSources() []ChoiceSource {
 	return append([]ChoiceSource(nil), s.choiceSources...)
 }
@@ -930,14 +926,14 @@ func normalizeChoiceSources(inputs []ChoiceSource) ([]ChoiceSource, error) {
 			return nil, fmt.Errorf("sources[%d].reference %v", index, err)
 		}
 		switch input.Kind {
-		case ChoiceSourceCurrentProject, ChoiceSourceTemplate:
+		case ChoiceSourceCurrentProject:
 		default:
 			return nil, fmt.Errorf("sources[%d].kind %q is invalid", index, input.Kind)
 		}
 		if kind == "" {
 			kind = input.Kind
 		} else if input.Kind != kind {
-			return nil, errors.New("sources cannot mix current-Project and template declarations")
+			return nil, errors.New("sources cannot mix configuration layers")
 		}
 		if err := modulepath.CheckProject(input.ModulePath); err != nil {
 			return nil, fmt.Errorf("sources[%d].module_path %q is invalid: %v", index, input.ModulePath, err)
@@ -966,8 +962,8 @@ func normalizeChoiceSources(inputs []ChoiceSource) ([]ChoiceSource, error) {
 		}
 		unique = append(unique, value)
 	}
-	if kind == ChoiceSourceCurrentProject && len(unique) != 1 {
-		return nil, errors.New("a current-Project choice must have exactly one winning source")
+	if len(unique) != 1 || kind != ChoiceSourceCurrentProject {
+		return nil, errors.New("a provider choice must have exactly one current-Project source")
 	}
 	return append([]ChoiceSource(nil), unique...), nil
 }

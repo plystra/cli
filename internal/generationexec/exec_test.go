@@ -504,13 +504,12 @@ func extensionContext(t *testing.T, mode string) generation.Context {
 	}
 	if mode == "provenance" {
 		input.ConfigurationProvenance = &generation.ConfigurationProvenanceInput{
-			Mode:                        generation.ConfigurationModeEnvironment,
-			Environment:                 "production",
-			RootPath:                    "plystra.yaml",
-			RootDigest:                  "sha256:" + strings.Repeat("1", 64),
-			SelectedPath:                "plystra.production.yaml",
-			SelectedDigest:              "sha256:" + strings.Repeat("2", 64),
-			DependencyCompositionDigest: "sha256:" + strings.Repeat("3", 64),
+			Mode:           generation.ConfigurationModeEnvironment,
+			Environment:    "production",
+			RootPath:       "plystra.yaml",
+			RootDigest:     "sha256:" + strings.Repeat("1", 64),
+			SelectedPath:   "plystra.production.yaml",
+			SelectedDigest: "sha256:" + strings.Repeat("2", 64),
 		}
 	}
 	context, err := generation.NewContext(input)
@@ -648,7 +647,7 @@ func Generate(context generation.GenerationContext) (generation.Output, error) {
 		if !exists {
 			return generation.Output{}, errors.New("configuration provenance is absent")
 		}
-		if provenance.Mode() != generation.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != "sha256:"+strings.Repeat("1", 64) || provenance.SelectedPath() != "plystra.production.yaml" || provenance.SelectedDigest() != "sha256:"+strings.Repeat("2", 64) || provenance.DependencyCompositionDigest() != "sha256:"+strings.Repeat("3", 64) {
+		if provenance.Mode() != generation.ConfigurationModeEnvironment || provenance.Environment() != "production" || provenance.RootPath() != "plystra.yaml" || provenance.RootDigest() != "sha256:"+strings.Repeat("1", 64) || provenance.SelectedPath() != "plystra.production.yaml" || provenance.SelectedDigest() != "sha256:"+strings.Repeat("2", 64) {
 			return generation.Output{}, fmt.Errorf("unexpected configuration provenance: mode=%s environment=%s root=%s selected=%s", provenance.Mode(), provenance.Environment(), provenance.RootPath(), provenance.SelectedPath())
 		}
 		return generation.Output{Diagnostics: []generation.Diagnostic{{Code: "configuration.provenance", Severity: generation.DiagnosticInfo, Message: string(provenance.Mode()) + ":" + provenance.Environment() + ":" + provenance.SelectedPath(), Namespace: "authn", Source: order, RuleID: "authn.provenance"}}}, nil

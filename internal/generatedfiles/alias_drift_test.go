@@ -410,13 +410,12 @@ func aliasConfigurationProvenance(t testing.TB) transportprovenance.Provenance {
 	t.Helper()
 	rootDigest := "sha256:" + strings.Repeat("1", 64)
 	provenance, err := transportprovenance.New(transportprovenance.Input{
-		Mode:                        generation.ConfigurationModeDefault,
-		RootPath:                    "plystra.yaml",
-		RootDigest:                  rootDigest,
-		SelectedPath:                "plystra.yaml",
-		SelectedDigest:              rootDigest,
-		DependencyCompositionDigest: "sha256:" + strings.Repeat("2", 64),
-		ApplicationModelDigest:      "sha256:" + strings.Repeat("3", 64),
+		Mode:                   generation.ConfigurationModeDefault,
+		RootPath:               "plystra.yaml",
+		RootDigest:             rootDigest,
+		SelectedPath:           "plystra.yaml",
+		SelectedDigest:         rootDigest,
+		ApplicationModelDigest: "sha256:" + strings.Repeat("3", 64),
 	})
 	if err != nil {
 		t.Fatalf("transportprovenance.New: %v", err)

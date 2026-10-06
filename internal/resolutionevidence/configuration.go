@@ -20,15 +20,14 @@ import (
 )
 
 type configurationCandidate struct {
-	path          string
-	digest        string
-	summary       string
-	removed       bool
-	owner         ConfigurationOwner
-	precedence    int
-	templateOrder int
-	sources       []Source
-	effective     bool
+	path       string
+	digest     string
+	summary    string
+	removed    bool
+	owner      ConfigurationOwner
+	precedence int
+	sources    []Source
+	effective  bool
 }
 
 func configurationSelectionFromContext(context generation.Context) (ConfigurationSelection, bool, error) {
@@ -37,13 +36,12 @@ func configurationSelectionFromContext(context generation.Context) (Configuratio
 		return ConfigurationSelection{}, false, nil
 	}
 	selection := ConfigurationSelection{
-		mode:             provenance.Mode(),
-		environment:      provenance.Environment(),
-		rootPath:         provenance.RootPath(),
-		rootDigest:       provenance.RootDigest(),
-		selectedPath:     provenance.SelectedPath(),
-		selectedDigest:   provenance.SelectedDigest(),
-		dependencyDigest: provenance.DependencyCompositionDigest(),
+		mode:           provenance.Mode(),
+		environment:    provenance.Environment(),
+		rootPath:       provenance.RootPath(),
+		rootDigest:     provenance.RootDigest(),
+		selectedPath:   provenance.SelectedPath(),
+		selectedDigest: provenance.SelectedDigest(),
 	}
 	if err := validateConfigurationSelection(selection); err != nil {
 		return ConfigurationSelection{}, false, err
@@ -59,45 +57,10 @@ func configurationEvidenceFromInput(input *ConfigurationInput, context generatio
 	if !exists {
 		return nil, fmt.Errorf("configuration input requires selected-configuration provenance")
 	}
-	if !input.DependencyBaseline.Valid() {
-		return nil, fmt.Errorf("dependency baseline is absent or invalid")
-	}
-	if input.DependencyBaseline.Digest() != provenance.DependencyCompositionDigest() {
-		return nil, fmt.Errorf("dependency baseline digest disagrees with selected-model provenance")
-	}
-	if err := validateTemplateLayerEvidence(input); err != nil {
-		return nil, err
-	}
 	if err := validateConfigurationLayers(provenance.Mode(), input.Layers); err != nil {
 		return nil, err
 	}
 	candidates := make(map[string][]configurationCandidate)
-	for index, layer := range input.Templates {
-		version := layer.ModuleVersion
-		if version == "" {
-			version = "workspace"
-		}
-		for _, decision := range layer.Decisions {
-			if !decision.DependencyComposable() {
-				continue
-			}
-			candidate := configurationCandidate{
-				path: decision.Path(), digest: decision.Digest(), removed: decision.Removed(),
-				owner: ConfigurationOwnerTemplate, precedence: 1, templateOrder: index + 1,
-				summary: string(decision.Summary()),
-			}
-			source, err := configurationSource(layer.ModulePath+"@"+version+"/"+layer.Source, ConfigurationOwnerTemplate, decision.Removed(), modules)
-			if err != nil {
-				return nil, fmt.Errorf("template field %s: %w", decision.Path(), err)
-			}
-			candidate.sources = append(candidate.sources, source)
-			if err := validateConfigurationCandidate(candidate); err != nil {
-				return nil, err
-			}
-			mergeConfigurationCandidate(candidates, candidate)
-		}
-	}
-
 	for _, layer := range input.Layers {
 		precedence := configurationLayerPrecedence(layer.Owner)
 		for _, decision := range layer.Decisions {
@@ -137,62 +100,10 @@ func configurationEvidenceFromInput(input *ConfigurationInput, context generatio
 	return fields, nil
 }
 
-func validateTemplateLayerEvidence(input *ConfigurationInput) error {
-	key := func(path, digest string, removed bool, source string) string {
-		return fmt.Sprintf("%s\x00%s\x00%t\x00%s", path, digest, removed, source)
-	}
-	records := make(map[string]bool)
-	ancestry := make(map[string][]string)
-	for _, record := range input.DependencyBaseline.Records() {
-		if strings.HasPrefix(record.Path, "template.ancestry[") {
-			ancestry[record.Path] = record.Sources
-			continue
-		}
-		for _, source := range record.Sources {
-			records[key(record.Path, record.Digest, record.Removed, source)] = true
-		}
-	}
-	if len(ancestry) != len(input.Templates) {
-		return errors.New("template layers disagree with dependency ancestry")
-	}
-	for index, layer := range input.Templates {
-		version := layer.ModuleVersion
-		if version == "" {
-			version = "workspace"
-		}
-		prefix := layer.ModulePath + "@" + version + "/"
-		identity := ancestry[fmt.Sprintf("template.ancestry[%d]", index)]
-		if len(identity) != 1 || identity[0] != prefix+layer.Source {
-			return errors.New("template layer order disagrees with dependency ancestry")
-		}
-		for _, decision := range layer.Decisions {
-			if !decision.DependencyComposable() {
-				continue
-			}
-			reference := decision.Source()
-			if reference == "" {
-				reference = layer.Source
-			}
-			if !strings.Contains(reference, " ") {
-				reference += " " + decision.Path()
-			}
-			item := key(decision.Path(), decision.Digest(), decision.Removed(), prefix+reference)
-			if !records[item] {
-				return errors.New("template decision disagrees with dependency baseline")
-			}
-			delete(records, item)
-		}
-	}
-	if len(records) != 0 {
-		return errors.New("template layers omit dependency decisions")
-	}
-	return nil
-}
-
 func validateConfigurationLayers(mode generation.ConfigurationMode, layers []ConfigurationLayerInput) error {
 	counts := map[ConfigurationOwner]int{}
 	for _, layer := range layers {
-		if layer.Owner == ConfigurationOwnerTemplate || configurationLayerPrecedence(layer.Owner) == 0 {
+		if configurationLayerPrecedence(layer.Owner) == 0 {
 			return fmt.Errorf("configuration layer %q is invalid", layer.Owner)
 		}
 		counts[layer.Owner]++
@@ -207,17 +118,8 @@ func validateConfigurationLayers(mode generation.ConfigurationMode, layers []Con
 			return fmt.Errorf("environment configuration evidence must contain one root and one environment layer")
 		}
 	case generation.ConfigurationModeExplicit:
-		if counts[ConfigurationOwnerRoot] > 1 || counts[ConfigurationOwnerEnvironment] != 0 || counts[ConfigurationOwnerExplicit] != 1 {
+		if counts[ConfigurationOwnerRoot] != 0 || counts[ConfigurationOwnerEnvironment] != 0 || counts[ConfigurationOwnerExplicit] != 1 {
 			return fmt.Errorf("explicit configuration evidence must contain exactly one replacement layer")
-		}
-		for _, layer := range layers {
-			if layer.Owner == ConfigurationOwnerRoot {
-				for _, decision := range layer.Decisions {
-					if decision.Path() != "template" {
-						return errors.New("replacement evidence cannot activate root application declarations")
-					}
-				}
-			}
 		}
 	default:
 		return fmt.Errorf("configuration mode %q is invalid", mode)
@@ -227,12 +129,10 @@ func validateConfigurationLayers(mode generation.ConfigurationMode, layers []Con
 
 func configurationLayerPrecedence(owner ConfigurationOwner) int {
 	switch owner {
-	case ConfigurationOwnerTemplate:
-		return 1
 	case ConfigurationOwnerRoot, ConfigurationOwnerExplicit:
-		return 2
+		return 1
 	case ConfigurationOwnerEnvironment:
-		return 3
+		return 2
 	default:
 		return 0
 	}
@@ -251,14 +151,8 @@ func validateConfigurationCandidate(candidate configurationCandidate) error {
 	if candidate.precedence != configurationLayerPrecedence(candidate.owner) {
 		return fmt.Errorf("configuration path %s has an invalid owner", candidate.path)
 	}
-	if (candidate.owner == ConfigurationOwnerTemplate) != (candidate.templateOrder > 0) {
-		return fmt.Errorf("configuration path %s has an invalid template order", candidate.path)
-	}
 	if candidate.removed != (candidate.summary == string(applicationmeta.ConfigurationSummaryRemoval)) {
 		return fmt.Errorf("configuration path %s has inconsistent removal evidence", candidate.path)
-	}
-	if candidate.owner == ConfigurationOwnerTemplate && !configurationPathDependencyComposable(candidate.path) {
-		return fmt.Errorf("configuration path %s cannot be contributed by a template", candidate.path)
 	}
 	if len(candidate.sources) == 0 {
 		return fmt.Errorf("configuration path %s has no source provenance", candidate.path)
@@ -268,10 +162,10 @@ func validateConfigurationCandidate(candidate configurationCandidate) error {
 
 func mergeConfigurationCandidate(groups map[string][]configurationCandidate, candidate configurationCandidate) {
 	values := groups[candidate.path]
-	key := string(candidate.owner) + "\x00" + fmt.Sprintf("%d:%d", candidate.precedence, candidate.templateOrder) + "\x00" + candidate.digest + "\x00" + fmt.Sprintf("%t", candidate.removed) + "\x00" + candidate.summary
+	key := string(candidate.owner) + "\x00" + fmt.Sprintf("%d", candidate.precedence) + "\x00" + candidate.digest + "\x00" + fmt.Sprintf("%t", candidate.removed) + "\x00" + candidate.summary
 	for index := range values {
 		other := values[index]
-		otherKey := string(other.owner) + "\x00" + fmt.Sprintf("%d:%d", other.precedence, other.templateOrder) + "\x00" + other.digest + "\x00" + fmt.Sprintf("%t", other.removed) + "\x00" + other.summary
+		otherKey := string(other.owner) + "\x00" + fmt.Sprintf("%d", other.precedence) + "\x00" + other.digest + "\x00" + fmt.Sprintf("%t", other.removed) + "\x00" + other.summary
 		if key != otherKey {
 			continue
 		}
@@ -357,7 +251,7 @@ func selectConfigurationFields(groups map[string][]configurationCandidate) ([]Co
 }
 
 func configurationRank(value configurationCandidate) int64 {
-	return int64(value.precedence)<<32 | int64(value.templateOrder)
+	return int64(value.precedence)
 }
 
 func configurationWinner(path string, values []configurationCandidate, minimumPrecedence int64) (int, error) {
@@ -396,14 +290,13 @@ func configurationFieldFromCandidates(path string, values []configurationCandida
 	field := ConfigurationField{path: path, effective: effective, contributors: make([]ConfigurationContribution, len(values))}
 	for index, value := range values {
 		field.contributors[index] = ConfigurationContribution{
-			owner:         value.owner,
-			precedence:    value.precedence,
-			templateOrder: value.templateOrder,
-			digest:        value.digest,
-			summary:       value.summary,
-			removed:       value.removed,
-			effective:     value.effective && effective,
-			sources:       uniqueConfigurationSources(value.sources),
+			owner:      value.owner,
+			precedence: value.precedence,
+			digest:     value.digest,
+			summary:    value.summary,
+			removed:    value.removed,
+			effective:  value.effective && effective,
+			sources:    uniqueConfigurationSources(value.sources),
 		}
 	}
 	sort.Slice(field.contributors, func(left, right int) bool {
@@ -510,42 +403,14 @@ func configurationSource(raw string, owner ConfigurationOwner, removed bool, mod
 	}
 	document := raw
 	module := ""
-	if owner == ConfigurationOwnerTemplate {
-		identities := make([]struct{ identity, module string }, 0, len(modules))
-		for _, candidate := range modules {
-			if candidate.role != ModuleRoleDependency {
-				continue
-			}
-			version := candidate.selectedVersion
-			if version == "" {
-				version = "workspace"
-			}
-			identities = append(identities, struct{ identity, module string }{identity: candidate.path + "@" + version, module: candidate.source.module})
+	for _, candidate := range modules {
+		if candidate.role == ModuleRoleCurrent {
+			module = candidate.path
+			break
 		}
-		sort.Slice(identities, func(left, right int) bool { return len(identities[left].identity) > len(identities[right].identity) })
-		matched := false
-		for _, candidate := range identities {
-			prefix := candidate.identity + "/plystra.yaml"
-			if raw == prefix || strings.HasPrefix(raw, prefix+" ") {
-				module = candidate.module
-				document = "plystra.yaml"
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return Source{}, fmt.Errorf("template source %q does not identify a participating module", raw)
-		}
-	} else {
-		for _, candidate := range modules {
-			if candidate.role == ModuleRoleCurrent {
-				module = candidate.path
-				break
-			}
-		}
-		if module == "" {
-			return Source{}, fmt.Errorf("current configuration source has no current Project module")
-		}
+	}
+	if module == "" {
+		return Source{}, fmt.Errorf("current configuration source has no current Project module")
 	}
 	if !safeConfigurationDocumentPath(document) {
 		return Source{}, fmt.Errorf("configuration document path %q is unsafe", document)
@@ -574,7 +439,7 @@ func safeConfigurationDocumentPath(value string) bool {
 
 func validConfigurationFieldPath(value string) bool {
 	switch value {
-	case "template", "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup", "interfaces.require":
+	case "http.address", "http.cors", "http.cors.allowed_origins", "http.cors.allow_credentials", "timeouts.startup", "interfaces.require":
 		return true
 	}
 	if _, suffix, ok := resourceConfigurationPath(value); ok {
@@ -715,20 +580,13 @@ func validateConfigurationFields(fields []ConfigurationField, modules []Module, 
 		var effectiveContribution ConfigurationContribution
 		previous := ""
 		for _, contribution := range field.contributors {
-			if (contribution.owner == ConfigurationOwnerTemplate) != (contribution.templateOrder > 0) || contribution.templateOrder < 0 || contribution.templateOrder > len(modules) {
-				return fmt.Errorf("configuration field %s has an invalid template order", field.path)
-			}
 			if contribution.precedence != configurationLayerPrecedence(contribution.owner) || !validDigest(contribution.digest) || !validConfigurationSummary(contribution.summary) || len(contribution.sources) == 0 {
 				return fmt.Errorf("configuration field %s has an invalid contribution", field.path)
 			}
 			if contribution.removed != (contribution.summary == string(applicationmeta.ConfigurationSummaryRemoval)) {
 				return fmt.Errorf("configuration field %s has inconsistent contribution removal evidence", field.path)
 			}
-			if contribution.owner == ConfigurationOwnerTemplate && !configurationPathDependencyComposable(field.path) {
-				return fmt.Errorf("configuration field %s has a dependency-owned process setting", field.path)
-			}
-			rootMetadata := hasSelection && field.path == "template" && contribution.owner == ConfigurationOwnerRoot
-			if !rootMetadata && !configurationOwnerAllowed(contribution.owner, selection, hasSelection) {
+			if !configurationOwnerAllowed(contribution.owner, selection, hasSelection) {
 				return fmt.Errorf("configuration field %s has an owner outside the selected configuration mode", field.path)
 			}
 			key := configurationContributionKey(contribution)
@@ -785,7 +643,7 @@ func validateConfigurationSelection(selection ConfigurationSelection) error {
 	if !safeConfigurationDocumentPath(selection.selectedPath) {
 		return fmt.Errorf("selected configuration path %q is unsafe", selection.selectedPath)
 	}
-	if !validDigest(selection.rootDigest) || !validDigest(selection.selectedDigest) || !validDigest(selection.dependencyDigest) {
+	if !validDigest(selection.rootDigest) || !validDigest(selection.selectedDigest) {
 		return errors.New("configuration selection has a noncanonical digest")
 	}
 	switch selection.mode {
@@ -816,8 +674,6 @@ func configurationOwnerAllowed(owner ConfigurationOwner, selection Configuration
 		return false
 	}
 	switch owner {
-	case ConfigurationOwnerTemplate:
-		return true
 	case ConfigurationOwnerRoot:
 		return selection.mode == generation.ConfigurationModeDefault || selection.mode == generation.ConfigurationModeEnvironment
 	case ConfigurationOwnerEnvironment:
@@ -840,11 +696,7 @@ func validateConfigurationSource(source Source, owner ConfigurationOwner, remove
 		return errors.New("location is not stable")
 	}
 	var expectedPath string
-	expectedRole := ModuleRoleCurrent
 	switch owner {
-	case ConfigurationOwnerTemplate:
-		expectedPath = "plystra.yaml"
-		expectedRole = ""
 	case ConfigurationOwnerRoot:
 		expectedPath = selection.rootPath
 	case ConfigurationOwnerEnvironment, ConfigurationOwnerExplicit:
@@ -856,26 +708,15 @@ func validateConfigurationSource(source Source, owner ConfigurationOwner, remove
 		return fmt.Errorf("path %q does not match owner %q", source.path, owner)
 	}
 	for _, module := range modules {
-		roleMatches := module.role == expectedRole
-		if owner == ConfigurationOwnerTemplate {
-			roleMatches = module.role == ModuleRoleDependency
-		}
-		if roleMatches && module.source.module == source.module {
+		if module.role == ModuleRoleCurrent && module.source.module == source.module {
 			return nil
 		}
 	}
-	return fmt.Errorf("module %q is not a participating %s Project source", source.module, expectedRole)
+	return fmt.Errorf("module %q is not the current Project source", source.module)
 }
 
 func configurationContributionKey(value ConfigurationContribution) string {
-	return fmt.Sprintf("%02d\x00%010d\x00%s\x00%s\x00%t\x00%s", value.precedence, value.templateOrder, value.owner, value.digest, value.removed, value.summary)
-}
-
-func configurationPathDependencyComposable(value string) bool {
-	if strings.HasPrefix(value, "resources.") {
-		return validConfigurationFieldPath(value)
-	}
-	return value == "interfaces.require" || strings.HasPrefix(value, "http.cors") || strings.HasPrefix(value, "http.expose[") || strings.HasPrefix(value, "capabilities.require[") || strings.HasPrefix(value, "capabilities.use[") || strings.HasPrefix(value, "capabilities.aliases[") || strings.HasPrefix(value, "interfaces.require[") || strings.HasPrefix(value, "interfaces.use[") || strings.HasPrefix(value, "interfaces.policies[") || strings.HasPrefix(value, "config[")
+	return fmt.Sprintf("%02d\x00%s\x00%s\x00%t\x00%s", value.precedence, value.owner, value.digest, value.removed, value.summary)
 }
 
 func configurationPathKeys(value, prefix string) ([]string, bool) {

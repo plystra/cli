@@ -2,6 +2,7 @@ package applicationmeta_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationmeta"
@@ -9,91 +10,92 @@ import (
 
 func TestInterfaceRequirementCompleteSetsReplaceLowerLayers(t *testing.T) {
 	t.Parallel()
-	dependencies := []applicationmeta.Dependency{
-		{ModulePath: "example.com/a", Manifest: composeManifest(t, "interfaces: {require: [audit.write/v1, email.send/v1]}\n")},
-		{ModulePath: "example.com/b", Manifest: composeManifest(t, "interfaces: {require: [email.send/v1]}\n")},
+	root := composeManifest(t, "interfaces: {require: [audit.write/v1, email.send/v1]}\n")
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("interfaces: {require: {add: [cache.read/v1], remove: [audit.write/v1]}}\n"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range []struct {
-		name, root, overlay string
-		want                []string
-	}{
-		{"omitted", "{}", "", []string{"email.send/v1"}},
-		{"sparse empty", "interfaces: {require: {}}", "", []string{"email.send/v1"}},
-		{"complete empty", "interfaces: {require: []}", "", []string{}},
-		{"complete subset", "interfaces: {require: [email.send/v1]}", "", []string{"email.send/v1"}},
-		{"sparse removal", "interfaces: {require: {remove: [email.send/v1]}}", "", []string{}},
-		{"overlay complete empty", "interfaces: {require: [cache.read/v1]}", "interfaces: {require: []}", []string{}},
-		{"overlay complete replacement", "interfaces: {require: [cache.read/v1]}", "interfaces: {require: [email.send/v1]}", []string{"email.send/v1"}},
-		{"overlay sparse over complete", "interfaces: {require: [cache.read/v1]}", "interfaces: {require: {add: [reports.read/v1], remove: [cache.read/v1]}}", []string{"reports.read/v1"}},
-		{"overlay sparse over empty complete", "interfaces: {require: []}", "interfaces: {require: {add: [reports.read/v1]}}", []string{"reports.read/v1"}},
-		{"overlay omitted", "interfaces: {require: []}", "{}", []string{}},
-		{"overlay complete drops lower removals", "interfaces: {require: {remove: [email.send/v1]}}", "interfaces: {require: [email.send/v1]}", []string{"email.send/v1"}},
-		{"overlay sparse over sparse", "interfaces: {require: {remove: [email.send/v1]}}", "interfaces: {require: {add: [cache.read/v1]}}", []string{"cache.read/v1"}},
+	selected, err := applicationmeta.ApplyOverlay(root, overlay, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	composed, err := applicationmeta.Compose(nil, selected, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := interfaceRequirementIDs(composed.Manifest().InterfaceRequirements()), []string{"cache.read/v1", "email.send/v1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("effective requirements = %v, want %v", got, want)
+	}
+
+	replacement, err := applicationmeta.ParseCompleteSource("deploy/customer.yaml", []byte("interfaces: {require: [reports.read/v1]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := applicationmeta.Compose(nil, replacement, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := interfaceRequirementIDs(replaced.Manifest().InterfaceRequirements()), []string{"reports.read/v1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("replacement requirements = %v, want %v", got, want)
+	}
+}
+
+func TestCompleteRequirementDocumentsRejectSparseForms(t *testing.T) {
+	t.Parallel()
+	for _, data := range []string{
+		"interfaces: {require: {}}\n",
+		"interfaces: {require: {add: [email.send/v1]}}\n",
+		"interfaces: {require: {remove: [email.send/v1]}}\n",
 	} {
-		t.Run(test.name, func(t *testing.T) {
-			current := composeManifest(t, test.root+"\n")
-			if test.overlay != "" {
-				overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(test.overlay+"\n"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				current, err = applicationmeta.ApplyOverlay(current, overlay, composeSchemaLookup(nil))
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			for _, order := range [][]applicationmeta.Dependency{dependencies} {
-				composed, err := applicationmeta.Compose(order, current, composeSchemaLookup(nil))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if got := interfaceRequirementIDs(composed.Manifest().InterfaceRequirements()); !reflect.DeepEqual(got, test.want) {
-					t.Fatalf("effective requirements = %v, want %v", got, test.want)
-				}
-			}
-		})
+		if _, err := applicationmeta.ParseCompleteSource("plystra.yaml", []byte(data)); err == nil || !strings.Contains(err.Error(), "complete sequence") {
+			t.Fatalf("ParseCompleteSource(%q) = %v", data, err)
+		}
 	}
 }
 
 func TestInterfaceRequirementSetModeChangesLayerIdentity(t *testing.T) {
 	t.Parallel()
-	for _, pair := range [][2]string{
-		{"{}", "interfaces: {require: []}"},
-		{"interfaces: {require: {}}", "interfaces: {require: []}"},
-		{"interfaces: {require: {add: [email.send/v1]}}", "interfaces: {require: [email.send/v1]}"},
-	} {
-		left, err := applicationmeta.ConfigurationLayerDigest(composeManifest(t, pair[0]), composeSchemaLookup(nil))
-		if err != nil {
-			t.Fatal(err)
-		}
-		right, err := applicationmeta.ConfigurationLayerDigest(composeManifest(t, pair[1]), composeSchemaLookup(nil))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if left == right {
-			t.Fatalf("distinct set semantics have equal identity: %s and %s", pair[0], pair[1])
-		}
+	root, err := applicationmeta.ParseCompleteSource("plystra.yaml", []byte("interfaces: {require: []}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("interfaces: {require: {add: [email.send/v1]}}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := applicationmeta.ApplyOverlay(root, overlay, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootDigest, err := applicationmeta.ConfigurationLayerDigest(root, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlayDigest, err := applicationmeta.ConfigurationLayerDigest(overlay, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootDigest == overlayDigest || len(selected.InterfaceRequirements()) != 1 {
+		t.Fatalf("root and overlay set identities or selected requirements are incorrect: %q, %q, %#v", rootDigest, overlayDigest, selected.InterfaceRequirements())
 	}
 }
 
-func TestAddExposurePreservesRequirementSetMode(t *testing.T) {
+func TestAddExposurePreservesCompleteRequirementSet(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"[]", "{}"} {
-		original := composeManifest(t, "interfaces: {require: "+mode+"}\n")
-		updated, changed, err := applicationmeta.AddHTTPExposure([]byte("interfaces: {require: "+mode+"}\n"), mustExposureID(t, "kernel.health/v1"))
-		if err != nil || !changed {
-			t.Fatalf("AddHTTPExposure: changed %t, %v", changed, err)
-		}
-		for _, current := range []applicationmeta.Manifest{original, composeManifest(t, string(updated))} {
-			composition, err := applicationmeta.Compose([]applicationmeta.Dependency{{
-				ModulePath: "example.com/a", Manifest: composeManifest(t, "interfaces: {require: [email.send/v1]}\n"),
-			}}, current, composeSchemaLookup(nil))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := len(composition.Manifest().InterfaceRequirements()); (got == 0) != (mode == "[]") {
-				t.Fatalf("exposure mutation changed requirement mode %s: %d members", mode, got)
-			}
-		}
+	original := "interfaces: {require: [email.send/v1]}\n"
+	updated, changed, err := applicationmeta.AddHTTPExposure([]byte(original), mustExposureID(t, "kernel.health/v1"))
+	if err != nil || !changed {
+		t.Fatalf("AddHTTPExposure: changed %t, %v", changed, err)
+	}
+	manifest, err := applicationmeta.ParseCompleteSource("plystra.yaml", updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	composition, err := applicationmeta.Compose(nil, manifest, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := interfaceRequirementIDs(composition.Manifest().InterfaceRequirements()), []string{"email.send/v1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("exposure mutation changed requirement set: %v, want %v", got, want)
 	}
 }
