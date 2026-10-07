@@ -164,6 +164,10 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) || !strings.HasSuffix(err.Error(), applicationresolve.ErrDataCompilerAnalysisUnavailable.Error()) {
 		t.Fatalf("Resolve error = %v", err)
 	}
+	var unavailable *applicationresolve.DataCompilerUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("Resolve error omitted DataCompilerUnavailableError: %v", err)
+	}
 	accepted, ok := resolved.DataAnalysis()
 	if !ok || !accepted.Valid() || accepted.ModelDigest("example.records/v1") == "" {
 		t.Fatalf("accepted Data analysis = %#v, ok=%t", accepted, ok)
@@ -185,6 +189,17 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	if !ok || selectedManifest.EmitProtocol != datacompiler.EmitSchema {
 		t.Fatalf("partial resolution compiler manifest = %#v, ok=%t", selectedManifest, ok)
 	}
+	observations := resolved.DataCompilerObservations()
+	if got := dataCompilerObservationIDs(observations); got != "data-compiler-build-temporary,data-compiler-build-execution,data-compiler-cache-materialization,data-compiler-analyze-execution" {
+		t.Fatalf("cold resolution observations = %q", got)
+	}
+	if unavailableObservations := unavailable.Observations(); len(unavailableObservations) != len(observations) {
+		t.Fatalf("unavailable observations = %#v", unavailableObservations)
+	}
+	observations[0].Verification[0] = "changed"
+	if resolved.DataCompilerObservations()[0].Verification[0] == "changed" {
+		t.Fatal("resolution observations accessor is not defensive")
+	}
 	generated, generateErr := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start: project, Environment: environment, Offline: true,
 		DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"),
@@ -195,6 +210,17 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	if acquisition, ok := generated.DataCompilerAcquisition(); !ok || !acquisition.Valid() || !acquisition.CacheHit() || !acquisition.Offline() {
 		t.Fatalf("Generate partial acquisition = %#v, ok=%t", acquisition, ok)
 	}
+	if got := dataCompilerObservationIDs(generated.DataCompilerObservations()); got != "data-compiler-analyze-execution" {
+		t.Fatalf("warm offline generation observations = %q", got)
+	}
+}
+
+func dataCompilerObservationIDs(values []datacompiler.Observation) string {
+	ids := make([]string, len(values))
+	for index, value := range values {
+		ids[index] = value.ID
+	}
+	return strings.Join(ids, ",")
 }
 
 func TestDataCompilerSelectionOfflineRejectsColdModuleGraph(t *testing.T) {

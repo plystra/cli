@@ -104,6 +104,7 @@ func (s SelectionInputs) AcquireDataCompiler(ctx context.Context, options Option
 		ModuleChecksum: selection.ModuleChecksum, CacheRoot: cacheRoot,
 		GoCommand: options.GoCommand, Environment: options.Environment,
 		Offline: options.Offline,
+		Observe: options.DataCompilerObserve,
 	})
 }
 

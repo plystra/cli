@@ -42,6 +42,7 @@ type BuildOptions struct {
 	// Offline verifies the selected source and returns only an existing
 	// verified cache entry; it never invokes Go or creates cache files.
 	Offline bool
+	Observe ObservationSink
 }
 
 // Artifact is one verified compiler executable and its immutable provenance.
@@ -101,6 +102,19 @@ func Build(ctx context.Context, options BuildOptions) (Artifact, error) {
 	if options.Offline {
 		return Artifact{}, fmt.Errorf("%w: %w", ErrBuild, ErrOfflineUnavailable)
 	}
+	target := compilerObservationTarget(manifestDigest, goos, goarch)
+	cacheObserved := false
+	recordCache := func() {
+		if cacheObserved {
+			return
+		}
+		cacheObserved = true
+		recordObservation(options.Observe, Observation{
+			ID: "data-compiler-cache-materialization", Class: ObservationCacheMaterialization,
+			Phase: "compiler-acquisition", Target: target, Reason: "selected_compiler_cache_changed",
+			Reversibility: "automatic", Verification: []string{"plystra", "generate", "--check"},
+		})
+	}
 	if err := os.MkdirAll(options.CacheRoot, 0o700); err != nil {
 		return Artifact{}, fmt.Errorf("%w: create private cache: %v", ErrBuild, err)
 	}
@@ -117,6 +131,11 @@ func Build(ctx context.Context, options BuildOptions) (Artifact, error) {
 		return Artifact{}, fmt.Errorf("%w: create build output: %v", ErrBuild, err)
 	}
 	temporaryPath := temporary.Name()
+	recordObservation(options.Observe, Observation{
+		ID: "data-compiler-build-temporary", Class: ObservationTemporaryFile,
+		Phase: "compiler-acquisition", Target: "data-compiler/build-output", Reason: "compiler_build_staging",
+		Reversibility: "automatic", Verification: []string{"plystra", "generate", "--check"},
+	})
 	if err := temporary.Close(); err != nil {
 		_ = os.Remove(temporaryPath)
 		return Artifact{}, fmt.Errorf("%w: prepare build output: %v", ErrBuild, err)
@@ -125,10 +144,25 @@ func Build(ctx context.Context, options BuildOptions) (Artifact, error) {
 	environment := buildEnvironment(options.Environment)
 	environment = replaceEnvironment(environment, "GOCACHE", goCache)
 	environment = replaceEnvironment(environment, "GOTMPDIR", goTemp)
-	if err := gocommand.Run(ctx, gocommand.Options{
+	started, err := gocommand.RunObserved(ctx, gocommand.Options{
 		Command: options.GoCommand, Directory: selection.Root, Environment: environment,
-	}, "build", "-mod=readonly", "-o", temporaryPath, manifest.CommandImportPath); err != nil {
+	}, "build", "-mod=readonly", "-o", temporaryPath, manifest.CommandImportPath)
+	if err != nil {
+		if started {
+			recordObservation(options.Observe, Observation{
+				ID: "data-compiler-build-execution", Class: ObservationTrustedExecution,
+				Phase: "compiler-acquisition", Target: target, Reason: "trusted_compiler_build",
+				Reversibility: "none", Verification: []string{"plystra", "generate", "--check"},
+			})
+		}
 		return Artifact{}, fmt.Errorf("%w: %v", ErrBuild, err)
+	}
+	if started {
+		recordObservation(options.Observe, Observation{
+			ID: "data-compiler-build-execution", Class: ObservationTrustedExecution,
+			Phase: "compiler-acquisition", Target: target, Reason: "trusted_compiler_build",
+			Reversibility: "none", Verification: []string{"plystra", "generate", "--check"},
+		})
 	}
 	binaryDigest, size, err := fileDigest(temporaryPath)
 	if err != nil {
@@ -139,6 +173,7 @@ func Build(ctx context.Context, options BuildOptions) (Artifact, error) {
 	if err := replaceFile(temporaryPath, path); err != nil {
 		return Artifact{}, fmt.Errorf("%w: install compiler output: %v", ErrBuild, err)
 	}
+	recordCache()
 	record := cacheRecord{
 		Schema: cacheRecordSchema, Key: key, ModulePath: ModulePath,
 		ModuleVersion: options.ModuleVersion, ModuleChecksum: options.ModuleChecksum,

@@ -20,12 +20,13 @@ func (s SelectionInputs) AnalyzeData(ctx context.Context, options Options) (data
 }
 
 type dataAnalyzeRun struct {
-	response datacompiler.AnalyzeResponse
-	snapshot datacompiler.AnalyzeSourceSnapshot
-	bounds   datacompiler.Bounds
-	artifact datacompiler.Artifact
-	manifest datacompiler.Manifest
-	status   DataCompilerAcquisition
+	response     datacompiler.AnalyzeResponse
+	snapshot     datacompiler.AnalyzeSourceSnapshot
+	bounds       datacompiler.Bounds
+	artifact     datacompiler.Artifact
+	manifest     datacompiler.Manifest
+	status       DataCompilerAcquisition
+	observations []datacompiler.Observation
 }
 
 func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (dataAnalyzeRun, error) {
@@ -36,11 +37,20 @@ func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (data
 	if err != nil {
 		return dataAnalyzeRun{}, fmt.Errorf("%w: select compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
+	run := dataAnalyzeRun{}
+	parentObserve := options.DataCompilerObserve
+	observe := func(observation datacompiler.Observation) {
+		run.observations = append(run.observations, observation)
+		if parentObserve != nil {
+			parentObserve(observation)
+		}
+	}
+	options.DataCompilerObserve = observe
 	artifact, err := s.AcquireDataCompiler(ctx, options)
 	if err != nil {
-		return dataAnalyzeRun{}, fmt.Errorf("%w: acquire compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return run, fmt.Errorf("%w: acquire compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
-	run := dataAnalyzeRun{artifact: artifact, manifest: selection.Manifest, status: newDataCompilerAcquisition(artifact, options.Offline)}
+	run.artifact, run.manifest, run.status = artifact, selection.Manifest, newDataCompilerAcquisition(artifact, options.Offline)
 	modules := dataSnapshotModules(s, selection)
 	snapshot, err := datacompiler.BuildAnalyzeSourceSnapshot(ctx, datacompiler.AnalyzeSourceSnapshotOptions{
 		DataPackages:     s.declarations.DataPackages(),
@@ -69,7 +79,7 @@ func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (data
 	if err != nil {
 		return run, fmt.Errorf("%w: build request: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
-	analyzeOptions := datacompiler.AnalyzeOptions{Environment: options.Environment, Timeout: options.ExecutionTimeout}
+	analyzeOptions := datacompiler.AnalyzeOptions{Environment: options.Environment, Timeout: options.ExecutionTimeout, Observe: observe}
 	response, err := datacompiler.Analyze(ctx, artifact, request, analyzeOptions)
 	if err != nil {
 		return run, fmt.Errorf("%w: invoke compiler: %w", ErrDataCompilerAnalysisUnavailable, err)

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/plystra/cli/internal/modulelocate"
 	"golang.org/x/mod/modfile"
@@ -41,16 +42,51 @@ type Options struct {
 // Run invokes the Go tool with an isolated working directory and sanitized
 // diagnostics suitable for returning across the CLI boundary.
 func Run(ctx context.Context, options Options, arguments ...string) error {
+	_, err := RunObserved(ctx, options, arguments...)
+	return err
+}
+
+// RunObserved invokes the Go tool and reports whether its process started.
+// The distinction lets callers account for trusted execution without
+// claiming an effect when the command could not be started.
+func RunObserved(ctx context.Context, options Options, arguments ...string) (bool, error) {
 	process := commandContext(ctx, options, arguments...)
-	output, err := process.CombinedOutput()
-	if err == nil {
-		return nil
+	var output combinedBuffer
+	process.Stdout = &output
+	process.Stderr = &output
+	if err := process.Start(); err != nil {
+		return false, formatRunError(ctx, arguments, output.Bytes(), err, options.Directory)
 	}
+	err := process.Wait()
+	if err == nil {
+		return true, nil
+	}
+	return true, formatRunError(ctx, arguments, output.Bytes(), err, options.Directory)
+}
+
+type combinedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *combinedBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(data)
+}
+
+func (b *combinedBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]byte(nil), b.buffer.Bytes()...)
+}
+
+func formatRunError(ctx context.Context, arguments []string, output []byte, err error, directory string) error {
 	operation := "go " + strings.Join(arguments, " ")
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return fmt.Errorf("%s: %w", operation, ctxErr)
 	}
-	message := SanitizeOutput(string(output), options.Directory)
+	message := SanitizeOutput(string(output), directory)
 	if message == "" {
 		return fmt.Errorf("%w: %s", ErrRun, operation)
 	}

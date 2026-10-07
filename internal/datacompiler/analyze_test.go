@@ -25,9 +25,16 @@ func TestMain(m *testing.M) {
 
 func TestAnalyzeAcceptsOneVerifiedSuccessFrame(t *testing.T) {
 	artifact := testAnalyzeArtifact(t)
-	response, err := Analyze(context.Background(), artifact, validAnalyzeRequest(t, artifact), AnalyzeOptions{Environment: []string{"PLYSTRA_ANALYZE_TEST_MODE=success"}})
+	var observations []Observation
+	response, err := Analyze(context.Background(), artifact, validAnalyzeRequest(t, artifact), AnalyzeOptions{
+		Environment: []string{"PLYSTRA_ANALYZE_TEST_MODE=success"},
+		Observe:     func(observation Observation) { observations = append(observations, observation) },
+	})
 	if err != nil || response.Status != analyzeStatusOK || len(response.Output) == 0 {
 		t.Fatalf("Analyze() = %#v, %v", response, err)
+	}
+	if len(observations) != 1 || observations[0].ID != "data-compiler-analyze-execution" || observations[0].Class != ObservationTrustedExecution {
+		t.Fatalf("Analyze observations = %#v", observations)
 	}
 }
 

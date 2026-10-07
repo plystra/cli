@@ -35,6 +35,7 @@ var (
 type AnalyzeOptions struct {
 	Timeout     time.Duration
 	Environment []string
+	Observe     ObservationSink
 }
 
 // Analyze starts the selected compiler, sends one immutable request frame,
@@ -65,7 +66,22 @@ func Analyze(ctx context.Context, artifact Artifact, request []byte, options Ana
 	stderr := newAnalyzeBuffer(maximumCompilerStderr)
 	command.Stdout = stdout
 	command.Stderr = stderr
-	if err := command.Run(); err != nil {
+	if err := command.Start(); err != nil {
+		if errors.Is(executionContext.Err(), context.DeadlineExceeded) {
+			return AnalyzeResponse{}, fmt.Errorf("%w: %w", ErrAnalyze, ErrAnalyzeTimeout)
+		}
+		if executionContext.Err() != nil {
+			return AnalyzeResponse{}, fmt.Errorf("%w: %w", ErrAnalyze, executionContext.Err())
+		}
+		return AnalyzeResponse{}, fmt.Errorf("%w: %w", ErrAnalyze, ErrAnalyzeCrash)
+	}
+	recordObservation(options.Observe, Observation{
+		ID: "data-compiler-analyze-execution", Class: ObservationTrustedExecution,
+		Phase: "analyze", Target: compilerObservationTarget(artifact.ManifestDigest, artifact.GOOS, artifact.GOARCH),
+		Reason: "trusted_compiler_analyze", Reversibility: "none",
+		Verification: []string{"plystra", "generate", "--check"},
+	})
+	if err := command.Wait(); err != nil {
 		if errors.Is(executionContext.Err(), context.DeadlineExceeded) {
 			return AnalyzeResponse{}, fmt.Errorf("%w: %w", ErrAnalyze, ErrAnalyzeTimeout)
 		}

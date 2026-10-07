@@ -14,9 +14,11 @@ import (
 
 func TestBuildCreatesAndReusesCompilerCache(t *testing.T) {
 	root := writeCompilerModule(t)
+	var observations []datacompiler.Observation
 	options := datacompiler.BuildOptions{
 		ModuleRoot: root, ModuleVersion: "v0.0.0-test", ModuleChecksum: testModuleChecksum(t, root),
 		CacheRoot: filepath.Join(t.TempDir(), "cache"), Environment: []string{"GOWORK=bad"},
+		Observe: func(observation datacompiler.Observation) { observations = append(observations, observation) },
 	}
 	first, err := datacompiler.Build(context.Background(), options)
 	if err != nil {
@@ -28,12 +30,18 @@ func TestBuildCreatesAndReusesCompilerCache(t *testing.T) {
 	if _, err := os.Stat(first.Path); err != nil {
 		t.Fatalf("built compiler = %v", err)
 	}
+	if got := observationIDs(observations); got != "data-compiler-build-temporary,data-compiler-build-execution,data-compiler-cache-materialization" {
+		t.Fatalf("cold build observations = %q", got)
+	}
 	second, err := datacompiler.Build(context.Background(), options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !second.CacheHit || second.Path != first.Path || second.BinaryDigest != first.BinaryDigest {
 		t.Fatalf("second artifact = %#v, first = %#v", second, first)
+	}
+	if len(observations) != 3 {
+		t.Fatalf("warm cache observations = %#v", observations)
 	}
 	file, err := os.OpenFile(first.Path, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
@@ -52,6 +60,9 @@ func TestBuildCreatesAndReusesCompilerCache(t *testing.T) {
 	}
 	if third.CacheHit || third.Path != first.Path || third.BinaryDigest != first.BinaryDigest {
 		t.Fatalf("tampered cache was not rebuilt: %#v, first = %#v", third, first)
+	}
+	if got := observationIDs(observations[3:]); got != "data-compiler-build-temporary,data-compiler-build-execution,data-compiler-cache-materialization" {
+		t.Fatalf("rebuilt cache observations = %q", got)
 	}
 }
 
@@ -228,4 +239,12 @@ func testModuleChecksum(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return checksum
+}
+
+func observationIDs(values []datacompiler.Observation) string {
+	ids := make([]string, len(values))
+	for index, value := range values {
+		ids[index] = value.ID
+	}
+	return strings.Join(ids, ",")
 }

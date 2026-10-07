@@ -103,6 +103,29 @@ func TestRunUsesDirectoryEnvironmentAndArguments(t *testing.T) {
 	}
 }
 
+func TestRunObservedReportsWhetherProcessStarted(t *testing.T) {
+	t.Parallel()
+
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatalf("Executable: %v", err)
+	}
+	directory := t.TempDir()
+	started, err := RunObserved(context.Background(), Options{
+		Command:     command,
+		Directory:   directory,
+		Environment: append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=success", "EXPECTED_DIRECTORY="+directory),
+	}, "test", "./...")
+	if !started || err != nil {
+		t.Fatalf("successful RunObserved = started %t, error %v", started, err)
+	}
+
+	started, err = RunObserved(context.Background(), Options{Command: filepath.Join(t.TempDir(), "missing-go")}, "version")
+	if started || !errors.Is(err, ErrRun) {
+		t.Fatalf("failed-to-start RunObserved = started %t, error %v", started, err)
+	}
+}
+
 func TestRunIsolatesModulesExcludedFromAnImplicitParentWorkspace(t *testing.T) {
 	t.Parallel()
 
