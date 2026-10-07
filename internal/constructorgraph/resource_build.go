@@ -252,6 +252,11 @@ func (b *resourceGraphBuilder) addBinding(input ResourceBindingInput) error {
 	if exists {
 		dependency.provider, dependency.selectionSources = target.provider.Symbol(), target.Sources()
 	} else if generated, generatedExists := b.generated[input.Target]; generatedExists && generated.resourceID == dependency.resourceID {
+		if input.Namespace == ResourceConsumerImplementation {
+			failure.detail = "generated Resource binding requires Data emission and installation"
+			failure.generatedCandidates = []GeneratedResourceNode{generated}
+			return failure
+		}
 		dependency.provider, dependency.selectionSources = generated.constructor, generated.Sources()
 	} else {
 		failure.detail = "target instance is not selected"
@@ -311,6 +316,9 @@ func (b *resourceGraphBuilder) resolve(graph *Graph) error {
 	}
 	sort.Strings(generatedNames)
 	for _, name := range generatedNames {
+		if err := b.visitGenerated(name); err != nil {
+			return err
+		}
 		node := b.generated[name]
 		record := b.consumers[resourceConsumer{ResourceConsumerInstance, name}]
 		for _, declared := range record.dependencies {
@@ -350,7 +358,10 @@ func (b *resourceGraphBuilder) bind(declared ResourceDependency) (ResourceDepend
 		if len(candidates)+len(generated) > 1 {
 			condition = ErrAmbiguousResourceBinding
 		}
-		return ResourceDependency{}, &ResourceBindingError{condition: condition, dependency: declared, candidates: cloneResourceNodes(candidates), detail: "implicit binding requires exactly one compatible selected instance"}
+		return ResourceDependency{}, &ResourceBindingError{condition: condition, dependency: declared, candidates: cloneResourceNodes(candidates), generatedCandidates: cloneGeneratedResourceNodes(generated), detail: "implicit binding requires exactly one compatible selected instance"}
+	}
+	if declared.namespace == ResourceConsumerImplementation && len(generated) != 0 {
+		return ResourceDependency{}, &ResourceBindingError{condition: ErrInvalidResourceBinding, dependency: declared, generatedCandidates: cloneGeneratedResourceNodes(generated), detail: "generated Resource binding requires Data emission and installation"}
 	}
 	if len(candidates) == 1 {
 		target := candidates[0]
@@ -388,12 +399,47 @@ func (b *resourceGraphBuilder) visit(name string) error {
 			if err := b.visit(dependency.instanceName); err != nil {
 				return err
 			}
+		} else if err := b.visitGenerated(dependency.instanceName); err != nil {
+			return err
 		}
 		b.stack = b.stack[:len(b.stack)-1]
 		node.dependencies = append(node.dependencies, dependency)
 	}
 	b.states[name] = visitDone
 	b.order = append(b.order, node)
+	return nil
+}
+
+func (b *resourceGraphBuilder) visitGenerated(name string) error {
+	if b.states[name] == visitDone {
+		return nil
+	}
+	if b.states[name] == visitActive {
+		for index, step := range b.stack {
+			if step.consumer == name {
+				return &ResourceCycleError{steps: cloneResourceDependencies(b.stack[index:])}
+			}
+		}
+		return fmt.Errorf("%w: generated Resource cycle has no matching active instance", ErrInvalidInput)
+	}
+	b.states[name] = visitActive
+	record := b.consumers[resourceConsumer{ResourceConsumerInstance, name}]
+	for _, declared := range record.dependencies {
+		dependency, err := b.bind(declared)
+		if err != nil {
+			return err
+		}
+		b.stack = append(b.stack, dependency)
+		if _, generated := b.generated[dependency.instanceName]; generated {
+			if err := b.visitGenerated(dependency.instanceName); err != nil {
+				return err
+			}
+		} else if err := b.visit(dependency.instanceName); err != nil {
+			return err
+		}
+		b.stack = b.stack[:len(b.stack)-1]
+	}
+	b.states[name] = visitDone
 	return nil
 }
 

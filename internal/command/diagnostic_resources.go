@@ -124,6 +124,9 @@ func resourceResolutionSources(err error) []diagnosticjson.Source {
 			position := provider.Declaration().Position()
 			sources = append(sources, diagnosticjson.Source{Module: provider.ModulePath(), Path: position.Path, Kind: "resource-provider-constructor", Line: position.Line, Column: position.Column})
 		}
+		for _, candidate := range binding.GeneratedCandidates() {
+			appendSources(candidate.Sources(), "data-member-declaration")
+		}
 	case errors.As(err, &cycle) && cycle != nil:
 		for _, step := range cycle.Steps() {
 			appendDependency(step)

@@ -53,11 +53,12 @@ func (e *ResourceInstanceError) Error() string {
 // An unresolved Implementation dependency also retains its Interface activation
 // path; Resource instances and explicit binding validation do not create roots.
 type ResourceBindingError struct {
-	condition  error
-	dependency ResourceDependency
-	candidates []ResourceNode
-	detail     string
-	path       dependencyPath
+	condition           error
+	dependency          ResourceDependency
+	candidates          []ResourceNode
+	generatedCandidates []GeneratedResourceNode
+	detail              string
+	path                dependencyPath
 }
 
 func (e *ResourceBindingError) Unwrap() error { return e.condition }
@@ -79,6 +80,9 @@ func (e *ResourceBindingError) SourcePath() string                 { return e.so
 func (e *ResourceBindingError) Line() int                          { return e.source().Line }
 func (e *ResourceBindingError) Column() int                        { return e.source().Column }
 func (e *ResourceBindingError) Candidates() []ResourceNode         { return cloneResourceNodes(e.candidates) }
+func (e *ResourceBindingError) GeneratedCandidates() []GeneratedResourceNode {
+	return cloneGeneratedResourceNodes(e.generatedCandidates)
+}
 
 // Root returns the first deterministic Interface root reaching an unresolved
 // Implementation consumer, or zero for Resource instances and explicit errors.
@@ -148,6 +152,9 @@ func (e *ResourceBindingError) Error() string {
 	}
 	for _, candidate := range e.candidates {
 		fmt.Fprintf(&message, "; instance %s provides %s using %s at %s selected from [%s]", candidate.name, candidate.resourceID, candidate.provider.Symbol(), candidate.provider.Source(), resourceSourceSummary(candidate.sources))
+	}
+	for _, candidate := range e.generatedCandidates {
+		fmt.Fprintf(&message, "; generated instance %s provides %s using %s from [%s]", candidate.name, candidate.resourceID, candidate.constructor, resourceSourceSummary(candidate.sources))
 	}
 	message.WriteString("; correction: select a compatible instance and bind the exact consumer parameter, or remove the invalid binding")
 	return message.String()
