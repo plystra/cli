@@ -335,11 +335,26 @@ func compilerProxyEnvironment(t *testing.T, proxy string) []string {
 	if runtime.GOOS == "windows" {
 		proxyPath = "/" + proxyPath
 	}
+	moduleCache := filepath.Join(t.TempDir(), "go-mod")
+	t.Cleanup(func() {
+		if err := makeWritableTree(moduleCache); err != nil {
+			t.Logf("restore module cache permissions: %v", err)
+		}
+	})
 	return goEnvironment(map[string]string{
 		"GOCACHE": filepath.Join(t.TempDir(), "go-build"), "GOENV": "off",
-		"GOMODCACHE": filepath.Join(t.TempDir(), "go-mod"),
+		"GOMODCACHE": moduleCache,
 		"GONOPROXY":  "none", "GOPRIVATE": "", "GOPROXY": (&url.URL{Scheme: "file", Path: proxyPath}).String(),
 		"GOSUMDB": "off", "GOTOOLCHAIN": "local", "GOWORK": "off",
+	})
+}
+
+func makeWritableTree(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chmod(path, 0o700)
 	})
 }
 
