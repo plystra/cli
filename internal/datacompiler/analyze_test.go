@@ -16,6 +16,10 @@ func TestMain(m *testing.M) {
 		runAnalyzeTestCompiler(mode)
 		return
 	}
+	if mode := os.Getenv("PLYSTRA_EMIT_TEST_MODE"); mode != "" {
+		runEmitTestCompiler(mode)
+		return
+	}
 	os.Exit(m.Run())
 }
 
