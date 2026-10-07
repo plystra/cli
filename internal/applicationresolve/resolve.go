@@ -297,7 +297,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err})
 		}
-		if _, err := validateDataAnalysisWithBounds(run.response, memberIDs, run.snapshot, run.bounds, true); err != nil {
+		acceptance, err := validateDataAnalysisWithBounds(run.response, memberIDs, run.snapshot, run.bounds, true)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err)})
+		}
+		if err := ValidateDataAssignments(manifest, acceptance); err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err)})
 		}
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable})

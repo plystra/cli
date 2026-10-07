@@ -123,7 +123,7 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	})
 	project := filepath.Join(root, "project")
 	writeFile(t, filepath.Join(project, "go.mod"), "module example.com/project\n\ngo 1.26\n\nrequire github.com/plystra/data v0.3.0\n")
-	writeFile(t, filepath.Join(project, "plystra.yaml"), "data: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.primary: {use: example.com/provider.New}}}\ndata: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
 	writeFile(t, filepath.Join(project, "resource", "resource.go"), "package resource\n\n//plystra:resource data.database/v1\ntype Resource interface { Ping() error }\n")
 	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"example.com/project/resource\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[resource.Resource]{Namespace: \"records\"}\n")
 	environment := compilerProxyEnvironment(t, proxy)

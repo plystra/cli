@@ -15,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/datacompiler"
 )
 
@@ -32,6 +33,16 @@ type DataAnalysisAcceptance struct {
 	resultDigest   string
 	snapshotDigest string
 	modelDigests   map[string]string
+	members        map[string]dataAnalysisMember
+}
+
+type dataAnalysisMember struct {
+	model         dataModel
+	modelDigest   string
+	accessPackage string
+	accessType    string
+	accessID      string
+	migrationOnly bool
 }
 
 // ResultDigest returns the compiler result identity accepted by Core.
@@ -289,6 +300,7 @@ func validateDataAnalysisWithBounds(response datacompiler.AnalyzeResponse, membe
 
 	eligible, resources := dataSnapshotIndexes(snapshot)
 	modelDigests := make(map[string]string, len(rawRoots))
+	analyzedMembers := make(map[string]dataAnalysisMember, len(rawRoots))
 	previousID := ""
 	for _, rawRoot := range rawRoots {
 		if err := requireDataFields(rawRoot, "member_id", "package_path", "file_path", "symbol", "model", "migration_only", "source_digest", "declaration_pos"); err != nil {
@@ -319,6 +331,11 @@ func validateDataAnalysisWithBounds(response datacompiler.AnalyzeResponse, membe
 			return DataAnalysisAcceptance{}, fmt.Errorf("Data root %q model digest: %w", root.MemberID, err)
 		}
 		modelDigests[root.MemberID] = modelDigest
+		analyzedMembers[root.MemberID] = dataAnalysisMember{
+			model: root.Model, modelDigest: modelDigest,
+			accessPackage: root.AccessPackage, accessType: root.AccessType,
+			accessID: root.AccessID, migrationOnly: root.MigrationOnly,
+		}
 		if err := validateDataAccess(root, resources); err != nil {
 			return DataAnalysisAcceptance{}, fmt.Errorf("Data root %q access contract: %w", root.MemberID, err)
 		}
@@ -337,7 +354,60 @@ func validateDataAnalysisWithBounds(response datacompiler.AnalyzeResponse, membe
 		resultDigest:   response.OutputDigest,
 		snapshotDigest: snapshot.Digest(),
 		modelDigests:   modelDigests,
+		members:        analyzedMembers,
 	}, nil
+}
+
+// ValidateDataAssignments checks the Core-owned mapping from accepted Data
+// roots to ordinary configured Resource instances. It does not create graph
+// nodes or install generated access artifacts.
+func ValidateDataAssignments(manifest applicationmeta.Manifest, acceptance DataAnalysisAcceptance) error {
+	resources := make(map[string]struct{}, len(manifest.ResourceInstances()))
+	for _, instance := range manifest.ResourceInstances() {
+		resources[instance.Name()] = struct{}{}
+	}
+	members := manifest.DataMembers()
+	configured := make(map[string]applicationmeta.DataMember, len(members))
+	accesses := make(map[string]string)
+	for _, member := range members {
+		configured[member.ID()] = member
+	}
+	for _, member := range members {
+		if _, exists := resources[member.Resource()]; !exists {
+			return fmt.Errorf("Data member %q references missing Resource instance %q", member.ID(), member.Resource())
+		}
+		analyzed, exists := acceptance.members[member.ID()]
+		if !exists {
+			return fmt.Errorf("Data member %q has no accepted analyze result", member.ID())
+		}
+		hasAccessContract := analyzed.accessPackage != ""
+		if member.Access() == "" {
+			if hasAccessContract || !analyzed.migrationOnly {
+				return fmt.Errorf("Data member %q requires an explicit access instance", member.ID())
+			}
+		} else {
+			if !hasAccessContract || analyzed.migrationOnly {
+				return fmt.Errorf("Data member %q configures access without an accepted Access contract", member.ID())
+			}
+			if _, exists := resources[member.Access()]; exists {
+				return fmt.Errorf("Data access instance %q collides with a Resource instance", member.Access())
+			}
+			if previous, exists := accesses[member.Access()]; exists {
+				return fmt.Errorf("Data access instance %q is assigned to both %q and %q", member.Access(), previous, member.ID())
+			}
+			accesses[member.Access()] = member.ID()
+		}
+		for _, imported := range analyzed.model.Imports {
+			other, exists := configured[imported]
+			if !exists {
+				return fmt.Errorf("Data member %q imports unassigned member %q", member.ID(), imported)
+			}
+			if other.Resource() != member.Resource() {
+				return fmt.Errorf("Data member %q crosses Resource boundary to %q", member.ID(), imported)
+			}
+		}
+	}
+	return nil
 }
 
 func defaultDataAnalyzeBounds() datacompiler.Bounds {
