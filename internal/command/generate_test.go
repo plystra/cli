@@ -998,7 +998,17 @@ func TestRunGenerateRepairsKernelDependencyAndReadOnlyCommandsReportSource(t *te
 		assertNoCommandTransactions(t, root)
 	}
 
-	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--env", "production"}, root, environment)
+	offlineBefore := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--offline", "--env", "production"}, root, environment)
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "go.mod must directly require github.com/plystra/kernel") || strings.Contains(stderr, root) || strings.Contains(stderr, filepath.ToSlash(root)) {
+		t.Fatalf("offline generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, offlineBefore) {
+		t.Fatalf("offline generate changed the Project:\nbefore: %#v\nafter:  %#v", offlineBefore, after)
+	}
+	assertNoCommandTransactions(t, root)
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--env", "production"}, root, environment)
 	if exitCode != 0 || stdout != "generated "+modulePath+" in "+commandCanonicalPath(t, root)+"\n" || stderr != "" {
 		t.Fatalf("generate repair = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -200,6 +201,10 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrGenerate)
 	}
+	if options.Offline && options.MutateModule != nil {
+		return Result{}, fmt.Errorf("%w: offline generation cannot mutate Go module metadata", ErrGenerate)
+	}
+	options.Environment = generationEnvironment(options.Environment, options.Offline)
 	prepared, err := prepare(ctx, options, options.Start)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
@@ -295,6 +300,28 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		documentationComparison: prepared.documentationComparison,
 		evolutionAssessment:     prepared.evolutionAssessment,
 	}, nil
+}
+
+func generationEnvironment(environment []string, offline bool) []string {
+	result := append([]string(nil), environment...)
+	if result == nil {
+		result = os.Environ()
+	}
+	if !offline {
+		return result
+	}
+	for _, setting := range []string{"GOPROXY=off", "GONOPROXY=none", "GOSUMDB=off", "GOTOOLCHAIN=local"} {
+		key, _, _ := strings.Cut(setting, "=")
+		filtered := make([]string, 0, len(result)+1)
+		for _, entry := range result {
+			name, _, _ := strings.Cut(entry, "=")
+			if !strings.EqualFold(name, key) {
+				filtered = append(filtered, entry)
+			}
+		}
+		result = append(filtered, setting)
+	}
+	return result
 }
 
 func runModuleMutation(ctx context.Context, options Options, root string, requirements []ModuleRequirement, operation func() error) error {

@@ -708,7 +708,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		}
 		var result applicationgenerate.Result
 		var err error
-		if generate.check {
+		if generate.check || generate.offline {
 			result, err = applicationgenerate.Generate(ctx, options)
 		} else {
 			project, locateErr := projectlocate.Find(workingDirectory)
