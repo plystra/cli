@@ -87,6 +87,33 @@ func TestResolveAcquiresSelectedCompilerBeforeAnalyzeBoundary(t *testing.T) {
 	}
 }
 
+func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
+	root := t.TempDir()
+	proxy := filepath.Join(root, "proxy")
+	manifest := dataCompilerManifest(t)
+	writeCompilerProxyModule(t, proxy, datacompiler.ModulePath, "v0.3.0", "module github.com/plystra/data\n\ngo 1.26\n", map[string][]byte{
+		"plystra-data-compiler.json":        manifest,
+		"declaration/declaration.go":        []byte("package declaration\n\ntype NoAccess struct{}\ntype Member[Access any] struct { Namespace string; Access Access }\n"),
+		"cmd/plystra-data-compiler/main.go": []byte(snapshotCheckingCompilerSource),
+	})
+	project := filepath.Join(root, "project")
+	writeFile(t, filepath.Join(project, "go.mod"), "module example.com/project\n\ngo 1.26\n\nrequire github.com/plystra/data v0.3.0\n")
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "data: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
+	writeFile(t, filepath.Join(project, "resource", "resource.go"), "package resource\n\n//plystra:resource data.database/v1\ntype Resource interface { Ping() error }\n")
+	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"example.com/project/resource\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[resource.Resource]{Namespace: \"records\"}\n")
+	environment := compilerProxyEnvironment(t, proxy)
+	runCompilerGo(t, project, environment, "mod", "download", "all")
+	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), CompileTimeout: 30 * time.Second,
+	})
+	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) {
+		t.Fatalf("Resolve error = %v", err)
+	}
+	if errors.Is(err, datacompiler.ErrAnalyze) {
+		t.Fatalf("analyze child process did not receive the Resource source closure: %v", err)
+	}
+}
+
 func TestDataCompilerSelectionOfflineRejectsColdModuleGraph(t *testing.T) {
 	root := t.TempDir()
 	proxy := filepath.Join(root, "proxy")
@@ -206,6 +233,52 @@ func dataCompilerManifest(t *testing.T) []byte {
 	}
 	return data
 }
+
+const snapshotCheckingCompilerSource = `package main
+
+import (
+    "encoding/binary"
+    "encoding/json"
+    "io"
+    "os"
+)
+
+func main() {
+    var header [4]byte
+    if _, err := io.ReadFull(os.Stdin, header[:]); err != nil { os.Exit(2) }
+    payload := make([]byte, binary.BigEndian.Uint32(header[:]))
+    if _, err := io.ReadFull(os.Stdin, payload); err != nil { os.Exit(2) }
+    var input map[string]any
+    if json.Unmarshal(payload, &input) != nil { os.Exit(2) }
+    snapshot, ok := input["snapshot"].(map[string]any)
+    if !ok { os.Exit(2) }
+    packages, packagesOK := snapshot["packages"].([]any)
+    resources, resourcesOK := snapshot["resources"].([]any)
+    foundPackage, foundResource := false, false
+    if packagesOK {
+        for _, value := range packages {
+            packageValue, ok := value.(map[string]any)
+            if ok && packageValue["import_path"] == "example.com/project/resource" { foundPackage = true }
+        }
+    }
+    if resourcesOK {
+        for _, value := range resources {
+            resourceValue, ok := value.(map[string]any)
+            if ok && resourceValue["import_path"] == "example.com/project/resource" { foundResource = true }
+        }
+    }
+    if !foundPackage || !foundResource { os.Exit(2) }
+    response := map[string]any{
+        "schema": input["schema"], "phase": input["phase"], "request_id": input["request_id"], "input_digest": input["input_digest"],
+        "status": "rejected", "output": map[string]any{"roots": []any{}, "valid": false, "truncated": false},
+        "diagnostics": []any{map[string]string{"code": "invalid-snapshot", "message": "test rejection", "action": "fix"}}, "truncated": false,
+    }
+    data, _ := json.Marshal(response)
+    binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+    _, _ = os.Stdout.Write(header[:])
+    _, _ = os.Stdout.Write(data)
+}
+`
 
 func writeCompilerProxyModule(t *testing.T, proxy, path, version, goMod string, files map[string][]byte) {
 	t.Helper()

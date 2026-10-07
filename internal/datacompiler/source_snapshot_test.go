@@ -138,6 +138,40 @@ func TestBuildAnalyzeSourceSnapshotHonorsCompilerFrameBound(t *testing.T) {
 	}
 }
 
+func TestBuildAnalyzeSourceSnapshotIncludesResourceContractImportClosure(t *testing.T) {
+	t.Parallel()
+	compilerRoot := writeSnapshotCompilerModule(t)
+	projectRoot := writeSnapshotProjectWithResource(t, compilerRoot)
+	module, err := modulelocate.Find(projectRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovery, err := interfaceinventory.DiscoverApplication(t.Context(), module, moduledependency.Index{}, interfaceinventory.Options{Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := datacompiler.BuildAnalyzeSourceSnapshot(t.Context(), datacompiler.AnalyzeSourceSnapshotOptions{
+		DataPackages: discovery.DataPackages(), ResourcePackages: discovery.Resources().Resources(),
+		Modules:     []datacompiler.SnapshotModule{{ModulePath: "example.com/app", Root: projectRoot}},
+		GoDirectory: projectRoot, Compiler: selectSnapshotCompiler(t, compilerRoot),
+		Environment: goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := snapshot.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), projectRoot) || !strings.Contains(string(data), `"import_path":"example.com/app/resource"`) {
+		t.Fatalf("resource support package missing or private root leaked: %q", data)
+	}
+	resources := snapshot.ResourceContracts()
+	if len(resources) != 1 || resources[0].ImportPath != "example.com/app/resource" || resources[0].TypeName != "Resource" || resources[0].ID != "data.database/v1" {
+		t.Fatalf("Resource contracts = %#v", resources)
+	}
+}
+
 func writeSnapshotCompilerModule(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -161,6 +195,13 @@ func writeSnapshotProject(t *testing.T, compilerRoot, dataTag string) string {
 	if dataTag != "" {
 		writeSnapshotFile(t, filepath.Join(root, "model", "selected.go"), "//go:build "+dataTag+"\n\npackage model\n\nconst Selected = true\n")
 	}
+	return root
+}
+
+func writeSnapshotProjectWithResource(t *testing.T, compilerRoot string) string {
+	root := writeSnapshotProject(t, compilerRoot, "")
+	writeSnapshotFile(t, filepath.Join(root, "resource", "resource.go"), "package resource\n\n//plystra:resource data.database/v1\ntype Resource interface { Ping() error }\n")
+	writeSnapshotFile(t, filepath.Join(root, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"example.com/app/resource\"\n)\n\n//plystra:data records.item/v1\nvar Records = declaration.Member[resource.Resource]{Namespace: \"records\"}\n")
 	return root
 }
 

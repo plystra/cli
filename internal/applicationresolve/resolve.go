@@ -50,8 +50,8 @@ var (
 	// ErrDataCompilerUnavailable reports selected Data activation before the
 	// official compiler acquisition or analyze/emit integration is available.
 	ErrDataCompilerUnavailable = errors.New("Data compiler integration is unavailable")
-	// ErrDataCompilerAnalysisUnavailable reports a verified compiler that has
-	// not yet been connected to the pre-Freeze analyze phase.
+	// ErrDataCompilerAnalysisUnavailable reports a verified compiler whose
+	// complete pre-Freeze analyze acceptance is not yet available.
 	ErrDataCompilerAnalysisUnavailable = errors.New("Data compiler analyze integration is unavailable")
 )
 
@@ -289,8 +289,16 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	manifest := composition.Manifest()
 	if members := manifest.DataMembers(); len(members) != 0 {
-		if _, err := inputs.AcquireDataCompiler(ctx, options); err != nil {
+		memberIDs := make([]string, len(members))
+		for index, member := range members {
+			memberIDs[index] = member.ID()
+		}
+		response, err := inputs.AnalyzeData(ctx, options)
+		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err})
+		}
+		if err := ValidateDataRoots(response, memberIDs); err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err)})
 		}
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable})
 	}
