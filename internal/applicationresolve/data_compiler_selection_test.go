@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -84,6 +85,30 @@ func TestResolveAcquiresSelectedCompilerBeforeAnalyzeBoundary(t *testing.T) {
 	_, err = applicationresolve.Resolve(t.Context(), options)
 	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) {
 		t.Fatalf("offline warm Resolve error = %v", err)
+	}
+}
+
+func TestGenerateForwardsOfflineCompilerAvailability(t *testing.T) {
+	root := t.TempDir()
+	proxy := filepath.Join(root, "proxy")
+	writeCompilerProxyModule(t, proxy, datacompiler.ModulePath, "v0.2.0", "module github.com/plystra/data\n\ngo 1.26\n", map[string][]byte{
+		"plystra-data-compiler.json":        dataCompilerManifest(t),
+		"cmd/plystra-data-compiler/main.go": []byte("package main\nfunc main() {}\n"),
+	})
+	project := filepath.Join(root, "project")
+	writeFile(t, filepath.Join(project, "go.mod"), "module example.com/project\n\ngo 1.26\n\nrequire github.com/plystra/data v0.2.0\n")
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "data: {members: {example.records/v1: {resource: database.primary}}}\n")
+	environment := compilerProxyEnvironment(t, proxy)
+	runCompilerGo(t, project, environment, "mod", "download", "all")
+	cache := filepath.Join(root, "compiler-cache")
+	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: project, Environment: environment, Offline: true, DataCompilerCacheRoot: cache,
+	})
+	if !errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) || !errors.Is(err, datacompiler.ErrOfflineUnavailable) {
+		t.Fatalf("offline generation error = %v", err)
+	}
+	if _, statErr := os.Stat(cache); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("offline generation materialized compiler cache: %v", statErr)
 	}
 }
 

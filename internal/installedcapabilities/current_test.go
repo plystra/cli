@@ -210,7 +210,9 @@ func assertInstalledCommandFacts(t testing.TB, commands map[string]commandschema
 		t.Fatalf("inspect.capabilities facts = %#v", capabilitiesCommand)
 	}
 	generateArguments := installedArgumentsByName(commands["generate"])
-	if generateArguments["--check"].Value() != commandschema.CapabilityArgumentFlag || !reflect.DeepEqual(commands["generate"].Selectors(), []string{"configuration"}) {
+	if generateArguments["--check"].Value() != commandschema.CapabilityArgumentFlag ||
+		generateArguments["--offline"].Value() != commandschema.CapabilityArgumentFlag ||
+		!reflect.DeepEqual(commands["generate"].Selectors(), []string{"configuration"}) {
 		t.Fatalf("generate facts = %#v", commands["generate"])
 	}
 }

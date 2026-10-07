@@ -109,6 +109,8 @@ type ModuleMutation func(context.Context, string, []ModuleRequirement, func() er
 type Options struct {
 	Start                 string
 	Check                 bool
+	Offline               bool
+	DataCompilerCacheRoot string
 	ConfigurationPath     string
 	EnvironmentName       string
 	GoCommand             string
@@ -434,6 +436,8 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	resolved, err := applicationresolve.Resolve(ctx, applicationresolve.Options{
 		RequireExecutablePolicies: true,
 		Start:                     start,
+		Offline:                   options.Offline,
+		DataCompilerCacheRoot:     options.DataCompilerCacheRoot,
 		ConfigurationPath:         options.ConfigurationPath,
 		EnvironmentName:           options.EnvironmentName,
 		GoCommand:                 options.GoCommand,

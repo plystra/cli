@@ -92,7 +92,7 @@ func installedCommands() []commandschema.CapabilityCommandInput {
 		projectInspectionCommand("explain.alias", []commandschema.CapabilityArgumentInput{positional("alias-id", 1)}),
 		projectInspectionCommand("explain.exposure", []commandschema.CapabilityArgumentInput{positional("capability-or-alias-id", 1)}),
 		installedCommand("check", configurationArguments(), []string{configurationSelectorID}, nil, false, false),
-		installedCommand("generate", append([]commandschema.CapabilityArgumentInput{flagOption("--check")}, configurationArguments()...), []string{configurationSelectorID}, nil, false, false),
+		installedCommand("generate", append([]commandschema.CapabilityArgumentInput{flagOption("--check"), flagOption("--offline")}, configurationArguments()...), []string{configurationSelectorID}, nil, false, false),
 	}
 }
 

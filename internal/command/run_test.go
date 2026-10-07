@@ -57,7 +57,7 @@ const (
   plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra check [--env <environment>|--config <yaml-path>]
-  plystra generate [--check] [--env <environment>|--config <yaml-path>]
+  plystra generate [--check] [--offline] [--env <environment>|--config <yaml-path>]
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
@@ -205,6 +205,16 @@ provider-declaration source before mutation.
 	wantImplementUsage       = "Usage:\n  plystra implement <contract> --package <project-relative-package>\n\nCreates an unfinished ordinary Go scaffold for one visible canonical Interface\nor Resource ID including /vN. The kind is inferred without a flag. The package\npath must begin with ./ and its target directory must not already exist.\nThe scaffold imports the canonical contract and adds a conformance assertion.\nResource constructors return an error and methods panic until implemented.\nNo configuration, dependencies, lifecycle hooks, or activation are invented;\nthe command creates no selected Resource instance or generated output.\nMissing, ambiguous, or inaccessible contracts fail before mutation.\n"
 )
 
+var wantGenerateUsageWithSourcesCurrent = strings.ReplaceAll(
+	strings.ReplaceAll(
+		wantGenerateUsage,
+		"Usage:\n  plystra generate [--check] [--env <environment>|--config <yaml-path>]",
+		"Usage:\n  plystra generate [--check] [--offline] [--env <environment>|--config <yaml-path>]",
+	),
+	"  --check                Report drift without modifying configuration or generated files.\n",
+	"  --check                Report drift without modifying configuration or generated files.\n  --offline              Use only locally available module inputs and the verified Data compiler cache.\n",
+) + wantPolicyUsage + wantDiagnosticSourceUsage + wantProtobufIdentitySourceUsage + wantProtobufOperationSourceUsage + wantProtobufPointerSourceUsage + wantCapabilityManifestSourceUsage + wantGenerationActivationSourceUsage + wantGenerationContributionSourceUsage + wantConcurrentSourceUsage
+
 const (
 	wantDiagnosticSourceUsage             = "PLYSTRA_PROJECT_MANIFEST_INVALID reports malformed current-Project plystra.yaml\nor an unsafe current or dependency Project marker. Malformed current-Project\ncontent uses 1:1; unsafe or unreadable markers omit the unavailable span.\nPLYSTRA_CONFIGURATION_INVALID reports a malformed selected environment or\ncomplete-replacement document at 1:1 as a configuration-declaration source.\nPLYSTRA_ENVIRONMENT_OVERLAY_INVALID reports the selected overlay document at\n1:1 as a configuration-declaration source before selector-aware recovery.\nPLYSTRA_GENERATED_OWNERSHIP_CONFLICT reports the desired managed path occupied\nby different unowned bytes or a non-regular entry as a generated-artifact source\nwithout a fabricated span.\nPLYSTRA_GENERATED_MANIFEST_INVALID reports the current Project's\ngenerated/.plystra-manifest.json as a generated-artifact source without a\nfabricated span.\nPLYSTRA_PROTOBUF_WIRE_HISTORY_INVALID reports the current Project's\ngenerated/proto/wire-map.json as a generated-artifact source without a\nfabricated span.\nPLYSTRA_GENERATED_DRIFT reports each stale, missing, or manually modified\nmanaged path as a generated-artifact source without a fabricated span.\nPLYSTRA_GENERATED_UNEXPECTED_OUTPUT reports each unexpected unowned path as a\ngenerated-artifact source without a fabricated span.\nPLYSTRA_GO_MODULE_INVALID reports an exact current-Project go.mod module or\nrequirement position as a module-dependency source once Project identity is valid.\nPLYSTRA_APPLICATION_DEPENDENCY_DRIFT reports current-Project go.mod at 1:1 as\na module-dependency source. Normal generation repairs the required direct\nKernel and generated runtime dependencies; check modes remain read-only.\nPLYSTRA_CONSTRUCTOR_CONFIGURATION_SCHEMA_INVALID reports the owning config\ndocument at 1:1 as a configuration-declaration source without values.\nPLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID reports the owning config\ndocument at 1:1 while retaining only a redacted-safe field path.\nPLYSTRA_CONSTRUCTOR_CONFIGURATION_UNSELECTED reports every effective\ncontributing config document at 1:1 as a configuration-declaration source\nwithout values.\nPLYSTRA_RESOLVE_UNKNOWN_INTERFACE reports every module-relative requirement,\nexposure, or Implementation-selection source before selector-aware recovery.\nPLYSTRA_RESOLVE_RESERVED_INTERFACE reports the module-relative declaration that\nuses the reserved kernel.* namespace before recovery.\n"
 	wantProtobufIdentitySourceUsage       = "PLYSTRA_PROTOBUF_IDENTITY_COLLISION reports the owning Interface Go contract at\nits declaration position as an interface-contract source before recovery.\n"
@@ -215,7 +225,6 @@ const (
 	wantGenerationContributionSourceUsage = "PLYSTRA_GENERATION_CONTRIBUTION_CYCLE reports the generation-rule source for\nevery contribution in the complete token-dependency cycle, in sorted and\ndeduplicated order. A bare contribution-cycle sentinel has no source.\nPLYSTRA_GENERATION_CONTRIBUTIONS_UNORDERED reports the generation-rule source\nfor every simultaneously ready contribution at the ordered generation point,\nin sorted and deduplicated order. A bare unordered sentinel has no source.\nPLYSTRA_GENERATION_STATE_REPEATED reports each selected extension declaration\nwhose output changed for identical normalized input as a sorted and deduplicated\nplugin-declaration source. A bare repeated-state sentinel has no source.\nPLYSTRA_GENERATION_NONCONVERGENT reports generation-rule sources from the most\nrecent pass that added unseen requirements, in sorted and deduplicated order. A\nbare convergence sentinel has no source.\nPLYSTRA_GENERATION_EXTENSION_DIAGNOSTIC reports generation-rule sources for\nevery distinct selected-extension rule that returned a structured error\ndiagnostic, in sorted and deduplicated order. Several rules owned by one Plugin\nshare one human source, info and warning diagnostics do not fail generation,\nand a bare extension-diagnostic sentinel has no source.\nPLYSTRA_GENERATION_API_UNSUPPORTED reports the exact unsupported generation.api\nscalar as a plugin-declaration source. A bare API sentinel has no source.\nPLYSTRA_GENERATION_PACKAGE_INVALID reports the exact generation.package scalar\nas a plugin-declaration source. A bare package sentinel has no source.\nPLYSTRA_GENERATION_COMPILE_FAILED reports the selected helper's exact\ngeneration.package scalar as a plugin-declaration source. A bare compile\nsentinel has no source.\nPLYSTRA_GENERATION_* helper invocation failures report the selected helper's\nexact generation.package scalar as a plugin-declaration source. A compile\ntimeout uses PLYSTRA_GENERATION_TIMEOUT with the same source. Bare or unlocated\ninvocation, orchestration, and aggregate cleanup errors have no source.\n"
 	wantConcurrentSourceUsage             = "PLYSTRA_PROJECT_CONCURRENT_CHANGE reports each known changed Project\nconfiguration, go.mod/go.sum, or generated path as a sorted path-only\nconfiguration-declaration, module-dependency, or generated-artifact source\nwithout a fabricated span.\n"
 	wantPolicyUsage                       = "PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the\ninstalled CLI/Kernel pair both generates and executes it. The diagnostic reports\nthe field, support stages, and module-relative configuration declarations.\nRemove the policy or use a compatible stack; inspect capabilities reports support.\nDormant policies remain intent, not enforced guarantees.\n"
-	wantGenerateUsageWithSources          = wantGenerateUsage + wantPolicyUsage + wantDiagnosticSourceUsage + wantProtobufIdentitySourceUsage + wantProtobufOperationSourceUsage + wantProtobufPointerSourceUsage + wantCapabilityManifestSourceUsage + wantGenerationActivationSourceUsage + wantGenerationContributionSourceUsage + wantConcurrentSourceUsage
 	wantCheckUsageWithSources             = wantCheckUsage + wantPolicyUsage + wantDiagnosticSourceUsage + wantProtobufIdentitySourceUsage + wantProtobufOperationSourceUsage + wantProtobufPointerSourceUsage + wantCapabilityManifestSourceUsage + wantGenerationActivationSourceUsage + wantGenerationContributionSourceUsage + wantConcurrentSourceUsage
 )
 
@@ -247,7 +256,7 @@ func TestRunGenerateHelp(t *testing.T) {
 	for _, argument := range []string{"help", "-h", "--help"} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
-		if exitCode := command.Run([]string{"generate", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantGenerateUsageWithSources || stderr.Len() != 0 {
+		if exitCode := command.Run([]string{"generate", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantGenerateUsageWithSourcesCurrent || stderr.Len() != 0 {
 			t.Fatalf("Run(generate %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
 		}
 	}
@@ -615,12 +624,13 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "explain duplicate configuration", arguments: []string{"explain", "capability", "email.send/v1", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantExplainCapabilityUsage},
 		{name: "explain missing environment", arguments: []string{"explain", "capability", "email.send/v1", "--env"}, wantError: wantExplainCapabilityUsage},
 		{name: "explain duplicate environment", arguments: []string{"explain", "capability", "email.send/v1", "--env", "test", "--env", "production"}, wantError: wantExplainCapabilityUsage},
-		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: wantGenerateUsageWithSources},
-		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: wantGenerateUsageWithSources},
-		{name: "generate missing configuration path", arguments: []string{"generate", "--config"}, wantError: wantGenerateUsageWithSources},
-		{name: "generate duplicate configuration", arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantGenerateUsageWithSources},
-		{name: "generate missing environment", arguments: []string{"generate", "--env"}, wantError: wantGenerateUsageWithSources},
-		{name: "generate duplicate environment", arguments: []string{"generate", "--env", "test", "--env", "production"}, wantError: wantGenerateUsageWithSources},
+		{name: "generate unknown option", arguments: []string{"generate", "--write"}, wantError: wantGenerateUsageWithSourcesCurrent},
+		{name: "generate duplicate check", arguments: []string{"generate", "--check", "--check"}, wantError: wantGenerateUsageWithSourcesCurrent},
+		{name: "generate duplicate offline", arguments: []string{"generate", "--offline", "--offline"}, wantError: wantGenerateUsageWithSourcesCurrent},
+		{name: "generate missing configuration path", arguments: []string{"generate", "--config"}, wantError: wantGenerateUsageWithSourcesCurrent},
+		{name: "generate duplicate configuration", arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantGenerateUsageWithSourcesCurrent},
+		{name: "generate missing environment", arguments: []string{"generate", "--env"}, wantError: wantGenerateUsageWithSourcesCurrent},
+		{name: "generate duplicate environment", arguments: []string{"generate", "--env", "test", "--env", "production"}, wantError: wantGenerateUsageWithSourcesCurrent},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

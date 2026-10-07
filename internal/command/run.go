@@ -51,7 +51,7 @@ const (
   plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra check [--env <environment>|--config <yaml-path>]
-  plystra generate [--check] [--env <environment>|--config <yaml-path>]
+  plystra generate [--check] [--offline] [--env <environment>|--config <yaml-path>]
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
@@ -114,10 +114,11 @@ PLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID, and
 PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS respectively.
 `
 	generateUsage = `Usage:
-  plystra generate [--check] [--env <environment>|--config <yaml-path>]
+  plystra generate [--check] [--offline] [--env <environment>|--config <yaml-path>]
 
 Options:
   --check                Report drift without modifying configuration or generated files.
+  --offline              Use only locally available module inputs and the verified Data compiler cache.
   --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.
   --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.
 
@@ -700,6 +701,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		options := applicationgenerate.Options{
 			Start:             workingDirectory,
 			Check:             generate.check,
+			Offline:           generate.offline,
 			ConfigurationPath: generate.configurationPath,
 			EnvironmentName:   generate.environmentName,
 			Environment:       environment,
@@ -773,6 +775,7 @@ func terminalFile(file *os.File) bool {
 
 type generateArguments struct {
 	check             bool
+	offline           bool
 	configurationPath string
 	environmentName   string
 }
@@ -826,6 +829,11 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 				return generateArguments{}, false
 			}
 			result.check = true
+		case "--offline":
+			if result.offline {
+				return generateArguments{}, false
+			}
+			result.offline = true
 		case "--config":
 			if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return generateArguments{}, false
