@@ -39,12 +39,13 @@ plystra capability create <capability-name> [--query] [--plugin <plugin>] [--int
 plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]
 plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
 plystra inspect capabilities [--format human|json]
+plystra doctor [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
 plystra generate [--check] [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
 ```
 
 Commands documented in the roadmap but absent from `plystra --help` are not
 implemented. In particular, do not tell users to rely on `dev`, `test`,
-`build`, `check`, `fix`, `doctor`, SDK packaging, or
+`build`, `fix`, SDK packaging, or
 `release` yet. Use the Go, npm, and public generation commands in this guide.
 
 ## Workspace and repository layout
@@ -2059,7 +2060,7 @@ plystra generate --check --config deploy/customer-a.yaml
 `plystra inspect capabilities` reports facts compiled into the installed CLI
 without requiring or resolving a Project. Its JSON form is one canonical
 `plystra.result/v1` document with a `plystra.capabilities/v1` payload containing
-the CLI, Kernel, specification, Go, platform, exact 28-command leaf surface,
+the CLI, Kernel, specification, Go, platform, exact 30-command leaf surface,
 arguments, selectors, stable defaults, interaction modes, output formats, all
 nine effect classes, bounds, transport toolchain, and five-stage support facts.
 Planned commands are absent. The human projection reports the global defaults
@@ -2067,6 +2068,18 @@ and category counts, then names the command argument, selector, effect-class,
 and transport component detail it omits. Invalid or missing Projects and
 ambient `PLYSTRA_ENV` or `PLYSTRA_CONFIG` selectors cannot change the result;
 explicit `--verbose`, `--env`, and `--config` are invalid.
+
+`plystra doctor` is the read-only Project-bound prerequisite report. It uses the
+same selected current-Project document as generation, checks the local Go
+toolchain and module graph, and reports exact Data compiler selection and
+verified private cache state when the selected document has active Data
+members. It never invokes the compiler or mutates Project files. Projects
+without active Data members report those checks as not applicable. `--offline`
+requires the selected module graph and exact compiler cache to be locally
+available; unavailable prerequisites return exit class 4 with
+`PLYSTRA_DOCTOR_PREREQUISITE_MISSING`. Use the same `--env` or `--config`
+selector as generation. JSON output is one `plystra.result/v1` document with a
+`plystra.doctor/v1` payload and no diagnostic text on stdout.
 
 The closed schema inventory reports result and recovery as
 `plystra.result/v1` and `plystra.recovery/v1`, plus `plystra.inspect` version 1

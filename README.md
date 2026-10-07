@@ -1105,7 +1105,7 @@ effect-class counts, transport-toolchain digest, and five-stage support summary.
 It identifies the command argument, selector, effect-class, and transport
 component details omitted from that filtered view.
 `--format json` writes one canonical `plystra.result/v1` document whose payload
-is `plystra.capabilities/v1`, including the exact 28 installed leaf commands and
+is `plystra.capabilities/v1`, including the exact 30 installed leaf commands and
 their arguments, selectors, stable defaults, interaction modes, output formats,
 all nine effect classes, and the complete 13-component transport toolchain
 identity. Planned commands are absent. Each supported feature reports
@@ -1114,6 +1114,20 @@ states. The command ignores
 `PLYSTRA_ENV`, `PLYSTRA_CONFIG`, the working directory, and invalid Project
 state. Explicit `--verbose`, `--env`, or `--config` is invalid and reports
 `PLYSTRA_INSPECT_CAPABILITIES_INVOCATION_INVALID`.
+
+`plystra doctor` is a read-only Project prerequisite report. It resolves the
+same selected current-Project document as generation, checks the local Go
+toolchain and module graph, and, when an active `data.members` entry exists,
+reports the exact selected Data compiler module, checksum, distribution
+manifest, protocol, toolchain, platform, and verified CLI-private cache state.
+It never builds or invokes the compiler and never writes Project files. A
+Project without active Data members reports the Data checks as not applicable.
+`--offline` requires both the selected module graph and the exact compiler to be
+available locally; missing prerequisites return exit class 4 with
+`PLYSTRA_DOCTOR_PREREQUISITE_MISSING`. `--env` and `--config` select the same
+current-Project layers as generation, and `--format json` returns one
+`plystra.result/v1` document with a `plystra.doctor/v1` payload while keeping
+diagnostics off stdout.
 
 The payload's closed schema inventory reports `plystra.result/v1`,
 `plystra.recovery/v1`, `plystra.inspect` version 1, and `plystra.graph` version

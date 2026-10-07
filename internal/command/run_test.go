@@ -13,7 +13,7 @@ import (
 var (
 	wantCurrentUsage = strings.NewReplacer(
 		"  plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
-		"  plystra inspect capabilities [--format human|json]\n  plystra inspect [modules|interfaces|implementations|resources|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
+		"  plystra inspect [modules|interfaces|implementations|resources|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n",
 	).Replace(wantUsage)
 	wantCurrentInspectUsage = strings.NewReplacer(
 		"  plystra inspect implementations [--verbose]",
@@ -50,6 +50,8 @@ const (
   plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
   plystra guidance sync [--replace-generated]
   plystra guidance check
+  plystra inspect capabilities [--format human|json]
+  plystra doctor [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect [modules|interfaces|implementations|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -117,6 +119,7 @@ ordinary graph input after creation.
 	wantPluginCreateUsage                = "Usage:\n  plystra plugin create <name>\n\nCreates one root-level Plugin scaffold and derives its exact Plugin ID from the\ncurrent Project module namespace plus the lower-case ASCII kebab-case name. The\nname must not be reserved, and the target directory must not already exist.\n\nInvalid names, unformable derived IDs, and existing targets emit\nPLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID, and\nPLYSTRA_PLUGIN_CREATE_TARGET_EXISTS respectively.\n"
 	wantGenerateUsage                    = "Usage:\n  plystra generate [--check] [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --check                Report drift without modifying configuration or generated files.\n  --offline              Use only locally available module inputs and the verified Data compiler cache.\n  --format human|json    Select concise human output or one plystra.result/v1 document.\n  --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.\n  --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.\n\nPLYSTRA_ENV and PLYSTRA_CONFIG supply equivalent selectors when no explicit\nselector is present; setting both is an error. Explicit --env or --config\noverrides both variables, and the two flags cannot be combined. Relative\nconfiguration paths are resolved from the detected Plystra Project root. Root\nplystra.yaml remains mandatory and is not merged beneath --config. Invalid or\nconflicting selections emit the stable PLYSTRA_CONFIGURATION_SELECTION_INVALID\ndiagnostic.\nA normalized Project-contained selected document that cannot be loaded reports\none span-less configuration-selection source; conflicting or unsafe selectors\nreport none.\nConfiguration composes only the current Project root with one selected overlay,\nor uses one complete current-Project replacement document.\nGeneration does not rewrite the selected current-Project configuration document.\ndata.members entries compose by exact member ID. An effective active member\nreports PLYSTRA_DATA_COMPILER_UNAVAILABLE before generation or drift checking;\nmalformed entries report PLYSTRA_DATA_MEMBER_METADATA_INVALID.\n"
 	wantCheckUsage                       = "Usage:\n  plystra check [--env <environment>|--config <yaml-path>]\n\nOptions:\n  --env <environment>    Check root plystra.yaml with plystra.<environment>.yaml.\n  --config <yaml-path>   Check one complete current-project configuration instead of root plystra.yaml.\n\nThe check is read-only: it validates the selected application model and generated\noutput, then runs go test -mod=readonly ./... when both are current. PLYSTRA_ENV and\nPLYSTRA_CONFIG supply equivalent selectors when no explicit selector is present;\nsetting both is an error. Explicit --env or --config overrides both variables,\nand the two flags cannot be combined. Relative configuration paths are resolved\nfrom the detected Plystra Project root. Root plystra.yaml remains mandatory and\nis not merged beneath --config. Invalid or conflicting selections emit the\nstable PLYSTRA_CONFIGURATION_SELECTION_INVALID diagnostic.\nA normalized Project-contained selected document that cannot be loaded reports\none span-less configuration-selection source; conflicting or unsafe selectors\nreport none.\nInvalid or unselected constructor configuration failures emit module-relative\nconfiguration-declaration sources before selector-aware recovery.\n"
+	wantDoctorUsage                      = "Usage:\n  plystra doctor [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]\n\nChecks the selected Project's local toolchain, module graph, exact Data compiler\ndistribution, and verified private compiler cache without changing Project files\nor materializing a compiler. `--offline` `--format json` returns one\n`plystra.result/v1` document with a `plystra.doctor/v1` payload.\n`--offline` also requires the selected module graph to be available locally.\nMissing prerequisites return exit class 4 and `PLYSTRA_DOCTOR_PREREQUISITE_MISSING`.\n"
 	wantCapabilityUsage                  = "Usage:\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n"
 	wantCapabilityArgumentUsage          = "usage:\n  plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]\n  plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]\n  plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]\n"
 	wantCapabilityCreateArgumentUsage    = "usage: plystra capability create <capability-name> [--query] [--plugin <plugin>] [--interactive] [--confirm] [--expose]\n"
@@ -262,6 +265,18 @@ func TestRunCheckHelp(t *testing.T) {
 		var stderr bytes.Buffer
 		if exitCode := command.Run([]string{"check", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantCheckUsageWithSources || stderr.Len() != 0 {
 			t.Fatalf("Run(check %s) = exit %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestRunDoctorHelp(t *testing.T) {
+	t.Parallel()
+
+	for _, argument := range []string{"help", "-h", "--help"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		if exitCode := command.Run([]string{"doctor", argument}, &stdout, &stderr); exitCode != 0 || stdout.String() != wantDoctorUsage || stderr.Len() != 0 {
+			t.Fatalf("Run(doctor %s) = %d, stdout %q, stderr %q", argument, exitCode, stdout.String(), stderr.String())
 		}
 	}
 }
@@ -623,6 +638,14 @@ func TestRunRejectsUnknownCommandAndExtraArguments(t *testing.T) {
 		{name: "generate duplicate configuration", arguments: []string{"generate", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantGenerateUsageWithSourcesCurrent},
 		{name: "generate missing environment", arguments: []string{"generate", "--env"}, wantError: wantGenerateUsageWithSourcesCurrent},
 		{name: "generate duplicate environment", arguments: []string{"generate", "--env", "test", "--env", "production"}, wantError: wantGenerateUsageWithSourcesCurrent},
+		{name: "doctor unknown option", arguments: []string{"doctor", "--unknown"}, wantError: wantDoctorUsage},
+		{name: "doctor duplicate offline", arguments: []string{"doctor", "--offline", "--offline"}, wantError: wantDoctorUsage},
+		{name: "doctor missing format", arguments: []string{"doctor", "--format"}, wantError: wantDoctorUsage},
+		{name: "doctor unknown format", arguments: []string{"doctor", "--format", "yaml"}, wantError: wantDoctorUsage},
+		{name: "doctor missing configuration path", arguments: []string{"doctor", "--config"}, wantError: wantDoctorUsage},
+		{name: "doctor duplicate configuration", arguments: []string{"doctor", "--config", "a.yaml", "--config", "b.yaml"}, wantError: wantDoctorUsage},
+		{name: "doctor missing environment", arguments: []string{"doctor", "--env"}, wantError: wantDoctorUsage},
+		{name: "doctor duplicate environment", arguments: []string{"doctor", "--env", "test", "--env", "production"}, wantError: wantDoctorUsage},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

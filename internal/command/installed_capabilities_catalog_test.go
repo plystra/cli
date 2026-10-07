@@ -22,6 +22,7 @@ func TestInstalledCapabilityCatalogAgreesWithCommandParsers(t *testing.T) {
 		{id: "capability.expose", invocations: [][]string{{"capability", "expose", "records.read/v1", "--env", "production"}, {"capability", "expose", "records.read/v1", "--config", "deploy/customer.yaml"}}},
 		{id: "capability.implement", invocations: [][]string{{"capability", "implement", "records.read/v1", "--plugin", "records", "--interactive"}}},
 		{id: "check", invocations: [][]string{{"check", "--env", "production"}, {"check", "--config", "deploy/customer.yaml"}}},
+		{id: "doctor", invocations: [][]string{{"doctor", "--offline", "--format", "json", "--env", "production"}, {"doctor", "--config", "deploy/customer.yaml"}}},
 		{id: "explain.alias", invocations: [][]string{{"explain", "alias", "mail.send/v1", "--verbose", "--format", "json", "--env", "production"}}},
 		{id: "explain.capability", invocations: [][]string{{"explain", "capability", "email.send/v1", "--verbose", "--format", "json", "--config", "deploy/customer.yaml"}}},
 		{id: "explain.config", invocations: [][]string{{"explain", "config", "config.acme.email.host", "--verbose", "--format", "json", "--env", "production"}}},
@@ -120,6 +121,9 @@ func installedParserAccepts(t testing.TB, commandID string, arguments []string) 
 		return string(parsed.subjectKind) == kind
 	case "check":
 		_, ok := parseCheckArguments(arguments)
+		return ok
+	case "doctor":
+		_, ok := parseDoctorArguments(arguments)
 		return ok
 	case "generate":
 		_, ok := parseGenerateArguments(arguments)

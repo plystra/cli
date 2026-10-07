@@ -18,6 +18,7 @@ plystra implement records.list/v1 --package ./recordlist
 plystra generate
 plystra generate --check
 plystra inspect capabilities --format json
+plystra doctor --format json
 plystra inspect
 plystra inspect modules
 plystra inspect interfaces
@@ -54,6 +55,8 @@ Automation may create with `--format json` to receive one `plystra.result/v1` do
 All five explanation commands also return `plystra.result/v1` with a `plystra.explain/v1` payload, diagnostics, and `plystra.recovery/v1` actions. JSON stderr stays empty after initialization; human progress and diagnostics use stderr. Invalid invocation or subject exits 2, invalid Project state or a missing target exits 3, required decisions or missing prerequisites exit 4, and internal failures exit 8 with redacted `PLYSTRA_EXPLAIN_FAILED`. Provider recovery edits the selected `capabilities.use` field; installed `plystra use` accepts Interface Implementations and named Resource providers, not legacy Capability Plugin IDs. Executable recovery and supported choice options use exact `argv` with the selector and Project-relative working directory. Never execute placeholders or human display strings; run the action's independent verification afterward.
 
 `plystra inspect capabilities --format json` is Project-independent and returns one `plystra.result/v1` document with a `plystra.capabilities/v1` payload. It reports exact installed commands and arguments, selectors, stable defaults, interaction and output modes, effect classes, schemas, bounds, toolchain identity, and independent `specified`, `parsed`, `generated`, `executed`, and `accepted` support stages. Planned commands are absent. Result, recovery, inspection, and graph schemas are available; standalone diagnostic and continuation schema roles remain explicitly unavailable. Invalid Projects and ambient selectors cannot change those facts; explicit `--verbose`, `--env`, and `--config` are invalid.
+
+`plystra doctor --format json` is a read-only Project prerequisite report. It checks the selected Go toolchain and module graph and reports the exact selected Data compiler and verified private cache when active Data members exist. It does not invoke the compiler or write Project files. `--offline` requires local module and compiler-cache availability; missing prerequisites return exit class 4 with `PLYSTRA_DOCTOR_PREREQUISITE_MISSING`.
 
 `plystra inspect implementations` shows every visible constructor candidate, active, dormant-explicit, or unselected state, implemented Interfaces, declared and resolved dependencies, constructor-owned configuration provenance, and reachable assembly membership.
 

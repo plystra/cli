@@ -273,6 +273,11 @@ func writeHumanInspectCapabilities(writer io.Writer, capabilities commandschema.
 	); err != nil {
 		return err
 	}
+	if compiler, ok := capabilities.DataCompiler(); ok {
+		if _, err := fmt.Fprintf(writer, "Data compiler: %s\n  command: %s\n  protocols: %s, %s\n  declaration: %s\n  availability: source=%s cache=%s build=%s offline=%s\n", compiler.ModulePath(), compiler.CommandImportPath(), compiler.AnalyzeProtocol(), compiler.EmitProtocol(), compiler.DeclarationLanguage(), compiler.Source(), compiler.Cache(), compiler.Build(), compiler.Offline()); err != nil {
+			return err
+		}
+	}
 	if _, err := fmt.Fprintf(writer, "Invocation concurrency: default_limit %d, queue 0, maximum %d\n", capabilities.InvocationConcurrencyLimit(), capabilities.MaximumConcurrencyLimit()); err != nil {
 		return err
 	}

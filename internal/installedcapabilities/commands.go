@@ -81,6 +81,7 @@ func installedCommands() []commandschema.CapabilityCommandInput {
 		installedCommand("guidance.check", nil, nil, nil, false, false),
 		projectInspectionCommand("inspect", nil),
 		installedCommand("inspect.capabilities", []commandschema.CapabilityArgumentInput{formatOption()}, nil, nil, false, true),
+		installedCommand("doctor", append([]commandschema.CapabilityArgumentInput{flagOption("--offline"), formatOption()}, configurationArguments()...), []string{configurationSelectorID}, nil, false, true),
 		projectInspectionCommand("inspect.modules", nil),
 		projectInspectionCommand("inspect.interfaces", nil),
 		projectInspectionCommand("inspect.resources", nil),

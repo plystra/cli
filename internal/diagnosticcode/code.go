@@ -146,6 +146,12 @@ const (
 )
 
 const (
+	DoctorInvocationInvalid   = Prefix + "DOCTOR_INVOCATION_INVALID"
+	DoctorPrerequisiteMissing = Prefix + "DOCTOR_PREREQUISITE_MISSING"
+	DoctorFailed              = Prefix + "DOCTOR_FAILED"
+)
+
+const (
 	ExplainInvocationInvalid = Prefix + "EXPLAIN_INVOCATION_INVALID"
 	ExplainSubjectInvalid    = Prefix + "EXPLAIN_SUBJECT_INVALID"
 	ExplainTargetNotFound    = Prefix + "EXPLAIN_TARGET_NOT_FOUND"

@@ -144,7 +144,8 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 	for _, expected := range []string{
 		"Installed Plystra capabilities\n",
 		"Public schemas:\n  continuation: unavailable\n  diagnostic: unavailable\n  graph: plystra.graph/v1\n  inspection: plystra.inspect/v1\n  recovery: plystra.recovery/v1\n  result: plystra.result/v1\n",
-		"Command surface: 29 installed leaf commands\nSelectors: 2 installed\nEffect classes: 9 closed\n",
+		"Command surface: 30 installed leaf commands\nSelectors: 2 installed\nEffect classes: 9 closed\n",
+		"Data compiler: github.com/plystra/data\n  command: github.com/plystra/data/cmd/plystra-data-compiler\n  protocols: plystra.data-analyze/v1, plystra.data-emit/v1\n  declaration: plystra.data-declaration/v1\n  availability: source=unknown cache=unknown build=unknown offline=unknown\n",
 		"Defaults: interaction non_interactive, output human, startup 2m, invocation 0s\n",
 		"Invocation concurrency: default_limit 64, queue 0, maximum 65536\n",
 		"Invocation policy: schema 1, compiler 1, defaults 1; timeout 1ns through 2562047h47m16.854775807s (64 bytes); default attempts 1, circuit disabled\n",
@@ -157,8 +158,8 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 		"resource.contract: specified=yes parsed=yes generated=not_applicable executed=not_applicable accepted=yes\n",
 		"resource.provider.discovery: specified=yes parsed=yes generated=not_applicable executed=not_applicable accepted=yes\n",
 		"resource: specified=yes parsed=yes generated=yes executed=yes accepted=no\n",
-		"data: specified=yes parsed=no generated=no executed=no accepted=no\n",
-		"data.compiler: specified=yes parsed=no generated=no executed=no accepted=no\n",
+		"data: specified=yes parsed=yes generated=yes executed=yes accepted=no\n",
+		"data.compiler: specified=yes parsed=yes generated=yes executed=yes accepted=yes\n",
 		"Support stages are independent: parsed, generated, or executed support does not establish acceptance.\n",
 		"Command argument, selector, effect-class, and transport component details are omitted from human output; use --format json for the complete installed payload.\n",
 	} {

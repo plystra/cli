@@ -11,6 +11,7 @@ Use read-only inspection before changing authored inputs:
     plystra inspect implementations
     plystra inspect resources
     plystra inspect configuration
+    plystra doctor --format json
     plystra explain capability <capability-name>/vN
     plystra explain plugin <plugin-id>
     plystra explain config config.<constructor-symbol>.<field>
@@ -18,6 +19,8 @@ Use read-only inspection before changing authored inputs:
     plystra check
 
 `plystra inspect capabilities` is separate from Project inspection. It ignores the working directory, invalid Project state, `PLYSTRA_ENV`, and `PLYSTRA_CONFIG` while reporting exact installed commands and arguments, selectors, stable defaults, interaction and output modes, effect classes, schemas, bounds, toolchain identity, and independent `specified`, `parsed`, `generated`, `executed`, and `accepted` support stages. Planned commands are absent. Result, recovery, inspection, and graph schemas are available; standalone diagnostic and continuation schema roles remain explicitly unavailable. Its only option is `--format human|json`.
+
+`plystra doctor` is the read-only Project-bound prerequisite report. It checks the selected Go toolchain and module graph and, for active Data members, reports exact compiler selection and verified private cache state without invoking the compiler or mutating Project files. `--offline` requires local module and compiler-cache availability; missing prerequisites return exit class 4 with `PLYSTRA_DOCTOR_PREREQUISITE_MISSING`. Its JSON result uses `plystra.result/v1` with a `plystra.doctor/v1` payload.
 
 Inspect versioned Agent guidance before refreshing it:
 

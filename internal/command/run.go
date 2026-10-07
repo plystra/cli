@@ -39,6 +39,7 @@ const (
   plystra guidance sync [--replace-generated]
   plystra guidance check
   plystra inspect capabilities [--format human|json]
+  plystra doctor [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect [modules|interfaces|implementations|resources|configuration] [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -445,6 +446,16 @@ A normalized Project-contained selected document that cannot be loaded reports
 one span-less configuration-selection source; conflicting or unsafe selectors
 report none.
 `
+	doctorUsage = `Usage:
+  plystra doctor [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
+
+Checks the selected Project's local toolchain, module graph, exact Data compiler
+distribution, and verified private compiler cache without changing Project files
+or materializing a compiler. ` + "`--offline`" + ` ` + "`--format json`" + ` returns one
+` + "`plystra.result/v1`" + ` document with a ` + "`plystra.doctor/v1`" + ` payload.
+` + "`--offline`" + ` also requires the selected module graph to be available locally.
+Missing prerequisites return exit class 4 and ` + "`PLYSTRA_DOCTOR_PREREQUISITE_MISSING`" + `.
+`
 	explainUsage = `Usage:
   plystra explain capability <capability-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain plugin <plugin-id> [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
@@ -635,6 +646,12 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		return runCapability(arguments, stdout, stderr, workingDirectory, environment, selectPlugin)
 	case "guidance":
 		return runGuidance(arguments, stdout, stderr, workingDirectory)
+	case "doctor":
+		if len(arguments) == 2 && isHelp(arguments[1]) {
+			_, _ = io.WriteString(stdout, doctorUsage)
+			return 0
+		}
+		return runDoctor(arguments, stdout, stderr, workingDirectory, environment)
 	case "inspect":
 		if len(arguments) == 2 && isHelp(arguments[1]) || len(arguments) == 3 && (arguments[1] == "capabilities" || arguments[1] == "modules" || arguments[1] == "interfaces" || arguments[1] == "implementations" || arguments[1] == "resources" || arguments[1] == "configuration") && isHelp(arguments[2]) {
 			_, _ = io.WriteString(stdout, inspectUsage)

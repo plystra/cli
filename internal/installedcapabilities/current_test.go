@@ -56,6 +56,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"capability.expose",
 		"capability.implement",
 		"check",
+		"doctor",
 		"explain.alias",
 		"explain.capability",
 		"explain.config",
@@ -125,14 +126,14 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 	if !reflect.DeepEqual(capabilities.EffectClasses(), wantEffects) {
 		t.Fatalf("effect classes = %#v, want %#v", capabilities.EffectClasses(), wantEffects)
 	}
-	for _, planned := range []string{"build", "capability.require", "change.apply", "change.plan", "data.migration.apply", "data.migration.plan", "data.migration.status", "dev", "doctor", "fix", "release", "sdk.link", "sdk.pack", "sdk.publish", "test"} {
+	for _, planned := range []string{"build", "capability.require", "change.apply", "change.plan", "data.migration.apply", "data.migration.plan", "data.migration.status", "dev", "fix", "release", "sdk.link", "sdk.pack", "sdk.publish", "test"} {
 		if _, exists := commandsByID[planned]; exists {
 			t.Fatalf("planned command %q reported as installed", planned)
 		}
 	}
 	wantSupport := []string{
-		"data|yes|no|no|no|no",
-		"data.compiler|yes|no|no|no|no",
+		"data|yes|yes|yes|yes|no",
+		"data.compiler|yes|yes|yes|yes|yes",
 		"inspect.capabilities|yes|yes|not_applicable|yes|yes",
 		"interfaces.policies.*.retry.backoff|yes|yes|yes|yes|yes",
 		"interfaces.policies.*.retry.eligibility|yes|yes|yes|yes|yes",

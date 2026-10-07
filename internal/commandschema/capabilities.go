@@ -131,6 +131,64 @@ func (s CapabilitySupport) Accepted() SupportState { return s.input.Accepted }
 // set and a safe canonical identity.
 func (s CapabilitySupport) Valid() bool { return validateCapabilitySupport(s.input) == nil }
 
+// DataCompilerCapabilityInput is the construction-only installed contract
+// for the official Data compiler. Project-specific module selection and
+// verified cache facts are reported by doctor; this record describes the
+// compiler protocol the installed CLI understands.
+type DataCompilerCapabilityInput struct {
+	ModulePath          string
+	DistributionSchema  string
+	CommandImportPath   string
+	AnalyzeProtocol     string
+	EmitProtocol        string
+	DeclarationLanguage string
+	Bounds              DataCompilerBoundsInput
+	Source              SupportState
+	Cache               SupportState
+	Build               SupportState
+	Offline             SupportState
+}
+
+// DataCompilerBoundsInput contains finite limits advertised by the official
+// compiler distribution.
+type DataCompilerBoundsInput struct {
+	MaxRoots             int
+	MaxNodes             int
+	MaxImports           int
+	MaxNesting           int
+	MaxSymbolBytes       int
+	MaxDiagnostics       int
+	MaxDiagnosticBytes   int
+	MaxFrameBytes        int
+	MaxArtifacts         int
+	MaxArtifactBytes     int
+	MaxArtifactPathBytes int
+}
+
+// DataCompilerCapability is one immutable official compiler contract.
+type DataCompilerCapability struct{ input DataCompilerCapabilityInput }
+
+// NewDataCompilerCapability validates one official compiler contract.
+func NewDataCompilerCapability(input DataCompilerCapabilityInput) (DataCompilerCapability, error) {
+	if err := validateDataCompilerCapability(input); err != nil {
+		return DataCompilerCapability{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
+	}
+	return DataCompilerCapability{input: input}, nil
+}
+
+func (c DataCompilerCapability) Valid() bool                     { return validateDataCompilerCapability(c.input) == nil }
+func (c DataCompilerCapability) ModulePath() string              { return c.input.ModulePath }
+func (c DataCompilerCapability) DistributionSchema() string      { return c.input.DistributionSchema }
+func (c DataCompilerCapability) CommandImportPath() string       { return c.input.CommandImportPath }
+func (c DataCompilerCapability) AnalyzeProtocol() string         { return c.input.AnalyzeProtocol }
+func (c DataCompilerCapability) EmitProtocol() string            { return c.input.EmitProtocol }
+func (c DataCompilerCapability) DeclarationLanguage() string     { return c.input.DeclarationLanguage }
+func (c DataCompilerCapability) Bounds() DataCompilerBoundsInput { return c.input.Bounds }
+func (c DataCompilerCapability) Source() SupportState            { return c.input.Source }
+func (c DataCompilerCapability) Cache() SupportState             { return c.input.Cache }
+func (c DataCompilerCapability) Build() SupportState             { return c.input.Build }
+func (c DataCompilerCapability) Offline() SupportState           { return c.input.Offline }
+
 // CapabilitiesInput is the construction-only form of installed capability
 // facts. All inputs must describe the running distribution rather than a
 // current Project or caller.
@@ -154,6 +212,7 @@ type CapabilitiesInput struct {
 	InvocationTimeout          time.Duration
 	InvocationConcurrencyLimit int
 	MaximumConcurrencyLimit    int
+	DataCompiler               *DataCompilerCapabilityInput
 	Support                    []CapabilitySupportInput
 }
 
@@ -178,22 +237,38 @@ type Capabilities struct {
 	invocationTimeout          time.Duration
 	invocationConcurrencyLimit int
 	maximumConcurrencyLimit    int
+	dataCompiler               *DataCompilerCapability
 	support                    []CapabilitySupport
 	canonicalJSON              []byte
 	prepared                   bool
 }
 
 type capabilitiesDocument struct {
-	InvocationPolicy CapabilityInvocationPolicy    `json:"invocation_policy"`
-	Schema           string                        `json:"schema"`
-	Installed        capabilitiesInstalledDocument `json:"installed"`
-	Schemas          []capabilitySchemaDocument    `json:"schemas"`
-	Commands         []capabilityCommandDocument   `json:"commands"`
-	Selectors        []capabilitySelectorDocument  `json:"selectors"`
-	Effects          []EffectClass                 `json:"effect_classes"`
-	Limits           capabilitiesLimitsDocument    `json:"limits"`
-	Defaults         capabilitiesDefaultsDocument  `json:"defaults"`
-	Support          []capabilitySupportDocument   `json:"support"`
+	InvocationPolicy CapabilityInvocationPolicy      `json:"invocation_policy"`
+	Schema           string                          `json:"schema"`
+	Installed        capabilitiesInstalledDocument   `json:"installed"`
+	Schemas          []capabilitySchemaDocument      `json:"schemas"`
+	Commands         []capabilityCommandDocument     `json:"commands"`
+	Selectors        []capabilitySelectorDocument    `json:"selectors"`
+	Effects          []EffectClass                   `json:"effect_classes"`
+	Limits           capabilitiesLimitsDocument      `json:"limits"`
+	Defaults         capabilitiesDefaultsDocument    `json:"defaults"`
+	Support          []capabilitySupportDocument     `json:"support"`
+	DataCompiler     *dataCompilerCapabilityDocument `json:"data_compiler"`
+}
+
+type dataCompilerCapabilityDocument struct {
+	ModulePath          string                  `json:"module_path"`
+	DistributionSchema  string                  `json:"distribution_schema"`
+	CommandImportPath   string                  `json:"command_import_path"`
+	AnalyzeProtocol     string                  `json:"analyze_protocol"`
+	EmitProtocol        string                  `json:"emit_protocol"`
+	DeclarationLanguage string                  `json:"declaration_language"`
+	Bounds              DataCompilerBoundsInput `json:"bounds"`
+	Source              SupportState            `json:"source"`
+	Cache               SupportState            `json:"cache"`
+	Build               SupportState            `json:"build"`
+	Offline             SupportState            `json:"offline"`
 }
 
 // CapabilityInvocationPolicy reports the installed compiled-policy protocol and
@@ -286,6 +361,14 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 	if err != nil {
 		return Capabilities{}, fmt.Errorf("%w: %v", ErrCapabilities, err)
 	}
+	var dataCompiler *DataCompilerCapability
+	if input.DataCompiler != nil {
+		value, compilerErr := NewDataCompilerCapability(*input.DataCompiler)
+		if compilerErr != nil {
+			return Capabilities{}, compilerErr
+		}
+		dataCompiler = &value
+	}
 	result := Capabilities{
 		invocationPolicy:           input.InvocationPolicy,
 		cliVersion:                 input.CLIVersion,
@@ -306,6 +389,7 @@ func NewCapabilities(input CapabilitiesInput) (Capabilities, error) {
 		invocationTimeout:          input.InvocationTimeout,
 		invocationConcurrencyLimit: input.InvocationConcurrencyLimit,
 		maximumConcurrencyLimit:    input.MaximumConcurrencyLimit,
+		dataCompiler:               dataCompiler,
 		support:                    support,
 		prepared:                   true,
 	}
@@ -428,6 +512,15 @@ func (c Capabilities) Support() []CapabilitySupport {
 	return append([]CapabilitySupport(nil), c.support...)
 }
 
+// DataCompiler returns the installed official compiler contract when this
+// CLI exposes one.
+func (c Capabilities) DataCompiler() (DataCompilerCapability, bool) {
+	if c.dataCompiler == nil {
+		return DataCompilerCapability{}, false
+	}
+	return *c.dataCompiler, true
+}
+
 // CanonicalJSON returns a defensive copy of the payload document.
 func (c Capabilities) CanonicalJSON() []byte { return append([]byte(nil), c.canonicalJSON...) }
 
@@ -473,6 +566,38 @@ func validateCapabilitiesInput(input CapabilitiesInput) error {
 	}
 	if input.MaximumConcurrencyLimit < 1 || input.MaximumConcurrencyLimit > 1<<30 || input.InvocationConcurrencyLimit < 1 || input.InvocationConcurrencyLimit > input.MaximumConcurrencyLimit {
 		return errors.New("concurrency limits must be positive and the default must not exceed the maximum")
+	}
+	return nil
+}
+
+func validateDataCompilerCapability(input DataCompilerCapabilityInput) error {
+	for name, value := range map[string]string{
+		"module path": input.ModulePath, "distribution schema": input.DistributionSchema,
+		"command import path": input.CommandImportPath, "analyze protocol": input.AnalyzeProtocol,
+		"emit protocol": input.EmitProtocol, "declaration language": input.DeclarationLanguage,
+	} {
+		if !validSafeText(value, 256) {
+			return fmt.Errorf("%s is invalid", name)
+		}
+	}
+	for name, value := range map[string]int{
+		"max_roots": input.Bounds.MaxRoots, "max_nodes": input.Bounds.MaxNodes,
+		"max_imports": input.Bounds.MaxImports, "max_nesting": input.Bounds.MaxNesting,
+		"max_symbol_bytes": input.Bounds.MaxSymbolBytes, "max_diagnostics": input.Bounds.MaxDiagnostics,
+		"max_diagnostic_bytes": input.Bounds.MaxDiagnosticBytes, "max_frame_bytes": input.Bounds.MaxFrameBytes,
+		"max_artifacts": input.Bounds.MaxArtifacts, "max_artifact_bytes": input.Bounds.MaxArtifactBytes,
+		"max_artifact_path_bytes": input.Bounds.MaxArtifactPathBytes,
+	} {
+		if value <= 0 || value > 1<<30 {
+			return fmt.Errorf("bounds.%s is invalid", name)
+		}
+	}
+	for name, state := range map[string]SupportState{
+		"source": input.Source, "cache": input.Cache, "build": input.Build, "offline": input.Offline,
+	} {
+		if !validSupportState(state) {
+			return fmt.Errorf("%s availability %q is invalid", name, state)
+		}
 	}
 	return nil
 }
@@ -654,6 +779,11 @@ func (c Capabilities) input() CapabilitiesInput {
 	for index, value := range c.support {
 		support[index] = value.input
 	}
+	var dataCompiler *DataCompilerCapabilityInput
+	if c.dataCompiler != nil {
+		value := c.dataCompiler.input
+		dataCompiler = &value
+	}
 	return CapabilitiesInput{
 		InvocationPolicy:           c.invocationPolicy,
 		CLIVersion:                 c.cliVersion,
@@ -674,6 +804,7 @@ func (c Capabilities) input() CapabilitiesInput {
 		InvocationTimeout:          c.invocationTimeout,
 		InvocationConcurrencyLimit: c.invocationConcurrencyLimit,
 		MaximumConcurrencyLimit:    c.maximumConcurrencyLimit,
+		DataCompiler:               dataCompiler,
 		Support:                    support,
 	}
 }
@@ -693,6 +824,17 @@ func (c Capabilities) document() capabilitiesDocument {
 	support := make([]capabilitySupportDocument, len(c.support))
 	for index, value := range c.support {
 		support[index] = capabilitySupportDocument(value.input)
+	}
+	var dataCompiler *dataCompilerCapabilityDocument
+	if c.dataCompiler != nil {
+		value := dataCompilerCapabilityDocument{
+			ModulePath: c.dataCompiler.ModulePath(), DistributionSchema: c.dataCompiler.DistributionSchema(),
+			CommandImportPath: c.dataCompiler.CommandImportPath(), AnalyzeProtocol: c.dataCompiler.AnalyzeProtocol(),
+			EmitProtocol: c.dataCompiler.EmitProtocol(), DeclarationLanguage: c.dataCompiler.DeclarationLanguage(),
+			Bounds: c.dataCompiler.Bounds(), Source: c.dataCompiler.Source(), Cache: c.dataCompiler.Cache(),
+			Build: c.dataCompiler.Build(), Offline: c.dataCompiler.Offline(),
+		}
+		dataCompiler = &value
 	}
 	return capabilitiesDocument{
 		InvocationPolicy: c.invocationPolicy,
@@ -717,6 +859,6 @@ func (c Capabilities) document() capabilitiesDocument {
 			InvocationTimeout:     formatCapabilitiesDuration(c.invocationTimeout),
 			InvocationConcurrency: capabilitiesConcurrencyDefaultDocument{DefaultLimit: c.invocationConcurrencyLimit, Queue: 0},
 		},
-		Support: support,
+		Support: support, DataCompiler: dataCompiler,
 	}
 }
