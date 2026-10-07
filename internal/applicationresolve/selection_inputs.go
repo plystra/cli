@@ -339,7 +339,7 @@ func (s SelectionInputs) ResolveCandidateInterfaces(composition applicationmeta.
 	if err != nil {
 		return interfaceresolution.Result{}, err
 	}
-	result, err := resolveInterfaces(composition.Manifest(), composition, s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources)
+	result, err := resolveInterfaces(composition.Manifest(), composition, s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources, nil)
 	if err != nil {
 		return interfaceresolution.Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -359,7 +359,7 @@ func (s SelectionInputs) CandidateOwners(composition applicationmeta.Composition
 	if err != nil {
 		return nil, err
 	}
-	input, err := interfaceResolutionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources)
+	input, err := interfaceResolutionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrResolve, err)
 	}

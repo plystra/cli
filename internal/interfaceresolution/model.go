@@ -57,13 +57,14 @@ func (s ChoiceSource) String() string { return s.Reference }
 // Input contains validated inventories from one application snapshot, effective
 // Interface requirements and choices, and named Resource selections and bindings.
 type Input struct {
-	Interfaces        interfaceinventory.Index
-	Implementations   implementationinventory.Index
-	Requirements      []Requirement
-	Choices           []Choice
-	ResourceProviders resourceproviderinventory.Index
-	ResourceInstances []constructorgraph.ResourceInstanceInput
-	ResourceBindings  []constructorgraph.ResourceBindingInput
+	Interfaces         interfaceinventory.Index
+	Implementations    implementationinventory.Index
+	Requirements       []Requirement
+	Choices            []Choice
+	ResourceProviders  resourceproviderinventory.Index
+	ResourceInstances  []constructorgraph.ResourceInstanceInput
+	ResourceBindings   []constructorgraph.ResourceBindingInput
+	GeneratedResources []constructorgraph.GeneratedResourceInput
 }
 
 // IntrinsicRequirement is one always-present reserved Kernel Interface with

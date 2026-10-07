@@ -77,12 +77,13 @@ type Selection struct {
 // root requirements, resolved Interface selections, and effective Resource
 // instance selections and bindings. Configuration composition precedes Build.
 type Input struct {
-	Implementations   implementationinventory.Index
-	Requirements      []Requirement
-	Selections        []Selection
-	ResourceProviders resourceproviderinventory.Index
-	ResourceInstances []ResourceInstanceInput
-	ResourceBindings  []ResourceBindingInput
+	Implementations    implementationinventory.Index
+	Requirements       []Requirement
+	Selections         []Selection
+	ResourceProviders  resourceproviderinventory.Index
+	ResourceInstances  []ResourceInstanceInput
+	ResourceBindings   []ResourceBindingInput
+	GeneratedResources []GeneratedResourceInput
 }
 
 // Graph is an immutable deterministic constructor dependency graph.
@@ -92,6 +93,7 @@ type Graph struct {
 	construction         []Node
 	resourceConstruction []ResourceNode
 	resourceDependencies map[constructorsymbol.Symbol][]ResourceDependency
+	generatedResources   []GeneratedResourceNode
 }
 
 // Roots returns the normalized Interface roots in canonical ID order.

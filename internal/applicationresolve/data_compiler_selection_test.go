@@ -19,6 +19,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationresolve"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/moduledependency"
 	"golang.org/x/mod/module"
@@ -149,13 +150,16 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	writeCompilerProxyModule(t, proxy, datacompiler.ModulePath, "v0.3.0", "module github.com/plystra/data\n\ngo 1.26\n", map[string][]byte{
 		"plystra-data-compiler.json":        manifest,
 		"declaration/declaration.go":        []byte("package declaration\n\ntype NoAccess struct{}\ntype Member[Access any] struct { Namespace string; Access Access }\n"),
+		"plystra.yaml":                      []byte("{}\n"),
+		"database/resource.go":              []byte("package database\n\n//plystra:resource data.database/v1\ntype Resource interface { Ping() error }\n"),
+		"postgres/postgres.go":              []byte("package postgres\n\nimport \"github.com/plystra/data/database\"\n\ntype provider struct{}\nvar _ database.Resource = (*provider)(nil)\nfunc (*provider) Ping() error { return nil }\n\n//plystra:implements-resource data.database/v1\nfunc New() (*provider, error) { return &provider{}, nil }\n"),
 		"cmd/plystra-data-compiler/main.go": []byte(snapshotCheckingCompilerSource),
 	})
 	project := filepath.Join(root, "project")
 	writeFile(t, filepath.Join(project, "go.mod"), "module example.com/project\n\ngo 1.26\n\nrequire github.com/plystra/data v0.3.0\n")
-	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.primary: {use: example.com/provider.New}}}\ndata: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
-	writeFile(t, filepath.Join(project, "resource", "resource.go"), "package resource\n\n//plystra:resource data.database/v1\ntype Resource interface { Ping() error }\n")
-	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"example.com/project/resource\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[resource.Resource]{Namespace: \"records\"}\n")
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.primary: {use: github.com/plystra/data/postgres.New}}}\ndata: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
+	writeFile(t, filepath.Join(project, "resource", "resource.go"), "package resource\n\n//plystra:resource example.records/v1\ntype Resource interface { Ping() error }\n")
+	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"github.com/plystra/data/database\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[database.Resource]{Namespace: \"records\"}\n")
 	environment := compilerProxyEnvironment(t, proxy)
 	runCompilerGo(t, project, environment, "mod", "download", "all")
 	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
@@ -171,6 +175,19 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	accepted, ok := resolved.DataAnalysis()
 	if !ok || !accepted.Valid() || accepted.ModelDigest("example.records/v1") == "" {
 		t.Fatalf("accepted Data analysis = %#v, ok=%t", accepted, ok)
+	}
+	activation, ok := resolved.DataActivation()
+	if !ok || len(activation.Assignments()) != 1 || activation.Assignments()[0].Access() != "database.records" {
+		t.Fatalf("Data activation = %#v, ok=%t", activation, ok)
+	}
+	graph := resolved.InterfaceResolution().Graph()
+	graphGenerated := graph.GeneratedResourceConstructionOrder()
+	if len(graphGenerated) != 1 || graphGenerated[0].Name() != "database.records" || graphGenerated[0].MemberID() != "example.records/v1" || graphGenerated[0].PackagePath() != "example.com/project/resource" || graphGenerated[0].ResourceID().String() != "example.records/v1" {
+		t.Fatalf("generated Data access graph = %#v", graphGenerated)
+	}
+	accessDependencies := graph.ResourceDependencies(graphGenerated[0].Constructor())
+	if len(accessDependencies) != 1 || accessDependencies[0].InstanceName() != "database.primary" || accessDependencies[0].Provider().String() != "github.com/plystra/data/postgres.New" || accessDependencies[0].Reason() != constructorgraph.SelectionUnique {
+		t.Fatalf("generated Data access dependency = %#v", accessDependencies)
 	}
 	output, ok := resolved.DataAnalyzeOutput()
 	if !ok || len(output) == 0 {
@@ -212,6 +229,36 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	}
 	if got := dataCompilerObservationIDs(generated.DataCompilerObservations()); got != "data-compiler-analyze-execution" {
 		t.Fatalf("warm offline generation observations = %q", got)
+	}
+}
+
+func TestResolveRejectsNonPostgreSQLDataProviderAfterAnalysis(t *testing.T) {
+	root := t.TempDir()
+	proxy := filepath.Join(root, "proxy")
+	writeCompilerProxyModule(t, proxy, datacompiler.ModulePath, "v0.3.0", "module github.com/plystra/data\n\ngo 1.26\n", map[string][]byte{
+		"plystra-data-compiler.json":        dataCompilerManifest(t),
+		"declaration/declaration.go":        []byte("package declaration\n\ntype Member[Access any] struct { Namespace string; Access Access }\n"),
+		"plystra.yaml":                      []byte("{}\n"),
+		"database/resource.go":              []byte("package database\n\n//plystra:resource data.database/v1\ntype Resource interface { Ping() error }\n"),
+		"postgres/postgres.go":              []byte("package postgres\n\nimport \"github.com/plystra/data/database\"\n\ntype provider struct{}\nvar _ database.Resource = (*provider)(nil)\nfunc (*provider) Ping() error { return nil }\n\n//plystra:implements-resource data.database/v1\nfunc New() (*provider, error) { return &provider{}, nil }\n"),
+		"cmd/plystra-data-compiler/main.go": []byte(snapshotCheckingCompilerSource),
+	})
+	project := filepath.Join(root, "project")
+	writeFile(t, filepath.Join(project, "go.mod"), "module example.com/project\n\ngo 1.26\n\nrequire github.com/plystra/data v0.3.0\n")
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.primary: {use: example.com/project/backend.New}}}\ndata: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
+	writeFile(t, filepath.Join(project, "resource", "resource.go"), "package resource\n\n//plystra:resource example.records/v1\ntype Resource interface { Ping() error }\n")
+	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"github.com/plystra/data/database\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[database.Resource]{Namespace: \"records\"}\n")
+	writeFile(t, filepath.Join(project, "backend", "backend.go"), "package backend\n\nimport \"github.com/plystra/data/database\"\n\ntype provider struct{}\nvar _ database.Resource = (*provider)(nil)\nfunc (*provider) Ping() error { return nil }\n\n//plystra:implements-resource data.database/v1\nfunc New() (*provider, error) { return &provider{}, nil }\n")
+	environment := compilerProxyEnvironment(t, proxy)
+	runCompilerGo(t, project, environment, "mod", "download", "all")
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), CompileTimeout: 30 * time.Second,
+	})
+	if !errors.Is(err, applicationresolve.ErrDataAssignment) || !strings.Contains(err.Error(), "official PostgreSQL provider") {
+		t.Fatalf("unsupported Data provider error = %v", err)
+	}
+	if activation, ok := resolved.DataActivation(); !ok || !activation.Valid() {
+		t.Fatalf("provider rejection discarded accepted activation = %#v, ok=%t", activation, ok)
 	}
 }
 
@@ -395,7 +442,7 @@ func main() {
         }
     }
 	if !foundPackage || !foundResource || source == "" { os.Exit(2) }
-	initializer := "declaration.Member[resource.Resource]{Namespace: \"records\"}"
+	initializer := "declaration.Member[database.Resource]{Namespace: \"records\"}"
 	start := strings.Index(source, initializer)
 	if start < 0 { os.Exit(2) }
 	position := func(offset int) map[string]any {
@@ -410,7 +457,7 @@ func main() {
 	root := map[string]any{
 		"member_id": "example.records/v1", "package_path": "example.com/project/model", "file_path": "model/model.go", "symbol": "Records",
 		"model": map[string]any{"namespace": "records"},
-		"access_package": "example.com/project/resource", "access_type": "Resource", "access_id": "data.database/v1", "migration_only": false,
+		"access_package": "example.com/project/resource", "access_type": "Resource", "access_id": "example.records/v1", "migration_only": false,
 		"source_digest": "sha256:" + hex.EncodeToString(sum[:]),
 		"declaration_pos": map[string]any{"path": "model/model.go", "start_line": startPosition["line"], "start_column": startPosition["column"], "end_line": endPosition["line"], "end_column": endPosition["column"]},
 	}

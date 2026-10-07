@@ -14,6 +14,7 @@ import (
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/configurationresolve"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/generationexec"
@@ -423,34 +424,35 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, err
 	}
 	manifest := composition.Manifest()
+	var dataMembers []applicationmeta.DataMember
+	var dataRun dataAnalyzeRun
+	var dataAnalysis DataAnalysisAcceptance
+	var dataActivation DataActivation
 	if members := manifest.DataMembers(); len(members) != 0 {
+		dataMembers = members
 		memberIDs := make([]string, len(members))
 		for index, member := range members {
 			memberIDs[index] = member.ID()
 		}
-		run, err := inputs.analyzeData(ctx, options)
+		dataRun, err = inputs.analyzeData(ctx, options)
 		partial := Result{
 			module:       module,
 			selection:    ConfigurationSelection{mode: selector.mode, path: selector.path, environment: selector.environment},
-			dataCompiler: run.artifact, dataCompilerManifest: run.manifest,
-			dataCompilerStatus:       run.status,
-			dataCompilerObservations: cloneDataCompilerObservations(run.observations),
+			dataCompiler: dataRun.artifact, dataCompilerManifest: dataRun.manifest,
+			dataCompilerStatus:       dataRun.status,
+			dataCompilerObservations: cloneDataCompilerObservations(dataRun.observations),
 		}
 		if err != nil {
-			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err, acquisition: run.status, observations: run.observations})
+			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err, acquisition: dataRun.status, observations: dataRun.observations})
 		}
-		acceptance, err := validateDataAnalysisWithBounds(run.response, memberIDs, run.snapshot, run.bounds, true)
+		dataAnalysis, err = validateDataAnalysisWithBounds(dataRun.response, memberIDs, dataRun.snapshot, dataRun.bounds, true)
 		if err != nil {
-			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: run.status, observations: run.observations})
+			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: dataRun.status, observations: dataRun.observations})
 		}
-		activation, err := BuildDataActivation(manifest, acceptance)
+		dataActivation, err = BuildDataActivation(manifest, dataAnalysis)
 		if err != nil {
 			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: members[0], cause: err})
 		}
-		partial.dataAnalysis = acceptance
-		partial.dataActivation = activation
-		partial.dataAnalyzeOutput = append(json.RawMessage(nil), run.response.Output...)
-		return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable, acquisition: run.status, observations: run.observations})
 	}
 	currentLayers := composition.CurrentLayers()
 	if len(currentLayers) == 0 {
@@ -469,7 +471,14 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
 	}
 	sourceContext := applicationInputSourceContext(module, dependencies, composition, currentProjectPaths)
-	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext)
+	var generatedResources []constructorgraph.GeneratedResourceInput
+	if dataActivation.Valid() {
+		generatedResources, err = buildDataGeneratedResources(module.ModulePath(), manifest, dataActivation)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
+		}
+	}
+	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext, generatedResources)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -554,7 +563,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err := inputs.ValidateSnapshot(ctx); err != nil {
 		return Result{}, err
 	}
-	return Result{
+	result := Result{
 		module:              module,
 		currentManifest:     currentManifest,
 		composition:         composition,
@@ -574,10 +583,34 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			environment: selector.environment,
 			digest:      selectedDigest,
 		},
-		rootData:            append([]byte(nil), rootData...),
-		rootDigest:          rootDigest,
-		configurationSource: configurationSnapshot.Data(),
-	}, nil
+		rootData:                 append([]byte(nil), rootData...),
+		rootDigest:               rootDigest,
+		configurationSource:      configurationSnapshot.Data(),
+		dataCompiler:             dataRun.artifact,
+		dataCompilerManifest:     dataRun.manifest,
+		dataCompilerStatus:       dataRun.status,
+		dataAnalysis:             dataAnalysis,
+		dataActivation:           dataActivation,
+		dataAnalyzeOutput:        append(json.RawMessage(nil), dataRun.response.Output...),
+		dataCompilerObservations: cloneDataCompilerObservations(dataRun.observations),
+	}
+	if dataActivation.Valid() {
+		if err := validateDataBackend(interfaceResolution.Graph(), declarations.Resources(), dataActivation); err != nil {
+			return result, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
+		}
+		return result, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{
+			member: membersFirst(dataMembers), cause: ErrDataCompilerAnalysisUnavailable,
+			acquisition: dataRun.status, observations: dataRun.observations,
+		})
+	}
+	return result, nil
+}
+
+func membersFirst(members []applicationmeta.DataMember) applicationmeta.DataMember {
+	if len(members) == 0 {
+		return applicationmeta.DataMember{}
+	}
+	return members[0]
 }
 
 func currentProjectConfigurationPaths(base, selected applicationmeta.Manifest, environment bool, schemas applicationmeta.SchemaLookup) ([]string, error) {

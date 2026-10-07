@@ -83,6 +83,37 @@ func TestResourceGraphBuildsNamedInstancesAndSharedDependencies(t *testing.T) {
 	}
 }
 
+func TestResourceGraphProjectsGeneratedAccessProviderAndBindsItsDatabase(t *testing.T) {
+	t.Parallel()
+	input := resourceGraphInput(t)
+	input.GeneratedResources = []constructorgraph.GeneratedResourceInput{{
+		MemberID: "example.records/v1", Name: "access.records", ResourceID: mustGraphID(t, "data.access/v1"),
+		PackagePath: "example.com/app/access", TypeName: "Resource", Constructor: mustGraphSymbol(t, "example.com/app/generated/data/access/records.New"),
+		DatabaseResourceID: mustGraphID(t, "data.raw/v1"), DatabasePackagePath: "example.com/app/contracts/raw",
+		DatabaseParameter: "database", DatabaseParameterPosition: 1, Sources: []constructorgraph.ResourceSource{resourceSource("data.members.example.records")},
+	}}
+	input.ResourceBindings = append(input.ResourceBindings, resourceBinding(constructorgraph.ResourceConsumerInstance, "access.records", "database", "database.primary"))
+	graph, err := constructorgraph.Build(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := graph.GeneratedResourceConstructionOrder()
+	if len(generated) != 1 || generated[0].Name() != "access.records" || generated[0].MemberID() != "example.records/v1" || generated[0].ResourceID().String() != "data.access/v1" || generated[0].PackagePath() != "example.com/app/access" || generated[0].TypeName() != "Resource" {
+		t.Fatalf("generated Resource nodes = %#v", generated)
+	}
+	if len(graph.ResourceConstructionOrder()) != 5 {
+		t.Fatalf("generated provider became a selected database instance: %#v", graph.ResourceConstructionOrder())
+	}
+	constructor := mustGraphSymbol(t, "example.com/app/generated/data/access/records.New")
+	dependencies := graph.ResourceDependencies(constructor)
+	if len(dependencies) != 1 || dependencies[0].InstanceName() != "database.primary" || dependencies[0].Provider().String() != "example.com/app/raw.New" || dependencies[0].Reason() != constructorgraph.SelectionExplicit || dependencies[0].ParameterName() != "database" {
+		t.Fatalf("generated Resource dependency = %#v", dependencies)
+	}
+	if got := generated[0].Dependencies(); len(got) != 1 || got[0].InstanceName() != "database.primary" {
+		t.Fatalf("generated node dependencies = %#v", got)
+	}
+}
+
 func TestResourceGraphResolvesOnlyActiveImplicitConsumers(t *testing.T) {
 	t.Parallel()
 	input := resourceGraphInput(t)

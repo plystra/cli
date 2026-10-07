@@ -29,6 +29,7 @@ type resourceConsumerRecord struct {
 
 type resourceGraphBuilder struct {
 	instances map[string]ResourceNode
+	generated map[string]GeneratedResourceNode
 	consumers map[resourceConsumer]resourceConsumerRecord
 	explicit  map[resourceAddress]ResourceDependency
 	states    map[string]visitState
@@ -39,6 +40,7 @@ type resourceGraphBuilder struct {
 func newResourceGraphBuilder(input Input) (*resourceGraphBuilder, error) {
 	builder := &resourceGraphBuilder{
 		instances: make(map[string]ResourceNode),
+		generated: make(map[string]GeneratedResourceNode),
 		consumers: make(map[resourceConsumer]resourceConsumerRecord),
 		explicit:  make(map[resourceAddress]ResourceDependency),
 		states:    make(map[string]visitState),
@@ -107,6 +109,43 @@ func newResourceGraphBuilder(input Input) (*resourceGraphBuilder, error) {
 			})
 		}
 		builder.consumers[consumer] = resourceConsumerRecord{constructor: provider.Symbol(), declaration: declaration, sources: sources, dependencies: dependencies}
+	}
+	generated := append([]GeneratedResourceInput(nil), input.GeneratedResources...)
+	sort.Slice(generated, func(i, j int) bool {
+		if generated[i].Name != generated[j].Name {
+			return generated[i].Name < generated[j].Name
+		}
+		return generated[i].Constructor.String() < generated[j].Constructor.String()
+	})
+	for _, selected := range generated {
+		if resourcename.Check(selected.Name) != nil || selected.MemberID == "" || selected.ResourceID.String() == "" || selected.PackagePath == "" || selected.TypeName == "" || selected.Constructor.String() == "" || selected.DatabaseResourceID.String() == "" || selected.DatabasePackagePath == "" || selected.DatabaseParameter == "" || selected.DatabaseParameterPosition < 1 {
+			return nil, fmt.Errorf("%w: invalid generated Resource provider input", ErrInvalidInput)
+		}
+		sources, err := normalizeResourceSources(selected.Sources)
+		if err != nil {
+			return nil, fmt.Errorf("%w: generated Resource provider sources: %v", ErrInvalidInput, err)
+		}
+		if _, exists := builder.instances[selected.Name]; exists {
+			return nil, fmt.Errorf("%w: generated Resource provider %q collides with selected instance", ErrInvalidInput, selected.Name)
+		}
+		if _, exists := builder.generated[selected.Name]; exists {
+			return nil, fmt.Errorf("%w: generated Resource provider %q is duplicated", ErrInvalidInput, selected.Name)
+		}
+		declaration := sources[0]
+		dependency := ResourceDependency{
+			namespace: ResourceConsumerInstance, consumer: selected.Name, constructor: selected.Constructor,
+			declaration: declaration, consumerSelectionSources: sources,
+			resourceID: selected.DatabaseResourceID, packagePath: selected.DatabasePackagePath,
+			parameterName: selected.DatabaseParameter, parameterPosition: selected.DatabaseParameterPosition,
+		}
+		builder.generated[selected.Name] = GeneratedResourceNode{
+			memberID: selected.MemberID, name: selected.Name, resourceID: selected.ResourceID,
+			packagePath: selected.PackagePath, typeName: selected.TypeName,
+			constructor: selected.Constructor, sources: sources,
+		}
+		builder.consumers[resourceConsumer{ResourceConsumerInstance, selected.Name}] = resourceConsumerRecord{
+			constructor: selected.Constructor, declaration: declaration, sources: sources, dependencies: []ResourceDependency{dependency},
+		}
 	}
 	for _, implementation := range input.Implementations.Implementations() {
 		consumer := resourceConsumer{ResourceConsumerImplementation, implementation.Symbol().String()}
@@ -210,13 +249,16 @@ func (b *resourceGraphBuilder) addBinding(input ResourceBindingInput) error {
 	dependency.instanceName = input.Target
 	failure.dependency = dependency
 	target, exists := b.instances[input.Target]
-	if !exists {
+	if exists {
+		dependency.provider, dependency.selectionSources = target.provider.Symbol(), target.Sources()
+	} else if generated, generatedExists := b.generated[input.Target]; generatedExists && generated.resourceID == dependency.resourceID {
+		dependency.provider, dependency.selectionSources = generated.constructor, generated.Sources()
+	} else {
 		failure.detail = "target instance is not selected"
 		return failure
 	}
-	dependency.provider, dependency.selectionSources = target.provider.Symbol(), target.Sources()
 	failure.dependency = dependency
-	if target.resourceID != dependency.resourceID {
+	if exists && target.resourceID != dependency.resourceID {
 		failure.detail = "target does not provide the exact Resource contract"
 		failure.candidates = []ResourceNode{target}
 		return failure
@@ -263,6 +305,24 @@ func (b *resourceGraphBuilder) resolve(graph *Graph) error {
 			graph.resourceDependencies[node.symbol] = append(graph.resourceDependencies[node.symbol], dependency)
 		}
 	}
+	generatedNames := make([]string, 0, len(b.generated))
+	for name := range b.generated {
+		generatedNames = append(generatedNames, name)
+	}
+	sort.Strings(generatedNames)
+	for _, name := range generatedNames {
+		node := b.generated[name]
+		record := b.consumers[resourceConsumer{ResourceConsumerInstance, name}]
+		for _, declared := range record.dependencies {
+			dependency, err := b.bind(declared)
+			if err != nil {
+				return err
+			}
+			node.dependencies = append(node.dependencies, dependency)
+			graph.resourceDependencies[node.constructor] = append(graph.resourceDependencies[node.constructor], dependency)
+		}
+		graph.generatedResources = append(graph.generatedResources, node)
+	}
 	return nil
 }
 
@@ -278,15 +338,28 @@ func (b *resourceGraphBuilder) bind(declared ResourceDependency) (ResourceDepend
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].name < candidates[j].name })
-	if len(candidates) != 1 {
+	generated := make([]GeneratedResourceNode, 0)
+	for _, node := range b.generated {
+		if node.resourceID == declared.resourceID {
+			generated = append(generated, node)
+		}
+	}
+	sort.Slice(generated, func(i, j int) bool { return generated[i].name < generated[j].name })
+	if len(candidates)+len(generated) != 1 {
 		condition := ErrMissingResourceBinding
-		if len(candidates) > 1 {
+		if len(candidates)+len(generated) > 1 {
 			condition = ErrAmbiguousResourceBinding
 		}
 		return ResourceDependency{}, &ResourceBindingError{condition: condition, dependency: declared, candidates: cloneResourceNodes(candidates), detail: "implicit binding requires exactly one compatible selected instance"}
 	}
-	target := candidates[0]
-	declared.instanceName, declared.provider, declared.reason = target.name, target.provider.Symbol(), SelectionUnique
+	if len(candidates) == 1 {
+		target := candidates[0]
+		declared.instanceName, declared.provider, declared.reason = target.name, target.provider.Symbol(), SelectionUnique
+		declared.selectionSources = target.Sources()
+		return declared, nil
+	}
+	target := generated[0]
+	declared.instanceName, declared.provider, declared.reason = target.name, target.constructor, SelectionUnique
 	declared.selectionSources = target.Sources()
 	return declared, nil
 }
@@ -311,8 +384,10 @@ func (b *resourceGraphBuilder) visit(name string) error {
 			return err
 		}
 		b.stack = append(b.stack, dependency)
-		if err := b.visit(dependency.instanceName); err != nil {
-			return err
+		if _, generated := b.generated[dependency.instanceName]; !generated {
+			if err := b.visit(dependency.instanceName); err != nil {
+				return err
+			}
 		}
 		b.stack = b.stack[:len(b.stack)-1]
 		node.dependencies = append(node.dependencies, dependency)
