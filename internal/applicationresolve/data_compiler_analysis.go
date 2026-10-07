@@ -2,8 +2,6 @@ package applicationresolve
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -17,16 +15,27 @@ import (
 // Core validates active-root assignment separately; complete typed-result
 // acceptance and generated installation remain later boundaries.
 func (s SelectionInputs) AnalyzeData(ctx context.Context, options Options) (datacompiler.AnalyzeResponse, error) {
+	run, err := s.analyzeData(ctx, options)
+	return run.response, err
+}
+
+type dataAnalyzeRun struct {
+	response datacompiler.AnalyzeResponse
+	snapshot datacompiler.AnalyzeSourceSnapshot
+	bounds   datacompiler.Bounds
+}
+
+func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (dataAnalyzeRun, error) {
 	if ctx == nil {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: context is nil", ErrDataCompilerAnalysisUnavailable)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: context is nil", ErrDataCompilerAnalysisUnavailable)
 	}
 	selection, err := s.DataCompilerSelection()
 	if err != nil {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: select compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: select compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	artifact, err := s.AcquireDataCompiler(ctx, options)
 	if err != nil {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: acquire compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: acquire compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	modules := dataSnapshotModules(s, selection)
 	snapshot, err := datacompiler.BuildAnalyzeSourceSnapshot(ctx, datacompiler.AnalyzeSourceSnapshotOptions{
@@ -39,11 +48,11 @@ func (s SelectionInputs) AnalyzeData(ctx context.Context, options Options) (data
 		Environment:      options.Environment,
 	})
 	if err != nil {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: build source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: build source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	snapshotJSON, err := snapshot.JSON()
 	if err != nil {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: encode source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: encode source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	request, err := datacompiler.BuildAnalyzeRequest(artifact, selection.Manifest, datacompiler.AnalyzeRequestOptions{
 		RequestID: "data-analyze-" + strings.TrimPrefix(snapshot.Digest(), "sha256:"),
@@ -54,17 +63,17 @@ func (s SelectionInputs) AnalyzeData(ctx context.Context, options Options) (data
 		Snapshot: snapshotJSON,
 	})
 	if err != nil {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: build request: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: build request: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	analyzeOptions := datacompiler.AnalyzeOptions{Environment: options.Environment, Timeout: options.ExecutionTimeout}
 	response, err := datacompiler.Analyze(ctx, artifact, request, analyzeOptions)
 	if err != nil {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: invoke compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: invoke compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	if response.Status != "succeeded" {
-		return datacompiler.AnalyzeResponse{}, fmt.Errorf("%w: compiler rejected the Data source snapshot", ErrDataCompilerAnalysisUnavailable)
+		return dataAnalyzeRun{}, fmt.Errorf("%w: compiler rejected the Data source snapshot", ErrDataCompilerAnalysisUnavailable)
 	}
-	return response, nil
+	return dataAnalyzeRun{response: response, snapshot: snapshot, bounds: selection.Manifest.Bounds}, nil
 }
 
 func dataSnapshotModules(inputs SelectionInputs, selection datacompiler.Selection) []datacompiler.SnapshotModule {
@@ -124,45 +133,4 @@ func analyzeBuildTags(environment []string) []string {
 	}
 	sort.Strings(tags)
 	return tags
-}
-
-// ValidateDataRoots checks the part of the analyze result that belongs to the
-// Core activation boundary. The independent compiler owns model typing; Core
-// owns whether every returned root has an explicit active assignment.
-func ValidateDataRoots(response datacompiler.AnalyzeResponse, members []string) error {
-	if response.Status != "succeeded" {
-		return errors.New("Data analyze result is not successful")
-	}
-	var output struct {
-		Roots []struct {
-			MemberID      string `json:"member_id"`
-			AccessPackage string `json:"access_package,omitempty"`
-			AccessType    string `json:"access_type,omitempty"`
-			AccessID      string `json:"access_id,omitempty"`
-		} `json:"roots"`
-	}
-	if err := json.Unmarshal(response.Output, &output); err != nil {
-		return fmt.Errorf("decode accepted Data roots: %w", err)
-	}
-	active := make(map[string]struct{}, len(members))
-	for _, member := range members {
-		active[member] = struct{}{}
-	}
-	seen := make(map[string]struct{}, len(output.Roots))
-	for _, root := range output.Roots {
-		if _, ok := active[root.MemberID]; !ok {
-			return fmt.Errorf("analyze returned unassigned Data member %q", root.MemberID)
-		}
-		if _, ok := seen[root.MemberID]; ok {
-			return fmt.Errorf("analyze returned duplicate Data member %q", root.MemberID)
-		}
-		seen[root.MemberID] = struct{}{}
-		if (root.AccessPackage == "") != (root.AccessType == "") || (root.AccessPackage == "") != (root.AccessID == "") {
-			return fmt.Errorf("analyze returned incomplete access Resource identity for %q", root.MemberID)
-		}
-	}
-	if len(seen) != len(active) {
-		return fmt.Errorf("analyze returned %d Data roots for %d active members", len(seen), len(active))
-	}
-	return nil
 }

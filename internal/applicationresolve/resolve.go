@@ -48,15 +48,15 @@ var (
 	// reachable in the frozen Interface constructor graph.
 	ErrUnownedConstructorConfiguration = errors.New("constructor configuration has no explicit selection or reachable constructor")
 	// ErrDataCompilerUnavailable reports selected Data activation before the
-	// official compiler acquisition or analyze/emit integration is available.
+	// CLI can emit and install the accepted compiler result.
 	ErrDataCompilerUnavailable = errors.New("Data compiler integration is unavailable")
-	// ErrDataCompilerAnalysisUnavailable reports a verified compiler whose
-	// complete pre-Freeze analyze acceptance is not yet available.
+	// ErrDataCompilerAnalysisUnavailable reports a failure to invoke the
+	// selected compiler or independently accept its analyze result.
 	ErrDataCompilerAnalysisUnavailable = errors.New("Data compiler analyze integration is unavailable")
 )
 
-// DataCompilerUnavailableError identifies the selected member that cannot yet
-// be installed by this CLI, without claiming a compiler distribution was run.
+// DataCompilerUnavailableError identifies the selected member whose accepted
+// Data result cannot yet be installed by this CLI.
 type DataCompilerUnavailableError struct {
 	member applicationmeta.DataMember
 	cause  error
@@ -293,11 +293,11 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		for index, member := range members {
 			memberIDs[index] = member.ID()
 		}
-		response, err := inputs.AnalyzeData(ctx, options)
+		run, err := inputs.analyzeData(ctx, options)
 		if err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err})
 		}
-		if err := ValidateDataRoots(response, memberIDs); err != nil {
+		if _, err := validateDataAnalysisWithBounds(run.response, memberIDs, run.snapshot, run.bounds, true); err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err)})
 		}
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable})

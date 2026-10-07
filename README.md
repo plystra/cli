@@ -1197,23 +1197,30 @@ assignability produce `PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID` or
 Installed capability facts distinguish contract and constructor discovery from
 named-instance configuration, binding, generation, and execution. Read each
 support stage independently; implemented stages do not imply `accepted: yes`.
-Data schema/query generation and migration commands remain unsupported.
+The selected Data compiler's bounded analyze phase is integrated as a
+read-only pre-Freeze step: the CLI supplies a finite source snapshot and
+independently validates the complete typed result, provenance, Resource
+identity, and logical-model digest. Emit, generated access installation,
+PostgreSQL/D1 generation, and migration commands remain unsupported.
 
 The CLI parses current-Project `data.members` assignments as exact member-ID
 entries. Each entry requires one valid named `resource` and may name an `access`
 instance. An environment overlay replaces an entire entry or removes it with
 `{$remove: true}`; root and complete replacement documents cannot remove it.
-This is configuration composition only. An effective active member makes
+This is configuration composition only. The CLI runs and accepts the bounded
+analyze result for effective active members, then still makes
 `plystra generate` and `plystra generate --check` fail with
-`PLYSTRA_DATA_COMPILER_UNAVAILABLE` before changing the Project. The CLI first
+`PLYSTRA_DATA_COMPILER_UNAVAILABLE` at the unimplemented emit and installation
+boundary before changing the Project. The CLI first
 resolves the exact `github.com/plystra/data` version, verified `h1:` checksum,
 and distribution manifest from the selected Project's ordinary Go Module graph;
 workspace and replacement sources are not accepted as published compiler
 distributions. A missing or invalid distribution is reported with the active
 member's configuration source. Invalid entries report
-`PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location. Project
-compiler execution, assignment validation, generated access, and migrations
-are not installed yet.
+`PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location. Analyze
+execution and result acceptance are installed as an internal boundary, but
+assignment activation, emit, generated access installation, and migrations
+remain unsupported.
 
 ### Named Resource instances
 

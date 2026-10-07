@@ -723,9 +723,13 @@ transaction target changes after inspection, the operation reports
 guidance path. Correct the reported path or stop the concurrent editor, then
 rerun `plystra guidance check` before synchronizing again.
 
-The current CLI supports named Resources but does not scaffold or run Data
-migrations. The official Data compiler, PostgreSQL/D1 generation, and explicit
-`data migration plan|apply|status` operations remain deferred to Gates 16-18.
+The current CLI supports named Resources and integrates the selected Data
+compiler's bounded read-only analyze phase. It independently accepts the
+complete typed result before Freeze, including source provenance, Resource
+identity, and logical-model digests. It does not yet emit or install generated
+access, scaffold or run Data migrations, or provide PostgreSQL/D1 generation;
+explicit `data migration plan|apply|status` operations remain deferred to
+Gates 16-18.
 Do not work around that boundary by placing database or migration behavior in a
 legacy Plugin or in `generated/`.
 
@@ -794,7 +798,7 @@ selected path or query.
 
 Every effective-graph module with root `plystra.yaml` is a discoverable Project. Ordinary dependencies remain inactive. `--template` resolves one Project module and records it as an ordinary direct Go Module dependency. It has no ancestry and contributes no configuration or source; creation and later dependency commands never copy or activate dependency configuration.
 
-The supported configuration layers are the current Project root plus one selected environment overlay, or one complete replacement document. They cover Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, CORS, Resource declarations, and typed `data.members` assignments authored by the current Project. Each Data member ID is an exact key; an overlay replaces or removes its whole assignment. This CLI parses the closed assignment shape but rejects effective active members before generation or drift checking because official Data compiler integration is not installed. Parsing an assignment does not validate its declared member, database provider, or access contract.
+The supported configuration layers are the current Project root plus one selected environment overlay, or one complete replacement document. They cover Interface requirements, Implementation choices, policies, typed constructor configuration, exposure, CORS, Resource declarations, and typed `data.members` assignments authored by the current Project. Each Data member ID is an exact key; an overlay replaces or removes its whole assignment. This CLI parses the closed assignment shape, runs and accepts the bounded analyze result for effective active members, then rejects them at the still-unimplemented emit and installation boundary before generation or drift checking can mutate the Project. Parsing an assignment does not validate its declared member, database provider, or access contract.
 
 Ordinary dependencies are discoverable Go Modules, not configuration layers. Their root marker may identify a Project for discovery, but their declarations, overlays, replacement documents, runtime baselines, and source never enter the current application model.
 

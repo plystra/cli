@@ -106,11 +106,8 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), CompileTimeout: 30 * time.Second,
 	})
-	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) {
+	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) || !strings.HasSuffix(err.Error(), applicationresolve.ErrDataCompilerAnalysisUnavailable.Error()) {
 		t.Fatalf("Resolve error = %v", err)
-	}
-	if errors.Is(err, datacompiler.ErrAnalyze) {
-		t.Fatalf("analyze child process did not receive the Resource source closure: %v", err)
 	}
 }
 
@@ -237,10 +234,14 @@ func dataCompilerManifest(t *testing.T) []byte {
 const snapshotCheckingCompilerSource = `package main
 
 import (
-    "encoding/binary"
-    "encoding/json"
-    "io"
-    "os"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"os"
+	"strings"
 )
 
 func main() {
@@ -254,25 +255,62 @@ func main() {
     if !ok { os.Exit(2) }
     packages, packagesOK := snapshot["packages"].([]any)
     resources, resourcesOK := snapshot["resources"].([]any)
-    foundPackage, foundResource := false, false
-    if packagesOK {
-        for _, value := range packages {
-            packageValue, ok := value.(map[string]any)
-            if ok && packageValue["import_path"] == "example.com/project/resource" { foundPackage = true }
-        }
-    }
+	foundPackage, foundResource := false, false
+	var source string
+	if packagesOK {
+		for _, value := range packages {
+			packageValue, ok := value.(map[string]any)
+			if !ok { continue }
+			if packageValue["import_path"] == "example.com/project/resource" { foundPackage = true }
+			if packageValue["import_path"] != "example.com/project/model" { continue }
+			files, ok := packageValue["files"].([]any)
+			if !ok { continue }
+			for _, fileValue := range files {
+				file, ok := fileValue.(map[string]any)
+				if !ok || file["path"] != "model/model.go" { continue }
+				encoded, ok := file["content"].(string)
+				if !ok { continue }
+				decoded, err := base64.StdEncoding.DecodeString(encoded)
+				if err != nil { continue }
+				source = string(decoded)
+			}
+		}
+	}
     if resourcesOK {
         for _, value := range resources {
             resourceValue, ok := value.(map[string]any)
             if ok && resourceValue["import_path"] == "example.com/project/resource" { foundResource = true }
         }
     }
-    if !foundPackage || !foundResource { os.Exit(2) }
-    response := map[string]any{
-        "schema": input["schema"], "phase": input["phase"], "request_id": input["request_id"], "input_digest": input["input_digest"],
-        "status": "rejected", "output": map[string]any{"roots": []any{}, "valid": false, "truncated": false},
-        "diagnostics": []any{map[string]string{"code": "invalid-snapshot", "message": "test rejection", "action": "fix"}}, "truncated": false,
-    }
+	if !foundPackage || !foundResource || source == "" { os.Exit(2) }
+	initializer := "declaration.Member[resource.Resource]{Namespace: \"records\"}"
+	start := strings.Index(source, initializer)
+	if start < 0 { os.Exit(2) }
+	position := func(offset int) map[string]any {
+		line, column := 1, 1
+		for index := 0; index < offset; index++ {
+			if source[index] == '\n' { line, column = line+1, 1 } else { column++ }
+		}
+		return map[string]any{"line": line, "column": column}
+	}
+	startPosition, endPosition := position(start), position(start+len(initializer))
+	sum := sha256.Sum256([]byte(source))
+	root := map[string]any{
+		"member_id": "example.records/v1", "package_path": "example.com/project/model", "file_path": "model/model.go", "symbol": "Records",
+		"model": map[string]any{"namespace": "records"},
+		"access_package": "example.com/project/resource", "access_type": "Resource", "access_id": "data.database/v1", "migration_only": false,
+		"source_digest": "sha256:" + hex.EncodeToString(sum[:]),
+		"declaration_pos": map[string]any{"path": "model/model.go", "start_line": startPosition["line"], "start_column": startPosition["column"], "end_line": endPosition["line"], "end_column": endPosition["column"]},
+	}
+	roots, _ := json.Marshal([]any{root})
+	digestPayload := []byte("{\"roots\":" + string(roots) + ",\"diagnostics\":[],\"truncated\":false}")
+	digestSum := sha256.Sum256(append([]byte("plystra.data.analyze/v1\x00"), digestPayload...))
+	digest := "sha256:" + hex.EncodeToString(digestSum[:])
+	response := map[string]any{
+		"schema": input["schema"], "phase": input["phase"], "request_id": input["request_id"], "input_digest": input["input_digest"],
+		"status": "succeeded", "output_digest": digest, "output": map[string]any{"roots": []any{root}, "digest": digest, "valid": true, "truncated": false},
+		"diagnostics": []any{}, "truncated": false,
+	}
     data, _ := json.Marshal(response)
     binary.BigEndian.PutUint32(header[:], uint32(len(data)))
     _, _ = os.Stdout.Write(header[:])
