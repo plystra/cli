@@ -219,6 +219,68 @@ interfaces:
 	}
 }
 
+func TestInterfaceResolutionInputsUseOnlyCurrentProjectLayers(t *testing.T) {
+	t.Parallel()
+
+	root := composeManifest(t, `
+interfaces:
+  require: [email.send/v1]
+  use: {email.send/v1: example.com/current/email.New}
+  policies: {email.send/v1: {timeout: 1s}}
+http: {expose: {email.send/v1: {transport: connect}}}
+`)
+	overlay, err := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte(`
+interfaces:
+  require: {add: [audit.write/v1], remove: [email.send/v1]}
+  use: {email.send/v1: example.com/current/production.New}
+  policies: {email.send/v1: {timeout: 2s}}
+http: {expose: {email.send/v1: {$remove: true}, audit.write/v1: {transport: connect}}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := applicationmeta.ApplyOverlay(root, overlay, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependency := applicationmeta.Dependency{
+		ModulePath:    "example.com/template",
+		ModuleVersion: "v1.0.0",
+		Manifest: composeManifest(t, `
+interfaces:
+  require: [template.read/v1]
+  use: {email.send/v1: example.com/template/email.New}
+  policies: {email.send/v1: {timeout: 10s}}
+http: {expose: {template.read/v1: {transport: connect}}}
+`),
+	}
+	withoutDependency, err := applicationmeta.Compose(nil, current, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withDependency, err := applicationmeta.Compose([]applicationmeta.Dependency{dependency}, current, composeSchemaLookup(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withDependency.CompositionDigest() != withoutDependency.CompositionDigest() || !reflect.DeepEqual(withDependency.Provenance(), withoutDependency.Provenance()) || !reflect.DeepEqual(withDependency.ResolutionSources(), withoutDependency.ResolutionSources()) {
+		t.Fatal("dependency configuration changed current-Project composition evidence")
+	}
+	manifest := withDependency.Manifest()
+	if got := interfaceRequirementStrings(manifest.InterfaceRequirements()); !reflect.DeepEqual(got, []string{`audit.write/v1@plystra.production.yaml interfaces.require.add["audit.write/v1"]`}) {
+		t.Fatalf("requirements = %v", got)
+	}
+	if got := implementationChoiceStrings(manifest.ImplementationChoices()); !reflect.DeepEqual(got, []string{`email.send/v1->example.com/current/production.New@plystra.production.yaml interfaces.use["email.send/v1"]`}) {
+		t.Fatalf("selections = %v", got)
+	}
+	if got := interfacePolicyStrings(manifest.InterfacePolicies()); !reflect.DeepEqual(got, []string{`email.send/v1=2s@plystra.production.yaml interfaces.policies["email.send/v1"]`}) {
+		t.Fatalf("policies = %v", got)
+	}
+	exposures := manifest.HTTPExposures()
+	if len(exposures) != 1 || exposures[0].ID().String() != "audit.write/v1" || exposures[0].Source() != `plystra.production.yaml http.expose["audit.write/v1"]` {
+		t.Fatalf("exposures = %#v", exposures)
+	}
+}
+
 func interfaceRequirementStrings(values []applicationmeta.InterfaceRequirement) []string {
 	result := make([]string, len(values))
 	for index, value := range values {
