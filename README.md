@@ -1209,9 +1209,15 @@ The CLI parses current-Project `data.members` assignments as exact member-ID
 entries. Each entry requires one valid named `resource` and may name an `access`
 instance. An environment overlay replaces an entire entry or removes it with
 `{$remove: true}`; root and complete replacement documents cannot remove it.
-This is configuration composition only. The CLI runs and accepts the bounded
-analyze result for effective active members, then still makes
-`plystra generate` and `plystra generate --check` fail with
+After the bounded analyze result is accepted, Core composes a deterministic
+activation set: every analyzed member must have one explicit Resource, imported
+members must also be explicitly assigned to that same Resource, member
+namespaces must be unique within a Resource, and access names must match the
+accepted Access contract without colliding with Resources, other access names,
+or reserved intrinsic names. Invalid activation reports
+`PLYSTRA_DATA_ASSIGNMENT_INVALID` with the member source. Valid activation is
+retained for the later graph, emit, and installation phases, but
+`plystra generate` and `plystra generate --check` still fail with
 `PLYSTRA_DATA_COMPILER_UNAVAILABLE` at the unimplemented emit and installation
 boundary before changing the Project. The CLI first
 resolves the exact `github.com/plystra/data` version, verified `h1:` checksum,
@@ -1220,9 +1226,9 @@ workspace and replacement sources are not accepted as published compiler
 distributions. A missing or invalid distribution is reported with the active
 member's configuration source. Invalid entries report
 `PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location. Analyze
-execution and result acceptance are installed as an internal boundary, but
-assignment activation, emit, generated access installation, and migrations
-remain unsupported.
+execution, result acceptance, and Core-owned assignment activation are
+installed as internal boundaries, but graph projection, emit, generated access
+installation, and migrations remain unsupported.
 The internal resolution and generation results retain the verified compiler
 identity, cache-hit fact, selected distribution manifest, and accepted analyze
 output even when generation stops at this boundary. They do not expose the

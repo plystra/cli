@@ -55,6 +55,9 @@ var (
 	// ErrDataCompilerAnalysisUnavailable reports a failure to invoke the
 	// selected compiler or independently accept its analyze result.
 	ErrDataCompilerAnalysisUnavailable = errors.New("Data compiler analyze integration is unavailable")
+	// ErrDataAssignment reports an invalid Core-owned activation after Data
+	// analysis has already been accepted.
+	ErrDataAssignment = errors.New("invalid Data member activation")
 )
 
 // DataCompilerUnavailableError identifies the selected member whose accepted
@@ -64,6 +67,36 @@ type DataCompilerUnavailableError struct {
 	cause        error
 	acquisition  DataCompilerAcquisition
 	observations []datacompiler.Observation
+}
+
+// DataAssignmentError identifies a selected member whose accepted Data model
+// cannot be mapped to the current Project's explicit Resource assignments.
+type DataAssignmentError struct {
+	member applicationmeta.DataMember
+	cause  error
+}
+
+func (e *DataAssignmentError) Error() string {
+	if e == nil || e.cause == nil {
+		return ErrDataAssignment.Error()
+	}
+	return fmt.Sprintf("%s: %s: %v", ErrDataAssignment, e.member.Source(), e.cause)
+}
+
+func (e *DataAssignmentError) Unwrap() []error {
+	if e == nil || e.cause == nil {
+		return []error{ErrDataAssignment}
+	}
+	return []error{ErrDataAssignment, e.cause}
+}
+
+// Source returns the selected member declaration that owns the invalid
+// activation.
+func (e *DataAssignmentError) Source() applicationmeta.ConfigurationDeclarationSource {
+	if e == nil {
+		return applicationmeta.ConfigurationDeclarationSource{}
+	}
+	return e.member.DeclarationSource()
 }
 
 func (e *DataCompilerUnavailableError) Error() string {
@@ -221,6 +254,7 @@ type Result struct {
 	dataCompilerManifest     datacompiler.Manifest
 	dataCompilerStatus       DataCompilerAcquisition
 	dataAnalysis             DataAnalysisAcceptance
+	dataActivation           DataActivation
 	dataAnalyzeOutput        json.RawMessage
 	dataCompilerObservations []datacompiler.Observation
 }
@@ -334,6 +368,16 @@ func (r Result) DataAnalysis() (DataAnalysisAcceptance, bool) {
 	return r.dataAnalysis, true
 }
 
+// DataActivation returns the explicit Core-owned Resource assignment retained
+// after Data analysis acceptance. It is absent until the later emit and graph
+// installation boundaries consume it.
+func (r Result) DataActivation() (DataActivation, bool) {
+	if !r.dataActivation.Valid() {
+		return DataActivation{}, false
+	}
+	return DataActivation{assignments: r.dataActivation.Assignments()}, true
+}
+
 // DataAnalyzeOutput returns the accepted versioned analyze payload for emit.
 func (r Result) DataAnalyzeOutput() (json.RawMessage, bool) {
 	if !r.dataAnalysis.Valid() || len(r.dataAnalyzeOutput) == 0 {
@@ -399,10 +443,12 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		if err != nil {
 			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: run.status, observations: run.observations})
 		}
-		if err := ValidateDataAssignments(manifest, acceptance); err != nil {
-			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: run.status, observations: run.observations})
+		activation, err := BuildDataActivation(manifest, acceptance)
+		if err != nil {
+			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: members[0], cause: err})
 		}
 		partial.dataAnalysis = acceptance
+		partial.dataActivation = activation
 		partial.dataAnalyzeOutput = append(json.RawMessage(nil), run.response.Output...)
 		return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable, acquisition: run.status, observations: run.observations})
 	}

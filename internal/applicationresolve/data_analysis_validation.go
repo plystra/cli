@@ -50,6 +50,72 @@ type dataAnalysisMember struct {
 	migrationOnly bool
 }
 
+// DataAssignment is one immutable Core-owned activation of an accepted Data
+// member. The generated access provider and ordinary graph edge are later
+// phases; this value only records their explicit Resource assignment.
+type DataAssignment struct {
+	memberID      string
+	resource      string
+	namespace     string
+	access        string
+	accessPackage string
+	accessType    string
+	accessID      string
+	modelDigest   string
+}
+
+// MemberID returns the exact accepted Data member identity.
+func (a DataAssignment) MemberID() string { return a.memberID }
+
+// Resource returns the exact configured database Resource instance.
+func (a DataAssignment) Resource() string { return a.resource }
+
+// Namespace returns the member-local PostgreSQL schema namespace.
+func (a DataAssignment) Namespace() string { return a.namespace }
+
+// Access returns the planned generated access instance, or an empty string
+// for a migration-only member without an authored access contract.
+func (a DataAssignment) Access() string { return a.access }
+
+// AccessPackage returns the authored access Resource package, when present.
+func (a DataAssignment) AccessPackage() string { return a.accessPackage }
+
+// AccessType returns the authored access Resource type, when present.
+func (a DataAssignment) AccessType() string { return a.accessType }
+
+// AccessID returns the authored access Resource ID, when present.
+func (a DataAssignment) AccessID() string { return a.accessID }
+
+// ModelDigest returns the accepted logical-model digest for the member.
+func (a DataAssignment) ModelDigest() string { return a.modelDigest }
+
+// DataActivation is the complete deterministic activation set for one
+// accepted Data analysis. Its assignments are sorted by member ID.
+type DataActivation struct {
+	assignments []DataAssignment
+}
+
+// Valid reports whether the activation contains a non-empty canonical set.
+func (a DataActivation) Valid() bool {
+	if len(a.assignments) == 0 {
+		return false
+	}
+	for index, assignment := range a.assignments {
+		if assignment.memberID == "" || assignment.resource == "" || assignment.namespace == "" || assignment.modelDigest == "" {
+			return false
+		}
+		if index > 0 && a.assignments[index-1].memberID >= assignment.memberID {
+			return false
+		}
+	}
+	return true
+}
+
+// Assignments returns a defensive copy of the canonical activation set.
+func (a DataActivation) Assignments() []DataAssignment {
+	return append([]DataAssignment(nil), a.assignments...)
+}
+
 // ResultDigest returns the compiler result identity accepted by Core.
 func (a DataAnalysisAcceptance) ResultDigest() string { return a.resultDigest }
 
@@ -363,10 +429,13 @@ func validateDataAnalysisWithBounds(response datacompiler.AnalyzeResponse, membe
 	}, nil
 }
 
-// ValidateDataAssignments checks the Core-owned mapping from accepted Data
-// roots to ordinary configured Resource instances. It does not create graph
-// nodes or install generated access artifacts.
-func ValidateDataAssignments(manifest applicationmeta.Manifest, acceptance DataAnalysisAcceptance) error {
+// BuildDataActivation checks and materializes the Core-owned mapping from
+// accepted Data roots to ordinary configured Resource instances. It does not
+// create graph nodes or install generated access artifacts.
+func BuildDataActivation(manifest applicationmeta.Manifest, acceptance DataAnalysisAcceptance) (DataActivation, error) {
+	if !acceptance.Valid() {
+		return DataActivation{}, fmt.Errorf("accepted Data analysis is incomplete")
+	}
 	resources := make(map[string]struct{}, len(manifest.ResourceInstances()))
 	for _, instance := range manifest.ResourceInstances() {
 		resources[instance.Name()] = struct{}{}
@@ -374,45 +443,99 @@ func ValidateDataAssignments(manifest applicationmeta.Manifest, acceptance DataA
 	members := manifest.DataMembers()
 	configured := make(map[string]applicationmeta.DataMember, len(members))
 	accesses := make(map[string]string)
+	namespaces := make(map[string]string)
 	for _, member := range members {
+		if member.ID() == "" || member.Resource() == "" {
+			return DataActivation{}, fmt.Errorf("Data member activation has an incomplete identity")
+		}
+		if _, exists := configured[member.ID()]; exists {
+			return DataActivation{}, fmt.Errorf("Data member %q is configured more than once", member.ID())
+		}
 		configured[member.ID()] = member
 	}
+	if len(configured) != len(acceptance.members) {
+		for memberID := range acceptance.members {
+			if _, exists := configured[memberID]; !exists {
+				return DataActivation{}, fmt.Errorf("accepted Data member %q has no explicit activation", memberID)
+			}
+		}
+	}
+	assignments := make([]DataAssignment, 0, len(members))
 	for _, member := range members {
 		if _, exists := resources[member.Resource()]; !exists {
-			return fmt.Errorf("Data member %q references missing Resource instance %q", member.ID(), member.Resource())
+			return DataActivation{}, fmt.Errorf("Data member %q references missing Resource instance %q", member.ID(), member.Resource())
 		}
 		analyzed, exists := acceptance.members[member.ID()]
 		if !exists {
-			return fmt.Errorf("Data member %q has no accepted analyze result", member.ID())
+			return DataActivation{}, fmt.Errorf("Data member %q has no accepted analyze result", member.ID())
 		}
-		hasAccessContract := analyzed.accessPackage != ""
+		if analyzed.modelDigest == "" || !validDataDigest(analyzed.modelDigest) {
+			return DataActivation{}, fmt.Errorf("Data member %q has an invalid accepted model digest", member.ID())
+		}
+		if analyzed.model.Namespace == "" {
+			return DataActivation{}, fmt.Errorf("Data member %q has no accepted namespace", member.ID())
+		}
+		namespaceKey := member.Resource() + "\x00" + analyzed.model.Namespace
+		if previous, exists := namespaces[namespaceKey]; exists {
+			return DataActivation{}, fmt.Errorf("Data member %q namespace %q collides with %q on Resource %q", member.ID(), analyzed.model.Namespace, previous, member.Resource())
+		}
+		namespaces[namespaceKey] = member.ID()
+		hasAccessContract := analyzed.accessPackage != "" || analyzed.accessType != "" || analyzed.accessID != ""
+		if hasAccessContract && (analyzed.accessPackage == "" || analyzed.accessType == "" || analyzed.accessID == "") {
+			return DataActivation{}, fmt.Errorf("Data member %q has an incomplete accepted Access contract", member.ID())
+		}
 		if member.Access() == "" {
 			if hasAccessContract || !analyzed.migrationOnly {
-				return fmt.Errorf("Data member %q requires an explicit access instance", member.ID())
+				return DataActivation{}, fmt.Errorf("Data member %q requires an explicit access instance", member.ID())
 			}
 		} else {
 			if !hasAccessContract || analyzed.migrationOnly {
-				return fmt.Errorf("Data member %q configures access without an accepted Access contract", member.ID())
+				return DataActivation{}, fmt.Errorf("Data member %q configures access without an accepted Access contract", member.ID())
 			}
 			if _, exists := resources[member.Access()]; exists {
-				return fmt.Errorf("Data access instance %q collides with a Resource instance", member.Access())
+				return DataActivation{}, fmt.Errorf("Data access instance %q collides with a Resource instance", member.Access())
+			}
+			if strings.HasPrefix(member.Access(), "kernel.") {
+				return DataActivation{}, fmt.Errorf("Data access instance %q uses a reserved intrinsic name", member.Access())
 			}
 			if previous, exists := accesses[member.Access()]; exists {
-				return fmt.Errorf("Data access instance %q is assigned to both %q and %q", member.Access(), previous, member.ID())
+				return DataActivation{}, fmt.Errorf("Data access instance %q is assigned to both %q and %q", member.Access(), previous, member.ID())
 			}
 			accesses[member.Access()] = member.ID()
 		}
 		for _, imported := range analyzed.model.Imports {
 			other, exists := configured[imported]
 			if !exists {
-				return fmt.Errorf("Data member %q imports unassigned member %q", member.ID(), imported)
+				return DataActivation{}, fmt.Errorf("Data member %q imports unassigned member %q", member.ID(), imported)
 			}
 			if other.Resource() != member.Resource() {
-				return fmt.Errorf("Data member %q crosses Resource boundary to %q", member.ID(), imported)
+				return DataActivation{}, fmt.Errorf("Data member %q crosses Resource boundary to %q", member.ID(), imported)
 			}
 		}
+		assignments = append(assignments, DataAssignment{
+			memberID: member.ID(), resource: member.Resource(), namespace: analyzed.model.Namespace, access: member.Access(),
+			accessPackage: analyzed.accessPackage, accessType: analyzed.accessType, accessID: analyzed.accessID,
+			modelDigest: analyzed.modelDigest,
+		})
 	}
-	return nil
+	for memberID := range acceptance.members {
+		if _, exists := configured[memberID]; !exists {
+			return DataActivation{}, fmt.Errorf("accepted Data member %q has no explicit activation", memberID)
+		}
+	}
+	sort.Slice(assignments, func(left, right int) bool { return assignments[left].memberID < assignments[right].memberID })
+	activation := DataActivation{assignments: assignments}
+	if !activation.Valid() {
+		return DataActivation{}, fmt.Errorf("Data activation is not canonical")
+	}
+	return activation, nil
+}
+
+// ValidateDataAssignments checks the Core-owned mapping from accepted Data
+// roots to ordinary configured Resource instances without retaining it.
+func ValidateDataAssignments(manifest applicationmeta.Manifest, acceptance DataAnalysisAcceptance) error {
+	_, err := BuildDataActivation(manifest, acceptance)
+	return err
 }
 
 func defaultDataAnalyzeBounds() datacompiler.Bounds {
