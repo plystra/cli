@@ -1047,6 +1047,9 @@ type dataEmitRoot struct {
 		Queries []struct {
 			ID string `json:"id"`
 		} `json:"queries"`
+		Plans []struct {
+			ID string `json:"id"`
+		} `json:"plans"`
 		Migrations []struct {
 			ID string `json:"id"`
 		} `json:"migrations"`
@@ -1063,6 +1066,7 @@ type dataManifestEntry struct {
 	Digest        string          `json:"digest"`
 	OwningMembers []string        `json:"owning_members"`
 	Query         json.RawMessage `json:"query,omitempty"`
+	Plan          json.RawMessage `json:"plan,omitempty"`
 	Migration     json.RawMessage `json:"migration,omitempty"`
 }
 
@@ -1145,6 +1149,16 @@ func validateDataArtifactSet(response datacompiler.EmitResponse, analyzeOutput j
 			}
 			expected[queryPath] = dataExpectedArtifact{Resource: assignment.Resource(), Contract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: assignment.Backend(), Owners: []string{assignment.MemberID()}, Kind: "query"}
 		}
+		for _, plan := range root.Model.Plans {
+			if plan.ID == "" {
+				return fmt.Errorf("Data member %q contains an empty plan ID", assignment.MemberID())
+			}
+			planPath := "generated/data/" + assignment.Resource() + "/plans/" + assignment.MemberID() + "/" + plan.ID + ".json"
+			if _, exists := expected[planPath]; exists {
+				return fmt.Errorf("duplicate expected Data artifact %q", planPath)
+			}
+			expected[planPath] = dataExpectedArtifact{Resource: assignment.Resource(), Contract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: assignment.Backend(), Owners: []string{assignment.MemberID()}, Kind: "plan"}
+		}
 		for _, migration := range root.Model.Migrations {
 			if migration.ID == "" {
 				return fmt.Errorf("Data member %q contains an empty migration ID", assignment.MemberID())
@@ -1173,26 +1187,30 @@ func validateDataArtifactSet(response datacompiler.EmitResponse, analyzeOutput j
 		}
 		switch expectedArtifact.Kind {
 		case "manifest":
-			if len(artifact.Query) != 0 || len(artifact.Migration) != 0 {
-				return fmt.Errorf("Data manifest %q carries query or migration metadata", artifact.Path)
+			if len(artifact.Query) != 0 || len(artifact.Plan) != 0 || len(artifact.Migration) != 0 {
+				return fmt.Errorf("Data manifest %q carries query, plan, or migration metadata", artifact.Path)
 			}
 			manifests[artifact.Resource] = artifact
 		case "schema":
-			if len(artifact.Query) != 0 || len(artifact.Migration) != 0 {
-				return fmt.Errorf("Data schema %q carries query or migration metadata", artifact.Path)
+			if len(artifact.Query) != 0 || len(artifact.Plan) != 0 || len(artifact.Migration) != 0 {
+				return fmt.Errorf("Data schema %q carries query, plan, or migration metadata", artifact.Path)
 			}
 		case "query":
-			if !validDataArtifactMetadata(artifact.Query) || len(artifact.Migration) != 0 {
+			if !validDataArtifactMetadata(artifact.Query) || len(artifact.Plan) != 0 || len(artifact.Migration) != 0 {
 				return fmt.Errorf("Data query artifact %q has invalid metadata", artifact.Path)
 			}
+		case "plan":
+			if !validDataArtifactMetadata(artifact.Plan) || len(artifact.Query) != 0 || len(artifact.Migration) != 0 {
+				return fmt.Errorf("Data plan artifact %q has invalid metadata", artifact.Path)
+			}
 		case "migration":
-			if !validDataArtifactMetadata(artifact.Migration) || len(artifact.Query) != 0 {
+			if !validDataArtifactMetadata(artifact.Migration) || len(artifact.Query) != 0 || len(artifact.Plan) != 0 {
 				return fmt.Errorf("Data migration artifact %q has invalid metadata", artifact.Path)
 			}
 		}
 		if expectedArtifact.Kind != "manifest" {
 			manifestArtifacts[artifact.Resource] = append(manifestArtifacts[artifact.Resource], dataManifestEntry{
-				Path: artifact.Path, Mode: artifact.Mode, Digest: artifact.Digest, OwningMembers: append([]string(nil), artifact.OwningMembers...), Query: append(json.RawMessage(nil), artifact.Query...), Migration: append(json.RawMessage(nil), artifact.Migration...),
+				Path: artifact.Path, Mode: artifact.Mode, Digest: artifact.Digest, OwningMembers: append([]string(nil), artifact.OwningMembers...), Query: append(json.RawMessage(nil), artifact.Query...), Plan: append(json.RawMessage(nil), artifact.Plan...), Migration: append(json.RawMessage(nil), artifact.Migration...),
 			})
 		}
 	}
@@ -1227,7 +1245,7 @@ func validateDataArtifactSet(response datacompiler.EmitResponse, analyzeOutput j
 			return fmt.Errorf("Data manifest for Resource %q has an incomplete artifact inventory", resource)
 		}
 		for index := range entries {
-			if manifest.Artifacts[index].Path != entries[index].Path || manifest.Artifacts[index].Mode != entries[index].Mode || manifest.Artifacts[index].Digest != entries[index].Digest || !reflect.DeepEqual(manifest.Artifacts[index].OwningMembers, entries[index].OwningMembers) || !equalDataJSON(manifest.Artifacts[index].Query, entries[index].Query) || !equalDataJSON(manifest.Artifacts[index].Migration, entries[index].Migration) {
+			if manifest.Artifacts[index].Path != entries[index].Path || manifest.Artifacts[index].Mode != entries[index].Mode || manifest.Artifacts[index].Digest != entries[index].Digest || !reflect.DeepEqual(manifest.Artifacts[index].OwningMembers, entries[index].OwningMembers) || !equalDataJSON(manifest.Artifacts[index].Query, entries[index].Query) || !equalDataJSON(manifest.Artifacts[index].Plan, entries[index].Plan) || !equalDataJSON(manifest.Artifacts[index].Migration, entries[index].Migration) {
 				return fmt.Errorf("Data manifest for Resource %q disagrees with artifact %q", resource, entries[index].Path)
 			}
 		}
@@ -1323,6 +1341,9 @@ func dataArtifactKind(filePath string) (generatedfiles.ArtifactKind, error) {
 	}
 	if path.Base(filePath) == "manifest.json" {
 		return generatedfiles.ArtifactKindDataManifest, nil
+	}
+	if strings.Contains(filePath, "/plans/") && strings.HasSuffix(filePath, ".json") {
+		return generatedfiles.ArtifactKindDataPlan, nil
 	}
 	if strings.HasSuffix(filePath, ".sql") {
 		return generatedfiles.ArtifactKindDataSQL, nil

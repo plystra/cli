@@ -35,6 +35,29 @@ func TestEmitAcceptsOneVerifiedStagedArtifactFrame(t *testing.T) {
 	}
 }
 
+func TestEmitAcceptsExecutablePlanArtifactFrame(t *testing.T) {
+	artifact := testAnalyzeArtifact(t)
+	manifest := emitTestManifest()
+	analyzeDigest := analyzeResultDigest(json.RawMessage(`[]`), json.RawMessage(`[]`), false)
+	request, err := BuildEmitRequest(artifact, manifest, EmitRequestOptions{
+		RequestID: "emit-plan-test", Build: AnalyzeBuildContext{GOOS: artifact.GOOS, GOARCH: artifact.GOARCH},
+		AnalyzeOutput: []byte(`{"roots":[],"digest":"` + analyzeDigest + `","truncated":false,"valid":true}`), AnalyzeDigest: analyzeDigest,
+		FrozenModelDigest: "sha256:" + strings.Repeat("3", 64),
+		Assignments:       []EmitAssignment{{MemberID: "accounts.user/v1", Resource: "database.primary", ResourceContract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: "postgres/v1", AllowedRoot: "generated/data/database.primary"}},
+	})
+	if err != nil {
+		t.Fatalf("BuildEmitRequest: %v", err)
+	}
+	response, err := Emit(context.Background(), artifact, manifest, request, AnalyzeOptions{Environment: []string{"PLYSTRA_EMIT_TEST_MODE=plan"}})
+	if err != nil || response.Status != emitStatusOK || len(response.Artifacts) != 1 {
+		t.Fatalf("Emit() = %#v, %v", response, err)
+	}
+	plan := response.Artifacts[0]
+	if plan.Path != "generated/data/database.primary/plans/accounts.user/v1/read-plan.json" || string(plan.Plan) != `{"id":"read-plan","statements":[]}` || string(plan.Bytes) != string(plan.Plan) {
+		t.Fatalf("plan artifact = %#v", plan)
+	}
+}
+
 func TestEmitRejectsInvalidTerminalFrames(t *testing.T) {
 	artifact := testAnalyzeArtifact(t)
 	manifest := emitTestManifest()
@@ -162,7 +185,14 @@ func runEmitTestCompiler(mode string) {
 	}
 	assignment := request.Assignments[0]
 	content := []byte("SELECT 1;\n")
-	staged := EmitArtifact{Path: assignment.AllowedRoot + "/schema.sql", Mode: 0644, Bytes: content, Digest: digestBytes("", content), OwningMembers: []string{assignment.MemberID}, Resource: assignment.Resource, ResourceContract: assignment.ResourceContract, Provider: assignment.Provider, Backend: assignment.Backend, Compiler: request.Compiler, FrozenModelDigest: request.FrozenModelDigest}
+	path := assignment.AllowedRoot + "/schema.sql"
+	var plan json.RawMessage
+	if mode == "plan" {
+		content = []byte(`{"id":"read-plan","statements":[]}`)
+		path = assignment.AllowedRoot + "/plans/" + assignment.MemberID + "/read-plan.json"
+		plan = append(json.RawMessage(nil), content...)
+	}
+	staged := EmitArtifact{Path: path, Mode: 0644, Bytes: content, Digest: digestBytes("", content), OwningMembers: []string{assignment.MemberID}, Resource: assignment.Resource, ResourceContract: assignment.ResourceContract, Provider: assignment.Provider, Backend: assignment.Backend, Compiler: request.Compiler, FrozenModelDigest: request.FrozenModelDigest, Plan: plan}
 	if mode == "tamper" {
 		staged.Digest = "sha256:" + strings.Repeat("0", 64)
 	}

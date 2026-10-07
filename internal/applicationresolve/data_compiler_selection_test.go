@@ -247,6 +247,7 @@ replace github.com/plystra/kernel => %s
 	writeFile(t, filepath.Join(project, "resource", "resource.go"), "package resource\n\n//plystra:resource example.records/v1\ntype Resource interface { Ping() error }\n")
 	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"github.com/plystra/data/database\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[database.Resource]{Namespace: \"records\"}\n")
 	environment := compilerProxyEnvironmentWithPublicFallback(t, proxy)
+	environment = append(environment, "PLYSTRA_EMIT_TEST_MODE=plan")
 	runCompilerGo(t, project, environment, "mod", "download", "all")
 	options := applicationgenerate.Options{
 		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), CompileTimeout: 30 * time.Second,
@@ -259,12 +260,18 @@ replace github.com/plystra/kernel => %s
 	if !generated.Installed() || !generated.Report().Clean() {
 		t.Fatalf("generated Data result = installed %t, changes %#v", generated.Installed(), generated.Report().Changes())
 	}
-	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/schema/schema.sql"} {
+	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/plans/example.records/v1/read-plan.json", "generated/data/database.primary/schema/schema.sql"} {
 		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); err != nil {
 			t.Fatalf("emitted Data artifact %s: %v", filePath, err)
 		}
 		artifact, exists, err := generatedfiles.ReadArtifact(project, filePath)
-		if err != nil || !exists || !artifact.Valid() || artifact.Generator() != "plystra.data/v1" {
+		wantKind := generatedfiles.ArtifactKindDataSQL
+		if strings.HasSuffix(filePath, "/manifest.json") {
+			wantKind = generatedfiles.ArtifactKindDataManifest
+		} else if strings.Contains(filePath, "/plans/") {
+			wantKind = generatedfiles.ArtifactKindDataPlan
+		}
+		if err != nil || !exists || !artifact.Valid() || artifact.Generator() != "plystra.data/v1" || artifact.Kind() != wantKind {
 			t.Fatalf("Data artifact provenance %s = %#v, exists=%t, err=%v", filePath, artifact, exists, err)
 		}
 		values := append(artifact.InputRecordIDs(), artifact.Sources()...)
@@ -292,7 +299,12 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("read generated Data manifest before malformed emit: %v", err)
 	}
 	malformedEnvironment := append([]string(nil), environment...)
-	malformedEnvironment = append(malformedEnvironment, "PLYSTRA_EMIT_TEST_MODE=manifest-mismatch")
+	for index, entry := range malformedEnvironment {
+		if strings.HasPrefix(entry, "PLYSTRA_EMIT_TEST_MODE=") {
+			malformedEnvironment[index] = "PLYSTRA_EMIT_TEST_MODE=manifest-mismatch"
+			break
+		}
+	}
 	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start: project, Environment: malformedEnvironment, DataCompilerCacheRoot: options.DataCompilerCacheRoot, CompileTimeout: options.CompileTimeout,
 	})
@@ -306,17 +318,30 @@ replace github.com/plystra/kernel => %s
 	if !bytes.Equal(manifestBefore, manifestAfter) {
 		t.Fatal("malformed staged Data manifest changed installed output")
 	}
+	planManifestEnvironment := append([]string(nil), environment...)
+	for index, entry := range planManifestEnvironment {
+		if strings.HasPrefix(entry, "PLYSTRA_EMIT_TEST_MODE=") {
+			planManifestEnvironment[index] = "PLYSTRA_EMIT_TEST_MODE=plan-manifest-mismatch"
+			break
+		}
+	}
+	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: project, Environment: planManifestEnvironment, DataCompilerCacheRoot: options.DataCompilerCacheRoot, CompileTimeout: options.CompileTimeout,
+	})
+	if !errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) || !strings.Contains(err.Error(), "disagrees with artifact") {
+		t.Fatalf("tampered Data plan manifest error = %v", err)
+	}
 	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.replica: {use: github.com/plystra/data/postgres.New}}}\ndata: {members: {example.records/v1: {resource: database.replica, access: database.records}}}\n")
 	replaced, err := applicationgenerate.Generate(t.Context(), options)
 	if err != nil {
 		t.Fatalf("Generate after Resource selection change: %v", err)
 	}
-	for _, filePath := range []string{"generated/data/database.replica/manifest.json", "generated/data/database.replica/schema/schema.sql"} {
+	for _, filePath := range []string{"generated/data/database.replica/manifest.json", "generated/data/database.replica/plans/example.records/v1/read-plan.json", "generated/data/database.replica/schema/schema.sql"} {
 		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); err != nil {
 			t.Fatalf("selected Resource artifact %s: %v", filePath, err)
 		}
 	}
-	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/schema/schema.sql"} {
+	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/plans/example.records/v1/read-plan.json", "generated/data/database.primary/schema/schema.sql"} {
 		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("unselected Resource artifact %s remains: %v", filePath, err)
 		}
@@ -335,7 +360,7 @@ replace github.com/plystra/kernel => %s
 	if err != nil {
 		t.Fatalf("Generate after Data removal: %v", err)
 	}
-	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/schema/schema.sql"} {
+	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/plans/example.records/v1/read-plan.json", "generated/data/database.primary/schema/schema.sql"} {
 		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("stale generated Data artifact %s remains: %v", filePath, err)
 		}
@@ -587,9 +612,27 @@ func main() {
 	}
 	startPosition, endPosition := position(start), position(start+len(initializer))
 	sum := sha256.Sum256([]byte(source))
+	model := map[string]any{"namespace": "records"}
+	var tables, queries, plans []any
+	if strings.HasPrefix(os.Getenv("PLYSTRA_EMIT_TEST_MODE"), "plan") {
+		tables = []any{map[string]any{
+				"id": "records",
+				"columns": []any{map[string]any{"id": "id", "type": "int64"}},
+			}}
+		queries = []any{map[string]any{
+				"id": "read", "operation": "select", "table": map[string]any{"symbol": "records"},
+				"projection": []any{map[string]any{"column": "id"}},
+				"results": []any{map[string]any{"id": "id", "source": "id", "type": "int64"}},
+			}}
+		plans = []any{map[string]any{
+				"id": "read-plan",
+				"statements": []any{map[string]any{"id": "read", "query": map[string]any{"symbol": "read"}, "cardinality": "many"}},
+			}}
+		model = map[string]any{"namespace": "records", "tables": tables, "queries": queries, "plans": plans}
+	}
 	root := map[string]any{
 		"member_id": "example.records/v1", "package_path": "example.com/project/model", "file_path": "model/model.go", "symbol": "Records",
-		"model": map[string]any{"namespace": "records"},
+		"model": model,
 		"access_package": "example.com/project/resource", "access_type": "Resource", "access_id": "example.records/v1", "migration_only": false,
 		"source_digest": "sha256:" + hex.EncodeToString(sum[:]),
 		"declaration_pos": map[string]any{"path": "model/model.go", "start_line": startPosition["line"], "start_column": startPosition["column"], "end_line": endPosition["line"], "end_column": endPosition["column"]},
@@ -632,13 +675,41 @@ func emit(input map[string]any, header [4]byte) {
     }
 	schemaPath := "generated/data/" + resource + "/schema/schema.sql"
 	schemaArtifact := artifact(schemaPath, []byte("CREATE TABLE records (id bigint NOT NULL);\n"))
-	modelSum := sha256.Sum256(append([]byte("plystra.data.logical-model/v1\x00"), []byte("{\"namespace\":\"records\"}")...))
+	queryPath := "generated/data/" + resource + "/queries/" + memberID + "/read.sql"
+	queryMetadata := map[string]any{
+		"id": "read", "operation": "select", "parameters": []any{}, "projection": []any{map[string]any{"column": "id"}},
+		"group_by": []any{}, "results": []any{map[string]any{"id": "id", "source": "id", "type": "int64"}},
+	}
+	queryArtifact := artifact(queryPath, []byte("SELECT id FROM records;\n"))
+	queryArtifact["query"] = queryMetadata
+	modelBytes := []byte("{\"namespace\":\"records\"}")
+	if strings.HasPrefix(os.Getenv("PLYSTRA_EMIT_TEST_MODE"), "plan") {
+		modelBytes = []byte("{\"namespace\":\"records\",\"tables\":[{\"id\":\"records\",\"columns\":[{\"id\":\"id\",\"type\":\"int64\",\"default\":{\"kind\":\"\",\"set\":false}}]}],\"queries\":[{\"id\":\"read\",\"operation\":\"select\",\"table\":{\"symbol\":\"records\"},\"conflict\":{\"constraint\":\"\",\"action\":\"\"},\"projection\":[{\"table\":{\"symbol\":\"\"},\"column\":\"id\"}],\"results\":[{\"id\":\"id\",\"source\":\"id\",\"type\":\"int64\"}],\"predicate\":{\"kind\":\"\",\"left\":{\"table\":{\"symbol\":\"\"},\"column\":\"\"},\"right\":{\"table\":{\"symbol\":\"\"},\"column\":\"\"},\"value\":{\"kind\":\"\",\"set\":false}}}],\"plans\":[{\"id\":\"read-plan\",\"statements\":[{\"id\":\"read\",\"query\":{\"symbol\":\"read\"},\"cardinality\":\"many\",\"affected\":{\"set\":false,\"min\":0}}]}]}")
+	}
+	modelSum := sha256.Sum256(append([]byte("plystra.data.logical-model/v1\x00"), modelBytes...))
+	planPath := "generated/data/" + resource + "/plans/" + memberID + "/read-plan.json"
+	planMetadata := map[string]any{
+		"id": "read-plan", "digest": "sha256:" + strings.Repeat("4", 64),
+		"statements": []any{map[string]any{
+			"id": "read", "query": "read", "sql": "SELECT id FROM records;", "sql_digest": "sha256:" + strings.Repeat("5", 64),
+			"cardinality": "many", "result_columns": []any{map[string]any{"kind": "int64"}},
+		}},
+	}
+	planBytes, _ := json.Marshal(planMetadata)
+	planArtifact := artifact(planPath, planBytes)
+	planArtifact["plan"] = planMetadata
+	entries := []map[string]any{}
+	if strings.HasPrefix(os.Getenv("PLYSTRA_EMIT_TEST_MODE"), "plan") {
+		entries = append(entries, map[string]any{"path": planPath, "mode": 0644, "digest": planArtifact["digest"], "owning_members": []string{memberID}, "plan": planMetadata})
+		entries = append(entries, map[string]any{"path": queryPath, "mode": 0644, "digest": queryArtifact["digest"], "owning_members": []string{memberID}, "query": queryMetadata})
+	}
+	entries = append(entries, map[string]any{"path": schemaPath, "mode": 0644, "digest": schemaArtifact["digest"], "owning_members": []string{memberID}})
 	manifest, _ := json.Marshal(map[string]any{
 		"schema": "plystra.data-instance-manifest/v1", "resource": resource, "resource_contract": resourceContract,
 		"provider": provider, "backend": backend, "compiler": compiler, "analyze_digest": input["analyze_digest"],
 		"input_digest": input["input_digest"], "frozen_model_digest": frozenModelDigest,
 		"member_models": map[string]string{memberID: "sha256:" + hex.EncodeToString(modelSum[:])},
-		"artifacts": []map[string]any{{"path": schemaPath, "mode": 0644, "digest": schemaArtifact["digest"], "owning_members": []string{memberID}}},
+		"artifacts": entries,
 	})
 	if os.Getenv("PLYSTRA_EMIT_TEST_MODE") == "manifest-mismatch" {
 		var value map[string]any
@@ -648,7 +719,34 @@ func emit(input map[string]any, header [4]byte) {
 		value["member_models"] = map[string]string{memberID: "sha256:" + strings.Repeat("0", 64)}
 		manifest, _ = json.Marshal(value)
 	}
-	artifacts := []map[string]any{artifact("generated/data/"+resource+"/manifest.json", manifest), schemaArtifact}
+	if os.Getenv("PLYSTRA_EMIT_TEST_MODE") == "plan-manifest-mismatch" {
+		var value map[string]any
+		if json.Unmarshal(manifest, &value) != nil {
+			os.Exit(2)
+		}
+		artifactValues, ok := value["artifacts"].([]any)
+		if !ok {
+			os.Exit(2)
+		}
+		for _, artifactValue := range artifactValues {
+			artifactMap, ok := artifactValue.(map[string]any)
+			if !ok || !strings.Contains(artifactMap["path"].(string), "/plans/") {
+				continue
+			}
+			planValue, ok := artifactMap["plan"].(map[string]any)
+			if !ok {
+				os.Exit(2)
+			}
+			planValue["id"] = "tampered-plan"
+		}
+		manifest, _ = json.Marshal(value)
+	}
+	artifacts := []map[string]any{artifact("generated/data/"+resource+"/manifest.json", manifest)}
+	if strings.HasPrefix(os.Getenv("PLYSTRA_EMIT_TEST_MODE"), "plan") {
+		artifacts = append(artifacts, planArtifact)
+		artifacts = append(artifacts, queryArtifact)
+	}
+	artifacts = append(artifacts, schemaArtifact)
     artifactBytes, _ := json.Marshal(artifacts)
     outputSum := sha256.Sum256(append([]byte("plystra.data.emit-output/v1\x00"), artifactBytes...))
     response := map[string]any{

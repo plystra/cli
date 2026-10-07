@@ -115,6 +115,7 @@ type EmitArtifact struct {
 	Compiler          emitCompilerIdentity `json:"compiler"`
 	FrozenModelDigest string               `json:"frozen_model_digest"`
 	Query             json.RawMessage      `json:"query,omitempty"`
+	Plan              json.RawMessage      `json:"plan,omitempty"`
 	Migration         json.RawMessage      `json:"migration,omitempty"`
 }
 
