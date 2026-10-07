@@ -135,7 +135,9 @@ type Result struct {
 	module                   modulelocate.Module
 	report                   generatedfiles.Report
 	checked                  bool
+	installed                bool
 	configurationPath        string
+	configurationSelection   applicationresolve.ConfigurationSelection
 	interfaceComparison      interfacecompatibility.Comparison
 	metadataComparison       interfacecompatibility.MetadataComparison
 	transportComparison      interfacecompatibility.TransportComparison
@@ -155,9 +157,22 @@ func (r Result) Report() generatedfiles.Report { return r.report }
 // Checked reports whether the operation was the read-only check mode.
 func (r Result) Checked() bool { return r.checked }
 
+// Installed reports whether the successful generation transaction committed
+// at least one generated or module-owned filesystem mutation.
+func (r Result) Installed() bool { return r.installed }
+
 // ConfigurationPath returns the stable Project-relative current-project
 // document selected for this operation.
 func (r Result) ConfigurationPath() string { return r.configurationPath }
+
+// ConfigurationSelection returns the normalized selector used for this
+// operation when resolution reached the selected current Project document.
+func (r Result) ConfigurationSelection() (applicationresolve.ConfigurationSelection, bool) {
+	if r.configurationSelection.Path() == "" {
+		return applicationresolve.ConfigurationSelection{}, false
+	}
+	return r.configurationSelection, true
+}
 
 // DataCompilerAcquisition returns the verified Data compiler identity retained
 // by resolution. It is absent for Projects without active Data members.
@@ -259,6 +274,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			report:                   report,
 			checked:                  true,
 			configurationPath:        prepared.resolved.ConfigurationSelection().Path(),
+			configurationSelection:   prepared.resolved.ConfigurationSelection(),
 			interfaceComparison:      prepared.interfaceComparison,
 			metadataComparison:       prepared.metadataComparison,
 			transportComparison:      prepared.transportComparison,
@@ -284,11 +300,11 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return partialResult(prepared.resolved, observations), fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
-	install := generatedfiles.InstallWithWrites
+	install := generatedfiles.InstallWithWritesOutcome
 	if options.RejectUnexpected {
-		install = generatedfiles.InstallStrictWithWrites
+		install = generatedfiles.InstallStrictWithWritesOutcome
 	}
-	report, err := install(prepared.resolved.Module().Path(), prepared.output, additional, func(root string) error {
+	outcome, err := install(prepared.resolved.Module().Path(), prepared.output, additional, func(root string) error {
 		return runModuleMutation(ctx, options, root, prepared.runtimeRequirements, func() error {
 			if err := validate(ctx, root); err != nil {
 				return fmt.Errorf("validate generated application: %w", err)
@@ -326,8 +342,10 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	}
 	return Result{
 		module:                   prepared.resolved.Module(),
-		report:                   report,
+		report:                   outcome.Report(),
+		installed:                outcome.Changed(),
 		configurationPath:        prepared.resolved.ConfigurationSelection().Path(),
+		configurationSelection:   prepared.resolved.ConfigurationSelection(),
 		interfaceComparison:      prepared.interfaceComparison,
 		metadataComparison:       prepared.metadataComparison,
 		transportComparison:      prepared.transportComparison,
@@ -341,6 +359,9 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 
 func partialResult(resolved applicationresolve.Result, observations []datacompiler.Observation) Result {
 	return Result{
+		module:                   resolved.Module(),
+		configurationPath:        resolved.ConfigurationSelection().Path(),
+		configurationSelection:   resolved.ConfigurationSelection(),
 		dataCompiler:             resolvedDataCompiler(resolved),
 		dataCompilerObservations: cloneDataCompilerObservations(observations),
 	}

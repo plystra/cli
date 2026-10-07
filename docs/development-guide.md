@@ -39,7 +39,7 @@ plystra capability create <capability-name> [--query] [--plugin <plugin>] [--int
 plystra capability implement <capability-name>/vN [--plugin <plugin>] [--interactive]
 plystra capability expose <capability-name>/vN [--env <environment>|--config <yaml-path>]
 plystra inspect capabilities [--format human|json]
-plystra generate [--check] [--env <environment>|--config <yaml-path>]
+plystra generate [--check] [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
 ```
 
 Commands documented in the roadmap but absent from `plystra --help` are not
@@ -898,6 +898,20 @@ interfaces:
 This is configuration precedence, not candidate ranking. Use `{$remove: true}` at an exact keyed choice, policy, exposure, or constructor configuration entry to exclude it. A requirement sequence replaces the lower explicit set; sparse add/remove changes only named members. Later selected current-Project layers and the current delta use the same typed rules.
 
 After manually changing a module version or root declaration, run `plystra generate` and `plystra generate --check` with the intended selector. Updating an ordinary dependency cannot change current-Project configuration. Invalid selected documents, missing constructors, invalid schemas, or incompatible effective values fail before mutation.
+
+`--format human` is the default generation projection. Use `--format json` for
+automation that needs one canonical `plystra.result/v1` document containing a
+`plystra.generate/v1` payload, selected configuration snapshot, and observed
+effects:
+
+```powershell
+plystra generate --format json
+plystra generate --check --format json
+```
+
+JSON diagnostics and recovery remain on stderr; stdout contains only the result
+document. A successful installation reports `success`, while a clean check
+reports `no_op`.
 
 The public manifest records current-Project source paths, normalized digests, redacted typed contributions, replacements/removals, and current-Project ownership. Private values, Secret-reference targets, resolved Secrets, and private hashes remain outside public output.
 
@@ -2034,6 +2048,8 @@ plystra explain exposure mail.send/v1 --env production
 plystra explain exposure mail.send/v1 --config deploy/customer-a.yaml
 plystra generate
 plystra generate --check
+plystra generate --format json
+plystra generate --check --format json
 plystra generate --env production
 plystra generate --check --env production
 plystra generate --config deploy/customer-a.yaml

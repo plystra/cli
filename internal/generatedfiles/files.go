@@ -60,6 +60,19 @@ type Report struct {
 	changes []Change
 }
 
+// InstallOutcome reports the final generated-file state and whether the
+// transaction committed at least one generated or additional write/removal.
+type InstallOutcome struct {
+	report  Report
+	changed bool
+}
+
+// Report returns the final generated-file comparison.
+func (o InstallOutcome) Report() Report { return o.report }
+
+// Changed reports whether the transaction committed a filesystem mutation.
+func (o InstallOutcome) Changed() bool { return o.changed }
+
 // OwnershipConflictError reports the canonical desired path occupied by
 // unowned bytes or a non-regular filesystem entry.
 type OwnershipConflictError struct {
@@ -181,35 +194,52 @@ func Check(rootPath string, output Output) (Report, error) {
 // manually modified retired files are preserved and remain visible as
 // unexpected drift.
 func Install(rootPath string, output Output, validate func(root string) error) (Report, error) {
-	return install(rootPath, output, nil, validate, false)
+	outcome, err := install(rootPath, output, nil, validate, false)
+	return outcome.report, err
 }
 
 // InstallStrict behaves like Install but rejects every unexpected unowned or
 // manually modified retired path. The path is preserved while all managed
 // writes and removals are rolled back.
 func InstallStrict(rootPath string, output Output, validate func(root string) error) (Report, error) {
-	return install(rootPath, output, nil, validate, true)
+	outcome, err := install(rootPath, output, nil, validate, true)
+	return outcome.report, err
 }
 
 // InstallWithWrites installs user-authored transaction writes together with
 // the generated tree. Additional writes must remain outside generated/ and
 // receive the same validation and rollback boundary.
 func InstallWithWrites(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error) (Report, error) {
+	outcome, err := install(rootPath, output, additional, validate, false)
+	return outcome.report, err
+}
+
+// InstallWithWritesOutcome is the detailed form of InstallWithWrites used by
+// callers that need to report whether a real transaction mutation occurred.
+func InstallWithWritesOutcome(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error) (InstallOutcome, error) {
 	return install(rootPath, output, additional, validate, false)
 }
 
 // InstallStrictWithWrites combines InstallStrict and InstallWithWrites.
 func InstallStrictWithWrites(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error) (Report, error) {
+	outcome, err := install(rootPath, output, additional, validate, true)
+	return outcome.report, err
+}
+
+// InstallStrictWithWritesOutcome is the detailed form of
+// InstallStrictWithWrites used by callers that need transaction mutation
+// accounting.
+func InstallStrictWithWritesOutcome(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error) (InstallOutcome, error) {
 	return install(rootPath, output, additional, validate, true)
 }
 
-func install(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error, rejectUnexpected bool) (Report, error) {
+func install(rootPath string, output Output, additional []atomicfs.Write, validate func(root string) error, rejectUnexpected bool) (InstallOutcome, error) {
 	if validate == nil {
-		return Report{}, fmt.Errorf("%w: validation callback is nil", ErrInstall)
+		return InstallOutcome{}, fmt.Errorf("%w: validation callback is nil", ErrInstall)
 	}
 	state, err := inspect(rootPath, output)
 	if err != nil {
-		return Report{}, fmt.Errorf("%w: %w", ErrInstall, err)
+		return InstallOutcome{}, fmt.Errorf("%w: %w", ErrInstall, err)
 	}
 
 	desired := make(map[string]File, len(output.files))
@@ -223,11 +253,11 @@ func install(rootPath string, output Output, additional []atomicfs.Write, valida
 		case !exists:
 			writes = append(writes, atomicfs.Write{Path: file.path, Data: file.data, MustNotExist: true})
 		case !actual.mode.IsRegular() || actual.mode&fs.ModeSymlink != 0:
-			return state.report, fmt.Errorf("%w: %w", ErrInstall, newOwnershipConflictError(file.path, "is not a regular file"))
+			return InstallOutcome{report: state.report}, fmt.Errorf("%w: %w", ErrInstall, newOwnershipConflictError(file.path, "is not a regular file"))
 		case bytes.Equal(actual.data, file.data):
 			// Identical legacy or unowned output can be adopted without mutation.
 		case state.previous[file.path] == "":
-			return state.report, fmt.Errorf("%w: %w", ErrInstall, newOwnershipConflictError(file.path, "already contains different unowned bytes"))
+			return InstallOutcome{report: state.report}, fmt.Errorf("%w: %w", ErrInstall, newOwnershipConflictError(file.path, "already contains different unowned bytes"))
 		default:
 			writes = append(writes, atomicfs.Write{Path: file.path, Data: file.data, ExpectedData: actual.data})
 		}
@@ -238,13 +268,13 @@ func install(rootPath string, output Output, additional []atomicfs.Write, valida
 	case !manifestExists:
 		writes = append(writes, atomicfs.Write{Path: ManifestPath, Data: output.manifestJSON, MustNotExist: true})
 	case !manifest.mode.IsRegular() || manifest.mode&fs.ModeSymlink != 0:
-		return state.report, fmt.Errorf("%w: %w: %s is not a regular file", ErrInstall, ErrManifest, ManifestPath)
+		return InstallOutcome{report: state.report}, fmt.Errorf("%w: %w: %s is not a regular file", ErrInstall, ErrManifest, ManifestPath)
 	case !bytes.Equal(manifest.data, output.manifestJSON):
 		writes = append(writes, atomicfs.Write{Path: ManifestPath, Data: output.manifestJSON, ExpectedData: manifest.data})
 	}
 	for index, write := range additional {
 		if write.Path == "generated" || strings.HasPrefix(write.Path, "generated/") {
-			return state.report, fmt.Errorf("%w: additional write[%d] targets CLI-owned path %q", ErrInstall, index, write.Path)
+			return InstallOutcome{report: state.report}, fmt.Errorf("%w: additional write[%d] targets CLI-owned path %q", ErrInstall, index, write.Path)
 		}
 		expectedData := write.ExpectedData
 		if expectedData != nil {
@@ -284,16 +314,16 @@ func install(rootPath string, output Output, additional []atomicfs.Write, valida
 		return validateInstalledOutput(root, output, rejectUnexpected)
 	}
 	if err := atomicfs.ApplyFiles(rootPath, writes, removes, validateInstalled); err != nil {
-		return state.report, fmt.Errorf("%w: %w", ErrInstall, err)
+		return InstallOutcome{report: state.report}, fmt.Errorf("%w: %w", ErrInstall, err)
 	}
 	final, err := inspect(rootPath, output)
 	if err != nil {
-		return Report{}, fmt.Errorf("%w: inspect committed output: %w", ErrInstall, err)
+		return InstallOutcome{}, fmt.Errorf("%w: inspect committed output: %w", ErrInstall, err)
 	}
 	if err := invalidInstalledReport(final.report, rejectUnexpected); err != nil {
-		return final.report, fmt.Errorf("%w: %w immediately after commit", ErrInstall, err)
+		return InstallOutcome{report: final.report, changed: len(writes) != 0 || len(removes) != 0}, fmt.Errorf("%w: %w immediately after commit", ErrInstall, err)
 	}
-	return final.report, nil
+	return InstallOutcome{report: final.report, changed: len(writes) != 0 || len(removes) != 0}, nil
 }
 
 func validateInstalledOutput(root string, output Output, rejectUnexpected bool) error {

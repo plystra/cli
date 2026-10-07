@@ -212,6 +212,8 @@ func assertInstalledCommandFacts(t testing.TB, commands map[string]commandschema
 	generateArguments := installedArgumentsByName(commands["generate"])
 	if generateArguments["--check"].Value() != commandschema.CapabilityArgumentFlag ||
 		generateArguments["--offline"].Value() != commandschema.CapabilityArgumentFlag ||
+		!reflect.DeepEqual(generateArguments["--format"].Choices(), []string{"human", "json"}) ||
+		!reflect.DeepEqual(commands["generate"].OutputFormats(), []commandschema.CapabilityOutputFormat{commandschema.CapabilityOutputHuman, commandschema.CapabilityOutputJSON}) ||
 		!reflect.DeepEqual(commands["generate"].Selectors(), []string{"configuration"}) {
 		t.Fatalf("generate facts = %#v", commands["generate"])
 	}

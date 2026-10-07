@@ -146,17 +146,20 @@ func TestParseGenerateArguments(t *testing.T) {
 	tests := []struct {
 		arguments         []string
 		check             bool
+		format            commandFormat
 		configurationPath string
 		environmentName   string
 		ok                bool
 	}{
-		{arguments: []string{"generate"}, ok: true},
-		{arguments: []string{"generate", "--check"}, check: true, ok: true},
-		{arguments: []string{"generate", "--config", "deploy/customer.yaml"}, configurationPath: "deploy/customer.yaml", ok: true},
-		{arguments: []string{"generate", "--check", "--config", "deploy/customer.yaml"}, check: true, configurationPath: "deploy/customer.yaml", ok: true},
-		{arguments: []string{"generate", "--config", "deploy/customer.yaml", "--check"}, check: true, configurationPath: "deploy/customer.yaml", ok: true},
-		{arguments: []string{"generate", "--env", "test"}, environmentName: "test", ok: true},
-		{arguments: []string{"generate", "--check", "--env", "production"}, check: true, environmentName: "production", ok: true},
+		{arguments: []string{"generate"}, format: commandFormatHuman, ok: true},
+		{arguments: []string{"generate", "--check"}, check: true, format: commandFormatHuman, ok: true},
+		{arguments: []string{"generate", "--format", "human"}, format: commandFormatHuman, ok: true},
+		{arguments: []string{"generate", "--format", "json"}, format: commandFormatJSON, ok: true},
+		{arguments: []string{"generate", "--config", "deploy/customer.yaml"}, format: commandFormatHuman, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"generate", "--check", "--config", "deploy/customer.yaml"}, check: true, format: commandFormatHuman, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"generate", "--config", "deploy/customer.yaml", "--check"}, check: true, format: commandFormatHuman, configurationPath: "deploy/customer.yaml", ok: true},
+		{arguments: []string{"generate", "--env", "test"}, format: commandFormatHuman, environmentName: "test", ok: true},
+		{arguments: []string{"generate", "--check", "--env", "production"}, check: true, format: commandFormatHuman, environmentName: "production", ok: true},
 		{arguments: nil},
 		{arguments: []string{"generate", "--write"}},
 		{arguments: []string{"generate", "--check", "--check"}},
@@ -166,12 +169,14 @@ func TestParseGenerateArguments(t *testing.T) {
 		{arguments: []string{"generate", "--env"}},
 		{arguments: []string{"generate", "--env", ""}},
 		{arguments: []string{"generate", "--env", "test", "--env", "production"}},
-		{arguments: []string{"generate", "--env", "test", "--config", "deploy.yaml"}, configurationPath: "deploy.yaml", environmentName: "test", ok: true},
+		{arguments: []string{"generate", "--env", "test", "--config", "deploy.yaml"}, format: commandFormatHuman, configurationPath: "deploy.yaml", environmentName: "test", ok: true},
+		{arguments: []string{"generate", "--format", "xml"}},
+		{arguments: []string{"generate", "--format", "json", "--format", "human"}},
 	}
 	for _, test := range tests {
 		result, ok := parseGenerateArguments(test.arguments)
-		if result.check != test.check || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
-			t.Errorf("parseGenerateArguments(%q) = %#v, %t; want check %t, path %q, environment %q, ok %t", test.arguments, result, ok, test.check, test.configurationPath, test.environmentName, test.ok)
+		if result.check != test.check || result.format != test.format || result.configurationPath != test.configurationPath || result.environmentName != test.environmentName || ok != test.ok {
+			t.Errorf("parseGenerateArguments(%q) = %#v, %t; want check %t, format %q, path %q, environment %q, ok %t", test.arguments, result, ok, test.check, test.format, test.configurationPath, test.environmentName, test.ok)
 		}
 	}
 }

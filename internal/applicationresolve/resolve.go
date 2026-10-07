@@ -386,6 +386,8 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		}
 		run, err := inputs.analyzeData(ctx, options)
 		partial := Result{
+			module:       module,
+			selection:    ConfigurationSelection{mode: selector.mode, path: selector.path, environment: selector.environment},
 			dataCompiler: run.artifact, dataCompilerManifest: run.manifest,
 			dataCompilerStatus:       run.status,
 			dataCompilerObservations: cloneDataCompilerObservations(run.observations),

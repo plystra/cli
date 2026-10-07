@@ -8,6 +8,8 @@ import (
 
 func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 	codes := []string{
+		diagnosticcode.GenerateInvocationInvalid,
+		diagnosticcode.GenerateFailed,
 		diagnosticcode.TemplateInvalid,
 		diagnosticcode.CapabilityRequirementConflict,
 		diagnosticcode.ProviderContractConflict,

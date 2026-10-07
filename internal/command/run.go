@@ -3,26 +3,21 @@ package command
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/dependencyadd"
 	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/dependencyupdate"
 	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/generatedfiles"
-	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/plugincreate"
 	"github.com/plystra/cli/internal/plugintarget"
 	"github.com/plystra/cli/internal/projectcheck"
-	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/version"
-	kernelintrinsic "github.com/plystra/kernel/intrinsic"
 )
 
 const (
@@ -51,7 +46,7 @@ const (
   plystra explain alias <alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra explain exposure <capability-or-alias-name>/vN [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra check [--env <environment>|--config <yaml-path>]
-  plystra generate [--check] [--offline] [--env <environment>|--config <yaml-path>]
+  plystra generate [--check] [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Common actionable failures end with one Recovery block containing the primary
 command or file edit and one stable PLYSTRA_<AREA>_<CONDITION> Diagnostic code.
@@ -114,11 +109,12 @@ PLYSTRA_PLUGIN_CREATE_NAME_INVALID, PLYSTRA_PLUGIN_CREATE_ID_INVALID, and
 PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS respectively.
 `
 	generateUsage = `Usage:
-  plystra generate [--check] [--offline] [--env <environment>|--config <yaml-path>]
+  plystra generate [--check] [--offline] [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Options:
   --check                Report drift without modifying configuration or generated files.
   --offline              Use only locally available module inputs and the verified Data compiler cache.
+  --format human|json    Select concise human output or one plystra.result/v1 document.
   --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.
   --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.
 
@@ -684,73 +680,7 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		_, _ = fmt.Fprintf(stdout, "Project checks passed for %s in %s\n", result.Module().ModulePath(), result.Module().Path())
 		return 0
 	case "generate":
-		if len(arguments) == 2 && (arguments[1] == "help" || arguments[1] == "-h" || arguments[1] == "--help") {
-			_, _ = io.WriteString(stdout, generateUsage)
-			return 0
-		}
-		generate, ok := parseGenerateArguments(arguments)
-		if !ok {
-			_, _ = io.WriteString(stderr, generateUsage)
-			return 2
-		}
-		if rejectConflictingConfigurationSelectors(stderr, generate.configurationPath, generate.environmentName) {
-			return 1
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
-		defer cancel()
-		options := applicationgenerate.Options{
-			Start:             workingDirectory,
-			Check:             generate.check,
-			Offline:           generate.offline,
-			ConfigurationPath: generate.configurationPath,
-			EnvironmentName:   generate.environmentName,
-			Environment:       environment,
-		}
-		var result applicationgenerate.Result
-		var err error
-		if generate.check || generate.offline {
-			result, err = applicationgenerate.Generate(ctx, options)
-		} else {
-			project, locateErr := projectlocate.Find(workingDirectory)
-			if locateErr != nil {
-				err = fmt.Errorf("locate Project: %w", locateErr)
-			} else {
-				generateWithMutation := func(mutate applicationgenerate.ModuleMutation) error {
-					options.MutateModule = mutate
-					var generateErr error
-					result, generateErr = applicationgenerate.Generate(ctx, options)
-					return generateErr
-				}
-				err = modulemutation.Tidy(ctx, project.Path(), options.GoCommand, environment, generateWithMutation)
-				var dependencySource *applicationgenerate.DependencySourceError
-				if errors.Is(err, applicationgenerate.ErrKernelDependency) && errors.As(err, &dependencySource) {
-					err = modulemutation.Change(ctx, project.Path(), modulemutation.ChangeOptions{
-						GoCommand:          options.GoCommand,
-						Environment:        environment,
-						Arguments:          []string{"get", kernelintrinsic.ModulePath + "@" + version.KernelVersion},
-						DirectRequirements: []string{kernelintrinsic.ModulePath},
-					}, generateWithMutation)
-				}
-			}
-		}
-		if err != nil {
-			writeCommandFailure(stderr, "", err, commandRecoveryContext(generate.configurationPath, generate.environmentName, environment))
-			return 1
-		}
-		if !result.Report().Clean() {
-			heading := "generated output remains inconsistent after installation"
-			if result.Checked() {
-				heading = "generated output is not current"
-			}
-			writeGenerationReport(stderr, heading, result.Module().ModulePath(), result.Report(), commandRecoveryContext(generate.configurationPath, generate.environmentName, environment))
-			return 1
-		}
-		if result.Checked() {
-			_, _ = fmt.Fprintf(stdout, "generated output is current for %s in %s\n", result.Module().ModulePath(), result.Module().Path())
-		} else {
-			_, _ = fmt.Fprintf(stdout, "generated %s in %s\n", result.Module().ModulePath(), result.Module().Path())
-		}
-		return 0
+		return runGenerate(arguments, stdout, stderr, workingDirectory, environment)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", arguments[0], usage)
 		return 2
@@ -776,6 +706,7 @@ func terminalFile(file *os.File) bool {
 type generateArguments struct {
 	check             bool
 	offline           bool
+	format            commandFormat
 	configurationPath string
 	environmentName   string
 }
@@ -819,9 +750,10 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 	if len(arguments) == 0 || arguments[0] != "generate" {
 		return generateArguments{}, false
 	}
-	var result generateArguments
+	result := generateArguments{format: commandFormatHuman}
 	configurationSet := false
 	environmentSet := false
+	formatSet := false
 	for index := 1; index < len(arguments); index++ {
 		switch arguments[index] {
 		case "--check":
@@ -834,6 +766,20 @@ func parseGenerateArguments(arguments []string) (generateArguments, bool) {
 				return generateArguments{}, false
 			}
 			result.offline = true
+		case "--format":
+			if formatSet || index+1 >= len(arguments) {
+				return generateArguments{}, false
+			}
+			formatSet = true
+			index++
+			switch arguments[index] {
+			case string(commandFormatHuman):
+				result.format = commandFormatHuman
+			case string(commandFormatJSON):
+				result.format = commandFormatJSON
+			default:
+				return generateArguments{}, false
+			}
 		case "--config":
 			if configurationSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
 				return generateArguments{}, false

@@ -7,6 +7,8 @@ import "strings"
 const Prefix = "PLYSTRA_"
 
 const (
+	GenerateInvocationInvalid            = Prefix + "GENERATE_INVOCATION_INVALID"
+	GenerateFailed                       = Prefix + "GENERATE_FAILED"
 	TemplateInvalid                      = Prefix + "TEMPLATE_INVALID"
 	CapabilityRequirementConflict        = Prefix + "CAPABILITY_REQUIREMENT_CONFLICT"
 	ProviderContractConflict             = Prefix + "PROVIDER_CONTRACT_CONFLICT"

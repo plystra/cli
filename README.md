@@ -1082,6 +1082,8 @@ plystra check
 plystra fix
 plystra generate
 plystra generate --check
+plystra generate --format json
+plystra generate --check --format json
 plystra generate --env <environment>
 plystra generate --check --env <environment>
 plystra generate --config <yaml-path>
@@ -1605,6 +1607,15 @@ plystra generate --check --config deploy/customer-a.yaml
 The command resolves mandatory root metadata, the effective Go Module graph, and the selected current-Project model. Ordinary dependency roots contribute discovery, not application intent. Only the root, one selected environment overlay, or one complete replacement document contributes configuration; dependency overlays and deployment settings are never read.
 
 Generation preserves authored YAML bytes and never materializes lower-layer values. It installs generated output and required module metadata in one transaction. Invalid selected configuration, concurrent input changes, validation failure, or nondeterministic output rolls back CLI-owned changes while preserving concurrent user edits.
+
+`--format human` is the default. `--format json` writes exactly one
+`plystra.result/v1` document to stdout with a `plystra.generate/v1` payload,
+the non-secret selected configuration snapshot, and observed Data compiler and
+Project-write effects. Diagnostics and recovery remain on stderr; JSON mode
+never mixes human progress into stdout. Successful installation reports
+`success`, while a clean `--check` reports `no_op`; invalid invocation,
+validation, prerequisite, decision, cancellation, and execution failures use
+the documented result exit classes.
 
 Go subprocesses preserve an explicit `GOWORK` selection. An automatically discovered enclosing `go.work` remains active when it validly includes the nearest module; when it is valid but does not list that module, the CLI runs the subprocess with `GOWORK=off` so an unrelated parent workspace cannot redirect generation or validation. Malformed workspaces, missing `use` directories, and invalid used modules remain active so the Go tool reports the original workspace error instead of having it hidden.
 

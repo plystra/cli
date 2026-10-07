@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -253,6 +254,95 @@ replace github.com/plystra/kernel => %s
 		t.Fatalf("unexpected zeta file = %q", got)
 	}
 	assertNoCommandTransactions(t, root)
+}
+
+func TestRunGenerateJSONReportsVersionedPayloadAndObservedWrites(t *testing.T) {
+	root := writeCapabilityCommandModule(t)
+	environment := commandGoEnvironment()
+
+	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--format", "json"}, root, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("JSON generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var document struct {
+		Schema  string `json:"schema"`
+		Status  string `json:"status"`
+		Payload struct {
+			Schema     string `json:"schema"`
+			ModulePath string `json:"module_path"`
+			Mode       string `json:"mode"`
+		} `json:"payload"`
+		Effects struct {
+			Observed []struct {
+				ID    string `json:"id"`
+				Class string `json:"class"`
+			} `json:"observed"`
+		} `json:"effects"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		t.Fatalf("Unmarshal(JSON generate) = %v; output %q", err, stdout)
+	}
+	if document.Schema != "plystra.result/v1" || document.Status != "success" ||
+		document.Payload.Schema != "plystra.generate/v1" || document.Payload.ModulePath != "example.com/acme/library" || document.Payload.Mode != "install" {
+		t.Fatalf("JSON generate document = %s", stdout)
+	}
+	var sawProjectWrite bool
+	for _, effect := range document.Effects.Observed {
+		if effect.ID == "generate-project" && effect.Class == "project_write" {
+			sawProjectWrite = true
+		}
+	}
+	if !sawProjectWrite {
+		t.Fatalf("JSON generate omitted actual project write effect: %s", stdout)
+	}
+
+	exitCode, stdout, stderr = runCommand(t, []string{"generate", "--format", "json", "--check"}, root, environment)
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("JSON clean check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	document = struct {
+		Schema  string `json:"schema"`
+		Status  string `json:"status"`
+		Payload struct {
+			Schema     string `json:"schema"`
+			ModulePath string `json:"module_path"`
+			Mode       string `json:"mode"`
+		} `json:"payload"`
+		Effects struct {
+			Observed []struct {
+				ID    string `json:"id"`
+				Class string `json:"class"`
+			} `json:"observed"`
+		} `json:"effects"`
+	}{}
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		t.Fatalf("Unmarshal(JSON check) = %v; output %q", err, stdout)
+	}
+	if document.Status != "no_op" || document.Payload.Mode != "check" || len(document.Effects.Observed) != 0 {
+		t.Fatalf("JSON check document = %s", stdout)
+	}
+}
+
+func TestRunGenerateJSONInvalidInvocationIsOneResultDocument(t *testing.T) {
+	exitCode, stdout, stderr := runCommand(t, []string{"generate", "--format", "json", "--unknown"}, t.TempDir(), commandGoEnvironment())
+	if exitCode != 2 || stderr != "" {
+		t.Fatalf("invalid JSON generate = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var document struct {
+		Schema      string `json:"schema"`
+		Operation   string `json:"operation"`
+		Status      string `json:"status"`
+		ExitClass   int    `json:"exit_class"`
+		Diagnostics []struct {
+			Code string `json:"code"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		t.Fatalf("Unmarshal(invalid JSON generate) = %v; output %q", err, stdout)
+	}
+	if document.Schema != "plystra.result/v1" || document.Operation != "generate" || document.Status != "invalid_invocation" || document.ExitClass != 2 || len(document.Diagnostics) != 1 || document.Diagnostics[0].Code != diagnosticcode.GenerateInvocationInvalid {
+		t.Fatalf("invalid JSON generate document = %s", stdout)
+	}
 }
 
 func TestRunGenerateReportsOwnershipConflictSourceWithoutMutation(t *testing.T) {
