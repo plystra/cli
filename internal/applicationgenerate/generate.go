@@ -127,7 +127,8 @@ type Options struct {
 
 // Result identifies the resolved application and its deterministic generated
 // output comparison. A successful installation can retain unexpected unowned
-// files, which remain visible in Report rather than being overwritten.
+// files, which remain visible in Report rather than being overwritten. On an
+// active Data failure, only DataCompilerAcquisition may be populated.
 type Result struct {
 	module                  modulelocate.Module
 	report                  generatedfiles.Report
@@ -139,6 +140,7 @@ type Result struct {
 	javaScriptComparison    interfacecompatibility.JavaScriptComparison
 	documentationComparison interfacecompatibility.DocumentationComparison
 	evolutionAssessment     interfacecompatibility.EvolutionAssessment
+	dataCompiler            applicationresolve.DataCompilerAcquisition
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -153,6 +155,15 @@ func (r Result) Checked() bool { return r.checked }
 // ConfigurationPath returns the stable Project-relative current-project
 // document selected for this operation.
 func (r Result) ConfigurationPath() string { return r.configurationPath }
+
+// DataCompilerAcquisition returns the verified Data compiler identity retained
+// by resolution. It is absent for Projects without active Data members.
+func (r Result) DataCompilerAcquisition() (applicationresolve.DataCompilerAcquisition, bool) {
+	if !r.dataCompiler.Valid() {
+		return applicationresolve.DataCompilerAcquisition{}, false
+	}
+	return r.dataCompiler, true
+}
 
 // InterfaceShapeComparison returns the authored Interface Go-shape
 // differences observed against the prior owned compatibility baseline.
@@ -207,7 +218,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	options.Environment = generationEnvironment(options.Environment, options.Offline)
 	prepared, err := prepare(ctx, options, options.Start)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrGenerate, err)
+		return Result{dataCompiler: resolvedDataCompiler(prepared.resolved)}, fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	if options.Check {
 		if err := validateRuntimeRequirements(prepared.resolved, prepared.runtimeRequirements); err != nil {
@@ -232,6 +243,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			javaScriptComparison:    prepared.javaScriptComparison,
 			documentationComparison: prepared.documentationComparison,
 			evolutionAssessment:     prepared.evolutionAssessment,
+			dataCompiler:            resolvedDataCompiler(prepared.resolved),
 		}, nil
 	}
 
@@ -299,7 +311,13 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		javaScriptComparison:    prepared.javaScriptComparison,
 		documentationComparison: prepared.documentationComparison,
 		evolutionAssessment:     prepared.evolutionAssessment,
+		dataCompiler:            resolvedDataCompiler(prepared.resolved),
 	}, nil
+}
+
+func resolvedDataCompiler(resolved applicationresolve.Result) applicationresolve.DataCompilerAcquisition {
+	acquisition, _ := resolved.DataCompilerAcquisition()
+	return acquisition
 }
 
 func generationEnvironment(environment []string, offline bool) []string {
@@ -475,7 +493,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		TemporaryParent:           options.TemporaryParent,
 	})
 	if err != nil {
-		return preparedGeneration{}, err
+		return preparedGeneration{resolved: resolved}, err
 	}
 	definitions := resolved.Interfaces().Interfaces()
 	contracts := make([]interfacecontract.Contract, 0, len(definitions))

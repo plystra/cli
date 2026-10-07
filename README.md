@@ -1221,6 +1221,11 @@ member's configuration source. Invalid entries report
 execution and result acceptance are installed as an internal boundary, but
 assignment activation, emit, generated access installation, and migrations
 remain unsupported.
+The internal resolution and generation results retain the verified compiler
+identity, cache-hit fact, selected distribution manifest, and accepted analyze
+output even when generation stops at this boundary. They do not expose the
+private compiler path in public command output. Public cache-effect reporting
+and installed Data artifacts remain incomplete.
 
 ### Named Resource instances
 

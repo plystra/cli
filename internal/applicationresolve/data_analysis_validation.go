@@ -36,6 +36,11 @@ type DataAnalysisAcceptance struct {
 	members        map[string]dataAnalysisMember
 }
 
+// Valid reports whether Core retained a complete accepted analysis identity.
+func (a DataAnalysisAcceptance) Valid() bool {
+	return a.resultDigest != "" && a.snapshotDigest != "" && len(a.modelDigests) != 0 && len(a.members) == len(a.modelDigests)
+}
+
 type dataAnalysisMember struct {
 	model         dataModel
 	modelDigest   string

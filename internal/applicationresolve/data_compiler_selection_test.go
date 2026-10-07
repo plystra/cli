@@ -73,18 +73,39 @@ func TestResolveAcquiresSelectedCompilerBeforeAnalyzeBoundary(t *testing.T) {
 	runCompilerGo(t, project, environment, "mod", "download", "all")
 	cache := filepath.Join(root, "compiler-cache")
 	options := applicationresolve.Options{Start: project, Environment: environment, DataCompilerCacheRoot: cache, CompileTimeout: 30 * time.Second}
-	_, err := applicationresolve.Resolve(t.Context(), options)
+	resolved, err := applicationresolve.Resolve(t.Context(), options)
 	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) || !errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) {
 		t.Fatalf("Resolve error = %v", err)
+	}
+	var unavailable *applicationresolve.DataCompilerUnavailableError
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("Resolve error omitted DataCompilerUnavailableError: %v", err)
+	}
+	acquisition, ok := unavailable.Acquisition()
+	if !ok || !acquisition.Valid() || acquisition.CacheHit() || acquisition.Offline() || acquisition.ModuleVersion() != "v0.2.0" || acquisition.ModulePath() != datacompiler.ModulePath {
+		t.Fatalf("cold acquisition = %#v, ok=%t", acquisition, ok)
+	}
+	if retained, ok := resolved.DataCompilerAcquisition(); !ok || retained != acquisition {
+		t.Fatalf("partial resolution acquisition = %#v, ok=%t", retained, ok)
 	}
 	entries, err := os.ReadDir(cache)
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("compiler cache entries = %v, error = %v", entries, err)
 	}
 	options.Offline = true
-	_, err = applicationresolve.Resolve(t.Context(), options)
+	resolved, err = applicationresolve.Resolve(t.Context(), options)
 	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) {
 		t.Fatalf("offline warm Resolve error = %v", err)
+	}
+	if !errors.As(err, &unavailable) {
+		t.Fatalf("offline Resolve error omitted DataCompilerUnavailableError: %v", err)
+	}
+	acquisition, ok = unavailable.Acquisition()
+	if !ok || !acquisition.Valid() || !acquisition.CacheHit() || !acquisition.Offline() {
+		t.Fatalf("warm offline acquisition = %#v, ok=%t", acquisition, ok)
+	}
+	if retained, ok := resolved.DataCompilerAcquisition(); !ok || retained != acquisition {
+		t.Fatalf("offline partial resolution acquisition = %#v, ok=%t", retained, ok)
 	}
 }
 
@@ -101,14 +122,23 @@ func TestGenerateForwardsOfflineCompilerAvailability(t *testing.T) {
 	environment := compilerProxyEnvironment(t, proxy)
 	runCompilerGo(t, project, environment, "mod", "download", "all")
 	cache := filepath.Join(root, "compiler-cache")
-	_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+	generated, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 		Start: project, Environment: environment, Offline: true, DataCompilerCacheRoot: cache,
 	})
 	if !errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) || !errors.Is(err, datacompiler.ErrOfflineUnavailable) {
 		t.Fatalf("offline generation error = %v", err)
 	}
+	var unavailable *applicationresolve.DataCompilerUnavailableError
+	if errors.As(err, &unavailable) {
+		if _, ok := unavailable.Acquisition(); ok {
+			t.Fatal("cold offline failure reported compiler acquisition")
+		}
+	}
 	if _, statErr := os.Stat(cache); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("offline generation materialized compiler cache: %v", statErr)
+	}
+	if _, ok := generated.DataCompilerAcquisition(); ok {
+		t.Fatal("cold offline generation returned a compiler acquisition")
 	}
 }
 
@@ -128,11 +158,42 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"example.com/project/resource\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[resource.Resource]{Namespace: \"records\"}\n")
 	environment := compilerProxyEnvironment(t, proxy)
 	runCompilerGo(t, project, environment, "mod", "download", "all")
-	_, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), CompileTimeout: 30 * time.Second,
 	})
 	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) || !strings.HasSuffix(err.Error(), applicationresolve.ErrDataCompilerAnalysisUnavailable.Error()) {
 		t.Fatalf("Resolve error = %v", err)
+	}
+	accepted, ok := resolved.DataAnalysis()
+	if !ok || !accepted.Valid() || accepted.ModelDigest("example.records/v1") == "" {
+		t.Fatalf("accepted Data analysis = %#v, ok=%t", accepted, ok)
+	}
+	output, ok := resolved.DataAnalyzeOutput()
+	if !ok || len(output) == 0 {
+		t.Fatal("partial resolution omitted accepted analyze output")
+	}
+	output[0] = '!'
+	second, _ := resolved.DataAnalyzeOutput()
+	if len(second) == 0 || second[0] == '!' {
+		t.Fatal("accepted analyze output accessor is not defensive")
+	}
+	artifact, ok := resolved.DataCompilerArtifact()
+	if !ok || artifact.Path == "" || artifact.BinaryDigest == "" {
+		t.Fatalf("partial resolution compiler = %#v, ok=%t", artifact, ok)
+	}
+	selectedManifest, ok := resolved.DataCompilerManifest()
+	if !ok || selectedManifest.EmitProtocol != datacompiler.EmitSchema {
+		t.Fatalf("partial resolution compiler manifest = %#v, ok=%t", selectedManifest, ok)
+	}
+	generated, generateErr := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: project, Environment: environment, Offline: true,
+		DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"),
+	})
+	if !errors.Is(generateErr, applicationresolve.ErrDataCompilerAnalysisUnavailable) {
+		t.Fatalf("Generate error = %v", generateErr)
+	}
+	if acquisition, ok := generated.DataCompilerAcquisition(); !ok || !acquisition.Valid() || !acquisition.CacheHit() || !acquisition.Offline() {
+		t.Fatalf("Generate partial acquisition = %#v, ok=%t", acquisition, ok)
 	}
 }
 

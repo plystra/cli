@@ -730,6 +730,9 @@ identity, and logical-model digests. It does not yet emit or install generated
 access, scaffold or run Data migrations, or provide PostgreSQL/D1 generation;
 explicit `data migration plan|apply|status` operations remain deferred to
 Gates 16-18.
+The failed generation result retains the exact verified compiler identity and
+cache-hit state internally for the later emit handoff; this is not a generated
+artifact or public cache-effect report.
 Do not work around that boundary by placing database or migration behavior in a
 legacy Plugin or in `generated/`.
 

@@ -23,6 +23,9 @@ type dataAnalyzeRun struct {
 	response datacompiler.AnalyzeResponse
 	snapshot datacompiler.AnalyzeSourceSnapshot
 	bounds   datacompiler.Bounds
+	artifact datacompiler.Artifact
+	manifest datacompiler.Manifest
+	status   DataCompilerAcquisition
 }
 
 func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (dataAnalyzeRun, error) {
@@ -37,6 +40,7 @@ func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (data
 	if err != nil {
 		return dataAnalyzeRun{}, fmt.Errorf("%w: acquire compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
+	run := dataAnalyzeRun{artifact: artifact, manifest: selection.Manifest, status: newDataCompilerAcquisition(artifact, options.Offline)}
 	modules := dataSnapshotModules(s, selection)
 	snapshot, err := datacompiler.BuildAnalyzeSourceSnapshot(ctx, datacompiler.AnalyzeSourceSnapshotOptions{
 		DataPackages:     s.declarations.DataPackages(),
@@ -48,11 +52,11 @@ func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (data
 		Environment:      options.Environment,
 	})
 	if err != nil {
-		return dataAnalyzeRun{}, fmt.Errorf("%w: build source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return run, fmt.Errorf("%w: build source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	snapshotJSON, err := snapshot.JSON()
 	if err != nil {
-		return dataAnalyzeRun{}, fmt.Errorf("%w: encode source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return run, fmt.Errorf("%w: encode source snapshot: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	request, err := datacompiler.BuildAnalyzeRequest(artifact, selection.Manifest, datacompiler.AnalyzeRequestOptions{
 		RequestID: "data-analyze-" + strings.TrimPrefix(snapshot.Digest(), "sha256:"),
@@ -63,17 +67,18 @@ func (s SelectionInputs) analyzeData(ctx context.Context, options Options) (data
 		Snapshot: snapshotJSON,
 	})
 	if err != nil {
-		return dataAnalyzeRun{}, fmt.Errorf("%w: build request: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return run, fmt.Errorf("%w: build request: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	analyzeOptions := datacompiler.AnalyzeOptions{Environment: options.Environment, Timeout: options.ExecutionTimeout}
 	response, err := datacompiler.Analyze(ctx, artifact, request, analyzeOptions)
 	if err != nil {
-		return dataAnalyzeRun{}, fmt.Errorf("%w: invoke compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
+		return run, fmt.Errorf("%w: invoke compiler: %w", ErrDataCompilerAnalysisUnavailable, err)
 	}
 	if response.Status != "succeeded" {
-		return dataAnalyzeRun{}, fmt.Errorf("%w: compiler rejected the Data source snapshot", ErrDataCompilerAnalysisUnavailable)
+		return run, fmt.Errorf("%w: compiler rejected the Data source snapshot", ErrDataCompilerAnalysisUnavailable)
 	}
-	return dataAnalyzeRun{response: response, snapshot: snapshot, bounds: selection.Manifest.Bounds}, nil
+	run.response, run.snapshot, run.bounds = response, snapshot, selection.Manifest.Bounds
+	return run, nil
 }
 
 func dataSnapshotModules(inputs SelectionInputs, selection datacompiler.Selection) []datacompiler.SnapshotModule {
