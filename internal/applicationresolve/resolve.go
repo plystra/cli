@@ -609,6 +609,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		if err := validateDataBackend(interfaceResolution.Graph(), declarations.Resources(), dataActivation); err != nil {
 			return result, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
 		}
+		result.dataActivation = dataActivation.withBackend(dataPostgresBackend)
 		return result, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{
 			member: membersFirst(dataMembers), cause: ErrDataCompilerAnalysisUnavailable,
 			acquisition: dataRun.status, observations: dataRun.observations,

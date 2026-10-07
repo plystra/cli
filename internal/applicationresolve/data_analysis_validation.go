@@ -56,6 +56,7 @@ type dataAnalysisMember struct {
 type DataAssignment struct {
 	memberID      string
 	resource      string
+	backend       string
 	namespace     string
 	access        string
 	accessPackage string
@@ -69,6 +70,10 @@ func (a DataAssignment) MemberID() string { return a.memberID }
 
 // Resource returns the exact configured database Resource instance.
 func (a DataAssignment) Resource() string { return a.resource }
+
+// Backend returns the validated backend identity, when backend compatibility
+// has already been proven against the resolved Resource graph.
+func (a DataAssignment) Backend() string { return a.backend }
 
 // Namespace returns the member-local PostgreSQL schema namespace.
 func (a DataAssignment) Namespace() string { return a.namespace }
@@ -93,6 +98,14 @@ func (a DataAssignment) ModelDigest() string { return a.modelDigest }
 // accepted Data analysis. Its assignments are sorted by member ID.
 type DataActivation struct {
 	assignments []DataAssignment
+}
+
+func (a DataActivation) withBackend(backend string) DataActivation {
+	result := DataActivation{assignments: append([]DataAssignment(nil), a.assignments...)}
+	for index := range result.assignments {
+		result.assignments[index].backend = backend
+	}
+	return result
 }
 
 // Valid reports whether the activation contains a non-empty canonical set.

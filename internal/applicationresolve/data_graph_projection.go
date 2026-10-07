@@ -17,6 +17,7 @@ const (
 	dataPostgresProvider   = "github.com/plystra/data/postgres.New"
 	dataPostgresPackage    = "github.com/plystra/data/postgres"
 	dataModulePath         = "github.com/plystra/data"
+	dataPostgresBackend    = "postgres/v1"
 	dataGeneratedParameter = "database"
 )
 
