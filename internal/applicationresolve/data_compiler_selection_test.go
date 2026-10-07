@@ -260,6 +260,16 @@ func TestResolveRejectsNonPostgreSQLDataProviderAfterAnalysis(t *testing.T) {
 	if activation, ok := resolved.DataActivation(); !ok || !activation.Valid() {
 		t.Fatalf("provider rejection discarded accepted activation = %#v, ok=%t", activation, ok)
 	}
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.primary: {use: example.com/project/missing.New}}}\ndata: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
+	resolved, err = applicationresolve.Resolve(t.Context(), applicationresolve.Options{
+		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), Offline: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider is not visible") {
+		t.Fatalf("post-analysis Resource failure = %v", err)
+	}
+	if activation, ok := resolved.DataActivation(); !ok || !activation.Valid() {
+		t.Fatalf("post-analysis failure discarded accepted activation = %#v, ok=%t", activation, ok)
+	}
 }
 
 func dataCompilerObservationIDs(values []datacompiler.Observation) string {

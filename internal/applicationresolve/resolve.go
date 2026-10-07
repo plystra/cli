@@ -454,9 +454,20 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: members[0], cause: err})
 		}
 	}
+	dataPartial := func() Result {
+		return Result{
+			module:       module,
+			selection:    ConfigurationSelection{mode: selector.mode, path: selector.path, environment: selector.environment},
+			dataCompiler: dataRun.artifact, dataCompilerManifest: dataRun.manifest,
+			dataCompilerStatus: dataRun.status,
+			dataAnalysis:       dataAnalysis, dataActivation: dataActivation,
+			dataAnalyzeOutput:        append(json.RawMessage(nil), dataRun.response.Output...),
+			dataCompilerObservations: cloneDataCompilerObservations(dataRun.observations),
+		}
+	}
 	currentLayers := composition.CurrentLayers()
 	if len(currentLayers) == 0 {
-		return Result{}, fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)
+		return dataPartial(), fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)
 	}
 	// Every selected layer is authored by the current Project. Keep its exact
 	// decision paths available to source validation without inferring ownership
@@ -468,22 +479,22 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	currentProjectPaths, err := currentProjectConfigurationPaths(baseLayer, selectedLayer, selector.mode == configurationModeEnvironment, schemaLookup)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
 	}
 	sourceContext := applicationInputSourceContext(module, dependencies, composition, currentProjectPaths)
 	var generatedResources []constructorgraph.GeneratedResourceInput
 	if dataActivation.Valid() {
 		generatedResources, err = buildDataGeneratedResources(module.ModulePath(), manifest, dataActivation)
 		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
+			return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
 		}
 	}
 	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext, generatedResources)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	if err := inputs.validateCandidateConfiguration(composition, interfaceResolution, sourceContext); err != nil {
-		return Result{}, err
+		return dataPartial(), err
 	}
 	rootLayerManifest := rootManifest
 	selectedLayerManifest := selectedManifest
@@ -495,12 +506,12 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	selectedDigest, err := applicationmeta.ConfigurationLayerDigest(selectedLayerManifest, schemaLookup)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
+		return dataPartial(), fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
 	}
 	rootData := rootSnapshot.Data()
 	rootDigest, err := applicationmeta.ConfigurationLayerDigest(rootLayerManifest, schemaLookup)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: digest root configuration %s: %w", ErrResolve, applicationManifestName, err)
+		return dataPartial(), fmt.Errorf("%w: digest root configuration %s: %w", ErrResolve, applicationManifestName, err)
 	}
 	configurationProvenance := &generation.ConfigurationProvenanceInput{
 		Mode:           generation.ConfigurationMode(selector.mode),
@@ -518,28 +529,28 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		TemporaryParent:  options.TemporaryParent,
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	resolution, err := generationresolution.ResolveExtensions(ctx, input)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	if options.RequireExecutablePolicies {
 		if err := validateExecutablePolicies(manifest, interfaceResolution, resolution.Context(), sourceContext); err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+			return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 	}
 	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	evidenceModules, err := resolutionEvidenceModules(module, dependencies)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, baseLayer, selectedLayer, schemaLookup)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	assemblyEvidence := resolutionEvidenceAssemblyInput(configs)
 	httpTransports := manifest.HTTPTransports()
@@ -554,14 +565,14 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		HTTPTransports:     &httpTransports,
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	evidence, err = resolutionevidence.WithResources(evidence, interfaceResolution.Graph(), declarations.Resources())
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: construct Resource resolution evidence: %w", ErrResolve, err)
+		return dataPartial(), fmt.Errorf("%w: construct Resource resolution evidence: %w", ErrResolve, err)
 	}
 	if err := inputs.ValidateSnapshot(ctx); err != nil {
-		return Result{}, err
+		return dataPartial(), err
 	}
 	result := Result{
 		module:              module,
