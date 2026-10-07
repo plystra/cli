@@ -726,13 +726,13 @@ rerun `plystra guidance check` before synchronizing again.
 The current CLI supports named Resources and integrates the selected Data
 compiler's bounded read-only analyze phase. It independently accepts the
 complete typed result before Freeze, including source provenance, Resource
-identity, and logical-model digests. It does not yet emit or install generated
-access, scaffold or run Data migrations, or provide PostgreSQL/D1 generation;
-explicit `data migration plan|apply|status` operations remain deferred to
-Gates 16-18.
-The failed generation result retains the exact verified compiler identity and
-cache-hit state internally for the later emit handoff; this is not a generated
-artifact or public cache-effect report.
+identity, and logical-model digests. After Freeze it invokes the exact
+selected compiler's bounded emit phase, validates the staged PostgreSQL SQL
+and instance manifest artifacts, and installs them transactionally under
+`generated/data/` with compiler and Resource provenance in the ownership
+manifest. It does not yet install typed generated access runtime, scaffold or
+run Data migrations, or provide PostgreSQL/D1 runtime generation; explicit
+`data migration plan|apply|status` operations remain deferred to Gates 16-18.
 Do not work around that boundary by placing database or migration behavior in a
 legacy Plugin or in `generated/`.
 

@@ -610,19 +610,8 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			return result, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
 		}
 		result.dataActivation = dataActivation.withBackend(dataPostgresBackend)
-		return result, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{
-			member: membersFirst(dataMembers), cause: ErrDataCompilerAnalysisUnavailable,
-			acquisition: dataRun.status, observations: dataRun.observations,
-		})
 	}
 	return result, nil
-}
-
-func membersFirst(members []applicationmeta.DataMember) applicationmeta.DataMember {
-	if len(members) == 0 {
-		return applicationmeta.DataMember{}
-	}
-	return members[0]
 }
 
 func currentProjectConfigurationPaths(base, selected applicationmeta.Manifest, environment bool, schemas applicationmeta.SchemaLookup) ([]string, error) {

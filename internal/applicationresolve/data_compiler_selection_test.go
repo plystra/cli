@@ -2,6 +2,7 @@ package applicationresolve_test
 
 import (
 	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,7 +22,9 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/datacompiler"
+	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/moduledependency"
+	"github.com/plystra/cli/internal/testkernel"
 	"golang.org/x/mod/module"
 )
 
@@ -165,12 +168,8 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	resolved, err := applicationresolve.Resolve(t.Context(), applicationresolve.Options{
 		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), CompileTimeout: 30 * time.Second,
 	})
-	if !errors.Is(err, applicationresolve.ErrDataCompilerAnalysisUnavailable) || !strings.HasSuffix(err.Error(), applicationresolve.ErrDataCompilerAnalysisUnavailable.Error()) {
+	if err != nil {
 		t.Fatalf("Resolve error = %v", err)
-	}
-	var unavailable *applicationresolve.DataCompilerUnavailableError
-	if !errors.As(err, &unavailable) {
-		t.Fatalf("Resolve error omitted DataCompilerUnavailableError: %v", err)
 	}
 	accepted, ok := resolved.DataAnalysis()
 	if !ok || !accepted.Valid() || accepted.ModelDigest("example.records/v1") == "" {
@@ -210,25 +209,101 @@ func TestResolveInvokesAnalyzeWithResourceContractSourceClosure(t *testing.T) {
 	if got := dataCompilerObservationIDs(observations); got != "data-compiler-build-temporary,data-compiler-build-execution,data-compiler-cache-materialization,data-compiler-analyze-execution" {
 		t.Fatalf("cold resolution observations = %q", got)
 	}
-	if unavailableObservations := unavailable.Observations(); len(unavailableObservations) != len(observations) {
-		t.Fatalf("unavailable observations = %#v", unavailableObservations)
-	}
 	observations[0].Verification[0] = "changed"
 	if resolved.DataCompilerObservations()[0].Verification[0] == "changed" {
 		t.Fatal("resolution observations accessor is not defensive")
 	}
-	generated, generateErr := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
-		Start: project, Environment: environment, Offline: true,
-		DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"),
+}
+
+func TestGenerateEmitsAndCleansDataArtifacts(t *testing.T) {
+	root := t.TempDir()
+	proxy := filepath.Join(root, "proxy")
+	writeCompilerProxyModule(t, proxy, datacompiler.ModulePath, "v0.99.99", "module github.com/plystra/data\n\ngo 1.26\n", map[string][]byte{
+		"plystra-data-compiler.json":        dataCompilerManifest(t),
+		"plystra.yaml":                      []byte("{}\n"),
+		"declaration/declaration.go":        []byte("package declaration\n\ntype Member[Access any] struct { Namespace string; Access Access }\n"),
+		"database/resource.go":              []byte("package database\n\n//plystra:resource data.database/v1\ntype Resource interface { Ping() error }\n"),
+		"postgres/postgres.go":              []byte("package postgres\n\nimport \"github.com/plystra/data/database\"\n\ntype provider struct{}\nvar _ database.Resource = (*provider)(nil)\nfunc (*provider) Ping() error { return nil }\n\n//plystra:implements-resource data.database/v1\nfunc New() (*provider, error) { return &provider{}, nil }\n"),
+		"cmd/plystra-data-compiler/main.go": []byte(snapshotCheckingCompilerSource),
 	})
-	if !errors.Is(generateErr, applicationresolve.ErrDataCompilerAnalysisUnavailable) {
-		t.Fatalf("Generate error = %v", generateErr)
+	project := filepath.Join(root, "project")
+	kernelRoot := testkernel.Root(t)
+	writeFile(t, filepath.Join(project, "go.mod"), fmt.Sprintf(`module example.com/project
+
+go 1.26
+
+require (
+	github.com/plystra/data v0.99.99
+    github.com/plystra/kernel v0.0.0
+    go.yaml.in/yaml/v3 v3.0.5
+    golang.org/x/mod v0.38.0
+    golang.org/x/sys v0.47.0
+)
+
+replace github.com/plystra/kernel => %s
+`, filepath.ToSlash(kernelRoot)))
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.primary: {use: github.com/plystra/data/postgres.New}}}\ndata: {members: {example.records/v1: {resource: database.primary, access: database.records}}}\n")
+	writeFile(t, filepath.Join(project, "resource", "resource.go"), "package resource\n\n//plystra:resource example.records/v1\ntype Resource interface { Ping() error }\n")
+	writeFile(t, filepath.Join(project, "model", "model.go"), "package model\n\nimport (\n \"github.com/plystra/data/declaration\"\n \"github.com/plystra/data/database\"\n)\n\n//plystra:data example.records/v1\nvar Records = declaration.Member[database.Resource]{Namespace: \"records\"}\n")
+	environment := compilerProxyEnvironmentWithPublicFallback(t, proxy)
+	runCompilerGo(t, project, environment, "mod", "download", "all")
+	options := applicationgenerate.Options{
+		Start: project, Environment: environment, DataCompilerCacheRoot: filepath.Join(root, "compiler-cache"), CompileTimeout: 30 * time.Second,
+		Validate: func(context.Context, string) error { return nil },
 	}
-	if acquisition, ok := generated.DataCompilerAcquisition(); !ok || !acquisition.Valid() || !acquisition.CacheHit() || !acquisition.Offline() {
-		t.Fatalf("Generate partial acquisition = %#v, ok=%t", acquisition, ok)
+	generated, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Generate with Data emit: %v", err)
 	}
-	if got := dataCompilerObservationIDs(generated.DataCompilerObservations()); got != "data-compiler-analyze-execution" {
-		t.Fatalf("warm offline generation observations = %q", got)
+	if !generated.Installed() || !generated.Report().Clean() {
+		t.Fatalf("generated Data result = installed %t, changes %#v", generated.Installed(), generated.Report().Changes())
+	}
+	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/schema/schema.sql"} {
+		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); err != nil {
+			t.Fatalf("emitted Data artifact %s: %v", filePath, err)
+		}
+		artifact, exists, err := generatedfiles.ReadArtifact(project, filePath)
+		if err != nil || !exists || !artifact.Valid() || artifact.Generator() != "plystra.data/v1" {
+			t.Fatalf("Data artifact provenance %s = %#v, exists=%t, err=%v", filePath, artifact, exists, err)
+		}
+		values := append(artifact.InputRecordIDs(), artifact.Sources()...)
+		for _, expected := range []string{"data-compiler:github.com/plystra/data@v0.99.99", "data-resource:database.primary", "data-member:example.records/v1", "Data provider github.com/plystra/data/postgres.New"} {
+			found := false
+			for _, value := range values {
+				if value == expected {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("Data artifact %s provenance omits %q: %#v", filePath, expected, values)
+			}
+		}
+	}
+	checked, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: project, Check: true, Environment: environment, DataCompilerCacheRoot: options.DataCompilerCacheRoot, CompileTimeout: options.CompileTimeout,
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("Data generate check = %#v, %v", checked.Report().Changes(), err)
+	}
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "{}\n")
+	cleaned, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Generate after Data removal: %v", err)
+	}
+	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/schema/schema.sql"} {
+		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale generated Data artifact %s remains: %v", filePath, err)
+		}
+	}
+	if !cleaned.Report().Clean() {
+		t.Fatalf("Data cleanup result changes = %#v", cleaned.Report().Changes())
+	}
+	checked, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: project, Check: true, Environment: environment, DataCompilerCacheRoot: options.DataCompilerCacheRoot, CompileTimeout: options.CompileTimeout,
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("post-cleanup generate check = %#v, %v", checked.Report().Changes(), err)
 	}
 }
 
@@ -420,6 +495,10 @@ func main() {
     if _, err := io.ReadFull(os.Stdin, payload); err != nil { os.Exit(2) }
     var input map[string]any
     if json.Unmarshal(payload, &input) != nil { os.Exit(2) }
+    if phase, _ := input["phase"].(string); phase == "emit" {
+        emit(input, header)
+        return
+    }
     snapshot, ok := input["snapshot"].(map[string]any)
     if !ok { os.Exit(2) }
     packages, packagesOK := snapshot["packages"].([]any)
@@ -480,6 +559,51 @@ func main() {
 		"status": "succeeded", "output_digest": digest, "output": map[string]any{"roots": []any{root}, "digest": digest, "valid": true, "truncated": false},
 		"diagnostics": []any{}, "truncated": false,
 	}
+    data, _ := json.Marshal(response)
+    binary.BigEndian.PutUint32(header[:], uint32(len(data)))
+    _, _ = os.Stdout.Write(header[:])
+    _, _ = os.Stdout.Write(data)
+}
+
+func emit(input map[string]any, header [4]byte) {
+    assignments, ok := input["assignments"].([]any)
+    if !ok || len(assignments) != 1 { os.Exit(2) }
+    assignment, ok := assignments[0].(map[string]any)
+    if !ok { os.Exit(2) }
+    memberID, _ := assignment["member_id"].(string)
+    resource, _ := assignment["resource"].(string)
+    resourceContract, _ := assignment["resource_contract"].(string)
+    provider, _ := assignment["provider"].(string)
+    backend, _ := assignment["backend"].(string)
+    compiler, ok := input["compiler"].(map[string]any)
+    if !ok { os.Exit(2) }
+    frozenModelDigest, _ := input["frozen_model_digest"].(string)
+    artifact := func(path string, content []byte) map[string]any {
+        sum := sha256.Sum256(content)
+        return map[string]any{
+            "path": path, "mode": 0644, "bytes": content, "digest": "sha256:" + hex.EncodeToString(sum[:]),
+            "owning_members": []string{memberID}, "resource": resource, "resource_contract": resourceContract,
+            "provider": provider, "backend": backend, "compiler": compiler, "frozen_model_digest": frozenModelDigest,
+        }
+    }
+	schemaPath := "generated/data/" + resource + "/schema/schema.sql"
+	schemaArtifact := artifact(schemaPath, []byte("CREATE TABLE records (id bigint NOT NULL);\n"))
+	modelSum := sha256.Sum256(append([]byte("plystra.data.logical-model/v1\x00"), []byte("{\"namespace\":\"records\"}")...))
+	manifest, _ := json.Marshal(map[string]any{
+		"schema": "plystra.data-instance-manifest/v1", "resource": resource, "resource_contract": resourceContract,
+		"provider": provider, "backend": backend, "compiler": compiler, "analyze_digest": input["analyze_digest"],
+		"input_digest": input["input_digest"], "frozen_model_digest": frozenModelDigest,
+		"member_models": map[string]string{memberID: "sha256:" + hex.EncodeToString(modelSum[:])},
+		"artifacts": []map[string]any{{"path": schemaPath, "mode": 0644, "digest": schemaArtifact["digest"], "owning_members": []string{memberID}}},
+	})
+	artifacts := []map[string]any{artifact("generated/data/"+resource+"/manifest.json", manifest), schemaArtifact}
+    artifactBytes, _ := json.Marshal(artifacts)
+    outputSum := sha256.Sum256(append([]byte("plystra.data.emit-output/v1\x00"), artifactBytes...))
+    response := map[string]any{
+        "schema": input["schema"], "phase": input["phase"], "request_id": input["request_id"], "input_digest": input["input_digest"],
+        "status": "succeeded", "output_digest": "sha256:" + hex.EncodeToString(outputSum[:]),
+        "output": map[string]any{"artifacts": json.RawMessage(artifactBytes)}, "diagnostics": []any{}, "truncated": false,
+    }
     data, _ := json.Marshal(response)
     binary.BigEndian.PutUint32(header[:], uint32(len(data)))
     _, _ = os.Stdout.Write(header[:])
@@ -554,6 +678,19 @@ func compilerProxyEnvironment(t *testing.T, proxy string) []string {
 		"GONOPROXY":  "none", "GOPRIVATE": "", "GOPROXY": (&url.URL{Scheme: "file", Path: proxyPath}).String(),
 		"GOSUMDB": "off", "GOTOOLCHAIN": "local", "GOWORK": "off",
 	})
+}
+
+func compilerProxyEnvironmentWithPublicFallback(t *testing.T, proxy string) []string {
+	t.Helper()
+	environment := compilerProxyEnvironment(t, proxy)
+	for index, entry := range environment {
+		if strings.HasPrefix(entry, "GOPROXY=") {
+			environment[index] = "GOPROXY=" + strings.TrimPrefix(entry, "GOPROXY=") + "|https://proxy.golang.org"
+			return environment
+		}
+	}
+	t.Fatal("compiler proxy environment omitted GOPROXY")
+	return nil
 }
 
 func makeWritableTree(root string) error {

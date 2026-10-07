@@ -1202,8 +1202,11 @@ support stage independently; implemented stages do not imply `accepted: yes`.
 The selected Data compiler's bounded analyze phase is integrated as a
 read-only pre-Freeze step: the CLI supplies a finite source snapshot and
 independently validates the complete typed result, provenance, Resource
-identity, and logical-model digest. Emit, generated access installation,
-PostgreSQL/D1 generation, and migration commands remain unsupported.
+identity, and logical-model digest. After Freeze, the CLI invokes the exact
+selected compiler and installs its independently validated PostgreSQL SQL and
+instance manifest artifacts under `generated/data/` in the same ownership
+transaction as the rest of generated output. Typed generated access runtime,
+D1 generation, and migration commands remain unsupported.
 
 The CLI parses current-Project `data.members` assignments as exact member-ID
 entries. Each entry requires one valid named `resource` and may name an `access`
@@ -1216,10 +1219,8 @@ namespaces must be unique within a Resource, and access names must match the
 accepted Access contract without colliding with Resources, other access names,
 or reserved intrinsic names. Invalid activation reports
 `PLYSTRA_DATA_ASSIGNMENT_INVALID` with the member source. Valid activation is
-retained for the later graph, emit, and installation phases, but
-`plystra generate` and `plystra generate --check` still fail with
-`PLYSTRA_DATA_COMPILER_UNAVAILABLE` at the unimplemented emit and installation
-boundary before changing the Project. The CLI first
+projected into the pre-Freeze Resource graph and consumed by the post-Freeze
+emit request. The CLI first
 resolves the exact `github.com/plystra/data` version, verified `h1:` checksum,
 and distribution manifest from the selected Project's ordinary Go Module graph;
 workspace and replacement sources are not accepted as published compiler
@@ -1227,13 +1228,14 @@ distributions. A missing or invalid distribution is reported with the active
 member's configuration source. Invalid entries report
 `PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location. Analyze
 execution, result acceptance, and Core-owned assignment activation are
-installed as internal boundaries, but graph projection, emit, generated access
-installation, and migrations remain unsupported.
+installed as internal boundaries. The generated ownership manifest records the
+selected compiler identity and Resource/member provenance for each Data
+artifact without exposing the private compiler path or Secret values. Typed
+generated access runtime and migrations remain unsupported.
 The internal resolution and generation results retain the verified compiler
 identity, cache-hit fact, selected distribution manifest, and accepted analyze
-output even when generation stops at this boundary. They do not expose the
-private compiler path in public command output. Public cache-effect reporting
-and installed Data artifacts remain incomplete.
+output for the emit and installation boundary. They do not expose the private
+compiler path in public command output.
 
 ### Named Resource instances
 

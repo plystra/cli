@@ -92,6 +92,7 @@ type Options struct {
 	InterfaceJavaScript       interfacecompatibility.JavaScriptBaseline
 	InterfaceProtobufModel    protobufmodel.InterfaceModel
 	ProtobufWireMap           protobufwiremap.Map
+	AdditionalFiles           []generatedfiles.File
 }
 
 // Result keeps private build output out of the public generated-file manifest.
@@ -720,6 +721,7 @@ func Render(options Options, resolution generationresolution.ExtensionResult) (R
 			err,
 		)
 	}
+	files = append(files, options.AdditionalFiles...)
 
 	output, err := generatedfiles.NewOutput(files)
 	if err != nil {

@@ -814,6 +814,10 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 	if err != nil {
 		return preparedGeneration{}, fmt.Errorf("construct application manifest provenance: %w", err)
 	}
+	dataFiles, err := dataArtifactFiles(ctx, resolved, modelDigest, options)
+	if err != nil {
+		return preparedGeneration{}, err
+	}
 	var constructorConfigurations []bootstrapgen.ConstructorConfigurationInput
 	for _, node := range resolved.InterfaceResolution().Graph().ConstructionOrder() {
 		if schema, exists := node.Implementation().Configuration(); exists {
@@ -848,6 +852,7 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		InterfaceJavaScript:       javaScriptBaseline,
 		InterfaceProtobufModel:    interfaceProtobufModel,
 		ProtobufWireMap:           wireMap,
+		AdditionalFiles:           dataFiles,
 	}, resolved.Resolution())
 	if err != nil {
 		return preparedGeneration{}, err
@@ -914,6 +919,214 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		evolutionAssessment:     evolutionAssessment,
 		fingerprint:             fingerprint,
 	}, nil
+}
+
+const dataArtifactGenerator = "plystra.data/v1"
+
+func dataArtifactFiles(ctx context.Context, resolved applicationresolve.Result, applicationModelDigest string, options Options) ([]generatedfiles.File, error) {
+	activation, active := resolved.DataActivation()
+	if !active {
+		return nil, nil
+	}
+	compiler, compilerOK := resolved.DataCompilerArtifact()
+	manifest, manifestOK := resolved.DataCompilerManifest()
+	analyzeOutput, analyzeOK := resolved.DataAnalyzeOutput()
+	analysis, analysisOK := resolved.DataAnalysis()
+	if !compilerOK || !manifestOK || !analyzeOK || !analysisOK {
+		return nil, fmt.Errorf("%w: accepted Data state is incomplete before emit", applicationresolve.ErrDataCompilerUnavailable)
+	}
+	frozenModelDigest, err := dataFrozenModelDigest(analysis, activation, applicationModelDigest)
+	if err != nil {
+		return nil, fmt.Errorf("%w: freeze Data model: %w", applicationresolve.ErrDataCompilerUnavailable, err)
+	}
+	assignments := make([]datacompiler.EmitAssignment, 0, len(activation.Assignments()))
+	assignmentByMember := make(map[string]applicationresolve.DataAssignment, len(activation.Assignments()))
+	for _, assignment := range activation.Assignments() {
+		if assignment.Backend() == "" {
+			return nil, fmt.Errorf("%w: Data member %q has no validated backend", applicationresolve.ErrDataCompilerUnavailable, assignment.MemberID())
+		}
+		assignments = append(assignments, datacompiler.EmitAssignment{
+			MemberID:         assignment.MemberID(),
+			Resource:         assignment.Resource(),
+			ResourceContract: "data.database/v1",
+			Provider:         "github.com/plystra/data/postgres.New",
+			Backend:          assignment.Backend(),
+			AllowedRoot:      path.Join("generated/data", assignment.Resource()),
+		})
+		assignmentByMember[assignment.MemberID()] = assignment
+	}
+	request, err := datacompiler.BuildEmitRequest(compiler, manifest, datacompiler.EmitRequestOptions{
+		RequestID:         "data-emit-" + strings.TrimPrefix(frozenModelDigest, "sha256:"),
+		Build:             datacompiler.AnalyzeBuildContext{GOOS: compiler.GOOS, GOARCH: compiler.GOARCH, BuildTags: dataBuildTags(options.Environment)},
+		AnalyzeOutput:     analyzeOutput,
+		AnalyzeDigest:     analysis.ResultDigest(),
+		FrozenModelDigest: frozenModelDigest,
+		Assignments:       assignments,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: build emit request: %w", applicationresolve.ErrDataCompilerUnavailable, err)
+	}
+	response, err := datacompiler.Emit(ctx, compiler, manifest, request, datacompiler.AnalyzeOptions{
+		Environment: options.Environment,
+		Timeout:     options.ExecutionTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: invoke Data compiler emit: %w", applicationresolve.ErrDataCompilerUnavailable, err)
+	}
+	if response.Status != "succeeded" {
+		return nil, fmt.Errorf("%w: Data compiler rejected the frozen model", applicationresolve.ErrDataCompilerUnavailable)
+	}
+	acquisition, acquired := resolved.DataCompilerAcquisition()
+	if !acquired {
+		return nil, fmt.Errorf("%w: compiler acquisition identity is absent after emit", applicationresolve.ErrDataCompilerUnavailable)
+	}
+	files := make([]generatedfiles.File, 0, len(response.Artifacts))
+	for _, artifact := range response.Artifacts {
+		kind, err := dataArtifactKind(artifact.Path)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", applicationresolve.ErrDataCompilerUnavailable, err)
+		}
+		inputIDs := []string{
+			"data-analysis:" + analysis.ResultDigest(),
+			"data-snapshot:" + analysis.SnapshotDigest(),
+			"data-frozen:" + frozenModelDigest,
+			"data-emit:" + response.OutputDigest,
+			"data-compiler:" + acquisition.ModulePath() + "@" + acquisition.ModuleVersion(),
+			"data-compiler-manifest:" + acquisition.ManifestDigest(),
+			"data-compiler-binary:" + acquisition.BinaryDigest(),
+			"data-resource:" + artifact.Resource,
+			"data-backend:" + artifact.Backend,
+		}
+		sources := []string{
+			"Data compiler " + acquisition.ModulePath() + "@" + acquisition.ModuleVersion(),
+			"Data compiler manifest " + acquisition.ManifestDigest(),
+			"Data compiler binary " + acquisition.BinaryDigest(),
+			"Data Resource " + artifact.Resource + " " + artifact.ResourceContract,
+			"Data backend " + artifact.Backend,
+		}
+		for _, memberID := range artifact.OwningMembers {
+			modelDigest := analysis.ModelDigest(memberID)
+			if modelDigest == "" {
+				return nil, fmt.Errorf("%w: artifact %q names an unaccepted Data member %q", applicationresolve.ErrDataCompilerUnavailable, artifact.Path, memberID)
+			}
+			inputIDs = append(inputIDs, "data-member:"+memberID, "data-model:"+modelDigest)
+			sources = append(sources, "Data member "+memberID)
+			if assignment, ok := assignmentByMember[memberID]; ok {
+				inputIDs = append(inputIDs, "data-database:"+assignment.Resource())
+				sources = append(sources, "Data database "+assignment.Resource()+" data.database/v1", "Data provider github.com/plystra/data/postgres.New", "Data namespace "+assignment.Namespace())
+				if assignment.Access() != "" {
+					inputIDs = append(inputIDs, "data-access:"+assignment.Access(), "data-access-contract:"+assignment.AccessID())
+					sources = append(sources, "Data access "+assignment.Access()+" "+assignment.AccessID())
+				}
+			}
+		}
+		inputIDs = uniqueDataArtifactValues(inputIDs)
+		sources = uniqueDataArtifactValues(sources)
+		file, err := generatedfiles.NewFile(artifact.Path, artifact.Bytes, generatedfiles.ArtifactInput{
+			Generator:      dataArtifactGenerator,
+			Kind:           kind,
+			InputRecordIDs: inputIDs,
+			Sources:        sources,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%w: stage Data artifact %q: %w", applicationresolve.ErrDataCompilerUnavailable, artifact.Path, err)
+		}
+		files = append(files, file)
+	}
+	return files, nil
+}
+
+func uniqueDataArtifactValues(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func dataFrozenModelDigest(analysis applicationresolve.DataAnalysisAcceptance, activation applicationresolve.DataActivation, applicationModelDigest string) (string, error) {
+	type assignment struct {
+		MemberID    string `json:"member_id"`
+		Resource    string `json:"resource"`
+		Backend     string `json:"backend"`
+		Namespace   string `json:"namespace"`
+		Access      string `json:"access,omitempty"`
+		AccessID    string `json:"access_id,omitempty"`
+		ModelDigest string `json:"model_digest"`
+	}
+	assignments := activation.Assignments()
+	values := make([]assignment, len(assignments))
+	for index, value := range assignments {
+		values[index] = assignment{
+			MemberID: value.MemberID(), Resource: value.Resource(), Backend: value.Backend(),
+			Namespace: value.Namespace(), Access: value.Access(), AccessID: value.AccessID(), ModelDigest: value.ModelDigest(),
+		}
+	}
+	payload, err := json.Marshal(struct {
+		Schema                 string       `json:"schema"`
+		ApplicationModelDigest string       `json:"application_model_digest"`
+		AnalyzeDigest          string       `json:"analyze_digest"`
+		SnapshotDigest         string       `json:"snapshot_digest"`
+		Assignments            []assignment `json:"assignments"`
+	}{
+		Schema: "plystra.data.frozen-model/v1", ApplicationModelDigest: applicationModelDigest,
+		AnalyzeDigest: analysis.ResultDigest(), SnapshotDigest: analysis.SnapshotDigest(), Assignments: values,
+	})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte("plystra.data.frozen-model/v1\x00"), payload...))
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+func dataArtifactKind(filePath string) (generatedfiles.ArtifactKind, error) {
+	if !strings.HasPrefix(filePath, "generated/data/") || path.Clean(filePath) != filePath {
+		return "", fmt.Errorf("invalid Data artifact path %q", filePath)
+	}
+	if path.Base(filePath) == "manifest.json" {
+		return generatedfiles.ArtifactKindDataManifest, nil
+	}
+	if strings.HasSuffix(filePath, ".sql") {
+		return generatedfiles.ArtifactKindDataSQL, nil
+	}
+	return "", fmt.Errorf("unsupported Data artifact path %q", filePath)
+}
+
+func dataBuildTags(environment []string) []string {
+	if environment == nil {
+		environment = os.Environ()
+	}
+	flags := ""
+	for _, entry := range environment {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(name, "GOFLAGS") {
+			flags = value
+		}
+	}
+	fields := strings.Fields(flags)
+	tags := make([]string, 0)
+	for index := 0; index < len(fields); index++ {
+		value := ""
+		if strings.HasPrefix(fields[index], "-tags=") {
+			value = strings.TrimPrefix(fields[index], "-tags=")
+		} else if fields[index] == "-tags" && index+1 < len(fields) {
+			index++
+			value = fields[index]
+		}
+		for _, tag := range strings.Split(value, ",") {
+			if tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+	}
+	sort.Strings(tags)
+	return tags
 }
 
 func interfaceProtobufProjection(ctx context.Context, resolved applicationresolve.Result, transports applicationmeta.HTTPTransports, options Options) (protobufmodel.InterfaceModel, []interfaceinventory.Interface, error) {
