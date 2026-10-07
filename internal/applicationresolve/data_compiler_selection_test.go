@@ -2,6 +2,7 @@ package applicationresolve_test
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -285,6 +286,49 @@ replace github.com/plystra/kernel => %s
 	})
 	if err != nil || !checked.Report().Clean() {
 		t.Fatalf("Data generate check = %#v, %v", checked.Report().Changes(), err)
+	}
+	manifestBefore, err := os.ReadFile(filepath.Join(project, "generated/data/database.primary/manifest.json"))
+	if err != nil {
+		t.Fatalf("read generated Data manifest before malformed emit: %v", err)
+	}
+	malformedEnvironment := append([]string(nil), environment...)
+	malformedEnvironment = append(malformedEnvironment, "PLYSTRA_EMIT_TEST_MODE=manifest-mismatch")
+	_, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: project, Environment: malformedEnvironment, DataCompilerCacheRoot: options.DataCompilerCacheRoot, CompileTimeout: options.CompileTimeout,
+	})
+	if !errors.Is(err, applicationresolve.ErrDataCompilerUnavailable) || !strings.Contains(err.Error(), "model digest") {
+		t.Fatalf("malformed staged Data manifest error = %v", err)
+	}
+	manifestAfter, err := os.ReadFile(filepath.Join(project, "generated/data/database.primary/manifest.json"))
+	if err != nil {
+		t.Fatalf("read generated Data manifest after malformed emit: %v", err)
+	}
+	if !bytes.Equal(manifestBefore, manifestAfter) {
+		t.Fatal("malformed staged Data manifest changed installed output")
+	}
+	writeFile(t, filepath.Join(project, "plystra.yaml"), "resources: {instances: {database.replica: {use: github.com/plystra/data/postgres.New}}}\ndata: {members: {example.records/v1: {resource: database.replica, access: database.records}}}\n")
+	replaced, err := applicationgenerate.Generate(t.Context(), options)
+	if err != nil {
+		t.Fatalf("Generate after Resource selection change: %v", err)
+	}
+	for _, filePath := range []string{"generated/data/database.replica/manifest.json", "generated/data/database.replica/schema/schema.sql"} {
+		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); err != nil {
+			t.Fatalf("selected Resource artifact %s: %v", filePath, err)
+		}
+	}
+	for _, filePath := range []string{"generated/data/database.primary/manifest.json", "generated/data/database.primary/schema/schema.sql"} {
+		if _, err := os.Stat(filepath.Join(project, filepath.FromSlash(filePath))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("unselected Resource artifact %s remains: %v", filePath, err)
+		}
+	}
+	if !replaced.Report().Clean() {
+		t.Fatalf("Resource selection replacement changes = %#v", replaced.Report().Changes())
+	}
+	checked, err = applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
+		Start: project, Check: true, Environment: environment, DataCompilerCacheRoot: options.DataCompilerCacheRoot, CompileTimeout: options.CompileTimeout,
+	})
+	if err != nil || !checked.Report().Clean() {
+		t.Fatalf("selected Resource generate check = %#v, %v", checked.Report().Changes(), err)
 	}
 	writeFile(t, filepath.Join(project, "plystra.yaml"), "{}\n")
 	cleaned, err := applicationgenerate.Generate(t.Context(), options)
@@ -596,6 +640,14 @@ func emit(input map[string]any, header [4]byte) {
 		"member_models": map[string]string{memberID: "sha256:" + hex.EncodeToString(modelSum[:])},
 		"artifacts": []map[string]any{{"path": schemaPath, "mode": 0644, "digest": schemaArtifact["digest"], "owning_members": []string{memberID}}},
 	})
+	if os.Getenv("PLYSTRA_EMIT_TEST_MODE") == "manifest-mismatch" {
+		var value map[string]any
+		if json.Unmarshal(manifest, &value) != nil {
+			os.Exit(2)
+		}
+		value["member_models"] = map[string]string{memberID: "sha256:" + strings.Repeat("0", 64)}
+		manifest, _ = json.Marshal(value)
+	}
 	artifacts := []map[string]any{artifact("generated/data/"+resource+"/manifest.json", manifest), schemaArtifact}
     artifactBytes, _ := json.Marshal(artifacts)
     outputSum := sha256.Sum256(append([]byte("plystra.data.emit-output/v1\x00"), artifactBytes...))

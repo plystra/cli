@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -976,6 +978,9 @@ func dataArtifactFiles(ctx context.Context, resolved applicationresolve.Result, 
 	if response.Status != "succeeded" {
 		return nil, fmt.Errorf("%w: Data compiler rejected the frozen model", applicationresolve.ErrDataCompilerUnavailable)
 	}
+	if err := validateDataArtifactSet(response, analyzeOutput, analysis, activation, frozenModelDigest); err != nil {
+		return nil, fmt.Errorf("%w: validate staged Data artifacts: %w", applicationresolve.ErrDataCompilerUnavailable, err)
+	}
 	acquisition, acquired := resolved.DataCompilerAcquisition()
 	if !acquired {
 		return nil, fmt.Errorf("%w: compiler acquisition identity is absent after emit", applicationresolve.ErrDataCompilerUnavailable)
@@ -1034,6 +1039,233 @@ func dataArtifactFiles(ctx context.Context, resolved applicationresolve.Result, 
 		files = append(files, file)
 	}
 	return files, nil
+}
+
+type dataEmitRoot struct {
+	MemberID string `json:"member_id"`
+	Model    struct {
+		Queries []struct {
+			ID string `json:"id"`
+		} `json:"queries"`
+		Migrations []struct {
+			ID string `json:"id"`
+		} `json:"migrations"`
+	} `json:"model"`
+}
+
+type dataEmitOutput struct {
+	Roots []dataEmitRoot `json:"roots"`
+}
+
+type dataManifestEntry struct {
+	Path          string          `json:"path"`
+	Mode          uint32          `json:"mode"`
+	Digest        string          `json:"digest"`
+	OwningMembers []string        `json:"owning_members"`
+	Query         json.RawMessage `json:"query,omitempty"`
+	Migration     json.RawMessage `json:"migration,omitempty"`
+}
+
+type dataInstanceManifest struct {
+	Schema            string              `json:"schema"`
+	Resource          string              `json:"resource"`
+	ResourceContract  string              `json:"resource_contract"`
+	Provider          string              `json:"provider"`
+	Backend           string              `json:"backend"`
+	Compiler          json.RawMessage     `json:"compiler"`
+	AnalyzeDigest     string              `json:"analyze_digest"`
+	InputDigest       string              `json:"input_digest"`
+	FrozenModelDigest string              `json:"frozen_model_digest"`
+	MemberModels      map[string]string   `json:"member_models"`
+	Artifacts         []dataManifestEntry `json:"artifacts"`
+}
+
+type dataExpectedArtifact struct {
+	Resource string
+	Contract string
+	Provider string
+	Backend  string
+	Owners   []string
+	Kind     string
+}
+
+func validateDataArtifactSet(response datacompiler.EmitResponse, analyzeOutput json.RawMessage, analysis applicationresolve.DataAnalysisAcceptance, activation applicationresolve.DataActivation, frozenModelDigest string) error {
+	var output dataEmitOutput
+	if err := json.Unmarshal(analyzeOutput, &output); err != nil {
+		return fmt.Errorf("decode accepted analyze output: %w", err)
+	}
+	roots := make(map[string]dataEmitRoot, len(output.Roots))
+	for _, root := range output.Roots {
+		if root.MemberID == "" {
+			return errors.New("accepted analyze output contains an empty member ID")
+		}
+		if _, exists := roots[root.MemberID]; exists {
+			return fmt.Errorf("accepted analyze output contains duplicate member %q", root.MemberID)
+		}
+		roots[root.MemberID] = root
+	}
+	assignments := activation.Assignments()
+	if len(roots) != len(assignments) {
+		return fmt.Errorf("accepted analyze output contains %d roots for %d active assignments", len(roots), len(assignments))
+	}
+	expected := make(map[string]dataExpectedArtifact)
+	resourceOwners := make(map[string][]string)
+	resourceAssignments := make(map[string]applicationresolve.DataAssignment)
+	for _, assignment := range assignments {
+		if _, exists := roots[assignment.MemberID()]; !exists {
+			return fmt.Errorf("accepted analyze output omits active member %q", assignment.MemberID())
+		}
+		resourceOwners[assignment.Resource()] = append(resourceOwners[assignment.Resource()], assignment.MemberID())
+		if previous, exists := resourceAssignments[assignment.Resource()]; exists && (previous.Backend() != assignment.Backend() || previous.Resource() != assignment.Resource()) {
+			return fmt.Errorf("Resource %q has inconsistent Data assignments", assignment.Resource())
+		}
+		resourceAssignments[assignment.Resource()] = assignment
+	}
+	for resource := range resourceOwners {
+		sort.Strings(resourceOwners[resource])
+		assignment := resourceAssignments[resource]
+		expected["generated/data/"+resource+"/manifest.json"] = dataExpectedArtifact{
+			Resource: resource, Contract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: assignment.Backend(),
+			Owners: append([]string(nil), resourceOwners[resource]...), Kind: "manifest",
+		}
+		expected["generated/data/"+resource+"/schema/schema.sql"] = dataExpectedArtifact{
+			Resource: resource, Contract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: assignment.Backend(),
+			Owners: append([]string(nil), resourceOwners[resource]...), Kind: "schema",
+		}
+	}
+	for _, assignment := range assignments {
+		root := roots[assignment.MemberID()]
+		for _, query := range root.Model.Queries {
+			if query.ID == "" {
+				return fmt.Errorf("Data member %q contains an empty query ID", assignment.MemberID())
+			}
+			queryPath := "generated/data/" + assignment.Resource() + "/queries/" + assignment.MemberID() + "/" + query.ID + ".sql"
+			if _, exists := expected[queryPath]; exists {
+				return fmt.Errorf("duplicate expected Data artifact %q", queryPath)
+			}
+			expected[queryPath] = dataExpectedArtifact{Resource: assignment.Resource(), Contract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: assignment.Backend(), Owners: []string{assignment.MemberID()}, Kind: "query"}
+		}
+		for _, migration := range root.Model.Migrations {
+			if migration.ID == "" {
+				return fmt.Errorf("Data member %q contains an empty migration ID", assignment.MemberID())
+			}
+			migrationPath := "generated/data/" + assignment.Resource() + "/migrations/" + assignment.MemberID() + "/" + migration.ID + ".sql"
+			if _, exists := expected[migrationPath]; exists {
+				return fmt.Errorf("duplicate expected Data artifact %q", migrationPath)
+			}
+			expected[migrationPath] = dataExpectedArtifact{Resource: assignment.Resource(), Contract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: assignment.Backend(), Owners: []string{assignment.MemberID()}, Kind: "migration"}
+		}
+	}
+	seen := make(map[string]struct{}, len(response.Artifacts))
+	manifestArtifacts := make(map[string][]dataManifestEntry)
+	manifests := make(map[string]datacompiler.EmitArtifact)
+	for _, artifact := range response.Artifacts {
+		expectedArtifact, exists := expected[artifact.Path]
+		if !exists {
+			return fmt.Errorf("unexpected staged Data artifact %q", artifact.Path)
+		}
+		if _, duplicate := seen[artifact.Path]; duplicate {
+			return fmt.Errorf("duplicate staged Data artifact %q", artifact.Path)
+		}
+		seen[artifact.Path] = struct{}{}
+		if artifact.Resource != expectedArtifact.Resource || artifact.ResourceContract != expectedArtifact.Contract || artifact.Provider != expectedArtifact.Provider || artifact.Backend != expectedArtifact.Backend || !reflect.DeepEqual(artifact.OwningMembers, expectedArtifact.Owners) {
+			return fmt.Errorf("staged Data artifact %q does not match its selected Resource assignment", artifact.Path)
+		}
+		switch expectedArtifact.Kind {
+		case "manifest":
+			if len(artifact.Query) != 0 || len(artifact.Migration) != 0 {
+				return fmt.Errorf("Data manifest %q carries query or migration metadata", artifact.Path)
+			}
+			manifests[artifact.Resource] = artifact
+		case "schema":
+			if len(artifact.Query) != 0 || len(artifact.Migration) != 0 {
+				return fmt.Errorf("Data schema %q carries query or migration metadata", artifact.Path)
+			}
+		case "query":
+			if !validDataArtifactMetadata(artifact.Query) || len(artifact.Migration) != 0 {
+				return fmt.Errorf("Data query artifact %q has invalid metadata", artifact.Path)
+			}
+		case "migration":
+			if !validDataArtifactMetadata(artifact.Migration) || len(artifact.Query) != 0 {
+				return fmt.Errorf("Data migration artifact %q has invalid metadata", artifact.Path)
+			}
+		}
+		if expectedArtifact.Kind != "manifest" {
+			manifestArtifacts[artifact.Resource] = append(manifestArtifacts[artifact.Resource], dataManifestEntry{
+				Path: artifact.Path, Mode: artifact.Mode, Digest: artifact.Digest, OwningMembers: append([]string(nil), artifact.OwningMembers...), Query: append(json.RawMessage(nil), artifact.Query...), Migration: append(json.RawMessage(nil), artifact.Migration...),
+			})
+		}
+	}
+	if len(seen) != len(expected) {
+		return fmt.Errorf("staged Data artifact inventory has %d artifacts, expected %d", len(seen), len(expected))
+	}
+	for resource, manifestArtifact := range manifests {
+		var manifest dataInstanceManifest
+		if err := decodeDataInstanceManifest(manifestArtifact.Bytes, &manifest); err != nil {
+			return fmt.Errorf("decode Data manifest for Resource %q: %w", resource, err)
+		}
+		assignment := resourceAssignments[resource]
+		if manifest.Schema != "plystra.data-instance-manifest/v1" || manifest.Resource != resource || manifest.ResourceContract != "data.database/v1" || manifest.Provider != "github.com/plystra/data/postgres.New" || manifest.Backend != assignment.Backend() || manifest.AnalyzeDigest != analysis.ResultDigest() || manifest.InputDigest != response.InputDigest || manifest.FrozenModelDigest != frozenModelDigest {
+			return fmt.Errorf("Data manifest for Resource %q has invalid frozen provenance", resource)
+		}
+		compiler, err := json.Marshal(manifestArtifact.Compiler)
+		if err != nil || !equalDataJSON(manifest.Compiler, compiler) {
+			return fmt.Errorf("Data manifest for Resource %q has invalid compiler identity", resource)
+		}
+		members := resourceOwners[resource]
+		if len(manifest.MemberModels) != len(members) {
+			return fmt.Errorf("Data manifest for Resource %q has an incomplete member model inventory", resource)
+		}
+		for _, memberID := range members {
+			if manifest.MemberModels[memberID] != analysis.ModelDigest(memberID) {
+				return fmt.Errorf("Data manifest for Resource %q has an invalid model digest for %q", resource, memberID)
+			}
+		}
+		entries := append([]dataManifestEntry(nil), manifestArtifacts[resource]...)
+		sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
+		if len(manifest.Artifacts) != len(entries) {
+			return fmt.Errorf("Data manifest for Resource %q has an incomplete artifact inventory", resource)
+		}
+		for index := range entries {
+			if manifest.Artifacts[index].Path != entries[index].Path || manifest.Artifacts[index].Mode != entries[index].Mode || manifest.Artifacts[index].Digest != entries[index].Digest || !reflect.DeepEqual(manifest.Artifacts[index].OwningMembers, entries[index].OwningMembers) || !equalDataJSON(manifest.Artifacts[index].Query, entries[index].Query) || !equalDataJSON(manifest.Artifacts[index].Migration, entries[index].Migration) {
+				return fmt.Errorf("Data manifest for Resource %q disagrees with artifact %q", resource, entries[index].Path)
+			}
+		}
+	}
+	if len(manifests) != len(resourceOwners) {
+		return fmt.Errorf("staged Data output omits an instance manifest")
+	}
+	return nil
+}
+
+func decodeDataInstanceManifest(data []byte, target *dataInstanceManifest) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return errors.New("trailing JSON")
+		}
+		return err
+	}
+	return nil
+}
+
+func validDataArtifactMetadata(data json.RawMessage) bool {
+	return len(data) != 0 && !bytes.Equal(bytes.TrimSpace(data), []byte("null")) && json.Valid(data)
+}
+
+func equalDataJSON(left, right json.RawMessage) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return len(left) == 0 && len(right) == 0
+	}
+	var leftValue, rightValue any
+	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }
 
 func uniqueDataArtifactValues(values []string) []string {
