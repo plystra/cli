@@ -3,12 +3,14 @@ package datacompiler
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEmitAcceptsOneVerifiedStagedArtifactFrame(t *testing.T) {
@@ -49,13 +51,20 @@ func TestEmitRejectsInvalidTerminalFrames(t *testing.T) {
 		mode string
 		want error
 	}{
+		{mode: "timeout", want: ErrEmitTimeout},
+		{mode: "crash", want: ErrEmitCrash},
 		{mode: "mismatch", want: ErrEmitIdentity},
 		{mode: "malformed", want: ErrEmitResponse},
 		{mode: "tamper", want: ErrEmitResponse},
 		{mode: "extra", want: ErrEmit},
+		{mode: "oversized", want: ErrEmitResponse},
 	} {
 		t.Run(test.mode, func(t *testing.T) {
-			_, err := Emit(context.Background(), artifact, manifest, request, AnalyzeOptions{Environment: []string{"PLYSTRA_EMIT_TEST_MODE=" + test.mode}})
+			timeout := 2 * time.Second
+			if test.mode == "timeout" {
+				timeout = 30 * time.Millisecond
+			}
+			_, err := Emit(context.Background(), artifact, manifest, request, AnalyzeOptions{Timeout: timeout, Environment: []string{"PLYSTRA_EMIT_TEST_MODE=" + test.mode}})
 			if err == nil || !errors.Is(err, test.want) {
 				t.Fatalf("Emit(%s) error = %v, want %v", test.mode, err, test.want)
 			}
@@ -63,11 +72,68 @@ func TestEmitRejectsInvalidTerminalFrames(t *testing.T) {
 	}
 }
 
+func TestEmitAcceptsRejectedResponseDiagnostics(t *testing.T) {
+	artifact := testAnalyzeArtifact(t)
+	manifest := emitTestManifest()
+	analyzeDigest := analyzeResultDigest(json.RawMessage(`[]`), json.RawMessage(`[]`), false)
+	request, err := BuildEmitRequest(artifact, manifest, EmitRequestOptions{
+		RequestID: "emit-rejected", Build: AnalyzeBuildContext{GOOS: artifact.GOOS, GOARCH: artifact.GOARCH},
+		AnalyzeOutput: []byte(`{"roots":[],"digest":"` + analyzeDigest + `","truncated":false,"valid":true}`), AnalyzeDigest: analyzeDigest,
+		FrozenModelDigest: "sha256:" + strings.Repeat("3", 64), Assignments: []EmitAssignment{{MemberID: "accounts.user/v1", Resource: "database.primary", ResourceContract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: "postgres/v1", AllowedRoot: "generated/data/database.primary"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := Emit(context.Background(), artifact, manifest, request, AnalyzeOptions{Environment: []string{"PLYSTRA_EMIT_TEST_MODE=rejected"}})
+	if err != nil || response.Status != emitStatusReject || len(response.Diagnostics) != 1 {
+		t.Fatalf("rejected Emit() = %#v, %v", response, err)
+	}
+}
+
+func TestEmitRejectsManifestBounds(t *testing.T) {
+	artifact := testAnalyzeArtifact(t)
+	manifest := emitTestManifest()
+	analyzeDigest := analyzeResultDigest(json.RawMessage(`[]`), json.RawMessage(`[]`), false)
+	request, err := BuildEmitRequest(artifact, manifest, EmitRequestOptions{
+		RequestID: "emit-bounds", Build: AnalyzeBuildContext{GOOS: artifact.GOOS, GOARCH: artifact.GOARCH},
+		AnalyzeOutput: []byte(`{"roots":[],"digest":"` + analyzeDigest + `","truncated":false,"valid":true}`), AnalyzeDigest: analyzeDigest,
+		FrozenModelDigest: "sha256:" + strings.Repeat("3", 64), Assignments: []EmitAssignment{{MemberID: "accounts.user/v1", Resource: "database.primary", ResourceContract: "data.database/v1", Provider: "github.com/plystra/data/postgres.New", Backend: "postgres/v1", AllowedRoot: "generated/data/database.primary"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("request frame", func(t *testing.T) {
+		small := manifest
+		small.Bounds.MaxFrameBytes = 128
+		if _, err := Emit(context.Background(), artifact, small, request, AnalyzeOptions{Environment: []string{"PLYSTRA_EMIT_TEST_MODE=success"}}); err == nil || !errors.Is(err, ErrEmitRequest) {
+			t.Fatalf("request bound error = %v", err)
+		}
+	})
+	t.Run("response frame", func(t *testing.T) {
+		small := manifest
+		small.Bounds.MaxFrameBytes = len(request)
+		if _, err := Emit(context.Background(), artifact, small, request, AnalyzeOptions{Environment: []string{"PLYSTRA_EMIT_TEST_MODE=oversized"}}); err == nil || !errors.Is(err, ErrEmitResponse) {
+			t.Fatalf("response bound error = %v", err)
+		}
+	})
+	t.Run("diagnostics", func(t *testing.T) {
+		small := manifest
+		small.Bounds.MaxDiagnosticBytes = 16
+		if _, err := Emit(context.Background(), artifact, small, request, AnalyzeOptions{Environment: []string{"PLYSTRA_EMIT_TEST_MODE=rejected"}}); err == nil || !errors.Is(err, ErrEmitResponse) {
+			t.Fatalf("diagnostic bound error = %v", err)
+		}
+	})
+}
+
 func runEmitTestCompiler(mode string) {
+	if mode == "timeout" {
+		time.Sleep(2 * time.Second)
+		return
+	}
 	if mode == "crash" {
 		os.Exit(17)
 	}
-	requestPayload, err := readEmitFrame(os.Stdin)
+	requestPayload, err := readEmitFrame(os.Stdin, MaxFrameBytes)
 	if err != nil {
 		os.Exit(18)
 	}
@@ -86,6 +152,12 @@ func runEmitTestCompiler(mode string) {
 	}
 	if mode == "malformed" {
 		_ = writeEmitFrame(os.Stdout, []byte("not-json"))
+		return
+	}
+	if mode == "oversized" {
+		var header [4]byte
+		binary.BigEndian.PutUint32(header[:], uint32(MaxFrameBytes+1))
+		_, _ = os.Stdout.Write(header[:])
 		return
 	}
 	assignment := request.Assignments[0]

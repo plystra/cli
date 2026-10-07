@@ -192,6 +192,9 @@ func emitInputDigest(request emitRequestEnvelope) (string, error) {
 }
 
 func validateEmitRequest(data []byte, artifact Artifact, manifest Manifest) (emitRequestEnvelope, error) {
+	if len(data) == 0 || len(data) > manifest.Bounds.MaxFrameBytes {
+		return emitRequestEnvelope{}, fmt.Errorf("%w: request frame exceeds the compiler frame limit", ErrEmitRequest)
+	}
 	var request emitRequestEnvelope
 	if err := decodeStrictJSON(data, &request); err != nil {
 		return request, fmt.Errorf("%w: malformed request", ErrEmitRequest)
@@ -236,13 +239,16 @@ func writeEmitFrame(w io.Writer, payload []byte) error {
 	return err
 }
 
-func readEmitFrame(r io.Reader) ([]byte, error) {
+func readEmitFrame(r io.Reader, maxFrameBytes int) ([]byte, error) {
 	var header [4]byte
 	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return nil, err
 	}
 	length := binary.BigEndian.Uint32(header[:])
-	if length == 0 || length > MaxFrameBytes {
+	if maxFrameBytes <= 0 || maxFrameBytes > MaxFrameBytes {
+		maxFrameBytes = MaxFrameBytes
+	}
+	if length == 0 || length > uint32(maxFrameBytes) {
 		return nil, ErrEmitResponse
 	}
 	payload := make([]byte, length)
@@ -253,6 +259,9 @@ func readEmitFrame(r io.Reader) ([]byte, error) {
 }
 
 func validateEmitResponse(data []byte, request emitRequestEnvelope, manifest Manifest) (EmitResponse, error) {
+	if len(data) == 0 || len(data) > manifest.Bounds.MaxFrameBytes {
+		return EmitResponse{}, fmt.Errorf("%w: response frame exceeds the compiler frame limit", ErrEmitResponse)
+	}
 	var wire emitResponseEnvelope
 	if err := decodeStrictJSON(data, &wire); err != nil {
 		return EmitResponse{}, fmt.Errorf("%w: malformed terminal frame", ErrEmitResponse)
@@ -264,9 +273,13 @@ func validateEmitResponse(data []byte, request emitRequestEnvelope, manifest Man
 		return EmitResponse{}, fmt.Errorf("%w: unsupported terminal status", ErrEmitResponse)
 	}
 	var diagnostics []json.RawMessage
-	if err := decodeStrictJSON(wire.Diagnostics, &diagnostics); err != nil {
-		return EmitResponse{}, fmt.Errorf("%w: malformed diagnostics", ErrEmitResponse)
+	decodedDiagnostics, err := decodeDiagnostics(wire.Diagnostics, analyzeLimits{
+		MaxDiagnostics: manifest.Bounds.MaxDiagnostics, MaxDiagnosticBytes: manifest.Bounds.MaxDiagnosticBytes,
+	})
+	if err != nil {
+		return EmitResponse{}, fmt.Errorf("%w: %v", ErrEmitResponse, err)
 	}
+	diagnostics = decodedDiagnostics
 	var artifacts []EmitArtifact
 	if err := decodeStrictJSON(wire.Output.Artifacts, &artifacts); err != nil || len(artifacts) > manifest.Bounds.MaxArtifacts {
 		return EmitResponse{}, fmt.Errorf("%w: malformed artifact output", ErrEmitResponse)

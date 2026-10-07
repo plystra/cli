@@ -64,7 +64,7 @@ func Emit(ctx context.Context, artifact Artifact, manifest Manifest, request []b
 		return EmitResponse{}, fmt.Errorf("%w: %w", ErrEmit, ErrEmitTooLarge)
 	}
 	reader := bytes.NewReader(stdout.Bytes())
-	responsePayload, err := readEmitFrame(reader)
+	responsePayload, err := readEmitFrame(reader, manifest.Bounds.MaxFrameBytes)
 	if err != nil {
 		return EmitResponse{}, fmt.Errorf("%w: %w", ErrEmit, err)
 	}
