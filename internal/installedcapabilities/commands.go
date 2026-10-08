@@ -55,6 +55,9 @@ func installedCommands() []commandschema.CapabilityCommandInput {
 			positional("target", 1),
 			positional("constructor-symbol", 2),
 		}, configurationArguments()...), []string{configurationSelectorID}, nil, false, false),
+		installedCommand("change.plan", append([]commandschema.CapabilityArgumentInput{
+			requiredStringOption("--request"), formatOption(),
+		}, configurationArguments()...), []string{configurationSelectorID}, nil, false, true),
 		installedCommand("plugin.create", []commandschema.CapabilityArgumentInput{positional("plugin-name", 1)}, nil, nil, false, false),
 		installedCommand("interface.create", []commandschema.CapabilityArgumentInput{positional("interface-name", 1)}, nil, nil, false, false),
 		installedCommand("implement", []commandschema.CapabilityArgumentInput{

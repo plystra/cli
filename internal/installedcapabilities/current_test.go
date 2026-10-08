@@ -55,6 +55,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"capability.create",
 		"capability.expose",
 		"capability.implement",
+		"change.plan",
 		"check",
 		"doctor",
 		"explain.alias",
@@ -126,7 +127,7 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 	if !reflect.DeepEqual(capabilities.EffectClasses(), wantEffects) {
 		t.Fatalf("effect classes = %#v, want %#v", capabilities.EffectClasses(), wantEffects)
 	}
-	for _, planned := range []string{"build", "capability.require", "change.apply", "change.plan", "data.migration.apply", "data.migration.plan", "data.migration.status", "dev", "fix", "release", "sdk.link", "sdk.pack", "sdk.publish", "test"} {
+	for _, planned := range []string{"build", "capability.require", "change.apply", "data.migration.apply", "data.migration.plan", "data.migration.status", "dev", "fix", "release", "sdk.link", "sdk.pack", "sdk.publish", "test"} {
 		if _, exists := commandsByID[planned]; exists {
 			t.Fatalf("planned command %q reported as installed", planned)
 		}

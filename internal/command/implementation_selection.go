@@ -37,7 +37,9 @@ instance's values. Selection removes only provably obsolete configuration and
 binding parameters, preserving still-owned configuration. Surviving dependencies
 must remain valid; the command never guesses a replacement binding or missing
 required value. It regenerates and validates the selected final state, with
-rollback on failure. Compound change plans and --dry-run are not installed.
+rollback on failure. plystra change plan --request change.json --format json
+previews one implementation_selection set request without mutation. Change
+apply, primitive-command lowering, and --dry-run are not installed.
 
 An effective choice for an intrinsic kernel.* Interface emits
 PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing

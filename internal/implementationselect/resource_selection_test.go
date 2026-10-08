@@ -80,8 +80,13 @@ func TestResourceSelectionCleansOnlyObsoleteExactConsumerParameters(t *testing.T
 			options, selected := resourceSelectionLayer(t, root, mode, resourceConsumerDocument)
 			options.Target, options.Constructor = "database.wrapper", selectionModule+"/resourceone.New"
 			before := implementationProjectTree(t, root)
-			if _, err := implementationselect.Select(t.Context(), options); err != nil {
+			result, err := implementationselect.Select(t.Context(), options)
+			if err != nil {
 				t.Fatalf("replace Resource consumer: %v", err)
+			}
+			impact := result.ConfigurationImpact()
+			if !impact.Valid() || len(impact.DerivedOperations()) == 0 || len(impact.NewlyUnownedPaths()) == 0 {
+				t.Fatalf("selection impact = %s", impact.CanonicalJSON())
 			}
 			manifest := resolveSelectionManifest(t, options)
 			if _, exists := selectionValue(manifest, "resources", "bind", "instances", "database.wrapper", "upstream"); exists {

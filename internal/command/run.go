@@ -30,6 +30,7 @@ const (
   plystra remove <go-module-path>
   plystra update <go-module-query>
   plystra use <target> <constructor-symbol> [--env <environment>|--config <yaml-path>]
+  plystra change plan --request <path|-> [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra plugin create <name>
   plystra interface create <interface-name>
   plystra implement <contract> --package <project-relative-package>
@@ -431,7 +432,8 @@ PLYSTRA_RESOURCE_BINDING_INVALID. Resources never become Interface roots,
 catalog entries, governed proxies, or transports. Use selects a compatible
 provider for an existing named instance without a kind flag. Implement creates
 unfinished Interface or Resource scaffolds without activation. Data, full
-Resource acceptance, and compound change plans remain unsupported.
+Resource acceptance, and change apply remain unsupported. The installed
+change-plan slice supports one implementation_selection set request.
 The configuration view retains the selected current-Project layer, redacted
 field summaries, ownership and precedence, effective and overridden
 contributions, explicit removals, and configuration suppression.
@@ -608,6 +610,8 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		return 0
 	case "use":
 		return runUse(arguments, stdout, stderr, workingDirectory, environment)
+	case "change":
+		return runChange(arguments, stdout, stderr, workingDirectory, environment)
 	case "plugin":
 		if len(arguments) == 2 && isHelp(arguments[1]) {
 			_, _ = io.WriteString(stdout, pluginUsage)

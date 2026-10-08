@@ -1,19 +1,96 @@
 package implementationselect
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
+	"github.com/plystra/cli/internal/configurationimpact"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceresolution"
+	"github.com/plystra/cli/internal/resourcename"
 )
 
-func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol) ([]byte, string, error) {
+// PlanResult is a read-only, validated selection plan. It contains authored
+// bytes only for the caller's private transaction boundary; public projections
+// must use the identity accessors and ConfigurationImpact.
+type PlanResult struct {
+	inputs          applicationresolve.SelectionInputs
+	target          string
+	kind            string
+	constructor     constructorsymbol.Symbol
+	moduleRoot      string
+	manifestPath    string
+	original        []byte
+	updated         []byte
+	impact          configurationimpact.Impact
+	compositionHash string
+}
+
+// Plan discovers and validates one selection without writing configuration,
+// module metadata, generated output, or any other Project file.
+func Plan(ctx context.Context, options Options) (PlanResult, error) {
+	if ctx == nil {
+		return PlanResult{}, fmt.Errorf("%w: context is nil", ErrSelect)
+	}
+	id, idErr := interfaceid.Parse(options.Target)
+	if idErr != nil && resourcename.Check(options.Target) != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, ErrInvalidTarget)
+	}
+	constructor, err := constructorsymbol.Parse(options.Constructor)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w: parse fully qualified Implementation constructor: %w", ErrSelect, ErrInvalidConstructor, err)
+	}
+	inputs, err := applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+		Start: options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+		GoCommand: options.GoCommand, Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
+	})
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor)
+	if err != nil {
+		var missing *interfaceresolution.UnknownInterfaceError
+		if errors.As(err, &missing) && missing.InterfaceID() == id {
+			err = fmt.Errorf("%w: %w", ErrTargetNotFound, err)
+		}
+		return PlanResult{}, fmt.Errorf("%w: %w: %w", ErrSelect, ErrConfigurationWrite, err)
+	}
+	original := inputs.SelectedSnapshot().Data()
+	candidate, err := inputs.ComposeCandidate(updated)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	return PlanResult{
+		inputs: inputs, target: options.Target, kind: kind, constructor: constructor,
+		moduleRoot: inputs.Module().Path(), manifestPath: filepath.Join(inputs.Module().Path(), filepath.FromSlash(inputs.ConfigurationSelection().Path())),
+		original: original, updated: updated, impact: impact, compositionHash: candidate.CompositionDigest(),
+	}, nil
+}
+
+func (p PlanResult) Inputs() applicationresolve.SelectionInputs      { return p.inputs }
+func (p PlanResult) Target() string                                  { return p.target }
+func (p PlanResult) Kind() string                                    { return p.kind }
+func (p PlanResult) Constructor() constructorsymbol.Symbol           { return p.constructor }
+func (p PlanResult) ModuleRoot() string                              { return p.moduleRoot }
+func (p PlanResult) ManifestPath() string                            { return p.manifestPath }
+func (p PlanResult) Original() []byte                                { return append([]byte(nil), p.original...) }
+func (p PlanResult) Updated() []byte                                 { return append([]byte(nil), p.updated...) }
+func (p PlanResult) Changed() bool                                   { return !bytes.Equal(p.original, p.updated) }
+func (p PlanResult) ConfigurationImpact() configurationimpact.Impact { return p.impact }
+func (p PlanResult) CompositionDigest() string                       { return p.compositionHash }
+
+func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol) ([]byte, string, configurationimpact.Impact, error) {
 	original := inputs.SelectedSnapshot().Data()
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	var updated []byte
 	var err error
+	var before applicationmeta.Composition
 	kind := "interface"
 	if id.String() != "" {
 		set := applicationmeta.SetImplementationChoice
@@ -26,32 +103,40 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		updated, err = selectResourceProvider(inputs, original, target, constructor, overlay)
 	}
 	if err != nil {
-		return nil, kind, err
+		return nil, kind, configurationimpact.Impact{}, err
 	}
 	if kind == "interface" {
-		before, err := inputs.ComposeSelectionCandidate(original)
+		before, err = inputs.ComposeSelectionCandidate(original)
 		if err != nil {
-			return nil, kind, err
+			return nil, kind, configurationimpact.Impact{}, err
 		}
 		candidate, err := inputs.ComposeSelectionCandidate(updated)
 		if err != nil {
-			return nil, kind, err
+			return nil, kind, configurationimpact.Impact{}, err
 		}
 		updated, err = cleanupImplementationOwners(inputs, before, candidate, updated, overlay)
 		if err != nil {
-			return nil, kind, err
+			return nil, kind, configurationimpact.Impact{}, err
 		}
 	}
 	candidate, err := inputs.ComposeCandidate(updated)
 	if err != nil {
-		return nil, kind, err
+		return nil, kind, configurationimpact.Impact{}, err
 	}
 	// Planning checks the complete remaining binding graph before any live write.
 	// Generation repeats resolution and owns compilation and rollback validation.
 	if err := inputs.ValidateCandidate(candidate); err != nil {
-		return nil, kind, err
+		return nil, kind, configurationimpact.Impact{}, err
 	}
-	return updated, kind, nil
+	impactBefore := before
+	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
+		impactBefore = composed
+	}
+	impact, err := configurationimpact.Compare(impactBefore.Manifest(), candidate.Manifest(), configurationimpact.Input{})
+	if err != nil {
+		return nil, kind, configurationimpact.Impact{}, err
+	}
+	return updated, kind, impact, nil
 }
 
 func selectResourceProvider(inputs applicationresolve.SelectionInputs, original []byte, target string, constructor constructorsymbol.Symbol, overlay bool) ([]byte, error) {

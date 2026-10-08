@@ -48,6 +48,10 @@ func TestPlanRemovesOnlyResourceBindingWhoseParameterDisappeared(t *testing.T) {
 	if !plan.Changed {
 		t.Fatal("Plan reported no ownership change")
 	}
+	impact := plan.ConfigurationImpact()
+	if !impact.Valid() || len(impact.DerivedOperations()) != 1 || len(impact.NewlyUnownedPaths()) != 1 {
+		t.Fatalf("cleanup impact = %s", impact.CanonicalJSON())
+	}
 	want := `resources:
   instances:
     primary:

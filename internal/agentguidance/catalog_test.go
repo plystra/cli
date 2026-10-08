@@ -238,7 +238,13 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"even when the starting graph is invalid", "resource.provider.selection",
 		"plystra implement <contract> --package ./<package>", "unfinished, inactive ordinary Resource provider scaffold",
 		"resource.provider.scaffold", "no guessed Config, dependency, or hook is added",
-		"Compound change plans, plan digests, and `--dry-run` are not installed",
+		"plystra change plan --request change.json --format json",
+		"implementation_selection",
+		"plystra.change-plan/v1",
+		"other operation kinds are structured unsupported results",
+		"change apply",
+		"primitive-command lowering",
+		"--dry-run",
 		"implemented stages do not establish `accepted=yes`", "Gates 5 and 13 remain incomplete",
 	} {
 		if !bytes.Contains(resources, []byte(phrase)) {

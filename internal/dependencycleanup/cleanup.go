@@ -11,6 +11,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/configurationimpact"
 	"github.com/plystra/cli/internal/constructorsymbol"
 )
 
@@ -29,7 +30,13 @@ type Result struct {
 	Inputs  applicationresolve.SelectionInputs
 	Data    []byte
 	Changed bool
+	impact  configurationimpact.Impact
 }
+
+// ConfigurationImpact returns deterministic ownership consequences for the
+// planned dependency cleanup. It contains no configured values or Secret
+// references.
+func (r Result) ConfigurationImpact() configurationimpact.Impact { return r.impact }
 
 // Commit installs the planned selected-document postimage for the duration of
 // operation. A failed operation restores the exact preimage and a concurrent
@@ -74,7 +81,11 @@ func Plan(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("derive Resource binding cleanup: %w", err)
 	}
 	if len(removals) == 0 {
-		return Result{Inputs: inputs, Data: original}, nil
+		impact, err := configurationimpact.Compare(composition.Manifest(), composition.Manifest(), configurationimpact.Input{})
+		if err != nil {
+			return Result{}, fmt.Errorf("build empty configuration impact: %w", err)
+		}
+		return Result{Inputs: inputs, Data: original, impact: impact}, nil
 	}
 
 	edit := applicationmeta.CleanupSelectionOwnership
@@ -96,7 +107,15 @@ func Plan(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("materialize Resource binding cleanup: %w", err)
 	}
-	return Result{Inputs: inputs, Data: updated, Changed: changed}, nil
+	final, err := inputs.ComposeSelectionCandidate(updated)
+	if err != nil {
+		return Result{}, fmt.Errorf("compose final Resource binding cleanup: %w", err)
+	}
+	impact, err := configurationimpact.Compare(composition.Manifest(), final.Manifest(), configurationimpact.Input{})
+	if err != nil {
+		return Result{}, fmt.Errorf("build configuration impact: %w", err)
+	}
+	return Result{Inputs: inputs, Data: updated, Changed: changed, impact: impact}, nil
 }
 
 func obsoleteBindings(inputs applicationresolve.SelectionInputs, manifest applicationmeta.Manifest) ([]applicationmeta.ResourceBindingRemoval, error) {

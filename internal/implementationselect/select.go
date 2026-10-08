@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/configurationimpact"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceresolution"
@@ -62,6 +63,7 @@ type Result struct {
 	moduleRoot   string
 	manifestPath string
 	changed      bool
+	impact       configurationimpact.Impact
 }
 
 // Target returns the exact canonical Interface ID or named Resource instance.
@@ -81,6 +83,10 @@ func (r Result) ManifestPath() string { return r.manifestPath }
 
 // Changed reports whether the transaction changed the selected configuration.
 func (r Result) Changed() bool { return r.changed }
+
+// ConfigurationImpact returns the deterministic ownership consequences of the
+// selected change. Values and Secret references are never retained.
+func (r Result) ConfigurationImpact() configurationimpact.Impact { return r.impact }
 
 // Select writes one explicit current-Project selection with proven ownership
 // cleanup, then regenerates, tidies, and validates in one rollback boundary.
@@ -103,7 +109,7 @@ func Select(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	updated, kind, err := planSelection(inputs, id, options.Target, constructor)
+	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor)
 	if err != nil {
 		var missing *interfaceresolution.UnknownInterfaceError
 		if errors.As(err, &missing) && missing.InterfaceID() == id {
@@ -161,5 +167,6 @@ func Select(ctx context.Context, options Options) (Result, error) {
 		moduleRoot:   module.Path(),
 		manifestPath: filepath.Join(module.Path(), filepath.FromSlash(selection.Path())),
 		changed:      changed,
+		impact:       impact,
 	}, nil
 }

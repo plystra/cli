@@ -146,6 +146,13 @@ const (
 )
 
 const (
+	ChangePlanInvocationInvalid    = Prefix + "CHANGE_PLAN_INVOCATION_INVALID"
+	ChangePlanRequestInvalid       = Prefix + "CHANGE_PLAN_REQUEST_INVALID"
+	ChangePlanOperationUnsupported = Prefix + "CHANGE_PLAN_OPERATION_UNSUPPORTED"
+	ChangePlanFailed               = Prefix + "CHANGE_PLAN_FAILED"
+)
+
+const (
 	DoctorInvocationInvalid   = Prefix + "DOCTOR_INVOCATION_INVALID"
 	DoctorPrerequisiteMissing = Prefix + "DOCTOR_PREREQUISITE_MISSING"
 	DoctorFailed              = Prefix + "DOCTOR_FAILED"
