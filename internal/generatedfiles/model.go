@@ -53,7 +53,6 @@ const (
 	ArtifactKindJavaScriptPackage    ArtifactKind = "javascript-package"
 	ArtifactKindDocumentation        ArtifactKind = "documentation"
 	ArtifactKindDataSQL              ArtifactKind = "data-sql"
-	ArtifactKindDataPlan             ArtifactKind = "data-plan"
 	ArtifactKindDataManifest         ArtifactKind = "data-manifest"
 	ArtifactKindCompatibilityWorking ArtifactKind = "compatibility-working-record"
 	ArtifactKindWireMap              ArtifactKind = "wire-map"
@@ -413,7 +412,6 @@ func validArtifactKind(value ArtifactKind) bool {
 		ArtifactKindJavaScriptPackage,
 		ArtifactKindDocumentation,
 		ArtifactKindDataSQL,
-		ArtifactKindDataPlan,
 		ArtifactKindDataManifest,
 		ArtifactKindCompatibilityWorking,
 		artifactKindCompatibilityBaselineV1,

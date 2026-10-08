@@ -57,7 +57,6 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		"capability.implement",
 		"change.plan",
 		"check",
-		"doctor",
 		"explain.alias",
 		"explain.capability",
 		"explain.config",
@@ -133,8 +132,8 @@ func TestCurrentReportsExactInstalledDistribution(t *testing.T) {
 		}
 	}
 	wantSupport := []string{
-		"data|yes|yes|yes|yes|no",
-		"data.compiler|yes|yes|yes|yes|yes",
+		"data|yes|no|no|no|no",
+		"data.compiler|yes|no|no|no|no",
 		"inspect.capabilities|yes|yes|not_applicable|yes|yes",
 		"interfaces.policies.*.retry.backoff|yes|yes|yes|yes|yes",
 		"interfaces.policies.*.retry.eligibility|yes|yes|yes|yes|yes",

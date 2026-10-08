@@ -462,21 +462,17 @@ func captureSupportPackages(ctx context.Context, options AnalyzeSourceSnapshotOp
 			return nil, nil, fmt.Errorf("source root for support package %q is unavailable", packageInfo.ImportPath)
 		}
 		canonical, err := canonicalSourceRoot(root)
-		if err != nil || !sameDirectory(canonical, packageInfo.Module.Dir) {
-			return nil, nil, fmt.Errorf("support package %q is outside its selected module", packageInfo.ImportPath)
-		}
-		packageDirectory, err := canonicalSourceDirectory(canonical, packageInfo.Dir)
-		if err != nil {
+		if err != nil || !sameDirectory(canonical, packageInfo.Module.Dir) || !sourceDirectoryWithin(canonical, packageInfo.Dir) {
 			return nil, nil, fmt.Errorf("support package %q is outside its selected module", packageInfo.ImportPath)
 		}
 		if err := budget.addPackage(packageInfo.ImportPath); err != nil {
 			return nil, nil, err
 		}
-		files, err := captureSelectedPackageFiles(ctx, canonical, packageDirectory, packageInfo.GoFiles, packageInfo.CgoFiles, budget)
+		files, err := captureSelectedPackageFiles(ctx, canonical, packageInfo.Dir, packageInfo.GoFiles, packageInfo.CgoFiles, budget)
 		if err != nil {
 			return nil, nil, fmt.Errorf("capture support package %q: %w", packageInfo.ImportPath, err)
 		}
-		result = append(result, supportSourcePackage{importPath: packageInfo.ImportPath, modulePath: packageInfo.Module.Path, moduleVersion: packageInfo.Module.Version, root: canonical, directory: packageDirectory, files: files})
+		result = append(result, supportSourcePackage{importPath: packageInfo.ImportPath, modulePath: packageInfo.Module.Path, moduleVersion: packageInfo.Module.Version, root: canonical, directory: packageInfo.Dir, files: files})
 		captured = append(captured, capturedSourcePackage{importPath: packageInfo.ImportPath, root: canonical, files: files})
 	}
 	return result, captured, nil
@@ -684,11 +680,7 @@ func captureDeclarationFiles(ctx context.Context, selection Selection, options A
 		return nil, fmt.Errorf("declaration package selection is incomplete")
 	}
 	root, err := canonicalSourceRoot(selection.Root)
-	if err != nil || !sameDirectory(root, listed.Module.Dir) {
-		return nil, fmt.Errorf("declaration package source is outside the selected compiler module")
-	}
-	packageDirectory, err := canonicalSourceDirectory(root, listed.Dir)
-	if err != nil {
+	if err != nil || !sameDirectory(root, listed.Module.Dir) || !sourceDirectoryWithin(root, listed.Dir) {
 		return nil, fmt.Errorf("declaration package source is outside the selected compiler module")
 	}
 	fileNames := append(append([]string(nil), listed.GoFiles...), listed.CgoFiles...)
@@ -704,7 +696,7 @@ func captureDeclarationFiles(ctx context.Context, selection Selection, options A
 		if fileName == "" || filepath.Base(fileName) != fileName || !strings.HasSuffix(fileName, ".go") {
 			return nil, fmt.Errorf("declaration package selects unsafe source")
 		}
-		absolute := filepath.Join(packageDirectory, fileName)
+		absolute := filepath.Join(listed.Dir, fileName)
 		relative, err := filepath.Rel(root, absolute)
 		if err != nil || filepath.IsAbs(relative) {
 			return nil, fmt.Errorf("declaration package source path is invalid")
@@ -846,19 +838,16 @@ func safeSourcePath(root, relative string) (string, error) {
 	return current, nil
 }
 
-func canonicalSourceDirectory(root, directory string) (string, error) {
-	if root == "" || directory == "" || !filepath.IsAbs(root) || !filepath.IsAbs(directory) {
-		return "", ErrInvalidSourceSnapshotInput
+func sourceDirectoryWithin(root, directory string) bool {
+	if directory == "" || !filepath.IsAbs(directory) {
+		return false
 	}
 	canonical, err := filepath.EvalSymlinks(directory)
 	if err != nil {
-		return "", err
+		return false
 	}
-	relative, err := filepath.Rel(filepath.Clean(root), canonical)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
-		return "", ErrInvalidSourceSnapshotInput
-	}
-	return canonical, nil
+	relative, err := filepath.Rel(root, canonical)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
 
 func sameDirectory(left, right string) bool {

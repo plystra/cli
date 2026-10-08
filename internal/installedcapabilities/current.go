@@ -9,7 +9,6 @@ import (
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/commandschema"
-	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/diagnosticschema"
 	"github.com/plystra/cli/internal/invocationpolicy"
 	"github.com/plystra/cli/internal/transporttoolchain"
@@ -85,24 +84,6 @@ func Current() (commandschema.Capabilities, error) {
 		InvocationTimeout:          applicationmeta.DefaultInvocationTimeout,
 		InvocationConcurrencyLimit: applicationmeta.DefaultInvocationConcurrencyLimit,
 		MaximumConcurrencyLimit:    kernelinvocation.MaximumConcurrencyLimit,
-		DataCompiler: &commandschema.DataCompilerCapabilityInput{
-			ModulePath:          datacompiler.ModulePath,
-			DistributionSchema:  datacompiler.DistributionSchema,
-			CommandImportPath:   datacompiler.CommandImportPath,
-			AnalyzeProtocol:     datacompiler.AnalyzeSchema,
-			EmitProtocol:        datacompiler.EmitSchema,
-			DeclarationLanguage: datacompiler.DeclarationLanguage,
-			Bounds: commandschema.DataCompilerBoundsInput{
-				MaxRoots: datacompiler.MaxRoots, MaxNodes: datacompiler.MaxNodes,
-				MaxImports: datacompiler.MaxImports, MaxNesting: datacompiler.MaxNesting,
-				MaxSymbolBytes: datacompiler.MaxSymbolBytes, MaxDiagnostics: datacompiler.MaxDiagnostics,
-				MaxDiagnosticBytes: datacompiler.MaxDiagnosticBytes, MaxFrameBytes: datacompiler.MaxFrameBytes,
-				MaxArtifacts: datacompiler.MaxArtifacts, MaxArtifactBytes: datacompiler.MaxArtifactBytes,
-				MaxArtifactPathBytes: datacompiler.MaxArtifactPathBytes,
-			},
-			Source: commandschema.SupportUnknown, Cache: commandschema.SupportUnknown,
-			Build: commandschema.SupportUnknown, Offline: commandschema.SupportUnknown,
-		},
 		Support: append([]commandschema.CapabilitySupportInput{
 			{
 				ID:        "invocation.default-concurrency",
@@ -171,18 +152,18 @@ func Current() (commandschema.Capabilities, error) {
 			{
 				ID:        "data",
 				Specified: commandschema.SupportYes,
-				Parsed:    commandschema.SupportYes,
-				Generated: commandschema.SupportYes,
-				Executed:  commandschema.SupportYes,
+				Parsed:    commandschema.SupportNo,
+				Generated: commandschema.SupportNo,
+				Executed:  commandschema.SupportNo,
 				Accepted:  commandschema.SupportNo,
 			},
 			{
 				ID:        "data.compiler",
 				Specified: commandschema.SupportYes,
-				Parsed:    commandschema.SupportYes,
-				Generated: commandschema.SupportYes,
-				Executed:  commandschema.SupportYes,
-				Accepted:  commandschema.SupportYes,
+				Parsed:    commandschema.SupportNo,
+				Generated: commandschema.SupportNo,
+				Executed:  commandschema.SupportNo,
+				Accepted:  commandschema.SupportNo,
 			},
 		}, invocationpolicy.RetrySupport()...),
 	})

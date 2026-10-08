@@ -511,9 +511,9 @@ Use plystra use <target> <constructor-symbol> for a canonical Interface ID inclu
 
 ` + "`" + `plystra implement <contract> --package ./<package>` + "`" + ` creates an unfinished, inactive ordinary Resource provider scaffold. It does not create a named instance, select a provider, infer configuration, or provide runtime behavior. Author ` + "`" + `New` + "`" + `, provider methods, configuration, dependencies, and lifecycle hooks before generation; no guessed Config, dependency, or hook is added. Instance creation remains unsupported. After manual Go or YAML edits, run ` + "`" + `plystra generate` + "`" + `, ` + "`" + `plystra generate --check` + "`" + `, and ` + "`" + `plystra check` + "`" + ` with the same selector. Never hand-edit generated assembly. Installed ` + "`" + `resource.provider.scaffold` + "`" + ` reports scaffold stages separately from ` + "`" + `resource.provider.selection` + "`" + ` and full Resource acceptance; implemented stages do not establish ` + "`" + `accepted=yes` + "`" + `. ` + "`" + `plystra change plan --request change.json --format json` + "`" + ` supports one ` + "`" + `implementation_selection` + "`" + ` set operation and emits a read-only ` + "`" + `plystra.change-plan/v1` + "`" + ` payload; other operation kinds are structured unsupported results. ` + "`" + `change apply` + "`" + `, primitive-command lowering, and ` + "`" + `--dry-run` + "`" + ` remain uninstalled. Data analyze acceptance, pre-Freeze graph projection, bounded emit, and transactional SQL/manifest installation are present; typed generated access runtime and data migration plan|apply|status remain unsupported; Gates 5 and 13 remain incomplete.
 
-Do not simulate those operations with handwritten files under ` + "`" + `generated/` + "`" + `, legacy Plugin conventions, or an unversioned migration script. Check ` + "`" + `plystra help` + "`" + ` after upgrading and run ` + "`" + `plystra inspect capabilities --format json` + "`" + ` before adopting any Resource contract, provider, backend, Data compiler, or migration workflow. Run ` + "`" + `plystra doctor --format json` + "`" + ` in the selected Project to verify the local Go/module prerequisites and, for active Data members, the exact compiler and verified private cache without invoking the compiler or changing Project files.
+Do not simulate those operations with handwritten files under ` + "`" + `generated/` + "`" + `, legacy Plugin conventions, or an unversioned migration script. Check ` + "`" + `plystra help` + "`" + ` after upgrading and run ` + "`" + `plystra inspect capabilities --format json` + "`" + ` before adopting any Resource contract, provider, backend, Data compiler, or migration workflow.
 
-Data migration plan, apply, and status commands remain unsupported. Keep migration behavior inside ordinary authored Implementation code and its tests without claiming a Plystra-managed migration workflow.
+Until those commands are present, keep persistence behavior inside ordinary authored Implementation code and its tests without claiming Plystra-managed Data generation or migration support.
 
 See the [Project README](../../../../README.md) for the currently supported application surface.
 `
@@ -531,7 +531,6 @@ Use read-only inspection before changing authored inputs:
     plystra inspect implementations
     plystra inspect resources
     plystra inspect configuration
-    plystra doctor --format json
     plystra explain capability <capability-name>/vN
     plystra explain plugin <plugin-id>
     plystra explain config config.<constructor-symbol>.<field>
@@ -539,8 +538,6 @@ Use read-only inspection before changing authored inputs:
     plystra check
 
 ` + "`" + `plystra inspect capabilities` + "`" + ` is separate from Project inspection. It ignores the working directory, invalid Project state, ` + "`" + `PLYSTRA_ENV` + "`" + `, and ` + "`" + `PLYSTRA_CONFIG` + "`" + ` while reporting exact installed commands and arguments, selectors, stable defaults, interaction and output modes, effect classes, schemas, bounds, toolchain identity, and independent ` + "`" + `specified` + "`" + `, ` + "`" + `parsed` + "`" + `, ` + "`" + `generated` + "`" + `, ` + "`" + `executed` + "`" + `, and ` + "`" + `accepted` + "`" + ` support stages. Planned commands are absent. Result, recovery, inspection, and graph schemas are available; standalone diagnostic and continuation schema roles remain explicitly unavailable. Its only option is ` + "`" + `--format human|json` + "`" + `.
-
-` + "`" + `plystra doctor` + "`" + ` is the read-only Project-bound prerequisite report. It checks the selected Go toolchain and module graph and, for active Data members, reports exact compiler selection and verified private cache state without invoking the compiler or mutating Project files. ` + "`" + `--offline` + "`" + ` requires local module and compiler-cache availability; missing prerequisites return exit class 4 with ` + "`" + `PLYSTRA_DOCTOR_PREREQUISITE_MISSING` + "`" + `. Its JSON result uses ` + "`" + `plystra.result/v1` + "`" + ` with a ` + "`" + `plystra.doctor/v1` + "`" + ` payload.
 
 Inspect versioned Agent guidance before refreshing it:
 
