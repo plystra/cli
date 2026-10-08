@@ -56,9 +56,6 @@ var (
 	// ErrDataCompilerAnalysisUnavailable reports a failure to invoke the
 	// selected compiler or independently accept its analyze result.
 	ErrDataCompilerAnalysisUnavailable = errors.New("Data compiler analyze integration is unavailable")
-	// ErrDataAssignment reports an invalid Core-owned activation after Data
-	// analysis has already been accepted.
-	ErrDataAssignment = errors.New("invalid Data member activation")
 )
 
 // DataCompilerUnavailableError identifies the selected member whose accepted
@@ -68,36 +65,6 @@ type DataCompilerUnavailableError struct {
 	cause        error
 	acquisition  DataCompilerAcquisition
 	observations []datacompiler.Observation
-}
-
-// DataAssignmentError identifies a selected member whose accepted Data model
-// cannot be mapped to the current Project's explicit Resource assignments.
-type DataAssignmentError struct {
-	member applicationmeta.DataMember
-	cause  error
-}
-
-func (e *DataAssignmentError) Error() string {
-	if e == nil || e.cause == nil {
-		return ErrDataAssignment.Error()
-	}
-	return fmt.Sprintf("%s: %s: %v", ErrDataAssignment, e.member.Source(), e.cause)
-}
-
-func (e *DataAssignmentError) Unwrap() []error {
-	if e == nil || e.cause == nil {
-		return []error{ErrDataAssignment}
-	}
-	return []error{ErrDataAssignment, e.cause}
-}
-
-// Source returns the selected member declaration that owns the invalid
-// activation.
-func (e *DataAssignmentError) Source() applicationmeta.ConfigurationDeclarationSource {
-	if e == nil {
-		return applicationmeta.ConfigurationDeclarationSource{}
-	}
-	return e.member.DeclarationSource()
 }
 
 func (e *DataCompilerUnavailableError) Error() string {
@@ -255,7 +222,6 @@ type Result struct {
 	dataCompilerManifest     datacompiler.Manifest
 	dataCompilerStatus       DataCompilerAcquisition
 	dataAnalysis             DataAnalysisAcceptance
-	dataActivation           DataActivation
 	dataAnalyzeOutput        json.RawMessage
 	dataCompilerObservations []datacompiler.Observation
 }
@@ -369,16 +335,6 @@ func (r Result) DataAnalysis() (DataAnalysisAcceptance, bool) {
 	return r.dataAnalysis, true
 }
 
-// DataActivation returns the explicit Core-owned Resource assignment retained
-// after Data analysis acceptance. It is absent until the later emit and graph
-// installation boundaries consume it.
-func (r Result) DataActivation() (DataActivation, bool) {
-	if !r.dataActivation.Valid() {
-		return DataActivation{}, false
-	}
-	return DataActivation{assignments: r.dataActivation.Assignments()}, true
-}
-
 // DataAnalyzeOutput returns the accepted versioned analyze payload for emit.
 func (r Result) DataAnalyzeOutput() (json.RawMessage, bool) {
 	if !r.dataAnalysis.Valid() || len(r.dataAnalyzeOutput) == 0 {
@@ -449,25 +405,16 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		if err != nil {
 			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: dataRun.status, observations: dataRun.observations})
 		}
-		dataActivation, err = BuildDataActivation(manifest, dataAnalysis)
-		if err != nil {
-			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: members[0], cause: err})
+		if err := ValidateDataAssignments(manifest, acceptance); err != nil {
+			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: run.status, observations: run.observations})
 		}
-	}
-	dataPartial := func() Result {
-		return Result{
-			module:       module,
-			selection:    ConfigurationSelection{mode: selector.mode, path: selector.path, environment: selector.environment},
-			dataCompiler: dataRun.artifact, dataCompilerManifest: dataRun.manifest,
-			dataCompilerStatus: dataRun.status,
-			dataAnalysis:       dataAnalysis, dataActivation: dataActivation,
-			dataAnalyzeOutput:        append(json.RawMessage(nil), dataRun.response.Output...),
-			dataCompilerObservations: cloneDataCompilerObservations(dataRun.observations),
-		}
+		partial.dataAnalysis = acceptance
+		partial.dataAnalyzeOutput = append(json.RawMessage(nil), run.response.Output...)
+		return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable, acquisition: run.status, observations: run.observations})
 	}
 	currentLayers := composition.CurrentLayers()
 	if len(currentLayers) == 0 {
-		return dataPartial(), fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)
+		return Result{}, fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)
 	}
 	// Every selected layer is authored by the current Project. Keep its exact
 	// decision paths available to source validation without inferring ownership
@@ -479,22 +426,22 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	currentProjectPaths, err := currentProjectConfigurationPaths(baseLayer, selectedLayer, selector.mode == configurationModeEnvironment, schemaLookup)
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
 	}
 	sourceContext := applicationInputSourceContext(module, dependencies, composition, currentProjectPaths)
 	var generatedResources []constructorgraph.GeneratedResourceInput
 	if dataActivation.Valid() {
 		generatedResources, err = buildDataGeneratedResources(module.ModulePath(), manifest, dataActivation)
 		if err != nil {
-			return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
 		}
 	}
 	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext, generatedResources)
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	if err := inputs.validateCandidateConfiguration(composition, interfaceResolution, sourceContext); err != nil {
-		return dataPartial(), err
+		return Result{}, err
 	}
 	rootLayerManifest := rootManifest
 	selectedLayerManifest := selectedManifest
@@ -506,12 +453,12 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	}
 	selectedDigest, err := applicationmeta.ConfigurationLayerDigest(selectedLayerManifest, schemaLookup)
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
+		return Result{}, fmt.Errorf("%w: digest selected configuration %s: %w", ErrResolve, selector.path, err)
 	}
 	rootData := rootSnapshot.Data()
 	rootDigest, err := applicationmeta.ConfigurationLayerDigest(rootLayerManifest, schemaLookup)
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: digest root configuration %s: %w", ErrResolve, applicationManifestName, err)
+		return Result{}, fmt.Errorf("%w: digest root configuration %s: %w", ErrResolve, applicationManifestName, err)
 	}
 	configurationProvenance := &generation.ConfigurationProvenanceInput{
 		Mode:           generation.ConfigurationMode(selector.mode),
@@ -529,28 +476,28 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		TemporaryParent:  options.TemporaryParent,
 	})
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	resolution, err := generationresolution.ResolveExtensions(ctx, input)
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	if options.RequireExecutablePolicies {
 		if err := validateExecutablePolicies(manifest, interfaceResolution, resolution.Context(), sourceContext); err != nil {
-			return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
+			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 	}
 	configs, err := configurationresolve.Resolve(manifest, inventory, resolution.Context())
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	evidenceModules, err := resolutionEvidenceModules(module, dependencies)
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, baseLayer, selectedLayer, schemaLookup)
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	assemblyEvidence := resolutionEvidenceAssemblyInput(configs)
 	httpTransports := manifest.HTTPTransports()
@@ -565,14 +512,14 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		HTTPTransports:     &httpTransports,
 	})
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
 	evidence, err = resolutionevidence.WithResources(evidence, interfaceResolution.Graph(), declarations.Resources())
 	if err != nil {
-		return dataPartial(), fmt.Errorf("%w: construct Resource resolution evidence: %w", ErrResolve, err)
+		return Result{}, fmt.Errorf("%w: construct Resource resolution evidence: %w", ErrResolve, err)
 	}
 	if err := inputs.ValidateSnapshot(ctx); err != nil {
-		return dataPartial(), err
+		return Result{}, err
 	}
 	result := Result{
 		module:              module,
@@ -609,7 +556,6 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		if err := validateDataBackend(interfaceResolution.Graph(), declarations.Resources(), dataActivation); err != nil {
 			return result, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
 		}
-		result.dataActivation = dataActivation.withBackend(dataPostgresBackend)
 		return result, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{
 			member: membersFirst(dataMembers), cause: ErrDataCompilerAnalysisUnavailable,
 			acquisition: dataRun.status, observations: dataRun.observations,
