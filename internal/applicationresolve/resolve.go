@@ -405,12 +405,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		if err != nil {
 			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: dataRun.status, observations: dataRun.observations})
 		}
-		if err := ValidateDataAssignments(manifest, acceptance); err != nil {
-			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: run.status, observations: run.observations})
-		}
-		partial.dataAnalysis = acceptance
-		partial.dataAnalyzeOutput = append(json.RawMessage(nil), run.response.Output...)
-		return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable, acquisition: run.status, observations: run.observations})
+		partial.dataAnalysis = dataAnalysis
+		partial.dataAnalyzeOutput = append(json.RawMessage(nil), dataRun.response.Output...)
+		return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable, acquisition: dataRun.status, observations: dataRun.observations})
 	}
 	currentLayers := composition.CurrentLayers()
 	if len(currentLayers) == 0 {
