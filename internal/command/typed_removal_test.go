@@ -137,7 +137,13 @@ func TestPublicInvalidTypedConfigurationDoesNotMutate(t *testing.T) {
 				for _, invocation := range [][]string{{"generate"}, {"generate", "--check"}, {"check"}} {
 					args := append(append([]string(nil), invocation...), mode.selector...)
 					code, stdout, stderr := runCommand(t, args, root, commandGoEnvironment())
-					if code == 0 || stdout != "" || !strings.Contains(stderr, "PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID") || strings.Contains(stderr, "private_key") || strings.Contains(stderr, "private_value") {
+					wantDiagnostic := "PLYSTRA_CONSTRUCTOR_CONFIGURATION_VALUES_INVALID"
+					if mode.name == "default" && strings.Contains(value, "private_key: {$remove: true}") {
+						wantDiagnostic = "PLYSTRA_PROJECT_MANIFEST_INVALID"
+					} else if mode.name == "replacement" && strings.Contains(value, "private_key: {$remove: true}") {
+						wantDiagnostic = "PLYSTRA_CONFIGURATION_INVALID"
+					}
+					if code == 0 || stdout != "" || !strings.Contains(stderr, wantDiagnostic) || strings.Contains(stderr, "private_key") || strings.Contains(stderr, "private_value") {
 						t.Fatalf("%s: %v = %d, %q, %q", value, args, code, stdout, stderr)
 					}
 					if !reflect.DeepEqual(commandTree(t, root), before) {

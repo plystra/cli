@@ -16,7 +16,10 @@ func TestCompleteConfigurationRejectsTemplateSparseRequirementsAndRemovals(t *te
 	}{
 		{name: "template field", data: "template: example.com/base\n", want: "unknown root field"},
 		{name: "sparse requirements", data: "interfaces: {require: {add: [email.send/v1]}}\n", want: "complete sequence"},
+		{name: "legacy sparse requirements", data: "capabilities: {require: {add: [email.send/v1]}}\n", want: "complete sequence"},
 		{name: "exposure removal", data: "http: {expose: {email.send/v1: {$remove: true}}}\n", want: "removal markers"},
+		{name: "nested constructor removal", data: "config: {example.com/acme/service.New: {settings: {legacy: {$remove: true}}}}\n", want: "removal markers"},
+		{name: "nested resource removal", data: "resources: {instances: {primary: {config: {legacy: {$remove: true}}}}}\n", want: "removal markers"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			for _, source := range []string{"plystra.yaml", "deploy/replacement.yaml"} {

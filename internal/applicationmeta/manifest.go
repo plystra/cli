@@ -521,7 +521,7 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 		return Manifest{}, err
 	}
 	if complete && !sparseOverlay {
-		if err := validateCompleteConfigurationLayer(values, manifest); err != nil {
+		if err := validateCompleteConfigurationLayer(root, values, manifest); err != nil {
 			return Manifest{}, err
 		}
 	}
@@ -529,7 +529,7 @@ func parseManifestNode(source string, root *yaml.Node, values map[string]*yaml.N
 	return manifest, nil
 }
 
-func validateCompleteConfigurationLayer(values map[string]*yaml.Node, manifest Manifest) error {
+func validateCompleteConfigurationLayer(root *yaml.Node, values map[string]*yaml.Node, manifest Manifest) error {
 	if interfaces := values["interfaces"]; interfaces != nil {
 		fields, err := mapping(interfaces, "interfaces")
 		if err != nil {
@@ -538,6 +538,18 @@ func validateCompleteConfigurationLayer(values map[string]*yaml.Node, manifest M
 		if requirement := fields["require"]; requirement != nil && requirement.Kind != yaml.SequenceNode {
 			return invalid("interfaces.require must use a complete sequence in root and full-replacement documents")
 		}
+	}
+	if capabilities := values["capabilities"]; capabilities != nil {
+		fields, err := mapping(capabilities, "capabilities")
+		if err != nil {
+			return err
+		}
+		if requirement := fields["require"]; requirement != nil && requirement.Kind != yaml.SequenceNode {
+			return invalid("capabilities.require must use a complete sequence in root and full-replacement documents")
+		}
+	}
+	if containsRemovalMarker(root) {
+		return invalid("removal markers are valid only in environment overlays")
 	}
 	if manifest.removeHTTPAddress || manifest.httpCORS.remove || manifest.httpCORS.removeAllowedOrigins || manifest.httpCORS.removeAllowCredentials || manifest.removeStartupTimeout ||
 		len(manifest.removedHTTPExposures) != 0 || len(manifest.removedRequirements) != 0 || len(manifest.removedProviderChoices) != 0 || len(manifest.removedInterfaceReqs) != 0 ||
@@ -554,6 +566,23 @@ func validateCompleteConfigurationLayer(values map[string]*yaml.Node, manifest M
 		}
 	}
 	return nil
+}
+
+func containsRemovalMarker(root *yaml.Node) bool {
+	if root == nil {
+		return false
+	}
+	stack := []*yaml.Node{root}
+	for len(stack) > 0 {
+		last := len(stack) - 1
+		node := stack[last]
+		stack = stack[:last]
+		if isRemovalMapping(node) {
+			return true
+		}
+		stack = append(stack, node.Content...)
+	}
+	return false
 }
 
 func parseTimeouts(node *yaml.Node) (time.Duration, bool, bool, error) {

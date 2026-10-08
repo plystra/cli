@@ -33,7 +33,19 @@ func TestSecretReferencePublicIdentityExcludesKindAndTarget(t *testing.T) {
 			first = digest
 		}
 		for _, values := range []string{"{}", "{password: {$remove: true}}"} {
-			digest, err := applicationmeta.ConfigurationLayerDigest(composeManifest(t, fmt.Sprintf(wrapper, values)), lookup)
+			parse := applicationmeta.Parse
+			source := "plystra.yaml"
+			if strings.Contains(values, "$remove") {
+				parse = func(data []byte) (applicationmeta.Manifest, error) {
+					return applicationmeta.ParseOverlaySource("plystra.production.yaml", data)
+				}
+				source = "plystra.production.yaml"
+			}
+			manifest, err := parse([]byte(fmt.Sprintf(wrapper, values)))
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", source, err)
+			}
+			digest, err := applicationmeta.ConfigurationLayerDigest(manifest, lookup)
 			if err != nil || digest == first {
 				t.Fatalf("absence or explicit removal lost its public identity: %v", err)
 			}

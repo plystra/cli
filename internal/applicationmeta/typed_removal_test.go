@@ -122,7 +122,11 @@ func TestConstructorAtomicValuesRejectReservedRemovalMappings(t *testing.T) {
 			lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
 				constructorConfigurationSymbol: composeSchema(t, "Field "+test.typeName),
 			})
-			_, err := applicationmeta.Compose(nil, composeManifest(t, "config: {"+constructorConfigurationSymbol+": {field: "+test.value+"}}\n"), lookup)
+			manifest, parseErr := applicationmeta.ParseOverlaySource("plystra.production.yaml", []byte("config: {"+constructorConfigurationSymbol+": {field: "+test.value+"}}\n"))
+			if parseErr != nil {
+				t.Fatalf("ParseOverlaySource: %v", parseErr)
+			}
+			_, err := applicationmeta.Compose(nil, manifest, lookup)
 			if !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "private_") || strings.Contains(err.Error(), "private-") {
 				t.Fatalf("invalid nested marker accepted or exposed: %v", err)
 			}

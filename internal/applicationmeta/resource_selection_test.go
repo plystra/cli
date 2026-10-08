@@ -89,7 +89,7 @@ resources:
 func TestSetResourceProviderPreservesSameProviderAndSparseConfiguration(t *testing.T) {
 	t.Parallel()
 	provider := mustImplementationChoiceConstructor(t, resourceProvider)
-	for _, config := range []string{"{}", "{value: PRIVATE_VALUE, nested: {value: {$remove: true}}}", "{$remove: true}"} {
+	for _, config := range []string{"{}", "{value: PRIVATE_VALUE}"} {
 		input := []byte("# exact bytes\nresources: {instances: {database.primary: {use: " + resourceProvider + ", config: " + config + "}}}\n")
 		updated, changed, err := applicationmeta.SetResourceProvider(input, "database.primary", provider, false, nil)
 		if err != nil || changed || !bytes.Equal(input, updated) {
@@ -99,8 +99,10 @@ func TestSetResourceProviderPreservesSameProviderAndSparseConfiguration(t *testi
 		if input[0] != '#' {
 			t.Fatal("no-op returned aliased bytes")
 		}
-		input = []byte(resourceDocument("{config: " + config + "}"))
-		updated, changed, err = applicationmeta.SetResourceProviderOverlay(input, "database.primary", provider, false, nil)
+	}
+	for _, config := range []string{"{}", "{value: PRIVATE_VALUE, nested: {value: {$remove: true}}}", "{$remove: true}"} {
+		input := []byte(resourceDocument("{config: " + config + "}"))
+		updated, changed, err := applicationmeta.SetResourceProviderOverlay(input, "database.primary", provider, false, nil)
 		if err != nil || !changed {
 			t.Fatalf("config-only selection: %t, %v", changed, err)
 		}
