@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/constructorsymbol"
-	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
@@ -52,61 +50,6 @@ func (s SelectionInputs) Module() modulelocate.Module { return s.module }
 
 // Dependencies returns the captured effective Go Module graph.
 func (s SelectionInputs) Dependencies() moduledependency.Index { return s.dependencies }
-
-// DataCompilerSelection resolves the exact published Data distribution from
-// this Project's selected Go Module graph. It does not activate Data members.
-func (s SelectionInputs) DataCompilerSelection() (datacompiler.Selection, error) {
-	if s.module.Path() == "" {
-		return datacompiler.Selection{}, fmt.Errorf("%w: Project selection inputs are empty", datacompiler.ErrSelection)
-	}
-	module, exists := s.dependencies.ByPath(datacompiler.ModulePath)
-	if !exists {
-		return datacompiler.Selection{}, fmt.Errorf("%w: selected Project graph has no %s module", datacompiler.ErrSelection, datacompiler.ModulePath)
-	}
-	_, replaced := module.Replacement()
-	return datacompiler.Resolve(datacompiler.Source{
-		ModulePath: module.Path(), ModuleVersion: module.SelectedVersion(),
-		ModuleChecksum: module.Checksum(), Root: module.Root(),
-		Workspace: module.Workspace(), Replacement: replaced,
-	})
-}
-
-// AcquireDataCompiler resolves and builds the exact selected compiler into a
-// CLI-owned private cache. It does not start the compiler or mutate Project
-// files; analyze and emit remain separate integration phases.
-func (s SelectionInputs) AcquireDataCompiler(ctx context.Context, options Options) (datacompiler.Artifact, error) {
-	if ctx == nil {
-		return datacompiler.Artifact{}, fmt.Errorf("acquire Data compiler: context is nil")
-	}
-	selection, err := s.DataCompilerSelection()
-	if err != nil {
-		return datacompiler.Artifact{}, err
-	}
-	cacheRoot := options.DataCompilerCacheRoot
-	if cacheRoot == "" {
-		base, err := os.UserCacheDir()
-		if err != nil {
-			return datacompiler.Artifact{}, fmt.Errorf("locate private compiler cache: %w", err)
-		}
-		cacheRoot = filepath.Join(base, "plystra", "data-compiler")
-	}
-	if !filepath.IsAbs(cacheRoot) {
-		return datacompiler.Artifact{}, fmt.Errorf("private compiler cache is not absolute")
-	}
-	buildContext := ctx
-	if options.CompileTimeout > 0 {
-		var cancel context.CancelFunc
-		buildContext, cancel = context.WithTimeout(ctx, options.CompileTimeout)
-		defer cancel()
-	}
-	return datacompiler.Build(buildContext, datacompiler.BuildOptions{
-		ModuleRoot: selection.Root, ModuleVersion: selection.ModuleVersion,
-		ModuleChecksum: selection.ModuleChecksum, CacheRoot: cacheRoot,
-		GoCommand: options.GoCommand, Environment: options.Environment,
-		Offline: options.Offline,
-		Observe: options.DataCompilerObserve,
-	})
-}
 
 // Declarations returns the same validated Go declarations used by Resolve.
 func (s SelectionInputs) Declarations() interfaceinventory.Discovery { return s.declarations }
@@ -339,7 +282,7 @@ func (s SelectionInputs) ResolveCandidateInterfaces(composition applicationmeta.
 	if err != nil {
 		return interfaceresolution.Result{}, err
 	}
-	result, err := resolveInterfaces(composition.Manifest(), composition, s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources, nil)
+	result, err := resolveInterfaces(composition.Manifest(), composition, s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources)
 	if err != nil {
 		return interfaceresolution.Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -359,7 +302,7 @@ func (s SelectionInputs) CandidateOwners(composition applicationmeta.Composition
 	if err != nil {
 		return nil, err
 	}
-	input, err := interfaceResolutionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources, nil)
+	input, err := interfaceResolutionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrResolve, err)
 	}

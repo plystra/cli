@@ -105,8 +105,6 @@ func TestBuiltInCodesAreCanonicalAndUnique(t *testing.T) {
 		diagnosticcode.ResourceMetadataInvalid,
 		diagnosticcode.ResourceConfigurationSchemaInvalid,
 		diagnosticcode.ResourceConfigurationValuesInvalid,
-		diagnosticcode.DataMemberMetadataInvalid,
-		diagnosticcode.DataCompilerUnavailable,
 		diagnosticcode.ResourceIDDuplicate,
 		diagnosticcode.AuthoredPackageInvalid,
 		diagnosticcode.ProjectCreateInvocationInvalid,

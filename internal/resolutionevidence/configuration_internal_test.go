@@ -11,11 +11,8 @@ func TestValidConfigurationFieldPathRejectsRemovedCompositionMetadata(t *testing
 	t.Parallel()
 
 	tests := map[string]bool{
-		`http.address`:                                     true,
-		`interfaces.require`:                               true,
-		`data.members["authn.persistence/v1"]`:             true,
-		`data.members["authn.persistence"]`:                false,
-		`data.members["authn.persistence/v1"]["resource"]`: false,
+		`http.address`:                    true,
+		`interfaces.require`:              true,
 		`template`:                        false,
 		`composition.exports["defaults"]`: false,
 		`composition.adopt["example.com/acme/platform#defaults"]`: false,

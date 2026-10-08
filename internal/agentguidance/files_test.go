@@ -308,7 +308,7 @@ func TestSyncRemovesOnlyUnchangedRetiredOwnedFiles(t *testing.T) {
 	if _, err := Sync(root, initial, SyncOptions{}); err != nil {
 		t.Fatalf("Sync initial guidance: %v", err)
 	}
-	retired := Root + "/tasks/resources-and-data.md"
+	retired := Root + "/tasks/resources.md"
 	updated := withoutProjectionPath(t, initial, retired)
 	writeTestFile(t, root, Root+"/local.md", []byte("keep local\n"))
 	writeTestFile(t, root, Root+"/tasks/custom.md", []byte("keep custom\n"))
@@ -463,7 +463,7 @@ func TestSyncClassifiesTransactionTargetChangesAfterUntypedApplyFailures(t *test
 		if _, err := Sync(root, initial, SyncOptions{}); err != nil {
 			t.Fatalf("Sync initial guidance: %v", err)
 		}
-		retired := Root + "/tasks/resources-and-data.md"
+		retired := Root + "/tasks/resources.md"
 		updated := withoutProjectionPath(t, initial, retired)
 		apply := func(rootPath string, writes []atomicfs.Write, removes []atomicfs.Remove, validate func(string) error) error {
 			if err := os.Remove(testPath(rootPath, retired)); err != nil {

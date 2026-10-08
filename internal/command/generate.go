@@ -10,7 +10,6 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/commandschema"
-	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/generatedfiles"
@@ -35,7 +34,6 @@ type generateResultEncoder struct {
 type generateFailureInput struct {
 	err          error
 	result       applicationgenerate.Result
-	observations []datacompiler.Observation
 	context      recoveryContext
 	report       *generatedfiles.Report
 }
@@ -82,9 +80,9 @@ func runGenerate(arguments []string, stdout, stderr io.Writer, workingDirectory 
 
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
-	result, observations, generateErr := executeGenerate(ctx, parsed, workingDirectory, environment)
+	result, generateErr := executeGenerate(ctx, parsed, workingDirectory, environment)
 	if generateErr != nil {
-		return emitGenerateFailure(output, encoder, generateFailureInput{err: generateErr, result: result, observations: observations, context: recovery}, func() error {
+		return emitGenerateFailure(output, encoder, generateFailureInput{err: generateErr, result: result, context: recovery}, func() error {
 			writeCommandFailure(output.diagnosticWriter(), "", generateErr, recovery)
 			return nil
 		})
@@ -92,7 +90,6 @@ func runGenerate(arguments []string, stdout, stderr io.Writer, workingDirectory 
 	if !result.Report().Clean() {
 		return emitGenerateFailure(output, encoder, generateFailureInput{
 			result:       result,
-			observations: observations,
 			context:      recovery,
 			report:       reportPointer(result.Report()),
 		}, func() error {
@@ -105,7 +102,7 @@ func runGenerate(arguments []string, stdout, stderr io.Writer, workingDirectory 
 		})
 	}
 
-	structured, buildErr := encoder.success(result, observations)
+	structured, buildErr := encoder.success(result)
 	if buildErr != nil {
 		return emitGenerateInternalFailure(output, encoder, result, buildErr)
 	}
@@ -119,7 +116,7 @@ func runGenerate(arguments []string, stdout, stderr io.Writer, workingDirectory 
 	})
 }
 
-func executeGenerate(ctx context.Context, arguments generateArguments, workingDirectory string, environment []string) (applicationgenerate.Result, []datacompiler.Observation, error) {
+func executeGenerate(ctx context.Context, arguments generateArguments, workingDirectory string, environment []string) (applicationgenerate.Result, error) {
 	options := applicationgenerate.Options{
 		Start:             workingDirectory,
 		Check:             arguments.check,
@@ -130,19 +127,17 @@ func executeGenerate(ctx context.Context, arguments generateArguments, workingDi
 	}
 	if arguments.check || arguments.offline {
 		result, err := applicationgenerate.Generate(ctx, options)
-		return result, result.DataCompilerObservations(), err
+		return result, err
 	}
 	project, err := projectlocate.Find(workingDirectory)
 	if err != nil {
-		return applicationgenerate.Result{}, nil, fmt.Errorf("locate Project: %w", err)
+		return applicationgenerate.Result{}, fmt.Errorf("locate Project: %w", err)
 	}
 	var result applicationgenerate.Result
-	var observations []datacompiler.Observation
 	generateWithMutation := func(mutate applicationgenerate.ModuleMutation) error {
 		options.MutateModule = mutate
 		var generateErr error
 		result, generateErr = applicationgenerate.Generate(ctx, options)
-		observations = append(observations, result.DataCompilerObservations()...)
 		return generateErr
 	}
 	err = modulemutation.Tidy(ctx, project.Path(), options.GoCommand, environment, generateWithMutation)
@@ -155,7 +150,7 @@ func executeGenerate(ctx context.Context, arguments generateArguments, workingDi
 			DirectRequirements: []string{kernelintrinsic.ModulePath},
 		}, generateWithMutation)
 	}
-	return result, observations, err
+	return result, err
 }
 
 func initializeGenerateResultEncoder(stderr io.Writer) (generateResultEncoder, bool) {
@@ -172,7 +167,7 @@ func initializeGenerateResultEncoder(stderr io.Writer) (generateResultEncoder, b
 	return generateResultEncoder{invocationID: invocationID, emptyEffects: effects}, true
 }
 
-func (e generateResultEncoder) success(result applicationgenerate.Result, observations []datacompiler.Observation) (commandschema.Result, error) {
+func (e generateResultEncoder) success(result applicationgenerate.Result) (commandschema.Result, error) {
 	snapshot, err := generateSnapshot(result)
 	if err != nil {
 		return commandschema.Result{}, err
@@ -181,7 +176,7 @@ func (e generateResultEncoder) success(result applicationgenerate.Result, observ
 	if err != nil {
 		return commandschema.Result{}, err
 	}
-	effects, err := generateEffects(result, observations, nil, result.Installed())
+	effects, err := generateEffects(result, nil, result.Installed())
 	if err != nil {
 		return commandschema.Result{}, err
 	}
@@ -215,7 +210,7 @@ func (e generateResultEncoder) failure(input generateFailureInput) (commandschem
 	if err != nil {
 		return commandschema.Result{}, err
 	}
-	effects, err := generateEffects(input.result, input.observations, input.err, false)
+	effects, err := generateEffects(input.result, input.err, false)
 	if err != nil {
 		return commandschema.Result{}, err
 	}
@@ -299,7 +294,7 @@ func classifyGenerateFailure(input generateFailureInput) generateFailureClassifi
 
 func generateStatusForDiagnostic(code string) commandschema.Status {
 	switch code {
-	case diagnosticcode.DataCompilerUnavailable, diagnosticcode.GoModuleUnavailable, diagnosticcode.GoCommandFailed:
+	case diagnosticcode.GoModuleUnavailable, diagnosticcode.GoCommandFailed:
 		return commandschema.StatusPrerequisiteMissing
 	case diagnosticcode.ProviderAmbiguous, diagnosticcode.ResolveMultipleImplementations, diagnosticcode.ResourceBindingAmbiguous:
 		return commandschema.StatusDecisionRequired
@@ -328,10 +323,6 @@ func generateFailureRecovery(failureInput generateFailureInput, classification g
 	verificationArguments := append([]string{"plystra", "generate"}, selectorArguments...)
 	kind := commandschema.RecoveryManual
 	targetKind, targetID := "operation", "generate"
-	if classification.code == diagnosticcode.DataCompilerUnavailable {
-		kind = commandschema.RecoverySatisfyPrerequisite
-		targetKind, targetID = "tool", "data-compiler"
-	}
 	recoveryInput := commandschema.RecoveryInput{
 		ID:            "resolve-generate-failure",
 		Kind:          kind,
@@ -393,56 +384,15 @@ func generateFailureRecovery(failureInput generateFailureInput, classification g
 	return commandschema.NewRecovery(recoveryInput)
 }
 
-func generateEffects(result applicationgenerate.Result, observations []datacompiler.Observation, failure error, installation bool) (commandschema.Effects, error) {
+func generateEffects(result applicationgenerate.Result, failure error, installation bool) (commandschema.Effects, error) {
 	modulePath := result.Module().ModulePath()
-	if modulePath == "" {
-		var unavailable *applicationresolve.DataCompilerUnavailableError
-		if errors.As(failure, &unavailable) && unavailable != nil {
-			modulePath = unavailable.Source().ModulePath()
-		}
-	}
 	if modulePath == "" {
 		return commandschema.NewEffects(commandschema.EffectsInput{})
 	}
-	observed := make([]commandschema.Effect, 0, len(observations)+1)
-	occurrences := make(map[string]int)
-	seen := make(map[string]struct{})
-	for _, observation := range observations {
-		occurrences[observation.ID]++
-		effectID := observation.ID
-		if occurrences[observation.ID] > 1 {
-			effectID = fmt.Sprintf("%s-%d", observation.ID, occurrences[observation.ID])
-		}
-		class, ok := generateEffectClass(observation.Class)
-		if !ok {
-			return commandschema.Effects{}, fmt.Errorf("unsupported Data compiler observation class %q", observation.Class)
-		}
-		effect, err := commandschema.NewEffect(commandschema.EffectInput{
-			ID:            effectID,
-			Class:         class,
-			Phase:         observation.Phase,
-			Target:        observation.Target,
-			Owner:         commandschema.Owner{Module: modulePath, Path: "."},
-			Reason:        observation.Reason,
-			Reversibility: observation.Reversibility,
-			Verification:  observation.Verification,
-		})
-		if err != nil {
-			return commandschema.Effects{}, err
-		}
-		seen[effectID] = struct{}{}
-		observed = append(observed, effect)
-	}
+	observed := make([]commandschema.Effect, 0, 1)
 	if installation && failure == nil && !result.Checked() {
-		effectID := "generate-project"
-		for suffix := 2; ; suffix++ {
-			if _, exists := seen[effectID]; !exists {
-				break
-			}
-			effectID = fmt.Sprintf("generate-project-%d", suffix)
-		}
 		effect, err := commandschema.NewEffect(commandschema.EffectInput{
-			ID:            effectID,
+			ID:            "generate-project",
 			Class:         commandschema.EffectProjectWrite,
 			Phase:         "commit",
 			Target:        ".",
@@ -459,19 +409,6 @@ func generateEffects(result applicationgenerate.Result, observations []datacompi
 	return commandschema.NewEffects(commandschema.EffectsInput{Observed: observed})
 }
 
-func generateEffectClass(class datacompiler.ObservationClass) (commandschema.EffectClass, bool) {
-	switch class {
-	case datacompiler.ObservationCacheMaterialization:
-		return commandschema.EffectCacheMaterialization, true
-	case datacompiler.ObservationTemporaryFile:
-		return commandschema.EffectTemporaryFile, true
-	case datacompiler.ObservationTrustedExecution:
-		return commandschema.EffectTrustedCodeExecution, true
-	default:
-		return "", false
-	}
-}
-
 func generatePayload(result applicationgenerate.Result) (commandschema.GeneratePayload, error) {
 	input := commandschema.GeneratePayloadInput{
 		ModulePath: result.Module().ModulePath(),
@@ -479,20 +416,6 @@ func generatePayload(result applicationgenerate.Result) (commandschema.GenerateP
 	}
 	if result.Checked() {
 		input.Mode = "check"
-	}
-	if acquisition, ok := result.DataCompilerAcquisition(); ok {
-		input.DataCompiler = &commandschema.GenerateDataCompilerInput{
-			ModulePath:     acquisition.ModulePath(),
-			ModuleVersion:  acquisition.ModuleVersion(),
-			ModuleChecksum: acquisition.ModuleChecksum(),
-			ManifestDigest: acquisition.ManifestDigest(),
-			BinaryDigest:   acquisition.BinaryDigest(),
-			GoToolchain:    acquisition.GoToolchain(),
-			GOOS:           acquisition.GOOS(),
-			GOARCH:         acquisition.GOARCH(),
-			CacheHit:       acquisition.CacheHit(),
-			Offline:        acquisition.Offline(),
-		}
 	}
 	return commandschema.NewGeneratePayload(input)
 }

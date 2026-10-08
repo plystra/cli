@@ -16,15 +16,15 @@ import (
 	"github.com/plystra/cli/internal/resourceproviderinventory"
 )
 
-func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext, generatedResources []constructorgraph.GeneratedResourceInput) (interfaceresolution.Result, error) {
-	input, err := interfaceResolutionInput(manifest, interfaces, implementations, resourceProviders, legacyPlugins, sourceContext, generatedResources)
+func resolveInterfaces(manifest applicationmeta.Manifest, composition applicationmeta.Composition, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Result, error) {
+	input, err := interfaceResolutionInput(manifest, interfaces, implementations, resourceProviders, legacyPlugins, sourceContext)
 	if err != nil {
 		return interfaceresolution.Result{}, err
 	}
 	return interfaceresolution.Resolve(input)
 }
 
-func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext, generatedResources []constructorgraph.GeneratedResourceInput) (interfaceresolution.Input, error) {
+func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Input, error) {
 	requirements := manifest.InterfaceRequirements()
 	exposures := manifest.HTTPExposures()
 	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures))
@@ -132,7 +132,6 @@ func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces inte
 		ResourceProviders:  resourceProviders,
 		ResourceInstances:  resourceInstances,
 		ResourceBindings:   resourceBindings,
-		GeneratedResources: generatedResources,
 	}, nil
 }
 

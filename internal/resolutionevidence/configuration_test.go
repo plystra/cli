@@ -22,38 +22,32 @@ func TestSecretReferenceProvenanceDoesNotPublishPrivateEquality(t *testing.T) {
 	manifest := func(reference string) applicationmeta.Manifest {
 		return configurationManifest(t, "plystra.yaml", "config: {example.com/acme/smtp.New: {password: "+reference+"}}")
 	}
-	for _, local := range []string{"{env: PRIVATE_LOCAL}", "{$remove: true}"} {
-		var first []byte
-		for _, reference := range []string{"{env: PRIVATE_FIRST}", "{env: PRIVATE_SECOND}", "{file: /PRIVATE_FILE}"} {
-			value := reference
-			if local == "{$remove: true}" {
-				value = local
-			}
-			root := manifest(value)
-			composition, err := applicationmeta.Compose(nil, root, lookup)
-			if err != nil {
-				t.Fatal(err)
-			}
-			input := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", composition,
-				[]resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: configurationDecisions(t, root, lookup)}},
-				[]resolutionevidence.ModuleInput{{Path: "example.com/app", Role: resolutionevidence.ModuleRoleCurrent, SourceModulePath: "example.com/app"}})
-			evidence, err := resolutionevidence.Build(input)
-			if err != nil {
-				t.Fatal(err)
-			}
-			field := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["password"]`)
-			if !field.Effective() || field.Owner() != resolutionevidence.ConfigurationOwnerRoot || field.Removed() != (local == "{$remove: true}") {
-				t.Fatal("private equality changed current-Project ownership or removal")
-			}
-			contributors := field.Contributors()
-			if len(contributors) != 1 || !contributors[0].Effective() || len(contributors[0].Sources()) != 1 {
-				t.Fatal("private equality changed current-project ownership")
-			}
-			if first != nil && !bytes.Equal(first, evidence.CanonicalJSON()) {
-				t.Fatal("private reference kind, target, or equality changed public provenance")
-			}
-			first = evidence.CanonicalJSON()
+	var first []byte
+	for _, reference := range []string{"{env: PRIVATE_FIRST}", "{env: PRIVATE_SECOND}", "{file: /PRIVATE_FILE}"} {
+		root := manifest(reference)
+		composition, err := applicationmeta.Compose(nil, root, lookup)
+		if err != nil {
+			t.Fatal(err)
 		}
+		input := configurationEvidenceInput(t, generation.ConfigurationModeDefault, "", "plystra.yaml", composition,
+			[]resolutionevidence.ConfigurationLayerInput{{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: configurationDecisions(t, root, lookup)}},
+			[]resolutionevidence.ModuleInput{{Path: "example.com/app", Role: resolutionevidence.ModuleRoleCurrent, SourceModulePath: "example.com/app"}})
+		evidence, err := resolutionevidence.Build(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		field := configurationField(t, evidence, `config["example.com/acme/smtp.New"]["password"]`)
+		if !field.Effective() || field.Owner() != resolutionevidence.ConfigurationOwnerRoot || field.Removed() {
+			t.Fatal("private equality changed current-Project ownership or removal")
+		}
+		contributors := field.Contributors()
+		if len(contributors) != 1 || !contributors[0].Effective() || len(contributors[0].Sources()) != 1 {
+			t.Fatal("private equality changed current-project ownership")
+		}
+		if first != nil && !bytes.Equal(first, evidence.CanonicalJSON()) {
+			t.Fatal("private reference kind, target, or equality changed public provenance")
+		}
+		first = evidence.CanonicalJSON()
 	}
 }
 

@@ -85,8 +85,6 @@ func applyManifestLayer(base, overlay Manifest, schemas SchemaLookup) (Manifest,
 	if err != nil {
 		return Manifest{}, fmt.Errorf("%w: %w", ErrApplyOverlay, err)
 	}
-	dataMembers, removedDataMembers := overlayDataMembers(base, overlay)
-
 	return Manifest{
 		modulePath:                    overlay.modulePath,
 		source:                        base.source,
@@ -115,8 +113,6 @@ func applyManifestLayer(base, overlay Manifest, schemas SchemaLookup) (Manifest,
 		removedResourceInstances:      removedResourceInstances,
 		resourceBindings:              resourceBindings,
 		removedResourceBindings:       removedResourceBindings,
-		dataMembers:                   dataMembers,
-		removedDataMembers:            removedDataMembers,
 		startupTimeout:                startupTimeout,
 		hasStartupTimeout:             hasStartupTimeout,
 		removeStartupTimeout:          removeStartupTimeout,

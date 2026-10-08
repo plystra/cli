@@ -33,7 +33,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		Root + "/tasks/project-and-dependencies.md",
 		Root + "/tasks/interfaces-and-implementations.md",
 		Root + "/tasks/configuration-and-secrets.md",
-		Root + "/tasks/resources-and-data.md",
+		Root + "/tasks/resources.md",
 		Root + "/tasks/diagnostics-and-recovery.md",
 		Root + "/tasks/verify-build-and-release.md",
 		ManifestPath,
@@ -75,7 +75,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"Kernel `" + version.KernelVersion + "`",
 		"specification revision `" + version.SpecificationRevision + "`",
 		"tasks/project-and-dependencies.md",
-		"tasks/resources-and-data.md",
+		"tasks/resources.md",
 		"optional `local.md`",
 		"`plystra guidance check` compares this projection",
 		"`plystra guidance sync --replace-generated`",
@@ -208,10 +208,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 			t.Fatalf("diagnostics guidance omits %q:\n%s", phrase, diagnostics)
 		}
 	}
-	resources := byPath[Root+"/tasks/resources-and-data.md"]
-	if !bytes.Contains(resources, []byte("plystra inspect capabilities --format json")) {
-		t.Fatalf("Resource and Data guidance omits installed capability discovery:\n%s", resources)
-	}
+	resources := byPath[Root+"/tasks/resources.md"]
 	for _, phrase := range []string{
 		"plystra inspect resources --format json", "contract_digest",
 		"64 type-reference levels and 65,536 public shape nodes", "PLYSTRA_RESOURCE_ID_DUPLICATE",
@@ -245,7 +242,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"change apply",
 		"primitive-command lowering",
 		"--dry-run",
-		"implemented stages do not establish `accepted=yes`", "Gates 5 and 13 remain incomplete",
+		"implemented stages do not establish `accepted=yes`",
 	} {
 		if !bytes.Contains(resources, []byte(phrase)) {
 			t.Fatalf("Resource guidance omits %q", phrase)

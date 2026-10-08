@@ -70,7 +70,6 @@ func Resolve(input Input) (Result, error) {
 		ResourceProviders:  input.ResourceProviders,
 		ResourceInstances:  input.ResourceInstances,
 		ResourceBindings:   input.ResourceBindings,
-		GeneratedResources: input.GeneratedResources,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)

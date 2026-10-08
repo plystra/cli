@@ -114,7 +114,7 @@ PLYSTRA_PLUGIN_CREATE_TARGET_EXISTS respectively.
 
 Options:
   --check                Report drift without modifying configuration or generated files.
-  --offline              Use only locally available module inputs and the verified Data compiler cache.
+  --offline              Use only locally available module inputs.
   --format human|json    Select concise human output or one plystra.result/v1 document.
   --env <environment>    Overlay root plystra.yaml with plystra.<environment>.yaml.
   --config <yaml-path>   Use one complete current-project configuration instead of root plystra.yaml.
@@ -132,9 +132,6 @@ report none.
 Configuration composes only the current Project root with one selected overlay,
 or uses one complete current-Project replacement document.
 Generation does not rewrite the selected current-Project configuration document.
-data.members entries compose by exact member ID. An effective active member
-reports PLYSTRA_DATA_COMPILER_UNAVAILABLE before generation or drift checking;
-malformed entries report PLYSTRA_DATA_MEMBER_METADATA_INVALID.
 PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
 installed CLI/Kernel pair both generates and executes it. The diagnostic reports
 the field, support stages, and module-relative configuration declarations.
@@ -430,8 +427,8 @@ PLYSTRA_RESOURCE_BINDING_MISSING, PLYSTRA_RESOURCE_BINDING_AMBIGUOUS, or
 PLYSTRA_RESOURCE_BINDING_INVALID. Resources never become Interface roots,
 catalog entries, governed proxies, or transports. Use selects a compatible
 provider for an existing named instance without a kind flag. Implement creates
-unfinished Interface or Resource scaffolds without activation. Data, full
-Resource acceptance, and change apply remain unsupported. The installed
+unfinished Interface or Resource scaffolds without activation. Full Resource
+acceptance and change apply remain unsupported. The installed
 change-plan slice supports one implementation_selection set request.
 The configuration view retains the selected current-Project layer, redacted
 field summaries, ownership and precedence, effective and overridden

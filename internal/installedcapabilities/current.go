@@ -149,22 +149,6 @@ func Current() (commandschema.Capabilities, error) {
 				Generated: commandschema.SupportYes, Executed: commandschema.SupportYes,
 				Accepted: commandschema.SupportNo,
 			},
-			{
-				ID:        "data",
-				Specified: commandschema.SupportYes,
-				Parsed:    commandschema.SupportNo,
-				Generated: commandschema.SupportNo,
-				Executed:  commandschema.SupportNo,
-				Accepted:  commandschema.SupportNo,
-			},
-			{
-				ID:        "data.compiler",
-				Specified: commandschema.SupportYes,
-				Parsed:    commandschema.SupportNo,
-				Generated: commandschema.SupportNo,
-				Executed:  commandschema.SupportNo,
-				Accepted:  commandschema.SupportNo,
-			},
 		}, invocationpolicy.RetrySupport()...),
 	})
 	if err != nil {

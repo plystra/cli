@@ -21,10 +21,6 @@ func TestRemainingStableKeyCollectionsComposeByExactKey(t *testing.T) {
       database.primary:
         obsolete: database.legacy
         retained: database.primary
-data:
-  members:
-    authn.persistence/v1: {resource: database.primary}
-    authz.persistence/v1: {resource: database.legacy}
 `)
 	overlay := resourceOverlayManifest(t, "plystra.production.yaml", `resources:
   instances:
@@ -38,10 +34,6 @@ data:
       database.primary:
         obsolete: {$remove: true}
         absent: {$remove: true}
-data:
-  members:
-    authz.persistence/v1: {$remove: true}
-    absent.persistence/v1: {$remove: true}
 `)
 	lookup := resourceLookup(t, "Value string")
 	selected, err := applicationmeta.ApplyOverlay(root, overlay, lookup)
@@ -61,19 +53,12 @@ data:
 	if len(bindings) != 2 || bindings[0].Namespace() != "implementations" || bindings[0].ParameterName() != "primary" || bindings[1].Namespace() != "instances" || bindings[1].ParameterName() != "retained" {
 		t.Fatalf("effective Resource bindings = %#v", bindings)
 	}
-	members := composition.Manifest().DataMembers()
-	if len(members) != 1 || members[0].ID() != "authn.persistence/v1" {
-		t.Fatalf("effective Data members = %#v", members)
-	}
-
 	wantRemovals := map[string]bool{
 		`resources.instances["database.legacy"]`:                                true,
 		`resources.bind.implementations["example.com/service.New"]["obsolete"]`: true,
 		`resources.bind.implementations["example.com/service.New"]["absent"]`:   true,
 		`resources.bind.instances["database.primary"]["obsolete"]`:              true,
 		`resources.bind.instances["database.primary"]["absent"]`:                true,
-		`data.members["authz.persistence/v1"]`:                                  true,
-		`data.members["absent.persistence/v1"]`:                                 true,
 	}
 	decisions, err := applicationmeta.ConfigurationDecisions(composition.Manifest(), lookup)
 	if err != nil {

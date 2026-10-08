@@ -102,8 +102,6 @@ const (
 	ResourceMetadataInvalid              = Prefix + "RESOURCE_METADATA_INVALID"
 	ResourceConfigurationSchemaInvalid   = Prefix + "RESOURCE_CONFIGURATION_SCHEMA_INVALID"
 	ResourceConfigurationValuesInvalid   = Prefix + "RESOURCE_CONFIGURATION_VALUES_INVALID"
-	DataMemberMetadataInvalid            = Prefix + "DATA_MEMBER_METADATA_INVALID"
-	DataCompilerUnavailable              = Prefix + "DATA_COMPILER_UNAVAILABLE"
 	AuthoredPackageInvalid               = Prefix + "AUTHORING_PACKAGE_INVALID"
 )
 
@@ -151,6 +149,7 @@ const (
 	ChangePlanFailed               = Prefix + "CHANGE_PLAN_FAILED"
 )
 
+const (
 	ExplainInvocationInvalid = Prefix + "EXPLAIN_INVOCATION_INVALID"
 	ExplainSubjectInvalid    = Prefix + "EXPLAIN_SUBJECT_INVALID"
 	ExplainTargetNotFound    = Prefix + "EXPLAIN_TARGET_NOT_FOUND"

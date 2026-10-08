@@ -28,7 +28,6 @@ import (
 	"github.com/plystra/cli/internal/configurationresolve"
 	"github.com/plystra/cli/internal/connectgen"
 	"github.com/plystra/cli/internal/constructorgraph"
-	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/generatedfiles"
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/implementationadaptergen"
@@ -112,7 +111,6 @@ type Options struct {
 	Start                 string
 	Check                 bool
 	Offline               bool
-	DataCompilerCacheRoot string
 	ConfigurationPath     string
 	EnvironmentName       string
 	GoCommand             string
@@ -121,7 +119,6 @@ type Options struct {
 	CompileTimeout        time.Duration
 	ExecutionTimeout      time.Duration
 	TemporaryParent       string
-	DataCompilerObserve   datacompiler.ObservationSink
 	Validate              Validator
 	MutateModule          ModuleMutation
 	RejectUnexpected      bool
@@ -129,8 +126,7 @@ type Options struct {
 
 // Result identifies the resolved application and its deterministic generated
 // output comparison. A successful installation can retain unexpected unowned
-// files, which remain visible in Report rather than being overwritten. Data
-// compiler observations remain available when a later generation phase fails.
+// files, which remain visible in Report rather than being overwritten.
 type Result struct {
 	module                   modulelocate.Module
 	report                   generatedfiles.Report
@@ -144,8 +140,6 @@ type Result struct {
 	javaScriptComparison     interfacecompatibility.JavaScriptComparison
 	documentationComparison  interfacecompatibility.DocumentationComparison
 	evolutionAssessment      interfacecompatibility.EvolutionAssessment
-	dataCompiler             applicationresolve.DataCompilerAcquisition
-	dataCompilerObservations []datacompiler.Observation
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -172,26 +166,6 @@ func (r Result) ConfigurationSelection() (applicationresolve.ConfigurationSelect
 		return applicationresolve.ConfigurationSelection{}, false
 	}
 	return r.configurationSelection, true
-}
-
-// DataCompilerAcquisition returns the verified Data compiler identity retained
-// by resolution. It is absent for Projects without active Data members.
-func (r Result) DataCompilerAcquisition() (applicationresolve.DataCompilerAcquisition, bool) {
-	if !r.dataCompiler.Valid() {
-		return applicationresolve.DataCompilerAcquisition{}, false
-	}
-	return r.dataCompiler, true
-}
-
-// DataCompilerObservations returns public-safe compiler effects observed while
-// resolving or invoking the selected Data compiler.
-func (r Result) DataCompilerObservations() []datacompiler.Observation {
-	result := make([]datacompiler.Observation, len(r.dataCompilerObservations))
-	for index, observation := range r.dataCompilerObservations {
-		result[index] = observation
-		result[index].Verification = append([]string(nil), observation.Verification...)
-	}
-	return result
 }
 
 // InterfaceShapeComparison returns the authored Interface Go-shape
@@ -244,22 +218,14 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	if options.Offline && options.MutateModule != nil {
 		return Result{}, fmt.Errorf("%w: offline generation cannot mutate Go module metadata", ErrGenerate)
 	}
-	parentObserve := options.DataCompilerObserve
-	var observations []datacompiler.Observation
-	options.DataCompilerObserve = func(observation datacompiler.Observation) {
-		observations = append(observations, observation)
-		if parentObserve != nil {
-			parentObserve(observation)
-		}
-	}
 	options.Environment = generationEnvironment(options.Environment, options.Offline)
 	prepared, err := prepare(ctx, options, options.Start)
 	if err != nil {
-		return partialResult(prepared.resolved, observations), fmt.Errorf("%w: %w", ErrGenerate, err)
+		return partialResult(prepared.resolved), fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	if options.Check {
 		if err := validateRuntimeRequirements(prepared.resolved, prepared.runtimeRequirements); err != nil {
-			return partialResult(prepared.resolved, observations), fmt.Errorf("%w: %w", ErrGenerate, err)
+			return partialResult(prepared.resolved), fmt.Errorf("%w: %w", ErrGenerate, err)
 		}
 		report, err := generatedfiles.Check(prepared.resolved.Module().Path(), prepared.output)
 		if err != nil {
@@ -267,7 +233,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			if !errors.Is(err, ErrConcurrentChange) {
 				err = generatedManifestSourceError(prepared.resolved.Module().ModulePath(), err)
 			}
-			return partialResult(prepared.resolved, observations), fmt.Errorf("%w: %w", ErrGenerate, err)
+			return partialResult(prepared.resolved), fmt.Errorf("%w: %w", ErrGenerate, err)
 		}
 		return Result{
 			module:                   prepared.resolved.Module(),
@@ -281,8 +247,6 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			javaScriptComparison:     prepared.javaScriptComparison,
 			documentationComparison:  prepared.documentationComparison,
 			evolutionAssessment:      prepared.evolutionAssessment,
-			dataCompiler:             resolvedDataCompiler(prepared.resolved),
-			dataCompilerObservations: cloneDataCompilerObservations(observations),
 		}, nil
 	}
 
@@ -298,7 +262,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 	}
 	additional, err := runtimebaseline.Writes(prepared.resolved.Module().Path(), prepared.baseline)
 	if err != nil {
-		return partialResult(prepared.resolved, observations), fmt.Errorf("%w: %w", ErrGenerate, err)
+		return partialResult(prepared.resolved), fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	install := generatedfiles.InstallWithWritesOutcome
 	if options.RejectUnexpected {
@@ -338,7 +302,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 				err = unexpectedOutputSourceError(prepared.resolved.Module().ModulePath(), unexpected.Paths(), err)
 			}
 		}
-		return partialResult(prepared.resolved, observations), fmt.Errorf("%w: %w", ErrGenerate, err)
+		return partialResult(prepared.resolved), fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	return Result{
 		module:                   prepared.resolved.Module(),
@@ -352,33 +316,15 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		javaScriptComparison:     prepared.javaScriptComparison,
 		documentationComparison:  prepared.documentationComparison,
 		evolutionAssessment:      prepared.evolutionAssessment,
-		dataCompiler:             resolvedDataCompiler(prepared.resolved),
-		dataCompilerObservations: cloneDataCompilerObservations(observations),
 	}, nil
 }
 
-func partialResult(resolved applicationresolve.Result, observations []datacompiler.Observation) Result {
+func partialResult(resolved applicationresolve.Result) Result {
 	return Result{
 		module:                   resolved.Module(),
 		configurationPath:        resolved.ConfigurationSelection().Path(),
 		configurationSelection:   resolved.ConfigurationSelection(),
-		dataCompiler:             resolvedDataCompiler(resolved),
-		dataCompilerObservations: cloneDataCompilerObservations(observations),
 	}
-}
-
-func cloneDataCompilerObservations(input []datacompiler.Observation) []datacompiler.Observation {
-	result := make([]datacompiler.Observation, len(input))
-	for index, observation := range input {
-		result[index] = observation
-		result[index].Verification = append([]string(nil), observation.Verification...)
-	}
-	return result
-}
-
-func resolvedDataCompiler(resolved applicationresolve.Result) applicationresolve.DataCompilerAcquisition {
-	acquisition, _ := resolved.DataCompilerAcquisition()
-	return acquisition
 }
 
 func generationEnvironment(environment []string, offline bool) []string {
@@ -543,7 +489,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		RequireExecutablePolicies: true,
 		Start:                     start,
 		Offline:                   options.Offline,
-		DataCompilerCacheRoot:     options.DataCompilerCacheRoot,
 		ConfigurationPath:         options.ConfigurationPath,
 		EnvironmentName:           options.EnvironmentName,
 		GoCommand:                 options.GoCommand,
@@ -552,7 +497,6 @@ func prepare(ctx context.Context, options Options, start string) (preparedGenera
 		CompileTimeout:            options.CompileTimeout,
 		ExecutionTimeout:          options.ExecutionTimeout,
 		TemporaryParent:           options.TemporaryParent,
-		DataCompilerObserve:       options.DataCompilerObserve,
 	})
 	if err != nil {
 		return preparedGeneration{resolved: resolved}, err

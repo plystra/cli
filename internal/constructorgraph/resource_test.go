@@ -83,82 +83,6 @@ func TestResourceGraphBuildsNamedInstancesAndSharedDependencies(t *testing.T) {
 	}
 }
 
-func TestResourceGraphProjectsGeneratedAccessProviderAndBindsItsDatabase(t *testing.T) {
-	t.Parallel()
-	input := resourceGraphInput(t)
-	input.GeneratedResources = []constructorgraph.GeneratedResourceInput{{
-		MemberID: "example.records/v1", Name: "access.records", ResourceID: mustGraphID(t, "data.access/v1"),
-		PackagePath: "example.com/app/access", TypeName: "Resource", Constructor: mustGraphSymbol(t, "example.com/app/generated/data/access/records.New"),
-		DatabaseResourceID: mustGraphID(t, "data.raw/v1"), DatabasePackagePath: "example.com/app/contracts/raw",
-		DatabaseParameter: "database", DatabaseParameterPosition: 1, Sources: []constructorgraph.ResourceSource{resourceSource("data.members.example.records")},
-	}}
-	input.ResourceBindings = append(input.ResourceBindings, resourceBinding(constructorgraph.ResourceConsumerInstance, "access.records", "database", "database.primary"))
-	graph, err := constructorgraph.Build(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	generated := graph.GeneratedResourceConstructionOrder()
-	if len(generated) != 1 || generated[0].Name() != "access.records" || generated[0].MemberID() != "example.records/v1" || generated[0].ResourceID().String() != "data.access/v1" || generated[0].PackagePath() != "example.com/app/access" || generated[0].TypeName() != "Resource" {
-		t.Fatalf("generated Resource nodes = %#v", generated)
-	}
-	if len(graph.ResourceConstructionOrder()) != 5 {
-		t.Fatalf("generated provider became a selected database instance: %#v", graph.ResourceConstructionOrder())
-	}
-	constructor := mustGraphSymbol(t, "example.com/app/generated/data/access/records.New")
-	dependencies := graph.ResourceDependencies(constructor)
-	if len(dependencies) != 1 || dependencies[0].InstanceName() != "database.primary" || dependencies[0].Provider().String() != "example.com/app/raw.New" || dependencies[0].Reason() != constructorgraph.SelectionExplicit || dependencies[0].ParameterName() != "database" {
-		t.Fatalf("generated Resource dependency = %#v", dependencies)
-	}
-	if got := generated[0].Dependencies(); len(got) != 1 || got[0].InstanceName() != "database.primary" {
-		t.Fatalf("generated node dependencies = %#v", got)
-	}
-}
-
-func TestResourceGraphRejectsImplementationBindingToUninstalledGeneratedResource(t *testing.T) {
-	t.Parallel()
-	input := resourceGraphInput(t)
-	input.ResourceInstances = []constructorgraph.ResourceInstanceInput{resourceInstance(t, "database.primary", "raw.New")}
-	input.ResourceBindings = nil
-	input.GeneratedResources = []constructorgraph.GeneratedResourceInput{generatedResourceInput(t, "access.view", "data.view/v1", "data.raw/v1")}
-	_, err := constructorgraph.Build(input)
-	var failure *constructorgraph.ResourceBindingError
-	if !errors.Is(err, constructorgraph.ErrInvalidResourceBinding) || !errors.As(err, &failure) || len(failure.GeneratedCandidates()) != 1 || !strings.Contains(err.Error(), "requires Data emission and installation") {
-		t.Fatalf("uninstalled generated binding = %v", err)
-	}
-}
-
-func TestResourceGraphReportsGeneratedCandidateInAmbiguity(t *testing.T) {
-	t.Parallel()
-	input := resourceGraphInput(t)
-	input.GeneratedResources = []constructorgraph.GeneratedResourceInput{generatedResourceInput(t, "access.view", "data.view/v1", "data.raw/v1")}
-	bindings := input.ResourceBindings[:0]
-	for _, binding := range input.ResourceBindings {
-		if binding.Consumer == "example.com/app/service.New" && binding.Parameter == "view" {
-			continue
-		}
-		bindings = append(bindings, binding)
-	}
-	input.ResourceBindings = append(bindings, resourceBinding(constructorgraph.ResourceConsumerInstance, "access.view", "database", "database.primary"))
-	_, err := constructorgraph.Build(input)
-	var failure *constructorgraph.ResourceBindingError
-	if !errors.Is(err, constructorgraph.ErrAmbiguousResourceBinding) || !errors.As(err, &failure) || len(failure.Candidates()) != 2 || len(failure.GeneratedCandidates()) != 1 || !strings.Contains(err.Error(), "generated instance access.view") {
-		t.Fatalf("generated ambiguity = %v", err)
-	}
-}
-
-func TestResourceGraphRejectsSelectedGeneratedResourceCycle(t *testing.T) {
-	t.Parallel()
-	input := resourceGraphInput(t)
-	input.ResourceInstances = []constructorgraph.ResourceInstanceInput{resourceInstance(t, "view.first", "view.New")}
-	input.ResourceBindings = nil
-	input.GeneratedResources = []constructorgraph.GeneratedResourceInput{generatedResourceInput(t, "access.raw", "data.raw/v1", "data.view/v1")}
-	_, err := constructorgraph.Build(input)
-	var cycle *constructorgraph.ResourceCycleError
-	if !errors.Is(err, constructorgraph.ErrCycle) || !errors.As(err, &cycle) || len(cycle.Steps()) < 2 || !strings.Contains(err.Error(), "view.first") || !strings.Contains(err.Error(), "access.raw") {
-		t.Fatalf("selected/generated cycle = %v", err)
-	}
-}
-
 func TestResourceGraphResolvesOnlyActiveImplicitConsumers(t *testing.T) {
 	t.Parallel()
 	input := resourceGraphInput(t)
@@ -535,16 +459,6 @@ func resourceInstance(t testing.TB, name, provider string) constructorgraph.Reso
 	return constructorgraph.ResourceInstanceInput{Name: name, Provider: mustGraphSymbol(t, "example.com/app/"+provider), Sources: []constructorgraph.ResourceSource{resourceSource("resources.instances." + name)}}
 }
 
-func generatedResourceInput(t testing.TB, name, resourceID, databaseID string) constructorgraph.GeneratedResourceInput {
-	t.Helper()
-	return constructorgraph.GeneratedResourceInput{
-		MemberID: name + "/member", Name: name, ResourceID: mustGraphID(t, resourceID),
-		PackagePath: "example.com/app/contracts/" + strings.TrimPrefix(resourceID, "data."), TypeName: "Resource",
-		Constructor:        mustGraphSymbol(t, "example.com/app/generated/"+strings.ReplaceAll(name, ".", "/")+".New"),
-		DatabaseResourceID: mustGraphID(t, databaseID), DatabasePackagePath: "example.com/app/contracts/" + strings.TrimPrefix(databaseID, "data."),
-		DatabaseParameter: "database", DatabaseParameterPosition: 1, Sources: []constructorgraph.ResourceSource{resourceSource("data.members." + name)},
-	}
-}
 func resourceBinding(namespace constructorgraph.ResourceConsumerNamespace, consumer, parameter, target string) constructorgraph.ResourceBindingInput {
 	return constructorgraph.ResourceBindingInput{Namespace: namespace, Consumer: consumer, Parameter: parameter, Target: target, Sources: []constructorgraph.ResourceSource{resourceSource("resources.bind." + string(namespace) + "." + consumer + "." + parameter)}}
 }

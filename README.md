@@ -1202,35 +1202,12 @@ assignability produce `PLYSTRA_RESOURCE_PROVIDER_DECLARATION_INVALID` or
 Installed capability facts distinguish contract and constructor discovery from
 named-instance configuration, binding, generation, and execution. Read each
 support stage independently; implemented stages do not imply `accepted: yes`.
-The selected Data compiler's bounded analyze phase is integrated as a
-read-only pre-Freeze step: the CLI supplies a finite source snapshot and
-independently validates the complete typed result, provenance, Resource
-identity, and logical-model digest. Emit, generated access installation,
-PostgreSQL/D1 generation, and migration commands remain unsupported.
-
-The CLI parses current-Project `data.members` assignments as exact member-ID
-entries. Each entry requires one valid named `resource` and may name an `access`
-instance. An environment overlay replaces an entire entry or removes it with
-`{$remove: true}`; root and complete replacement documents cannot remove it.
-This is configuration composition only. The CLI runs and accepts the bounded
-analyze result for effective active members, then still makes
-`plystra generate` and `plystra generate --check` fail with
-`PLYSTRA_DATA_COMPILER_UNAVAILABLE` at the unimplemented emit and installation
-boundary before changing the Project. The CLI first
-resolves the exact `github.com/plystra/data` version, verified `h1:` checksum,
-and distribution manifest from the selected Project's ordinary Go Module graph;
-workspace and replacement sources are not accepted as published compiler
-distributions. A missing or invalid distribution is reported with the active
-member's configuration source. Invalid entries report
-`PLYSTRA_DATA_MEMBER_METADATA_INVALID` with their source location. Analyze
-execution and result acceptance are installed as an internal boundary, but
-assignment activation, emit, generated access installation, and migrations
-remain unsupported.
-The internal resolution and generation results retain the verified compiler
-identity, cache-hit fact, selected distribution manifest, and accepted analyze
-output even when generation stops at this boundary. They do not expose the
-private compiler path in public command output. Public cache-effect reporting
-and installed Data artifacts remain incomplete.
+Data products are outside this CLI's ownership boundary. The CLI does not
+parse Data-specific configuration, resolve a Data compiler, generate database
+access, or manage migrations. Projects that need those capabilities should use
+the independent Data repository and integrate only through its own public
+contract; the Core CLI remains limited to generic Interfaces, Resources, and
+application assembly.
 
 ### Named Resource instances
 
@@ -1288,7 +1265,7 @@ from provider selection and full Resource acceptance; generated and executed
 scaffold support does not establish `accepted: yes`. After manual declaration or binding edits, run `plystra generate`,
 `plystra generate --check`, and `plystra check` with the same selector. Do not
 hand-edit generated assembly. Installed `resource.provider.selection` support
-does not establish Resource or Data acceptance; Gate 5 remains incomplete under the
+does not establish full Resource acceptance; Gate 5 remains incomplete under the
 current creation-only template contract.
 
 ### Explain resolution
@@ -1613,8 +1590,8 @@ Generation preserves authored YAML bytes and never materializes lower-layer valu
 
 `--format human` is the default. `--format json` writes exactly one
 `plystra.result/v1` document to stdout with a `plystra.generate/v1` payload,
-the non-secret selected configuration snapshot, and observed Data compiler and
-Project-write effects. Diagnostics and recovery remain on stderr; JSON mode
+the non-secret selected configuration snapshot and Project-write effects.
+Diagnostics and recovery remain on stderr; JSON mode
 never mixes human progress into stdout. Successful installation reports
 `success`, while a clean `--check` reports `no_op`; invalid invocation,
 validation, prerequisite, decision, cancellation, and execution failures use

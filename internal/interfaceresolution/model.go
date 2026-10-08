@@ -64,7 +64,6 @@ type Input struct {
 	ResourceProviders  resourceproviderinventory.Index
 	ResourceInstances  []constructorgraph.ResourceInstanceInput
 	ResourceBindings   []constructorgraph.ResourceBindingInput
-	GeneratedResources []constructorgraph.GeneratedResourceInput
 }
 
 // IntrinsicRequirement is one always-present reserved Kernel Interface with

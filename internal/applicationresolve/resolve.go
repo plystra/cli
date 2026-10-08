@@ -4,7 +4,6 @@ package applicationresolve
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -14,9 +13,7 @@ import (
 	"github.com/plystra/cli/internal/applicationinput"
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/configurationresolve"
-	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/constructorsymbol"
-	"github.com/plystra/cli/internal/datacompiler"
 	"github.com/plystra/cli/internal/generationexec"
 	"github.com/plystra/cli/internal/generationresolution"
 	"github.com/plystra/cli/internal/implementationinventory"
@@ -50,57 +47,7 @@ var (
 	// configuration whose constructor is neither explicitly selected nor
 	// reachable in the frozen Interface constructor graph.
 	ErrUnownedConstructorConfiguration = errors.New("constructor configuration has no explicit selection or reachable constructor")
-	// ErrDataCompilerUnavailable reports selected Data activation before the
-	// CLI can emit and install the accepted compiler result.
-	ErrDataCompilerUnavailable = errors.New("Data compiler integration is unavailable")
-	// ErrDataCompilerAnalysisUnavailable reports a failure to invoke the
-	// selected compiler or independently accept its analyze result.
-	ErrDataCompilerAnalysisUnavailable = errors.New("Data compiler analyze integration is unavailable")
 )
-
-// DataCompilerUnavailableError identifies the selected member whose accepted
-// Data result cannot yet be installed by this CLI.
-type DataCompilerUnavailableError struct {
-	member       applicationmeta.DataMember
-	cause        error
-	acquisition  DataCompilerAcquisition
-	observations []datacompiler.Observation
-}
-
-func (e *DataCompilerUnavailableError) Error() string {
-	if e.cause != nil {
-		return fmt.Sprintf("%s: %s: %v", ErrDataCompilerUnavailable, e.member.Source(), e.cause)
-	}
-	return fmt.Sprintf("%s: %s requires the selected Data compiler before generation", ErrDataCompilerUnavailable, e.member.Source())
-}
-func (e *DataCompilerUnavailableError) Unwrap() []error {
-	if e.cause == nil {
-		return []error{ErrDataCompilerUnavailable}
-	}
-	return []error{ErrDataCompilerUnavailable, e.cause}
-}
-func (e *DataCompilerUnavailableError) Source() applicationmeta.ConfigurationDeclarationSource {
-	return e.member.DeclarationSource()
-}
-
-// Acquisition returns the verified compiler identity when acquisition
-// completed before a later Data phase failed. The boolean is false when no
-// compiler executable was materialized or reused.
-func (e *DataCompilerUnavailableError) Acquisition() (DataCompilerAcquisition, bool) {
-	if e == nil || !e.acquisition.Valid() {
-		return DataCompilerAcquisition{}, false
-	}
-	return e.acquisition, true
-}
-
-// Observations returns public-safe compiler effects observed before the Data
-// boundary failed. Host paths and raw compiler arguments are never retained.
-func (e *DataCompilerUnavailableError) Observations() []datacompiler.Observation {
-	if e == nil {
-		return nil
-	}
-	return cloneDataCompilerObservations(e.observations)
-}
 
 type dependencyConcurrentChangeError struct {
 	cause error
@@ -189,17 +136,13 @@ type Options struct {
 	// Offline constrains module and eligible-package discovery to locally
 	// available selected sources. Other Go helpers still need their own guard.
 	Offline               bool
-	DataCompilerCacheRoot string
 	CompileTimeout        time.Duration
 	ExecutionTimeout      time.Duration
 	TemporaryParent       string
-	DataCompilerObserve   datacompiler.ObservationSink
 }
 
 // Result is one immutable filesystem provenance and stable generation
-// resolution assembled from the same application snapshot. On an active Data
-// boundary failure, only verified Data handoff fields and public-safe compiler
-// observations may be populated.
+// resolution assembled from the same application snapshot.
 type Result struct {
 	module                   modulelocate.Module
 	currentManifest          applicationmeta.Manifest
@@ -218,12 +161,6 @@ type Result struct {
 	rootData                 []byte
 	rootDigest               string
 	configurationSource      []byte
-	dataCompiler             datacompiler.Artifact
-	dataCompilerManifest     datacompiler.Manifest
-	dataCompilerStatus       DataCompilerAcquisition
-	dataAnalysis             DataAnalysisAcceptance
-	dataAnalyzeOutput        json.RawMessage
-	dataCompilerObservations []datacompiler.Observation
 }
 
 // Module returns the nearest Plystra Project Go Module.
@@ -299,65 +236,6 @@ func (r Result) ConfigurationSource() []byte {
 	return append([]byte(nil), r.configurationSource...)
 }
 
-// DataCompilerAcquisition returns the verified compiler identity retained by
-// resolution, including a partial result returned with a later Data error.
-func (r Result) DataCompilerAcquisition() (DataCompilerAcquisition, bool) {
-	if !r.dataCompilerStatus.Valid() {
-		return DataCompilerAcquisition{}, false
-	}
-	return r.dataCompilerStatus, true
-}
-
-// DataCompilerArtifact returns the verified private compiler executable for a
-// later protocol phase. Callers must not persist or expose its path.
-func (r Result) DataCompilerArtifact() (datacompiler.Artifact, bool) {
-	if r.dataCompiler.Path == "" {
-		return datacompiler.Artifact{}, false
-	}
-	return r.dataCompiler, true
-}
-
-// DataCompilerManifest returns the exact selected distribution contract for
-// the retained compiler. It is absent when no compiler was acquired.
-func (r Result) DataCompilerManifest() (datacompiler.Manifest, bool) {
-	if !r.dataCompilerStatus.Valid() {
-		return datacompiler.Manifest{}, false
-	}
-	return r.dataCompilerManifest, true
-}
-
-// DataAnalysis returns the independently accepted Data model retained before
-// generation. Its contents are immutable through defensive accessors.
-func (r Result) DataAnalysis() (DataAnalysisAcceptance, bool) {
-	if !r.dataAnalysis.Valid() {
-		return DataAnalysisAcceptance{}, false
-	}
-	return r.dataAnalysis, true
-}
-
-// DataAnalyzeOutput returns the accepted versioned analyze payload for emit.
-func (r Result) DataAnalyzeOutput() (json.RawMessage, bool) {
-	if !r.dataAnalysis.Valid() || len(r.dataAnalyzeOutput) == 0 {
-		return nil, false
-	}
-	return append(json.RawMessage(nil), r.dataAnalyzeOutput...), true
-}
-
-// DataCompilerObservations returns public-safe compiler effects observed while
-// acquiring or invoking the selected Data compiler.
-func (r Result) DataCompilerObservations() []datacompiler.Observation {
-	return cloneDataCompilerObservations(r.dataCompilerObservations)
-}
-
-func cloneDataCompilerObservations(input []datacompiler.Observation) []datacompiler.Observation {
-	result := make([]datacompiler.Observation, len(input))
-	for index, observation := range input {
-		result[index] = observation
-		result[index].Verification = append([]string(nil), observation.Verification...)
-	}
-	return result
-}
-
 // Resolve locates the nearest Project, loads its root plystra.yaml, discovers
 // the effective Go Module graph and active authored Interface and Implementation
 // packages, indexes legacy Project inputs not yet removed by later roadmap
@@ -380,35 +258,6 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, err
 	}
 	manifest := composition.Manifest()
-	var dataMembers []applicationmeta.DataMember
-	var dataRun dataAnalyzeRun
-	var dataAnalysis DataAnalysisAcceptance
-	var dataActivation DataActivation
-	if members := manifest.DataMembers(); len(members) != 0 {
-		dataMembers = members
-		memberIDs := make([]string, len(members))
-		for index, member := range members {
-			memberIDs[index] = member.ID()
-		}
-		dataRun, err = inputs.analyzeData(ctx, options)
-		partial := Result{
-			module:       module,
-			selection:    ConfigurationSelection{mode: selector.mode, path: selector.path, environment: selector.environment},
-			dataCompiler: dataRun.artifact, dataCompilerManifest: dataRun.manifest,
-			dataCompilerStatus:       dataRun.status,
-			dataCompilerObservations: cloneDataCompilerObservations(dataRun.observations),
-		}
-		if err != nil {
-			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: err, acquisition: dataRun.status, observations: dataRun.observations})
-		}
-		dataAnalysis, err = validateDataAnalysisWithBounds(dataRun.response, memberIDs, dataRun.snapshot, dataRun.bounds, true)
-		if err != nil {
-			return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: fmt.Errorf("%w: %v", ErrDataCompilerAnalysisUnavailable, err), acquisition: dataRun.status, observations: dataRun.observations})
-		}
-		partial.dataAnalysis = dataAnalysis
-		partial.dataAnalyzeOutput = append(json.RawMessage(nil), dataRun.response.Output...)
-		return partial, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{member: members[0], cause: ErrDataCompilerAnalysisUnavailable, acquisition: dataRun.status, observations: dataRun.observations})
-	}
 	currentLayers := composition.CurrentLayers()
 	if len(currentLayers) == 0 {
 		return Result{}, fmt.Errorf("%w: composed current-project layers are absent", ErrResolve)
@@ -426,14 +275,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
 	}
 	sourceContext := applicationInputSourceContext(module, dependencies, composition, currentProjectPaths)
-	var generatedResources []constructorgraph.GeneratedResourceInput
-	if dataActivation.Valid() {
-		generatedResources, err = buildDataGeneratedResources(module.ModulePath(), manifest, dataActivation)
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
-		}
-	}
-	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext, generatedResources)
+	interfaceResolution, err := resolveInterfaces(manifest, composition, interfaces, implementations, declarations.ResourceProviders(), inventory, sourceContext)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -541,31 +383,8 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		rootData:                 append([]byte(nil), rootData...),
 		rootDigest:               rootDigest,
 		configurationSource:      configurationSnapshot.Data(),
-		dataCompiler:             dataRun.artifact,
-		dataCompilerManifest:     dataRun.manifest,
-		dataCompilerStatus:       dataRun.status,
-		dataAnalysis:             dataAnalysis,
-		dataActivation:           dataActivation,
-		dataAnalyzeOutput:        append(json.RawMessage(nil), dataRun.response.Output...),
-		dataCompilerObservations: cloneDataCompilerObservations(dataRun.observations),
-	}
-	if dataActivation.Valid() {
-		if err := validateDataBackend(interfaceResolution.Graph(), declarations.Resources(), dataActivation); err != nil {
-			return result, fmt.Errorf("%w: %w", ErrResolve, &DataAssignmentError{member: dataMembers[0], cause: err})
-		}
-		return result, fmt.Errorf("%w: %w", ErrResolve, &DataCompilerUnavailableError{
-			member: membersFirst(dataMembers), cause: ErrDataCompilerAnalysisUnavailable,
-			acquisition: dataRun.status, observations: dataRun.observations,
-		})
 	}
 	return result, nil
-}
-
-func membersFirst(members []applicationmeta.DataMember) applicationmeta.DataMember {
-	if len(members) == 0 {
-		return applicationmeta.DataMember{}
-	}
-	return members[0]
 }
 
 func currentProjectConfigurationPaths(base, selected applicationmeta.Manifest, environment bool, schemas applicationmeta.SchemaLookup) ([]string, error) {

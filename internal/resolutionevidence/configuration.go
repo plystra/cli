@@ -73,7 +73,7 @@ func configurationEvidenceFromInput(input *ConfigurationInput, context generatio
 				precedence: precedence,
 			}
 			reference := decision.Source()
-			for _, prefix := range []string{"resources.", "data.members["} {
+			for _, prefix := range []string{"resources."} {
 				if strings.HasPrefix(decision.Path(), prefix) {
 					if index := strings.LastIndex(reference, " "+prefix); index >= 0 && validConfigurationFieldPath(reference[index+1:]) {
 						reference = reference[:index]
@@ -463,10 +463,6 @@ func validConfigurationFieldPath(value string) bool {
 		return err == nil
 	}
 	if keys, ok := configurationPathKeys(value, "http.expose"); ok && len(keys) == 1 {
-		_, err := interfaceid.Parse(keys[0])
-		return err == nil
-	}
-	if keys, ok := configurationPathKeys(value, "data.members"); ok && len(keys) == 1 {
 		_, err := interfaceid.Parse(keys[0])
 		return err == nil
 	}

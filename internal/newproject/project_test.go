@@ -159,7 +159,7 @@ func TestCreateAndPublicCommandProduceDeterministicBuildableProjects(t *testing.
 		".agents/skills/plystra/tasks/diagnostics-and-recovery.md",
 		".agents/skills/plystra/tasks/interfaces-and-implementations.md",
 		".agents/skills/plystra/tasks/project-and-dependencies.md",
-		".agents/skills/plystra/tasks/resources-and-data.md",
+		".agents/skills/plystra/tasks/resources.md",
 		".agents/skills/plystra/tasks/verify-build-and-release.md",
 		".gitattributes",
 		".github/workflows/ci.yml",

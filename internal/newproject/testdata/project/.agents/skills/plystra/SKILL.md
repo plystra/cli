@@ -16,7 +16,7 @@ Start with `plystra help` and the exact subcommand help. Read only the task refe
 - [Project and dependencies](tasks/project-and-dependencies.md): create a Project, inspect its layout, or change Go Module dependencies.
 - [Interfaces and Implementations](tasks/interfaces-and-implementations.md): define, implement, require, expose, or select an Interface.
 - [Configuration and Secrets](tasks/configuration-and-secrets.md): edit root, environment, or complete-replacement configuration safely.
-- [Resources and Data](tasks/resources-and-data.md): check whether this installed release supports the required Resource or Data workflow.
+- [Resources](tasks/resources.md): discover, configure, and bind named Resources.
 - [Diagnostics and recovery](tasks/diagnostics-and-recovery.md): inspect selected state and follow source-bearing diagnostics.
 - [Verify, build, and release](tasks/verify-build-and-release.md): prove generated state, tests, builds, and installed release support.
 

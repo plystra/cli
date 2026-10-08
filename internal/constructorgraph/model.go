@@ -83,7 +83,6 @@ type Input struct {
 	ResourceProviders  resourceproviderinventory.Index
 	ResourceInstances  []ResourceInstanceInput
 	ResourceBindings   []ResourceBindingInput
-	GeneratedResources []GeneratedResourceInput
 }
 
 // Graph is an immutable deterministic constructor dependency graph.
@@ -93,7 +92,6 @@ type Graph struct {
 	construction         []Node
 	resourceConstruction []ResourceNode
 	resourceDependencies map[constructorsymbol.Symbol][]ResourceDependency
-	generatedResources   []GeneratedResourceNode
 }
 
 // Roots returns the normalized Interface roots in canonical ID order.
