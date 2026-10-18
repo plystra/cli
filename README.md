@@ -845,9 +845,11 @@ conflicting targets fail without exposing submitted configuration values.
 The installed public `plystra change plan` slice accepts one
 `implementation_selection` set operation, validates its final ownership graph,
 and emits a read-only `plystra.change-plan/v1` payload with a plan digest and
-all five `configuration_impact` arrays. Other operation kinds return a
-structured unsupported result; `change apply`, primitive-command lowering,
-and `--dry-run` remain unavailable.
+all five `configuration_impact` arrays. When both the old and candidate graphs
+resolve, a newly reachable Implementation reports its required top-level
+Config fields and constructor provenance without exposing configured values.
+Other operation kinds return a structured unsupported result; `change apply`,
+primitive-command lowering, and `--dry-run` remain unavailable.
 
 ## Authoring behavior
 

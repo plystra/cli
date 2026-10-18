@@ -132,11 +132,60 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
 		impactBefore = composed
 	}
-	impact, err := configurationimpact.Compare(impactBefore.Manifest(), candidate.Manifest(), configurationimpact.Input{})
+	impactInput := configurationimpact.Input{}
+	if kind == "interface" {
+		impactInput.NewlyRequiredFields, err = newlyRequiredImplementationFields(inputs, before, candidate)
+		if err != nil {
+			return nil, kind, configurationimpact.Impact{}, err
+		}
+	}
+	impact, err := configurationimpact.Compare(impactBefore.Manifest(), candidate.Manifest(), impactInput)
 	if err != nil {
 		return nil, kind, configurationimpact.Impact{}, err
 	}
 	return updated, kind, impact, nil
+}
+
+func newlyRequiredImplementationFields(inputs applicationresolve.SelectionInputs, before, after applicationmeta.Composition) ([]configurationimpact.NewlyRequiredField, error) {
+	previous, err := inputs.ResolveCandidateInterfaces(before)
+	if err != nil {
+		return nil, nil
+	}
+	current, err := inputs.ResolveCandidateInterfaces(after)
+	if err != nil {
+		return nil, err
+	}
+	oldOwners := make(map[constructorsymbol.Symbol]bool)
+	for _, node := range previous.Graph().ConstructionOrder() {
+		oldOwners[node.Symbol()] = true
+	}
+	var fields []configurationimpact.NewlyRequiredField
+	for _, node := range current.Graph().ConstructionOrder() {
+		if oldOwners[node.Symbol()] {
+			continue
+		}
+		implementation, exists := inputs.Declarations().Implementations().BySymbol(node.Symbol())
+		if !exists {
+			continue
+		}
+		configuration, exists := implementation.Configuration()
+		if !exists {
+			continue
+		}
+		for _, field := range configuration.Fields() {
+			if !field.Required() {
+				continue
+			}
+			fields = append(fields, configurationimpact.NewlyRequiredField{
+				Owner:              implementation.Symbol().String(),
+				Path:               "config." + implementation.Symbol().String() + "." + field.Name(),
+				SchemaSource:       implementation.Source(),
+				RequirednessReason: "required-field-on-newly-reachable-constructor",
+				DefaultSatisfies:   field.HasDefault(),
+			})
+		}
+	}
+	return fields, nil
 }
 
 func selectResourceProvider(inputs applicationresolve.SelectionInputs, original []byte, target string, constructor constructorsymbol.Symbol, overlay bool) ([]byte, error) {

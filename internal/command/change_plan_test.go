@@ -88,3 +88,48 @@ func TestRunChangePlanRejectsUninstalledOperationWithoutMutation(t *testing.T) {
 		t.Fatalf("unsupported change plan mutated the Project:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
+
+func TestRunChangePlanReportsNewlyRequiredConstructorField(t *testing.T) {
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandConfigurableImplementation(t, root, "local", "email.send/v1", "email/send/v1", "Send")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
+  require: [email.send/v1]
+  use:
+    email.send/v1: example.com/acme/implementation-use/smtp.New
+config:
+  example.com/acme/implementation-use/local.New:
+    endpoint: PRIVATE_ENDPOINT
+`)
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"set","interface":"email.send/v1","constructor":"example.com/acme/implementation-use/local.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("change plan = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Payload struct {
+			ConfigurationImpact struct {
+				NewlyRequiredFields []struct {
+					Owner              string `json:"owner"`
+					Path               string `json:"path"`
+					SchemaSource       string `json:"schema_source"`
+					RequirednessReason string `json:"requiredness_reason"`
+					DefaultSatisfies   bool   `json:"default_satisfies"`
+				} `json:"newly_required_fields"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode change plan: %v\n%s", err, stdout)
+	}
+	fields := result.Payload.ConfigurationImpact.NewlyRequiredFields
+	if len(fields) != 1 || fields[0].Owner != "example.com/acme/implementation-use/local.New" || fields[0].Path != "config.example.com/acme/implementation-use/local.New.endpoint" || !strings.HasPrefix(fields[0].SchemaSource, "example.com/acme/implementation-use@local/local/implementation.go:") || fields[0].RequirednessReason != "required-field-on-newly-reachable-constructor" || fields[0].DefaultSatisfies {
+		t.Fatalf("newly required fields = %#v", fields)
+	}
+	if strings.Contains(stdout, "PRIVATE_ENDPOINT") {
+		t.Fatal("change plan disclosed a private configuration value")
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("change plan changed Project files")
+	}
+}
