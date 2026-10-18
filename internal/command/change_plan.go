@@ -24,9 +24,9 @@ const changePlanUsage = `Usage:
 
 Plans one bounded declarative change request without modifying the Project. This
 initial installed slice accepts one implementation_selection set operation and
-validates its final Interface/Resource ownership graph. A missing newly required
-constructor or non-pointer fixed-object child value is reported as an unresolved
-non-exact preview.
+validates its final Interface/Resource ownership graph. Missing newly required
+constructor or non-pointer fixed-object child values are reported as unresolved
+decisions in a non-exact preview.
 Other operation kinds return a structured unsupported result until their staged
 planners are installed.
 `

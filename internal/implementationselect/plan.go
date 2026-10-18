@@ -154,8 +154,24 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		}
 	}
 	if missing != nil {
+		var owners []constructorsymbol.Symbol
 		for _, field := range impactInput.NewlyRequiredFields {
-			if field.Owner != missing.Constructor().String() || field.Path != missing.Field() {
+			owner, parseErr := constructorsymbol.Parse(field.Owner)
+			if parseErr != nil {
+				return nil, kind, configurationimpact.Impact{}, parseErr
+			}
+			owners = append(owners, owner)
+		}
+		missingPaths, missingErr := inputs.MissingRequiredImplementationFields(candidate, owners)
+		if missingErr != nil {
+			return nil, kind, configurationimpact.Impact{}, missingErr
+		}
+		absent := make(map[string]bool, len(missingPaths))
+		for _, path := range missingPaths {
+			absent[path] = true
+		}
+		for _, field := range impactInput.NewlyRequiredFields {
+			if !absent[field.Path] {
 				continue
 			}
 			sources := []string{field.SchemaSource, missing.SourcePath()}
@@ -168,7 +184,6 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 				Alternatives: []string{"provide-required-field", "retain-previous-constructor"},
 				Sources:      sources,
 			})
-			break
 		}
 		if len(impactInput.UnresolvedDecisions) == 0 {
 			return nil, kind, configurationimpact.Impact{}, validationErr

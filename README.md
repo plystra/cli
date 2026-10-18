@@ -848,7 +848,7 @@ and emits a read-only `plystra.change-plan/v1` payload with a plan digest and
 all five `configuration_impact` arrays. When both the old and candidate graphs
 resolve, a newly reachable Implementation reports required top-level Config
 fields and required descendants of non-pointer fixed objects, with constructor
-provenance but no configured values. One missing field of either kind can be
+provenance but no configured values. Every missing field of either kind is
 reported as an unresolved decision in a non-exact read-only preview. The
 `plystra use` command still rejects that invalid final configuration.
 Other operation kinds return a structured unsupported result; `change apply`,

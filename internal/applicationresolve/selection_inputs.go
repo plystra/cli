@@ -329,6 +329,12 @@ func (s SelectionInputs) ValidateCandidate(composition applicationmeta.Compositi
 	return s.validateCandidateConfiguration(composition, resolution, sources)
 }
 
+// MissingRequiredImplementationFields inspects only composed typed Config
+// objects; it does not relax final candidate validation.
+func (s SelectionInputs) MissingRequiredImplementationFields(composition applicationmeta.Composition, owners []constructorsymbol.Symbol) ([]string, error) {
+	return composition.MissingRequiredImplementationFields(s.schemaLookup, owners)
+}
+
 func (s SelectionInputs) validateCandidateConfiguration(composition applicationmeta.Composition, resolution interfaceresolution.Result, sources applicationinput.SourceContext) error {
 	if err := validateConstructorConfigurationOwners(composition.Manifest(), resolution, sources); err != nil {
 		return fmt.Errorf("%w: %w", ErrResolve, err)

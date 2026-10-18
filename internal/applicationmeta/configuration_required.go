@@ -53,6 +53,63 @@ func (c Composition) ValidateRequiredConfiguration(schemas SchemaLookup, active 
 	return c.validateRequiredResourceConfiguration(schemas, source)
 }
 
+// MissingRequiredImplementationFields returns every statically addressable
+// required field absent from the named constructors' composed fixed objects.
+func (c Composition) MissingRequiredImplementationFields(schemas SchemaLookup, owners []constructorsymbol.Symbol) ([]string, error) {
+	if !c.Valid() || schemas == nil {
+		return nil, ErrCompose
+	}
+	var paths []string
+	seen := make(map[constructorsymbol.Symbol]bool, len(owners))
+	for _, owner := range owners {
+		if seen[owner] {
+			continue
+		}
+		seen[owner] = true
+		schema, exists := schemas(ConfigurationNamespaceImplementation, owner)
+		if !exists {
+			continue
+		}
+		var node *yaml.Node
+		if configured, present := c.manifest.Configuration(owner); present {
+			var err error
+			node, err = decodeNormalizedConfigNode(configured.yaml)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err := collectMissingFixedObjectFields(schema.Fields(), node, nil, owner, &paths); err != nil {
+			return nil, err
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func collectMissingFixedObjectFields(fields []implementationinventory.ConfigurationField, node *yaml.Node, prefix []string, owner constructorsymbol.Symbol, paths *[]string) error {
+	var provided map[string]*yaml.Node
+	if node != nil {
+		var err error
+		provided, err = safeConstructorConfigMapping(node)
+		if err != nil {
+			return err
+		}
+	}
+	for _, field := range fields {
+		child := provided[field.Name()]
+		segments := append(append([]string(nil), prefix...), field.Name())
+		if child == nil && field.Required() {
+			*paths = append(*paths, constructorConfigPath(owner, segments))
+		}
+		if field.Value().Kind() == implementationinventory.ConfigurationValueObject && (child == nil || !isNull(child)) {
+			if err := collectMissingFixedObjectFields(field.Value().Fields(), child, segments, owner, paths); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func requiredConstructorConfigFields(fields []implementationinventory.ConfigurationField, node *yaml.Node, state *constructorConfigNormalizeState, depth int) ([]string, error) {
 	var provided map[string]*yaml.Node
 	if node != nil {
