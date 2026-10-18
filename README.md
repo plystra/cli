@@ -846,11 +846,11 @@ The installed public `plystra change plan` slice accepts one
 `implementation_selection` set operation, validates its final ownership graph,
 and emits a read-only `plystra.change-plan/v1` payload with a plan digest and
 all five `configuration_impact` arrays. When both the old and candidate graphs
-resolve, a newly reachable Implementation reports its required top-level
-Config fields and constructor provenance without exposing configured values.
-One missing newly required top-level constructor value can be reported as an
-unresolved decision in a non-exact read-only preview; `plystra use` still rejects
-that invalid final configuration.
+resolve, a newly reachable Implementation reports required top-level Config
+fields and required descendants of non-pointer fixed objects, with constructor
+provenance but no configured values. One missing field of either kind can be
+reported as an unresolved decision in a non-exact read-only preview. The
+`plystra use` command still rejects that invalid final configuration.
 Other operation kinds return a structured unsupported result; `change apply`,
 primitive-command lowering, and `--dry-run` remain unavailable.
 

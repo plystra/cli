@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/configurationimpact"
 	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/resourcename"
@@ -206,20 +207,27 @@ func newlyRequiredImplementationFields(inputs applicationresolve.SelectionInputs
 		if !exists {
 			continue
 		}
-		for _, field := range configuration.Fields() {
-			if !field.Required() {
-				continue
-			}
-			fields = append(fields, configurationimpact.NewlyRequiredField{
-				Owner:              implementation.Symbol().String(),
-				Path:               fmt.Sprintf("config[%q][%q]", implementation.Symbol().String(), field.Name()),
-				SchemaSource:       implementation.Source(),
+		fields = appendRequiredFixedObjectFields(fields, implementation.Symbol().String(), implementation.Source(),
+			fmt.Sprintf("config[%q]", implementation.Symbol().String()), configuration.Fields())
+	}
+	return fields, nil
+}
+
+func appendRequiredFixedObjectFields(result []configurationimpact.NewlyRequiredField, owner, source, prefix string, fields []implementationinventory.ConfigurationField) []configurationimpact.NewlyRequiredField {
+	for _, field := range fields {
+		path := prefix + fmt.Sprintf("[%q]", field.Name())
+		if field.Required() {
+			result = append(result, configurationimpact.NewlyRequiredField{
+				Owner: owner, Path: path, SchemaSource: source,
 				RequirednessReason: "required-field-on-newly-reachable-constructor",
 				DefaultSatisfies:   field.HasDefault(),
 			})
 		}
+		if value := field.Value(); value.Kind() == implementationinventory.ConfigurationValueObject {
+			result = appendRequiredFixedObjectFields(result, owner, source, path, value.Fields())
+		}
 	}
-	return fields, nil
+	return result
 }
 
 func selectResourceProvider(inputs applicationresolve.SelectionInputs, original []byte, target string, constructor constructorsymbol.Symbol, overlay bool) ([]byte, error) {

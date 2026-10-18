@@ -2,6 +2,7 @@ package command_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -183,5 +184,67 @@ func TestRunChangePlanReportsMissingRequiredConstructorValueWithoutMutation(t *t
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatal("failed use changed Project files")
+	}
+}
+
+func TestRunChangePlanReportsRequiredFixedObjectChild(t *testing.T) {
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandConfigurableImplementation(t, root, "local", "email.send/v1", "email/send/v1", "Send")
+	implementationPath := filepath.Join(root, "local", "implementation.go")
+	source, err := os.ReadFile(implementationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldField := "Endpoint string `plystra:\"required\"`"
+	newField := "Database struct { Host string `plystra:\"required\"` }"
+	if !strings.Contains(string(source), oldField) {
+		t.Fatal("configurable fixture lacks the expected field")
+	}
+	writeCommandFile(t, implementationPath, strings.Replace(string(source), oldField, newField, 1))
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"set","interface":"email.send/v1","constructor":"example.com/acme/implementation-use/local.New"}]}`)
+	wantPath := `config["example.com/acme/implementation-use/local.New"]["database"]["host"]`
+	for _, test := range []struct {
+		name, config string
+		unresolved   bool
+	}{
+		{"provided", "config:\n  example.com/acme/implementation-use/local.New:\n    database: {host: PRIVATE_HOST}\n", false},
+		{"missing", "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [email.send/v1]\n  use:\n    email.send/v1: example.com/acme/implementation-use/smtp.New\n"+test.config)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 0 || stderr != "" {
+				t.Fatalf("change plan = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Payload struct {
+					ConfigurationImpact struct {
+						NewlyRequiredFields []struct {
+							Path string `json:"path"`
+						} `json:"newly_required_fields"`
+						UnresolvedDecisions []struct {
+							Target string `json:"target"`
+						} `json:"unresolved_decisions"`
+					} `json:"configuration_impact"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			impact := result.Payload.ConfigurationImpact
+			if len(impact.NewlyRequiredFields) != 1 || impact.NewlyRequiredFields[0].Path != wantPath || (len(impact.UnresolvedDecisions) == 1) != test.unresolved {
+				t.Fatalf("fixed-object impact = %#v", impact)
+			}
+			if test.unresolved && impact.UnresolvedDecisions[0].Target != wantPath {
+				t.Fatalf("unresolved target = %#v", impact.UnresolvedDecisions)
+			}
+			if strings.Contains(stdout, "PRIVATE_HOST") {
+				t.Fatal("change plan disclosed a private value")
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("change plan changed Project files")
+			}
+		})
 	}
 }
