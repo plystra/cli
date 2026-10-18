@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
@@ -35,6 +36,16 @@ type PlanResult struct {
 // Plan discovers and validates one selection without writing configuration,
 // module metadata, generated output, or any other Project file.
 func Plan(ctx context.Context, options Options) (PlanResult, error) {
+	return plan(ctx, options, false)
+}
+
+// Preview returns a non-mutating selection plan even when the candidate lacks
+// one newly required constructor value that the impact can identify exactly.
+func Preview(ctx context.Context, options Options) (PlanResult, error) {
+	return plan(ctx, options, true)
+}
+
+func plan(ctx context.Context, options Options, allowMissingRequired bool) (PlanResult, error) {
 	if ctx == nil {
 		return PlanResult{}, fmt.Errorf("%w: context is nil", ErrSelect)
 	}
@@ -53,7 +64,7 @@ func Plan(ctx context.Context, options Options) (PlanResult, error) {
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor)
+	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, allowMissingRequired)
 	if err != nil {
 		var missing *interfaceresolution.UnknownInterfaceError
 		if errors.As(err, &missing) && missing.InterfaceID() == id {
@@ -85,7 +96,7 @@ func (p PlanResult) Changed() bool                                   { return !b
 func (p PlanResult) ConfigurationImpact() configurationimpact.Impact { return p.impact }
 func (p PlanResult) CompositionDigest() string                       { return p.compositionHash }
 
-func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol) ([]byte, string, configurationimpact.Impact, error) {
+func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol, allowMissingRequired bool) ([]byte, string, configurationimpact.Impact, error) {
 	original := inputs.SelectedSnapshot().Data()
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	var updated []byte
@@ -125,8 +136,10 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	}
 	// Planning checks the complete remaining binding graph before any live write.
 	// Generation repeats resolution and owns compilation and rollback validation.
-	if err := inputs.ValidateCandidate(candidate); err != nil {
-		return nil, kind, configurationimpact.Impact{}, err
+	validationErr := inputs.ValidateCandidate(candidate)
+	var missing *applicationmeta.ConstructorConfigurationValueError
+	if validationErr != nil && (!allowMissingRequired || kind != "interface" || !errors.Is(validationErr, applicationmeta.ErrConfigurationRequired) || !errors.As(validationErr, &missing)) {
+		return nil, kind, configurationimpact.Impact{}, validationErr
 	}
 	impactBefore := before
 	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
@@ -137,6 +150,27 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		impactInput.NewlyRequiredFields, err = newlyRequiredImplementationFields(inputs, before, candidate)
 		if err != nil {
 			return nil, kind, configurationimpact.Impact{}, err
+		}
+	}
+	if missing != nil {
+		for _, field := range impactInput.NewlyRequiredFields {
+			if field.Owner != missing.Constructor().String() || field.Path != missing.Field() {
+				continue
+			}
+			sources := []string{field.SchemaSource, missing.SourcePath()}
+			sort.Strings(sources)
+			if sources[0] == sources[1] {
+				sources = sources[:1]
+			}
+			impactInput.UnresolvedDecisions = append(impactInput.UnresolvedDecisions, configurationimpact.UnresolvedDecision{
+				Target: field.Path, Reason: "required-configuration-value-missing",
+				Alternatives: []string{"provide-required-field", "retain-previous-constructor"},
+				Sources:      sources,
+			})
+			break
+		}
+		if len(impactInput.UnresolvedDecisions) == 0 {
+			return nil, kind, configurationimpact.Impact{}, validationErr
 		}
 	}
 	impact, err := configurationimpact.Compare(impactBefore.Manifest(), candidate.Manifest(), impactInput)
@@ -178,7 +212,7 @@ func newlyRequiredImplementationFields(inputs applicationresolve.SelectionInputs
 			}
 			fields = append(fields, configurationimpact.NewlyRequiredField{
 				Owner:              implementation.Symbol().String(),
-				Path:               "config." + implementation.Symbol().String() + "." + field.Name(),
+				Path:               fmt.Sprintf("config[%q][%q]", implementation.Symbol().String(), field.Name()),
 				SchemaSource:       implementation.Source(),
 				RequirednessReason: "required-field-on-newly-reachable-constructor",
 				DefaultSatisfies:   field.HasDefault(),

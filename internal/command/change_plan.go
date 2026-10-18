@@ -24,8 +24,10 @@ const changePlanUsage = `Usage:
 
 Plans one bounded declarative change request without modifying the Project. This
 initial installed slice accepts one implementation_selection set operation and
-validates its final Interface/Resource ownership graph. Other operation kinds
-return a structured unsupported result until their staged planners are installed.
+validates its final Interface/Resource ownership graph. A missing newly required
+top-level constructor value is reported as an unresolved non-exact preview.
+Other operation kinds return a structured unsupported result until their staged
+planners are installed.
 `
 
 type changePlanArguments struct {
@@ -90,7 +92,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
-	planned, err := implementationselect.Plan(ctx, implementationselect.Options{
+	planned, err := implementationselect.Preview(ctx, implementationselect.Options{
 		Start: workingDirectory, Target: selection.Interface(), Constructor: constructor,
 		ConfigurationPath: parsed.configurationPath, EnvironmentName: parsed.environmentName,
 		Environment: environment,

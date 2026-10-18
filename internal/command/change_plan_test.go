@@ -123,7 +123,7 @@ config:
 		t.Fatalf("decode change plan: %v\n%s", err, stdout)
 	}
 	fields := result.Payload.ConfigurationImpact.NewlyRequiredFields
-	if len(fields) != 1 || fields[0].Owner != "example.com/acme/implementation-use/local.New" || fields[0].Path != "config.example.com/acme/implementation-use/local.New.endpoint" || !strings.HasPrefix(fields[0].SchemaSource, "example.com/acme/implementation-use@local/local/implementation.go:") || fields[0].RequirednessReason != "required-field-on-newly-reachable-constructor" || fields[0].DefaultSatisfies {
+	if len(fields) != 1 || fields[0].Owner != "example.com/acme/implementation-use/local.New" || fields[0].Path != `config["example.com/acme/implementation-use/local.New"]["endpoint"]` || !strings.HasPrefix(fields[0].SchemaSource, "example.com/acme/implementation-use@local/local/implementation.go:") || fields[0].RequirednessReason != "required-field-on-newly-reachable-constructor" || fields[0].DefaultSatisfies {
 		t.Fatalf("newly required fields = %#v", fields)
 	}
 	if strings.Contains(stdout, "PRIVATE_ENDPOINT") {
@@ -131,5 +131,57 @@ config:
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatal("change plan changed Project files")
+	}
+}
+
+func TestRunChangePlanReportsMissingRequiredConstructorValueWithoutMutation(t *testing.T) {
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandConfigurableImplementation(t, root, "local", "email.send/v1", "email/send/v1", "Send")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
+  require: [email.send/v1]
+  use:
+    email.send/v1: example.com/acme/implementation-use/smtp.New
+`)
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"set","interface":"email.send/v1","constructor":"example.com/acme/implementation-use/local.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("change plan = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Status  string `json:"status"`
+		Payload struct {
+			Completeness        string `json:"completeness"`
+			ConfigurationImpact struct {
+				NewlyRequiredFields []struct {
+					Path string `json:"path"`
+				} `json:"newly_required_fields"`
+				UnresolvedDecisions []struct {
+					Target       string   `json:"target"`
+					Reason       string   `json:"reason"`
+					Alternatives []string `json:"alternatives"`
+					Sources      []string `json:"sources"`
+				} `json:"unresolved_decisions"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode change plan: %v\n%s", err, stdout)
+	}
+	impact := result.Payload.ConfigurationImpact
+	wantPath := `config["example.com/acme/implementation-use/local.New"]["endpoint"]`
+	if result.Status != "success" || result.Payload.Completeness != "non_exact" || len(impact.NewlyRequiredFields) != 1 || impact.NewlyRequiredFields[0].Path != wantPath || len(impact.UnresolvedDecisions) != 1 || impact.UnresolvedDecisions[0].Target != wantPath || impact.UnresolvedDecisions[0].Reason != "required-configuration-value-missing" || len(impact.UnresolvedDecisions[0].Alternatives) == 0 || len(impact.UnresolvedDecisions[0].Sources) == 0 {
+		t.Fatalf("missing-value impact = %#v", result)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("change plan changed Project files")
+	}
+
+	exitCode, _, _ = runCommand(t, []string{"use", "email.send/v1", "example.com/acme/implementation-use/local.New"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode == 0 {
+		t.Fatal("mutating use accepted a missing required configuration value")
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("failed use changed Project files")
 	}
 }

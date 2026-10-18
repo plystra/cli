@@ -109,7 +109,7 @@ func Select(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor)
+	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, false)
 	if err != nil {
 		var missing *interfaceresolution.UnknownInterfaceError
 		if errors.As(err, &missing) && missing.InterfaceID() == id {
