@@ -15,7 +15,7 @@ func TestBuildRequiresExactDependencyParameterIdentifiers(t *testing.T) {
 	t.Parallel()
 	canonical := canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")
 	contract := canonical.Types.Scope().Lookup("Interface").Type()
-	resource := canonicalResource(t, "data.database/v1", "example.com/resources/database")
+	resource := canonicalResource(t, "storage.database/v1", "example.com/resources/database")
 	kernel := types.NewPackage("github.com/plystra/kernel", "plystra")
 	optional := types.NewNamed(types.NewTypeName(token.NoPos, kernel, "Optional", nil), types.NewStruct(nil, nil), nil)
 	optional.SetTypeParams([]*types.TypeParam{types.NewTypeParam(types.NewTypeName(token.NoPos, kernel, "T", nil), types.Universe.Lookup("any").Type())})

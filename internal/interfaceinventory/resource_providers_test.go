@@ -29,20 +29,20 @@ func TestResourceProviderDiscoverySharesProjectBoundaryAndGoIdentity(t *testing.
 	writeFile(t, filepath.Join(root, "wrong", "go.mod"), "module example.com/value\ngo 1.26\n")
 	writeFile(t, filepath.Join(root, "wrong", "value.go"), "package value\ntype Wrong struct{}\n")
 	writeFile(t, filepath.Join(root, "contract", "go.mod"), "module example.com/contract\ngo 1.26\nrequire example.com/value v1.0.0\n")
-	writeFile(t, filepath.Join(root, "contract", "contract.go"), "package contract\nimport \"example.com/value\"\n//plystra:resource data.database/v1\ntype Resource interface{Read() value.Value}\n")
-	source := "package provider\nimport \"example.com/value\"\ntype database struct{}\nfunc (*database) Read() value.Value{return value.Value{}}\n//plystra:implements-resource data.database/v1\nfunc New()(*database,error){panic(\"constructor-entry\")}\n"
+	writeFile(t, filepath.Join(root, "contract", "contract.go"), "package contract\nimport \"example.com/value\"\n//plystra:resource storage.database/v1\ntype Resource interface{Read() value.Value}\n")
+	source := "package provider\nimport \"example.com/value\"\ntype database struct{}\nfunc (*database) Read() value.Value{return value.Value{}}\n//plystra:implements-resource storage.database/v1\nfunc New()(*database,error){panic(\"constructor-entry\")}\n"
 	writeFile(t, filepath.Join(root, "provider", "provider.go"), source)
 	writeFile(t, filepath.Join(app, "provider", "provider.go"), source)
 	writeFile(t, filepath.Join(root, "transitive", "go.mod"), "module example.com/transitive\ngo 1.26\nrequire example.com/value v1.0.0\n")
 	writeFile(t, filepath.Join(root, "transitive", "provider.go"), source)
 	for _, directory := range []string{"generated", "testdata", "vendor", "fixture", "fixtures", ".private", "_private"} {
-		writeFile(t, filepath.Join(app, directory, "provider.go"), strings.Replace(source, "data.database/v1", "invalid", 1))
+		writeFile(t, filepath.Join(app, directory, "provider.go"), strings.Replace(source, "storage.database/v1", "invalid", 1))
 	}
-	writeFile(t, filepath.Join(app, "inactive", "provider.go"), "//go:build provider_inactive\n\n"+strings.Replace(source, "data.database/v1", "invalid", 1))
-	writeFile(t, filepath.Join(app, "tests", "provider_test.go"), strings.Replace(source, "data.database/v1", "invalid", 1))
+	writeFile(t, filepath.Join(app, "inactive", "provider.go"), "//go:build provider_inactive\n\n"+strings.Replace(source, "storage.database/v1", "invalid", 1))
+	writeFile(t, filepath.Join(app, "tests", "provider_test.go"), strings.Replace(source, "storage.database/v1", "invalid", 1))
 	writeFile(t, filepath.Join(app, "literal", "literal.go"), "package literal\nconst marker = `//plystra:implements-resource invalid`\n")
 	writeProject(t, filepath.Join(app, "nested"), "example.com/nested")
-	writeFile(t, filepath.Join(app, "nested", "provider.go"), strings.Replace(source, "data.database/v1", "invalid", 1))
+	writeFile(t, filepath.Join(app, "nested", "provider.go"), strings.Replace(source, "storage.database/v1", "invalid", 1))
 	before := snapshotFiles(t, root)
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"})
 	discovery := discoverApplication(t, app, environment)
@@ -51,7 +51,7 @@ func TestResourceProviderDiscoverySharesProjectBoundaryAndGoIdentity(t *testing.
 		t.Fatalf("providers = %#v", providers)
 	}
 	for n, symbol := range []string{"example.com/app/provider.New", "example.com/provider.New", "example.com/transitive.New"} {
-		if providers[n].Symbol().String() != symbol || providers[n].ID() != "data.database/v1" || providers[n].Local() != (n == 0) {
+		if providers[n].Symbol().String() != symbol || providers[n].ID() != "storage.database/v1" || providers[n].Local() != (n == 0) {
 			t.Fatalf("provider = %#v", providers[n])
 		}
 	}
@@ -77,7 +77,7 @@ func TestResourceProviderDiscoveryRemovesTemporaryModuleFiles(t *testing.T) {
 	t.Setenv("TMP", temporary)
 	writeProject(t, root, "example.com/app")
 	writeFile(t, filepath.Join(root, "api", "resource.go"), resourceSource)
-	source := "package provider\nimport api \"example.com/app/api\"\ntype database struct{}\nfunc (*database) Read() api.Value{return api.Value{}}\n//plystra:implements-resource data.database/v1\nfunc New()(*database,error){panic(\"constructor-entry\")}\n"
+	source := "package provider\nimport api \"example.com/app/api\"\ntype database struct{}\nfunc (*database) Read() api.Value{return api.Value{}}\n//plystra:implements-resource storage.database/v1\nfunc New()(*database,error){panic(\"constructor-entry\")}\n"
 	for _, mode := range []string{"valid", "conformance", "package-load"} {
 		body := source
 		if mode == "conformance" {
@@ -118,7 +118,7 @@ func TestResourceDiscoveryDoesNotPromoteUnrelatedOrdinaryModules(t *testing.T) {
 	writeFile(t, filepath.Join(app, "go.mod"), "module example.com/app\ngo 1.26\nrequire (\nexample.com/project v1.0.0\nexample.com/value v1.0.0\n)\nreplace example.com/project => ../project\nreplace example.com/unused => ../unused\nreplace example.com/value v1.0.0 => ../value\nreplace example.com/value v1.1.0 => ../new-value\n")
 	writeProject(t, filepath.Join(root, "project"), "example.com/project")
 	writeFile(t, filepath.Join(root, "project", "go.mod"), "module example.com/project\ngo 1.26\nrequire example.com/unused v1.0.0\n")
-	writeFile(t, filepath.Join(root, "project", "resource.go"), "package project\nimport \"example.com/value\"\n//plystra:resource data.database/v1\ntype Resource interface{Read() value.Value}\ntype database struct{}\nfunc (*database) Read() value.Value{return value.Value{Legacy:1}}\n//plystra:implements-resource data.database/v1\nfunc New()(*database,error){panic(\"constructor-entry\")}\n")
+	writeFile(t, filepath.Join(root, "project", "resource.go"), "package project\nimport \"example.com/value\"\n//plystra:resource storage.database/v1\ntype Resource interface{Read() value.Value}\ntype database struct{}\nfunc (*database) Read() value.Value{return value.Value{Legacy:1}}\n//plystra:implements-resource storage.database/v1\nfunc New()(*database,error){panic(\"constructor-entry\")}\n")
 	writeFile(t, filepath.Join(root, "unused", "go.mod"), "module example.com/unused\ngo 1.26\nrequire example.com/value v1.1.0\n")
 	writeFile(t, filepath.Join(root, "value", "go.mod"), "module example.com/value\ngo 1.26\n")
 	writeFile(t, filepath.Join(root, "value", "value.go"), "package value\ntype Value struct{Legacy int}\n")
@@ -152,13 +152,13 @@ func TestResourceProviderDiscoveryRetainsNamedDependencies(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root, "example.com/app")
 	writeFile(t, filepath.Join(root, "api", "resource.go"), resourceSource)
-	source := "package provider\nimport api \"example.com/app/api\"\ntype Config struct{Limit int}\ntype database struct{}\nfunc (*database) Read() api.Value{return api.Value{}}\n//plystra:implements-resource data.database/v1\nfunc New(cfg Config, primary api.Resource, Secondary api.Resource)(*database,error){panic(\"constructor-entry\")}\n"
+	source := "package provider\nimport api \"example.com/app/api\"\ntype Config struct{Limit int}\ntype database struct{}\nfunc (*database) Read() api.Value{return api.Value{}}\n//plystra:implements-resource storage.database/v1\nfunc New(cfg Config, primary api.Resource, Secondary api.Resource)(*database,error){panic(\"constructor-entry\")}\n"
 	writeFile(t, filepath.Join(root, "provider", "provider.go"), source)
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"})
 	provider := discoverApplication(t, root, environment).ResourceProviders().Providers()[0]
 	for n, name := range []string{"primary", "Secondary"} {
 		dep := provider.Dependencies()[n]
-		if dep.ParameterName() != name || dep.ParameterPosition() != n+2 || dep.ID() != "data.database/v1" {
+		if dep.ParameterName() != name || dep.ParameterPosition() != n+2 || dep.ID() != "storage.database/v1" {
 			t.Fatalf("dependency = %#v", dep)
 		}
 	}

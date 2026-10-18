@@ -25,9 +25,9 @@ func TestResourceDiagnosticsRetainSelectionBindingAndCycleSources(t *testing.T) 
 	files := map[string]string{
 		"go.mod":          "module example.com/app\n\ngo 1.26\n",
 		"plystra.yaml":    "{}\n",
-		"api/resource.go": "package api\n//plystra:resource data.database/v1\ntype Resource interface{Read()}\n",
-		"provider/new.go": "package provider\ntype Config struct{ Limit int };type Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource data.database/v1\nfunc New(cfg Config)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
-		"wrapper/new.go":  "package wrapper\nimport api \"example.com/app/api\"\ntype Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource data.database/v1\nfunc New(upstream api.Resource)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
+		"api/resource.go": "package api\n//plystra:resource storage.database/v1\ntype Resource interface{Read()}\n",
+		"provider/new.go": "package provider\ntype Config struct{ Limit int };type Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource storage.database/v1\nfunc New(cfg Config)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
+		"wrapper/new.go":  "package wrapper\nimport api \"example.com/app/api\"\ntype Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource storage.database/v1\nfunc New(upstream api.Resource)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(root, filepath.FromSlash(name))

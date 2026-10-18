@@ -1045,7 +1045,7 @@ func TestApplicationModelDigestIncludesCompleteBindingPolicy(t *testing.T) {
 
 func TestApplicationModelDigestIncludesNamedResources(t *testing.T) {
 	t.Parallel()
-	id, err := interfaceid.Parse("data.database/v1")
+	id, err := interfaceid.Parse("storage.database/v1")
 	if err != nil {
 		t.Fatal(err)
 	}

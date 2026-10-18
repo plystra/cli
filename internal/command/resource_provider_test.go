@@ -10,16 +10,16 @@ import (
 )
 
 func commandResourceProviderSource(module string) string {
-	return "package provider\nimport api \"" + module + "/api\"\ntype Config struct{Limit int}\ntype database struct{}\nfunc (*database) Read() api.Value{return api.Value{}}\n//plystra:implements-resource data.database/v1\nfunc New(cfg Config, primary api.Resource)(*database,error){panic(\"constructor-entry-marker\")}\n"
+	return "package provider\nimport api \"" + module + "/api\"\ntype Config struct{Limit int}\ntype database struct{}\nfunc (*database) Read() api.Value{return api.Value{}}\n//plystra:implements-resource storage.database/v1\nfunc New(cfg Config, primary api.Resource)(*database,error){panic(\"constructor-entry-marker\")}\n"
 }
 
 func TestPublicCommandsRejectInvalidResourceProvidersWithoutMutation(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct{ name, old, replacement, code, kind string }{
-		{"identity", "data.database/v1", "invalid-private-marker", diagnosticcode.ResourceProviderDeclarationInvalid, "resource-provider-declaration"},
-		{"duplicate", "//plystra:implements-resource data.database/v1", "//plystra:implements-resource data.database/v1\n//plystra:implements-resource data.database/v1", diagnosticcode.ResourceProviderDeclarationInvalid, "resource-provider-declaration"},
-		{"mixed", "//plystra:implements-resource data.database/v1", "//plystra:implements-resource data.database/v1\n//plystra:implements data.database/v1", diagnosticcode.ResourceProviderDeclarationInvalid, "resource-provider-declaration"},
-		{"unknown", "data.database/v1", "data.missing/v1", diagnosticcode.ResourceProviderInvalid, "resource-provider-constructor"},
+		{"identity", "storage.database/v1", "invalid-private-marker", diagnosticcode.ResourceProviderDeclarationInvalid, "resource-provider-declaration"},
+		{"duplicate", "//plystra:implements-resource storage.database/v1", "//plystra:implements-resource storage.database/v1\n//plystra:implements-resource storage.database/v1", diagnosticcode.ResourceProviderDeclarationInvalid, "resource-provider-declaration"},
+		{"mixed", "//plystra:implements-resource storage.database/v1", "//plystra:implements-resource storage.database/v1\n//plystra:implements storage.database/v1", diagnosticcode.ResourceProviderDeclarationInvalid, "resource-provider-declaration"},
+		{"unknown", "storage.database/v1", "storage.missing/v1", diagnosticcode.ResourceProviderInvalid, "resource-provider-constructor"},
 		{"conformance", "Read() api.Value", "Other() api.Value", diagnosticcode.ResourceProviderInvalid, "resource-provider-constructor"},
 		{"config", "cfg Config", "cfg *Config", diagnosticcode.ResourceProviderInvalid, "resource-provider-constructor"},
 		{"private-default", "Limit int", "Limit int `plystra-default:\"PRIVATE_DEFAULT_MARKER\"`", diagnosticcode.ResourceProviderInvalid, "resource-provider-constructor"},
@@ -69,7 +69,7 @@ func TestResourceProviderPackageErrorUsesDependencyRelativeSource(t *testing.T) 
 		t.Run(directory, func(t *testing.T) {
 			root, _ := createInspectModuleGraphProject(t)
 			owner := filepath.Join(root, "library")
-			writeCommandFile(t, filepath.Join(owner, directory, "broken.go"), "package library\nimport \"example.com/missing\"\n//plystra:implements-resource data.database/v1\nfunc New() (*missing.Value,error) { panic(\"constructor-entry-marker\") }\n")
+			writeCommandFile(t, filepath.Join(owner, directory, "broken.go"), "package library\nimport \"example.com/missing\"\n//plystra:implements-resource storage.database/v1\nfunc New() (*missing.Value,error) { panic(\"constructor-entry-marker\") }\n")
 			before := snapshotInspectProject(t, root)
 			for _, arguments := range [][]string{{"generate"}, {"inspect", "resources", "--format", "json"}} {
 				code, stdout, stderr := runCommand(t, arguments, root, inspectCommandEnvironment(nil))

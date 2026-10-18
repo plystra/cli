@@ -3231,10 +3231,10 @@ needed.
 Generated project `SKILL.md` files deliberately contain no Git workflow rules;
 repository process belongs in contributor documentation such as this guide.
 
-While Data, AuthN, or AuthZ is being developed, Kernel and CLI changes are
-allowed whenever their APIs, runtime, assembly, generation, configuration,
-testing, or developer experience must evolve for integration. These changes are
-not limited to bug fixes. Once Gate 15 and the release workflow are
+While Data, AuthN, or AuthZ is being developed, Kernel and CLI may evolve their
+generic APIs, runtime, assembly, generation, configuration, testing, and
+developer experience contracts. Data-specific behavior remains in the
+independent Data repository. Once Gate 15 and the release workflow are
 implemented, agents may publish immutable Kernel and CLI RC versions locally
 by preparing exact release state for downstream testing; remote ref publication
 remains a manual project-owner operation and no Agent may run `git push` or an
@@ -3277,7 +3277,7 @@ The following remain roadmap work and must not be represented as complete:
   doctor, SDK packaging/publication, and release commands.
 - Generated documentation, compatibility, Behavioral Conformance, manifest,
   and release-evidence constraint projection.
-- CLI-managed Data migration workflows and selected-backend generation.
+- Data-owned migration workflows and selected-backend generation.
 - Gate 29 final cross-platform acceptance, packaging, release metadata,
   public-source readiness, and coordinated stable Kernel, CLI, Data, AuthN, and
   AuthZ `v0.0.1` publication after explicit owner authorization.

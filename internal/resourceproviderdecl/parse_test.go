@@ -13,14 +13,14 @@ import (
 
 func TestParseFileReturnsResourceProviderDeclaration(t *testing.T) {
 	t.Parallel()
-	source := []byte("package database\n\n// New constructs a database provider.\n//plystra:implements-resource data.database/v12\nfunc New(cfg Config) (*Database, error) { return nil, nil }\n")
+	source := []byte("package database\n\n// New constructs a database provider.\n//plystra:implements-resource storage.database/v12\nfunc New(cfg Config) (*Database, error) { return nil, nil }\n")
 	before := bytes.Clone(source)
 	declarations, err := resourceproviderdecl.ParseFile("database/provider.go", source)
 	if err != nil || len(declarations) != 1 {
 		t.Fatalf("ParseFile = %#v, %v", declarations, err)
 	}
 	d := declarations[0]
-	if d.ID() != "data.database/v12" || d.PackageName() != "database" || d.FunctionName() != "New" || d.Position() != (resourceproviderdecl.Position{Path: "database/provider.go", Line: 5, Column: 6}) {
+	if d.ID() != "storage.database/v12" || d.PackageName() != "database" || d.FunctionName() != "New" || d.Position() != (resourceproviderdecl.Position{Path: "database/provider.go", Line: 5, Column: 6}) {
 		t.Fatalf("declaration = %#v", d)
 	}
 	declarations[0] = resourceproviderdecl.Declaration{}
@@ -32,7 +32,7 @@ func TestParseFileReturnsResourceProviderDeclaration(t *testing.T) {
 
 func TestParseFilePreservesIndependentConstructorsInSourceOrder(t *testing.T) {
 	t.Parallel()
-	source := "package database\n//plystra:implements-resource data.database/v1\nfunc NewZ() {}\n//plystra:implements-resource data.database/v1\nfunc NewA() {}\n//plystra:implements-resource storage.cache/v2\nfunc NewCache() {}\n"
+	source := "package database\n//plystra:implements-resource storage.database/v1\nfunc NewZ() {}\n//plystra:implements-resource storage.database/v1\nfunc NewA() {}\n//plystra:implements-resource storage.cache/v2\nfunc NewCache() {}\n"
 	declarations, err := resourceproviderdecl.ParseFile("provider.go", []byte(source))
 	if err != nil || len(declarations) != 3 {
 		t.Fatalf("ParseFile = %#v, %v", declarations, err)
@@ -50,13 +50,13 @@ func TestParseFilePreservesIndependentConstructorsInSourceOrder(t *testing.T) {
 func TestParseFileSeparatesDirectiveOwners(t *testing.T) {
 	t.Parallel()
 	for _, providerFirst := range []bool{false, true} {
-		provider := "//plystra:implements-resource data.database/v1\nfunc NewDatabase() {}\n"
+		provider := "//plystra:implements-resource storage.database/v1\nfunc NewDatabase() {}\n"
 		ordinary := "//plystra:implements order.create/v1\n//plystra:implements order.read/v1\nfunc NewOrders() {}\n"
 		constructors := ordinary + "\n" + provider
 		if providerFirst {
 			constructors = provider + "\n" + ordinary
 		}
-		source := []byte("package service\n//plystra:resource data.database/v1\ntype Resource interface{}\n//plystra:interface order.create/v1\ntype Interface interface{}\n\n" + constructors)
+		source := []byte("package service\n//plystra:resource storage.database/v1\ntype Resource interface{}\n//plystra:interface order.create/v1\ntype Interface interface{}\n\n" + constructors)
 		resources, err := resourceproviderdecl.ParseFile("service.go", source)
 		if err != nil || len(resources) != 1 || resources[0].FunctionName() != "NewDatabase" {
 			t.Fatalf("Resource providers = %#v, %v", resources, err)
@@ -76,13 +76,13 @@ func TestParseFileLeavesGoLoadingAndSignatureValidationToCaller(t *testing.T) {
 		"func New() (*Database, error)",
 		"func \u00c9tablir() {}",
 	} {
-		source := "//go:build resource_provider_inactive\n\npackage provider\n//plystra:implements-resource data.database/v1\n" + function
+		source := "//go:build resource_provider_inactive\n\npackage provider\n//plystra:implements-resource storage.database/v1\n" + function
 		declarations, err := resourceproviderdecl.ParseFile("provider.go", []byte(source))
 		if err != nil || len(declarations) != 1 {
 			t.Fatalf("%s: %#v, %v", function, declarations, err)
 		}
 	}
-	longID := "data." + strings.Repeat("long", 300) + "/v1"
+	longID := "storage." + strings.Repeat("long", 300) + "/v1"
 	source := "package provider\r\n//plystra:implements-resource " + longID + "\r\nfunc New() {}\r\n"
 	declarations, err := resourceproviderdecl.ParseFile("provider.go", []byte(source))
 	if err != nil || len(declarations) != 1 || declarations[0].ID() != longID {
@@ -96,12 +96,12 @@ func TestParseFileIgnoresNonProviderCommentsAndLiterals(t *testing.T) {
 		"// New constructs an ordinary value.\nfunc New() {}",
 		"//plystra:implements order.create/v1\nfunc New() {}",
 		"//plystra:implements invalid-ordinary-id\nfunc New() {}",
-		"//plystra:resource data.database/v1\ntype Resource interface{}",
+		"//plystra:resource storage.database/v1\ntype Resource interface{}",
 		"//plystra:interface order.create/v1\ntype Interface interface{}",
 		"const line = \"//plystra:implements-resource invalid-private-marker\"",
 		"const block = \"/*plystra:implements-resource invalid-private-marker*/\"",
 		"const raw = `\n//plystra:implements-resource invalid-private-marker\n/*plystra:implements-resource another-private-marker*/\n`",
-		"// Example: //plystra:implements-resource data.database/v1",
+		"// Example: //plystra:implements-resource storage.database/v1",
 	} {
 		declarations, err := resourceproviderdecl.ParseFile("provider.go", []byte("package provider\n"+body))
 		if err != nil || len(declarations) != 0 {
@@ -115,28 +115,28 @@ func TestParseFileRejectsMalformedProviderDirectives(t *testing.T) {
 	for _, directive := range []string{
 		"//plystra:implements-resource",
 		"//plystra:implements-resource ",
-		"//plystra:implements-resource\tdata.database/v1",
-		"//plystra:implements-resource  data.database/v1",
-		"//plystra:implements-resource data.database/v1 ",
-		"//plystra:implements-resource data.database/v1\t",
-		"//plystra:implements-resource data.database/v1 data.cache/v1",
-		"//plystra:implements-resource data.database/v1\tdata.cache/v1",
-		"//plystra:implements-resource data.database/v1,data.cache/v1",
-		"//plystra:implements-resource data.database/v1 // private-marker",
-		"//plystra:implements-resources data.database/v1",
+		"//plystra:implements-resource\tstorage.database/v1",
+		"//plystra:implements-resource  storage.database/v1",
+		"//plystra:implements-resource storage.database/v1 ",
+		"//plystra:implements-resource storage.database/v1\t",
+		"//plystra:implements-resource storage.database/v1 storage.cache/v1",
+		"//plystra:implements-resource storage.database/v1\tstorage.cache/v1",
+		"//plystra:implements-resource storage.database/v1,storage.cache/v1",
+		"//plystra:implements-resource storage.database/v1 // private-marker",
+		"//plystra:implements-resources storage.database/v1",
 		"//plystra:implements-resource=invalid-private-marker",
-		"/*plystra:implements-resource data.database/v1*/",
-		"/*plystra:implements-resource\ndata.database/v1\n*/",
+		"/*plystra:implements-resource storage.database/v1*/",
+		"/*plystra:implements-resource\nstorage.database/v1\n*/",
 		"//plystra:implements-resource invalid-private-marker",
 		"//plystra:implements-resource database/v1",
 		"//plystra:implements-resource Data.database/v1",
 		"//plystra:implements-resource data.Database/v1",
 		"//plystra:implements-resource data..database/v1",
-		"//plystra:implements-resource data.database/v0",
-		"//plystra:implements-resource data.database/v01",
-		"//plystra:implements-resource data.database/V1",
-		"//plystra:implements-resource data.database/v18446744073709551616",
-		"//plystra:implements-resource data.database/v1/extra",
+		"//plystra:implements-resource storage.database/v0",
+		"//plystra:implements-resource storage.database/v01",
+		"//plystra:implements-resource storage.database/V1",
+		"//plystra:implements-resource storage.database/v18446744073709551616",
+		"//plystra:implements-resource storage.database/v1/extra",
 	} {
 		t.Run(directive, func(t *testing.T) {
 			err := rejected(t, "package provider\n"+directive+"\nfunc New() {}", 2)
@@ -149,7 +149,7 @@ func TestParseFileRejectsMalformedProviderDirectives(t *testing.T) {
 
 func TestParseFileRejectsInvalidProviderTargets(t *testing.T) {
 	t.Parallel()
-	const directive = "//plystra:implements-resource data.database/v1\n"
+	const directive = "//plystra:implements-resource storage.database/v1\n"
 	for _, test := range []struct {
 		name, body string
 		line       int
@@ -176,13 +176,13 @@ func TestParseFileRejectsInvalidProviderTargets(t *testing.T) {
 
 func TestParseFileRejectsMixedDirectivesOnSameConstructor(t *testing.T) {
 	t.Parallel()
-	const provider = "//plystra:implements-resource data.database/v1\n"
+	const provider = "//plystra:implements-resource storage.database/v1\n"
 	for _, other := range []string{
 		"//plystra:implements order.create/v1\n",
 		"//plystra:implements\n",
 		"/*plystra:implements order.create/v1*/\n",
-		"//plystra:resource data.database/v1\n",
-		"/*plystra:resource data.database/v1*/\n",
+		"//plystra:resource storage.database/v1\n",
+		"/*plystra:resource storage.database/v1*/\n",
 		"//plystra:interface order.create/v1\n",
 		"/*plystra:interface order.create/v1*/\n",
 	} {
@@ -200,8 +200,8 @@ func TestParseFileRejectsWholeFileAndRedactsSyntaxErrors(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{
 		"package provider\nvar secret = invalid-private-marker",
-		"package provider\n//plystra:implements-resource data.database/v1\nfunc New() {}\n//plystra:implements-resource\nfunc Other() {}",
-		"package provider\n//plystra:implements-resource data.database/v1\nfunc New() {}\n//plystra:implements-resource data.database/v1\n",
+		"package provider\n//plystra:implements-resource storage.database/v1\nfunc New() {}\n//plystra:implements-resource\nfunc Other() {}",
+		"package provider\n//plystra:implements-resource storage.database/v1\nfunc New() {}\n//plystra:implements-resource storage.database/v1\n",
 	} {
 		if strings.Contains(source, "invalid-private-marker") {
 			source += " ?"

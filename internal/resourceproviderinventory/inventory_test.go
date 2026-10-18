@@ -40,7 +40,7 @@ func compile(t *testing.T, imports packages, path, source string) *types.Package
 	return pkg
 }
 
-const declaration = "//plystra:implements-resource data.database/v1\n"
+const declaration = "//plystra:implements-resource storage.database/v1\n"
 const providerSource = "package provider\nimport api \"example.com/api\"\ntype Config struct{Limit int}\ntype database struct{}\nfunc (*database) Read() api.Value{return api.Value{}}\n" + declaration + "func New(cfg Config, primary api.Resource, Secondary api.Resource)(*database,error){panic(\"constructor-entry\")}\n"
 
 func providerInput(t *testing.T, imports packages, source string) resourceproviderinventory.Input {
@@ -57,7 +57,7 @@ func contracts(t *testing.T) (packages, []resourceproviderinventory.ContractInpu
 	t.Helper()
 	imports := packages{}
 	compile(t, imports, "example.com/api", "package api\ntype Resource interface{Read() Value}\ntype Value struct{Data string}\n")
-	return imports, []resourceproviderinventory.ContractInput{{ID: "data.database/v1", PackagePath: "example.com/api"}}
+	return imports, []resourceproviderinventory.ContractInput{{ID: "storage.database/v1", PackagePath: "example.com/api"}}
 }
 
 func TestBuildResourceProviders(t *testing.T) {
@@ -72,7 +72,7 @@ func TestBuildResourceProviders(t *testing.T) {
 		t.Fatal(view)
 	}
 	provider := view[0]
-	if provider.ID() != "data.database/v1" || provider.Symbol().String() != "example.com/provider.New" || provider.ModulePath() != input.ModulePath || provider.ModuleVersion() != "v1.2.3" || provider.Local() || provider.ConcreteType().String() != "*example.com/provider.database" || !strings.Contains(provider.Source(), "@v1.2.3/provider.go:") {
+	if provider.ID() != "storage.database/v1" || provider.Symbol().String() != "example.com/provider.New" || provider.ModulePath() != input.ModulePath || provider.ModuleVersion() != "v1.2.3" || provider.Local() || provider.ConcreteType().String() != "*example.com/provider.database" || !strings.Contains(provider.Source(), "@v1.2.3/provider.go:") {
 		t.Fatalf("provider = %#v", provider)
 	}
 	configuration, has := provider.Configuration()
@@ -81,7 +81,7 @@ func TestBuildResourceProviders(t *testing.T) {
 	}
 	deps := provider.Dependencies()
 	for i, name := range []string{"primary", "Secondary"} {
-		if len(deps) != 2 || deps[i].ID() != "data.database/v1" || deps[i].PackagePath() != "example.com/api" || deps[i].ParameterName() != name || deps[i].ParameterPosition() != i+2 {
+		if len(deps) != 2 || deps[i].ID() != "storage.database/v1" || deps[i].PackagePath() != "example.com/api" || deps[i].ParameterName() != name || deps[i].ParameterPosition() != i+2 {
 			t.Fatalf("dependencies = %#v", deps)
 		}
 	}
@@ -135,7 +135,7 @@ func TestResourceProviderRejectsInvalidSignaturesAndConformance(t *testing.T) {
 		{"error-kind", "(*database,error)", "(*database,int)", "predeclared error"},
 		{"error-wrapper", "(*database,error)", "(*database,Failure)", "predeclared error"},
 		{"one-result", "(*database,error)", "*database", "exactly one"},
-		{"unknown", "data.database/v1", "data.missing/v1", "no visible"},
+		{"unknown", "storage.database/v1", "storage.missing/v1", "no visible"},
 		{"method-missing", "Read() api.Value", "ReadOther() api.Value", "not assignable"},
 		{"method-result", "Read() api.Value{return api.Value{}}", "Read() string{return \"\"}", "not assignable"},
 	} {
@@ -167,7 +167,7 @@ func TestProviderConformanceUsesSharedNamedTypeIdentityWithoutContractImport(t *
 	compile(t, imports, "example.com/api", "package api\nimport \"example.com/value\"\ntype Resource interface{Read() value.Value}\n")
 	source := "package provider\nimport \"example.com/value\"\ntype database struct{}\nfunc (*database) Read() value.Value{return value.Value{}}\n" + declaration + "func New()(*database,error){panic(\"constructor-entry\")}\n"
 	input := providerInput(t, imports, source)
-	if _, err := resourceproviderinventory.Build([]resourceproviderinventory.Input{input}, []resourceproviderinventory.ContractInput{{ID: "data.database/v1", PackagePath: "example.com/api"}}, imports); err != nil {
+	if _, err := resourceproviderinventory.Build([]resourceproviderinventory.Input{input}, []resourceproviderinventory.ContractInput{{ID: "storage.database/v1", PackagePath: "example.com/api"}}, imports); err != nil {
 		t.Fatal(err)
 	}
 }

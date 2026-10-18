@@ -13,7 +13,7 @@ import (
 
 func resourceInstanceGraphInput(t testing.TB) GraphInput {
 	t.Helper()
-	contract := GraphNode{ID: "resource-contract:data.database/v1", Kind: "resource-contract", Label: "example.com/app/database", ResourceID: "data.database/v1", ContractDigest: "sha256:" + strings.Repeat("a", 64)}
+	contract := GraphNode{ID: "resource-contract:storage.database/v1", Kind: "resource-contract", Label: "example.com/app/database", ResourceID: "storage.database/v1", ContractDigest: "sha256:" + strings.Repeat("a", 64)}
 	contract.Sources = []diagnosticjson.Source{{Module: "example.com/app", Path: "database/resource.go", Kind: "resource-declaration", Line: 2, Column: 1}}
 	sources := []interfaceprovenance.ResourceSource{{Module: "example.com/app", Path: "plystra.yaml", Kind: "resource-selection", Line: 2, Column: 3}}
 	input := GraphInput{Evidence: resolvedInspectEvidence(t), Type: GraphTypeResources, Nodes: []GraphNode{contract, {ID: "constructor:example.com/app/service.New", Kind: "constructor", Label: "example.com/app/service.New"}}}
@@ -77,7 +77,7 @@ func TestResourceInstanceGraphRejectsContradictoryTypedEdges(t *testing.T) {
 		"missing-instance":      func(i *GraphInput) { i.Edges[2].ResourceBinding.InstanceName = "missing" },
 		"wrong-position":        func(i *GraphInput) { i.Edges[2].ResourceBinding.ParameterPosition = 3 },
 		"wrong-kind":            func(i *GraphInput) { i.Edges[2].ResourceBinding.ConsumerKind = "instances" },
-		"wrong-contract":        func(i *GraphInput) { i.Edges[2].ResourceBinding.ResourceID = "data.other/v1" },
+		"wrong-contract":        func(i *GraphInput) { i.Edges[2].ResourceBinding.ResourceID = "storage.other/v1" },
 		"missing-contract-edge": func(i *GraphInput) { i.Edges = i.Edges[1:] },
 		"private-source":        func(i *GraphInput) { i.Edges[2].ResourceBinding.BindingSources[0].Path = "C:/private/secret.yaml" },
 	} {

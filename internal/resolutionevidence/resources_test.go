@@ -24,10 +24,10 @@ func TestResourceEvidenceProjectsResolvedGraphWithoutPrivateValues(t *testing.T)
 	files := map[string]string{
 		"go.mod":               "module example.com/app\n\ngo 1.26\n",
 		"plystra.yaml":         "{}\n",
-		"database/resource.go": "package database\n//plystra:resource data.database/v1\ntype Resource interface{Read()}\n",
-		"view/resource.go":     "package view\n//plystra:resource data.view/v1\ntype Resource interface{View()}\n",
-		"provider/new.go":      "package provider\ntype Config struct{ Password string `plystra-default:\"PRIVATE_DEFAULT\"` }\ntype Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource data.database/v1\nfunc New(cfg Config)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
-		"wrapper/new.go":       "package wrapper\nimport api \"example.com/app/database\"\ntype Value struct{}\nfunc (*Value) View(){}\n//plystra:implements-resource data.view/v1\nfunc New(upstream api.Resource)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
+		"database/resource.go": "package database\n//plystra:resource storage.database/v1\ntype Resource interface{Read()}\n",
+		"view/resource.go":     "package view\n//plystra:resource storage.view/v1\ntype Resource interface{View()}\n",
+		"provider/new.go":      "package provider\ntype Config struct{ Password string `plystra-default:\"PRIVATE_DEFAULT\"` }\ntype Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource storage.database/v1\nfunc New(cfg Config)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
+		"wrapper/new.go":       "package wrapper\nimport api \"example.com/app/database\"\ntype Value struct{}\nfunc (*Value) View(){}\n//plystra:implements-resource storage.view/v1\nfunc New(upstream api.Resource)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n",
 	}
 	for name, content := range files {
 		path := filepath.Join(root, filepath.FromSlash(name))
@@ -109,7 +109,7 @@ func TestResourceEvidenceProjectsResolvedGraphWithoutPrivateValues(t *testing.T)
 			t.Fatalf("Resource evidence changed authored %s: %v", name, err)
 		}
 	}
-	if strings.Contains(string(before), `"interface_id":"data.database/v1"`) {
+	if strings.Contains(string(before), `"interface_id":"storage.database/v1"`) {
 		t.Fatal("Resource became an Interface binding")
 	}
 }

@@ -172,7 +172,7 @@ func TestGraphV1SupportsEveryGraphAndConfigurationType(t *testing.T) {
 
 func TestResourceGraphRetainsOnlyValidatedContractDigests(t *testing.T) {
 	input := GraphInput{Evidence: resolvedInspectEvidence(t), Type: GraphTypeResources,
-		Nodes: []GraphNode{{ID: "resource-contract:data.database/v1", Kind: "resource-contract", Label: "example.com/api", ResourceID: "data.database/v1", ContractDigest: "sha256:" + strings.Repeat("a", 64)}},
+		Nodes: []GraphNode{{ID: "resource-contract:storage.database/v1", Kind: "resource-contract", Label: "example.com/api", ResourceID: "storage.database/v1", ContractDigest: "sha256:" + strings.Repeat("a", 64)}},
 	}
 	result, err := NewGraph(input)
 	if err != nil || !result.Valid() || result.Nodes()[0].ContractDigest != input.Nodes[0].ContractDigest || !bytes.Contains(result.Envelope().CanonicalJSON(), []byte(`"contract_digest":"sha256:`)) {

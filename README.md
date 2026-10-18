@@ -1174,7 +1174,7 @@ must still name valid consumers, parameters, and targets.
 Resource-only packages are discovered in the current and dependency Projects
 through the same Go-selected source boundary as Interfaces. Declare one
 non-generic defined Go interface named `Resource` with exactly one
-`//plystra:resource data.database/v1` directive. IDs use the Interface identity
+`//plystra:resource storage.database/v1` directive. IDs use the Interface identity
 grammar without case folding. Duplicate identities retain every defining source.
 Completed method sets cannot expose `Start`, `Stop`, `Shutdown`, or `Close`;
 equivalent lifecycle controls also belong on providers, not consumer contracts.

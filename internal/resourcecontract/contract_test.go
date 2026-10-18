@@ -52,7 +52,7 @@ func digest(t testing.TB, source string) string {
 	return c.Digest()
 }
 
-const marker = "//plystra:resource data.database/v1\n"
+const marker = "//plystra:resource storage.database/v1\n"
 
 func TestResourcePublicShapeChangesDigest(t *testing.T) {
 	for _, test := range []struct{ name, before, after string }{
@@ -112,7 +112,7 @@ func TestResourceDigestIgnoresNonContractChanges(t *testing.T) {
 	if digest(t, base) != digest(t, "\n// documentation only\n"+base) {
 		t.Fatal("location/comment changed digest")
 	}
-	if digest(t, base) == digest(t, strings.Replace(base, "data.database/v1", "data.database/v2", 1)) {
+	if digest(t, base) == digest(t, strings.Replace(base, "storage.database/v1", "storage.database/v2", 1)) {
 		t.Fatal("identity did not affect digest")
 	}
 }

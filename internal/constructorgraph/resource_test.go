@@ -32,7 +32,7 @@ func TestResourceGraphBuildsNamedInstancesAndSharedDependencies(t *testing.T) {
 	}
 	for n, target := range []string{"database.primary", "database.secondary"} {
 		dependencies := nodes[n+3].Dependencies()
-		if len(dependencies) != 1 || dependencies[0].Namespace() != constructorgraph.ResourceConsumerInstance || dependencies[0].Consumer() != nodes[n+3].Name() || dependencies[0].InstanceName() != target || dependencies[0].ParameterName() != "upstream" || dependencies[0].ParameterPosition() != 2 || dependencies[0].ResourceID().String() != "data.raw/v1" || dependencies[0].Reason() != constructorgraph.SelectionExplicit || len(dependencies[0].Sources()) != 1 || len(dependencies[0].SelectionSources()) != 1 {
+		if len(dependencies) != 1 || dependencies[0].Namespace() != constructorgraph.ResourceConsumerInstance || dependencies[0].Consumer() != nodes[n+3].Name() || dependencies[0].InstanceName() != target || dependencies[0].ParameterName() != "upstream" || dependencies[0].ParameterPosition() != 2 || dependencies[0].ResourceID().String() != "storage.raw/v1" || dependencies[0].Reason() != constructorgraph.SelectionExplicit || len(dependencies[0].Sources()) != 1 || len(dependencies[0].SelectionSources()) != 1 {
 			t.Fatalf("instance dependency = %#v", dependencies)
 		}
 	}
@@ -119,7 +119,7 @@ func TestResourceGraphMissingAndAmbiguousActiveBindings(t *testing.T) {
 	input.ResourceInstances = nil
 	_, err := constructorgraph.Build(input)
 	var failure *constructorgraph.ResourceBindingError
-	if !errors.Is(err, constructorgraph.ErrBuild) || !errors.Is(err, constructorgraph.ErrMissingResourceBinding) || !errors.As(err, &failure) || failure.ResourceID().String() != "data.raw/v1" || failure.ParameterName() != "database" || failure.ParameterPosition() != 1 || failure.Constructor().String() != "example.com/app/audit.New" || failure.SourcePath() != "audit/new.go" {
+	if !errors.Is(err, constructorgraph.ErrBuild) || !errors.Is(err, constructorgraph.ErrMissingResourceBinding) || !errors.As(err, &failure) || failure.ResourceID().String() != "storage.raw/v1" || failure.ParameterName() != "database" || failure.ParameterPosition() != 1 || failure.Constructor().String() != "example.com/app/audit.New" || failure.SourcePath() != "audit/new.go" {
 		t.Fatalf("missing dependency evidence = %v", err)
 	}
 	input.ResourceInstances = []constructorgraph.ResourceInstanceInput{resourceInstance(t, "second", "raw.New"), resourceInstance(t, "first", "raw.New")}
@@ -197,7 +197,7 @@ func TestResourceGraphReportsCompleteInstanceCycles(t *testing.T) {
 		}
 		steps := cycle.Steps()
 		for index, step := range steps {
-			if step.Consumer() != names[index] || step.InstanceName() != names[(index+1)%len(names)] || step.Constructor().String() != "example.com/app/wrap.New" || step.Provider() != step.Constructor() || step.ResourceID().String() != "data.raw/v1" || step.ParameterName() != "upstream" || step.ParameterPosition() != 1 || step.DeclarationSource().Path != "wrap/new.go" || len(step.Sources()) != 1 || len(step.SelectionSources()) != 1 {
+			if step.Consumer() != names[index] || step.InstanceName() != names[(index+1)%len(names)] || step.Constructor().String() != "example.com/app/wrap.New" || step.Provider() != step.Constructor() || step.ResourceID().String() != "storage.raw/v1" || step.ParameterName() != "upstream" || step.ParameterPosition() != 1 || step.DeclarationSource().Path != "wrap/new.go" || len(step.Sources()) != 1 || len(step.SelectionSources()) != 1 {
 				t.Fatalf("cycle step = %#v", step)
 			}
 		}
@@ -379,16 +379,16 @@ func resourceGraphInput(t testing.TB) constructorgraph.Input {
 	writeGraphFile(t, filepath.Join(root, "go.mod"), "module example.com/app\n\ngo 1.26\n")
 	writeGraphFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	for _, contract := range []struct{ name, method string }{{"raw", "Raw"}, {"view", "View"}, {"other", "Raw"}} {
-		writeGraphFile(t, filepath.Join(root, "contracts", contract.name, "resource.go"), fmt.Sprintf("package %s\n//plystra:resource data.%s/v1\ntype Resource interface{ %s() }\n", contract.name, contract.name, contract.method))
+		writeGraphFile(t, filepath.Join(root, "contracts", contract.name, "resource.go"), fmt.Sprintf("package %s\n//plystra:resource storage.%s/v1\ntype Resource interface{ %s() }\n", contract.name, contract.name, contract.method))
 	}
 	for _, provider := range []struct{ pkg, contract, parameter, method string }{{"raw", "raw", "", "Raw"}, {"view", "view", "cfg Config, upstream raw.Resource", "View"}, {"other", "other", "", "Raw"}, {"wrap", "raw", "upstream raw.Resource", "Raw"}} {
 		imports := ""
 		if provider.parameter != "" {
 			imports = "import raw \"example.com/app/contracts/raw\"\n"
 		}
-		source := fmt.Sprintf("package %s\n%s type Config struct{ Label string }\ntype Value struct{}\nfunc (*Value) %s(){}\n//plystra:implements-resource data.%s/v1\nfunc New(%s)(*Value,error){ panic(\"constructor executed\") }\n", provider.pkg, imports, provider.method, provider.contract, provider.parameter)
+		source := fmt.Sprintf("package %s\n%s type Config struct{ Label string }\ntype Value struct{}\nfunc (*Value) %s(){}\n//plystra:implements-resource storage.%s/v1\nfunc New(%s)(*Value,error){ panic(\"constructor executed\") }\n", provider.pkg, imports, provider.method, provider.contract, provider.parameter)
 		if provider.pkg == "raw" {
-			source += "//plystra:implements-resource data.raw/v1\nfunc Alternate()(*Value,error){return &Value{},nil}\n"
+			source += "//plystra:implements-resource storage.raw/v1\nfunc Alternate()(*Value,error){return &Value{},nil}\n"
 		}
 		writeGraphFile(t, filepath.Join(root, provider.pkg, "new.go"), source)
 	}

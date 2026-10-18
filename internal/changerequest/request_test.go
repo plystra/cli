@@ -390,7 +390,7 @@ func TestRemovalUpdateAndResourceOperations(t *testing.T) {
 {"kind":"interface_root","action":"absent","interface":"order.create/v1","root":"require"},
 {"kind":"implementation_selection","action":"remove","interface":"order.create/v1"},
 {"kind":"resource_selection","action":"remove","instance":"database.primary"},
-{"kind":"implementation_create","contract":"data.database/v1","package":"./postgres"}
+{"kind":"implementation_create","contract":"storage.database/v1","package":"./postgres"}
 ]}`))
 	if err != nil {
 		t.Fatal(err)

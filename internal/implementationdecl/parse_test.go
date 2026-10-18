@@ -89,13 +89,13 @@ func TestParseFileIgnoresOrdinaryGoSource(t *testing.T) {
 func TestParseFileIgnoresResourceProviderDirectiveFamily(t *testing.T) {
 	t.Parallel()
 	for _, directive := range []string{
-		"//plystra:implements-resource data.database/v1",
+		"//plystra:implements-resource storage.database/v1",
 		"//plystra:implements-resource",
-		"//plystra:implements-resource\tdata.database/v1",
-		"//plystra:implements-resource data.database/v1 extra",
+		"//plystra:implements-resource\tstorage.database/v1",
+		"//plystra:implements-resource storage.database/v1 extra",
 		"//plystra:implements-resource invalid-private-marker",
-		"//plystra:implements-resources data.database/v1",
-		"/*plystra:implements-resource data.database/v1*/",
+		"//plystra:implements-resources storage.database/v1",
+		"/*plystra:implements-resource storage.database/v1*/",
 	} {
 		provider := directive + "\nfunc NewDatabase() {}\n"
 		for _, ordinary := range []string{"", "//plystra:implements order.create/v1\nfunc NewOrders() {}\n"} {
@@ -125,11 +125,11 @@ func TestParseFileStillRejectsMalformedOrdinaryDirectivesWithResourceProviders(t
 		"//plystra:implements order.create/v1 extra",
 		"//plystra:implements invalid-private-marker",
 		"//plystra:implements-other order.create/v1",
-		"//plystra:implements-resourc data.database/v1",
-		"//plystra:implementsresource data.database/v1",
+		"//plystra:implements-resourc storage.database/v1",
+		"//plystra:implementsresource storage.database/v1",
 		"/*plystra:implements order.create/v1*/",
 	} {
-		provider := "//plystra:implements-resource data.database/v1\nfunc NewDatabase() {}\n"
+		provider := "//plystra:implements-resource storage.database/v1\nfunc NewDatabase() {}\n"
 		ordinary := directive + "\nfunc NewOrders() {}\n"
 		for _, providerFirst := range []bool{false, true} {
 			body, line := ordinary+"\n"+provider, 2
@@ -268,8 +268,8 @@ func FuzzParseFile(f *testing.F) {
 		"package test\n//plystra:implements order.create/v1\nfunc New() (*Service, error) { return nil, nil }\n",
 		"package test\nfunc New() *Service { return nil }\n",
 		"package test\n//plystra:implements order/v1\nfunc New() (*Service, error) { return nil, nil }\n",
-		"package test\n//plystra:implements-resource data.database/v1\nfunc NewDatabase() {}\n//plystra:implements order.create/v1\nfunc NewOrders() {}\n",
-		"package test\n/*plystra:implements-resource data.database/v1*/\nfunc NewDatabase() {}\n",
+		"package test\n//plystra:implements-resource storage.database/v1\nfunc NewDatabase() {}\n//plystra:implements order.create/v1\nfunc NewOrders() {}\n",
+		"package test\n/*plystra:implements-resource storage.database/v1*/\nfunc NewDatabase() {}\n",
 		"not go source",
 	} {
 		f.Add(seed)

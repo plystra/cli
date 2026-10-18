@@ -18,7 +18,7 @@ func TestResourceConsumerDiscoverySharesProjectBoundaryAndGoIdentity(t *testing.
 	app := filepath.Join(root, "app")
 	for _, name := range []string{"app", "dependency", "transitive"} {
 		writeProject(t, filepath.Join(root, name), "example.com/"+name)
-		writeFile(t, filepath.Join(root, name, "resource", "resource.go"), fmt.Sprintf("package resource\nimport \"example.com/ordinary\"\n//plystra:resource data.%s/v1\ntype Resource interface{Read() ordinary.Value}\n", name))
+		writeFile(t, filepath.Join(root, name, "resource", "resource.go"), fmt.Sprintf("package resource\nimport \"example.com/ordinary\"\n//plystra:resource storage.%s/v1\ntype Resource interface{Read() ordinary.Value}\n", name))
 	}
 	writeFile(t, filepath.Join(app, "go.mod"), `module example.com/app
 go 1.26
@@ -84,7 +84,7 @@ type Database = transitive.Resource
 		}
 		if n > 0 {
 			resources := implementation.RequiredResources()
-			if len(resources) != 1 || resources[0].ParameterName() != "database" || resources[0].ParameterPosition() != 1 || resources[0].ID().String() != "data."+name+"/v1" || resources[0].PackagePath() != "example.com/"+name+"/resource" || optional[0].ParameterPosition() != 2 {
+			if len(resources) != 1 || resources[0].ParameterName() != "database" || resources[0].ParameterPosition() != 1 || resources[0].ID().String() != "storage."+name+"/v1" || resources[0].PackagePath() != "example.com/"+name+"/resource" || optional[0].ParameterPosition() != 2 {
 				t.Fatalf("dependency Resources = %#v", resources)
 			}
 		}
@@ -97,7 +97,7 @@ type Database = transitive.Resource
 		name, owner string
 		position    int
 	}{{"primary", "app", 2}, {"Secondary", "dependency", 4}, {"_transitive", "transitive", 6}, {"Primary", "app", 7}} {
-		if resources[n].ParameterName() != want.name || resources[n].ParameterPosition() != want.position || resources[n].ID().String() != "data."+want.owner+"/v1" || resources[n].PackagePath() != "example.com/"+want.owner+"/resource" {
+		if resources[n].ParameterName() != want.name || resources[n].ParameterPosition() != want.position || resources[n].ID().String() != "storage."+want.owner+"/v1" || resources[n].PackagePath() != "example.com/"+want.owner+"/resource" {
 			t.Fatalf("Resource %d = %#v", n, resources[n])
 		}
 	}
@@ -153,7 +153,7 @@ func TestResourceConsumerDiscoveryRejectsInvalidParametersWithOwningSources(t *t
 				writeProject(t, owner, "example.com/owner")
 				writeFile(t, filepath.Join(owner, "go.mod"), "module example.com/owner\ngo 1.26\nrequire (\nexample.com/ordinary v1.0.0\ngithub.com/plystra/kernel v0.0.0\n)\nreplace example.com/ordinary => ../ordinary\nreplace github.com/plystra/kernel => ../kernel\n")
 				writeFile(t, filepath.Join(owner, "api", "resource.go"), resourceSource)
-				writeFile(t, filepath.Join(owner, "unmarked", "resource.go"), strings.Replace(resourceSource, "//plystra:resource data.database/v1\n", "", 1))
+				writeFile(t, filepath.Join(owner, "unmarked", "resource.go"), strings.Replace(resourceSource, "//plystra:resource storage.database/v1\n", "", 1))
 				writeFile(t, filepath.Join(owner, "consumer", "new.go"), resourceConsumerSource("service.consumer/v1", test.prelude, test.parameter))
 				writeFile(t, filepath.Join(root, "ordinary", "go.mod"), "module example.com/ordinary\ngo 1.26\n")
 				writeFile(t, filepath.Join(root, "ordinary", "resource.go"), resourceSource)

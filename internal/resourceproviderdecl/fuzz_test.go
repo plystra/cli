@@ -12,11 +12,11 @@ import (
 
 func FuzzParseFile(f *testing.F) {
 	for _, source := range []string{
-		"package provider\n//plystra:implements-resource data.database/v1\nfunc New() (*Database, error) {return nil, nil}",
-		"package provider\n//plystra:implements-resource data.database/v1\nfunc New[T any]() {}",
-		"package provider\n//plystra:implements-resource data.database/v1\n//plystra:implements order.create/v1\nfunc New() {}",
-		"package provider\n//plystra:implements order.create/v1\nfunc NewOrders() {}\n//plystra:implements-resource data.database/v1\nfunc NewDatabase() {}",
-		"package provider\n/*plystra:implements-resource data.database/v1*/\nfunc New() {}",
+		"package provider\n//plystra:implements-resource storage.database/v1\nfunc New() (*Database, error) {return nil, nil}",
+		"package provider\n//plystra:implements-resource storage.database/v1\nfunc New[T any]() {}",
+		"package provider\n//plystra:implements-resource storage.database/v1\n//plystra:implements order.create/v1\nfunc New() {}",
+		"package provider\n//plystra:implements order.create/v1\nfunc NewOrders() {}\n//plystra:implements-resource storage.database/v1\nfunc NewDatabase() {}",
+		"package provider\n/*plystra:implements-resource storage.database/v1*/\nfunc New() {}",
 		"package provider\n//plystra:implements-resource",
 		"package provider\nconst marker = `//plystra:implements-resource invalid`",
 		"not go source",

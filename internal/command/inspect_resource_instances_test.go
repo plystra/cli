@@ -142,7 +142,7 @@ func assertSelectedResourceGraph(t testing.TB, output, view string) {
 		if name == "view.main" {
 			contract, provider = "view", "viewprovider"
 		}
-		if resource.ResourceID != "data."+contract+"/v1" || resource.PackagePath != "example.com/acme/inspect/"+contract || resource.Provider != "example.com/acme/inspect/"+provider+".New" || resource.ContractSource.Path != contract+"/resource.go" || resource.ContractSource.Module != resource.ModulePath || resource.DeclarationSource.Path != provider+"/new.go" {
+		if resource.ResourceID != "storage."+contract+"/v1" || resource.PackagePath != "example.com/acme/inspect/"+contract || resource.Provider != "example.com/acme/inspect/"+provider+".New" || resource.ContractSource.Path != contract+"/resource.go" || resource.ContractSource.Module != resource.ModulePath || resource.DeclarationSource.Path != provider+"/new.go" {
 			t.Fatalf("instance lost exact contract/provider identity: %#v", resource)
 		}
 	}
@@ -215,11 +215,11 @@ resources:
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), manifest)
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "resources: {instances: {database.primary: {config: {third: PRIVATE_CONFIG_OVERLAY}}}}\n")
 	writeCommandFile(t, filepath.Join(root, "deploy/replacement.yaml"), manifest)
-	writeCommandFile(t, filepath.Join(root, "database/resource.go"), "package database\n//plystra:resource data.database/v1\ntype Resource interface{Read()}\n")
-	writeCommandFile(t, filepath.Join(root, "view/resource.go"), "package view\n//plystra:resource data.view/v1\ntype Resource interface{View()}\n")
+	writeCommandFile(t, filepath.Join(root, "database/resource.go"), "package database\n//plystra:resource storage.database/v1\ntype Resource interface{Read()}\n")
+	writeCommandFile(t, filepath.Join(root, "view/resource.go"), "package view\n//plystra:resource storage.view/v1\ntype Resource interface{View()}\n")
 	writeCommandGraphInterface(t, root, "run/v1", "runv1", "app.run/v1", "Run")
-	writeCommandFile(t, filepath.Join(root, "provider/new.go"), "package provider\ntype Config struct { First string `yaml:\"first\" plystra-default:\"PRIVATE_DEFAULT\"`; Second string `yaml:\"second\"`; Third string `yaml:\"third\"` }\ntype Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource data.database/v1\nfunc New(cfg Config)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n")
-	writeCommandFile(t, filepath.Join(root, "viewprovider/new.go"), "package viewprovider\nimport \"example.com/acme/inspect/database\"\ntype Value struct{}\nfunc (*Value) View(){}\n//plystra:implements-resource data.view/v1\nfunc New(upstream database.Resource)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n")
+	writeCommandFile(t, filepath.Join(root, "provider/new.go"), "package provider\ntype Config struct { First string `yaml:\"first\" plystra-default:\"PRIVATE_DEFAULT\"`; Second string `yaml:\"second\"`; Third string `yaml:\"third\"` }\ntype Value struct{}\nfunc (*Value) Read(){}\n//plystra:implements-resource storage.database/v1\nfunc New(cfg Config)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n")
+	writeCommandFile(t, filepath.Join(root, "viewprovider/new.go"), "package viewprovider\nimport \"example.com/acme/inspect/database\"\ntype Value struct{}\nfunc (*Value) View(){}\n//plystra:implements-resource storage.view/v1\nfunc New(upstream database.Resource)(*Value,error){panic(\"PRIVATE_CONSTRUCTOR\")}\n")
 	writeCommandFile(t, filepath.Join(root, "service/new.go"), `package service
 import (
  "context"

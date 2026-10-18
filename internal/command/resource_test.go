@@ -12,7 +12,7 @@ import (
 	"github.com/plystra/cli/internal/diagnosticcode"
 )
 
-const commandResourceSource = "package api\n//plystra:resource data.database/v1\ntype Resource interface{Read() Value}\ntype Value struct{Data string; private []byte}\n"
+const commandResourceSource = "package api\n//plystra:resource storage.database/v1\ntype Resource interface{Read() Value}\ntype Value struct{Data string; private []byte}\n"
 
 func TestBuiltCLIInspectsResourceContracts(t *testing.T) {
 	t.Parallel()
@@ -36,8 +36,8 @@ func TestBuiltCLIInspectsResourceContracts(t *testing.T) {
 	if err != nil || stderr.String() != inspectProgress {
 		t.Fatalf("built Resource inspection: %v\n%s\n%s", err, output, &stderr)
 	}
-	node := inspectGraphNodeByID(t, decodeInspectGraphCommandEnvelope(t, string(output)).Result.Nodes, "resource-contract:data.database/v1")
-	if node.ResourceID != "data.database/v1" || len(node.ContractDigest) != 71 {
+	node := inspectGraphNodeByID(t, decodeInspectGraphCommandEnvelope(t, string(output)).Result.Nodes, "resource-contract:storage.database/v1")
+	if node.ResourceID != "storage.database/v1" || len(node.ContractDigest) != 71 {
 		t.Fatalf("built Resource record: %#v", node)
 	}
 	if !reflect.DeepEqual(before, snapshotInspectProject(t, root)) {
@@ -50,7 +50,7 @@ func TestInspectResourcesReportsDeterministicReadOnlyContracts(t *testing.T) {
 	root, nested := createInspectModuleGraphProject(t)
 	local := filepath.Join(root, "api", "resource.go")
 	writeCommandFile(t, local, commandResourceSource)
-	writeCommandFile(t, filepath.Join(root, "library", "api", "resource.go"), strings.Replace(commandResourceSource, "data.database/v1", "data.remote/v1", 1))
+	writeCommandFile(t, filepath.Join(root, "library", "api", "resource.go"), strings.Replace(commandResourceSource, "storage.database/v1", "storage.remote/v1", 1))
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
 	writeCommandFile(t, filepath.Join(root, "deploy", "replacement.yaml"), "{}\n")
 	environment := inspectCommandEnvironment(nil)
@@ -67,8 +67,8 @@ func TestInspectResourcesReportsDeterministicReadOnlyContracts(t *testing.T) {
 		if document.Schema != "plystra.graph" || document.SchemaVersion != 1 || document.Result.Type != "resources" || len(document.Result.Nodes) != 4 || len(document.Result.Edges) != 2 {
 			t.Fatalf("Resource graph = %#v", document)
 		}
-		resource := inspectGraphNodeByID(t, document.Result.Nodes, "resource-contract:data.database/v1")
-		if resource.ResourceID != "data.database/v1" || resource.Label != "example.com/acme/inspect/api" || len(resource.ContractDigest) != 71 || len(resource.Sources) != 1 || resource.Sources[0].Path != "api/resource.go" || resource.Sources[0].Kind != "resource-declaration" || resource.Sources[0].Line != 2 {
+		resource := inspectGraphNodeByID(t, document.Result.Nodes, "resource-contract:storage.database/v1")
+		if resource.ResourceID != "storage.database/v1" || resource.Label != "example.com/acme/inspect/api" || len(resource.ContractDigest) != 71 || len(resource.Sources) != 1 || resource.Sources[0].Path != "api/resource.go" || resource.Sources[0].Kind != "resource-declaration" || resource.Sources[0].Line != 2 {
 			t.Fatalf("Resource = %#v", resource)
 		}
 		if first == "" {
@@ -77,7 +77,7 @@ func TestInspectResourcesReportsDeterministicReadOnlyContracts(t *testing.T) {
 		if resource.ContractDigest != originalDigest {
 			t.Fatal("selector changed Resource contract identity")
 		}
-		assertInspectGraphEdge(t, document.Result.Edges, "defines-resource", "module:example.com/acme/library", "resource-contract:data.remote/v1", "authored", "example.com/acme/library", "api/resource.go", "resource-declaration")
+		assertInspectGraphEdge(t, document.Result.Edges, "defines-resource", "module:example.com/acme/library", "resource-contract:storage.remote/v1", "authored", "example.com/acme/library", "api/resource.go", "resource-declaration")
 		for _, forbidden := range []string{root, "resolved-secret-marker", "private", "parameter_name", "selected-provider"} {
 			if strings.Contains(stdout, forbidden) {
 				t.Fatalf("Resource view contains %q", forbidden)
@@ -105,12 +105,12 @@ func TestInspectResourcesReportsDeterministicReadOnlyContracts(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("inspect changed contract: %d, %s, %s", code, stdout, stderr)
 	}
-	changed := inspectGraphNodeByID(t, decodeInspectGraphCommandEnvelope(t, stdout).Result.Nodes, "resource-contract:data.database/v1")
+	changed := inspectGraphNodeByID(t, decodeInspectGraphCommandEnvelope(t, stdout).Result.Nodes, "resource-contract:storage.database/v1")
 	if changed.ContractDigest == originalDigest {
 		t.Fatal("transitive public type edit did not change recorded digest")
 	}
-	longID := "data." + strings.Repeat("long", 300) + "/v1"
-	writeCommandFile(t, local, strings.Replace(commandResourceSource, "data.database/v1", longID, 1))
+	longID := "storage." + strings.Repeat("long", 300) + "/v1"
+	writeCommandFile(t, local, strings.Replace(commandResourceSource, "storage.database/v1", longID, 1))
 	code, stdout, stderr = runCommand(t, []string{"inspect", "resources", "--format", "json"}, root, environment)
 	if code != 0 {
 		t.Fatalf("inspect long identity: %d, %s, %s", code, stdout, stderr)
@@ -136,9 +136,9 @@ func TestPublicCommandsRejectInvalidResourceContractsWithoutMutation(t *testing.
 		name, source, code, kind string
 		duplicate                bool
 	}{
-		{"identity", strings.Replace(commandResourceSource, "data.database/v1", "invalid-private-marker", 1), diagnosticcode.ResourceDeclarationInvalid, "resource-declaration", false},
+		{"identity", strings.Replace(commandResourceSource, "storage.database/v1", "invalid-private-marker", 1), diagnosticcode.ResourceDeclarationInvalid, "resource-declaration", false},
 		{"target", strings.Replace(commandResourceSource, "type Resource interface", "type Other interface", 1), diagnosticcode.ResourceDeclarationInvalid, "resource-declaration", false},
-		{"mixed", strings.Replace(commandResourceSource, "type Resource", "//plystra:interface data.database/v1\ntype Resource", 1), diagnosticcode.ResourceDeclarationInvalid, "resource-declaration", false},
+		{"mixed", strings.Replace(commandResourceSource, "type Resource", "//plystra:interface storage.database/v1\ntype Resource", 1), diagnosticcode.ResourceDeclarationInvalid, "resource-declaration", false},
 		{"lifecycle", strings.Replace(commandResourceSource, "Read() Value", "Close()", 1), diagnosticcode.ResourceContractInvalid, "resource-contract", false},
 		{"depth", strings.Replace(commandResourceSource, "Read() Value", "Read("+strings.Repeat("*", 65)+"int)", 1), diagnosticcode.ResourceContractInvalid, "resource-contract", false},
 		{"duplicate", commandResourceSource, diagnosticcode.ResourceIDDuplicate, "resource-declaration", true},

@@ -61,10 +61,10 @@ func resourceOptions(t *testing.T) Options {
 	compile("example.com/cache", "package cache\ntype Resource interface { Read() string }\n")
 	providers := []resourceproviderinventory.Input{}
 	for _, test := range []struct{ path, imports, config, id, args string }{
-		{"example.com/provider", "import \"github.com/plystra/kernel/configuration\"\n", resourceConfigSource, "data.database/v1", "Config"},
-		{"example.com/alternate", "import \"github.com/plystra/kernel/configuration\"\n", resourceConfigSource, "data.database/v1", "Config"},
-		{"example.com/empty", "", "", "data.database/v1", ""},
-		{"example.com/cached", "import \"example.com/database\"\n", "", "data.cache/v1", "database database.Resource"},
+		{"example.com/provider", "import \"github.com/plystra/kernel/configuration\"\n", resourceConfigSource, "storage.database/v1", "Config"},
+		{"example.com/alternate", "import \"github.com/plystra/kernel/configuration\"\n", resourceConfigSource, "storage.database/v1", "Config"},
+		{"example.com/empty", "", "", "storage.database/v1", ""},
+		{"example.com/cached", "import \"example.com/database\"\n", "", "storage.cache/v1", "database database.Resource"},
 	} {
 		source := "package provider\n" + test.imports + test.config + "type value struct{}\nfunc (*value) Read() string { return \"\" }\n//plystra:implements-resource " + test.id + "\nfunc New(" + test.args + ") (*value, error) { return nil, nil }\n"
 		compile(test.path, source)
@@ -74,7 +74,7 @@ func resourceOptions(t *testing.T) Options {
 		}
 		providers = append(providers, resourceproviderinventory.Input{ModulePath: test.path, PackagePath: test.path, Declaration: declarations[0]})
 	}
-	inventory, err := resourceproviderinventory.Build(providers, []resourceproviderinventory.ContractInput{{ID: "data.database/v1", PackagePath: "example.com/database"}, {ID: "data.cache/v1", PackagePath: "example.com/cache"}}, packages)
+	inventory, err := resourceproviderinventory.Build(providers, []resourceproviderinventory.ContractInput{{ID: "storage.database/v1", PackagePath: "example.com/database"}, {ID: "storage.cache/v1", PackagePath: "example.com/cache"}}, packages)
 	if err != nil {
 		t.Fatal(err)
 	}

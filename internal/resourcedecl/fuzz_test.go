@@ -7,7 +7,7 @@ import (
 )
 
 func FuzzParseResourceFile(f *testing.F) {
-	for _, source := range []string{"package api\n//plystra:resource data.database/v1\ntype Resource interface{}", "package api\n//plystra:resource", "package api\ntype(\n//plystra:resource a.b/v1\nResource interface{Read()}\n)"} {
+	for _, source := range []string{"package api\n//plystra:resource storage.database/v1\ntype Resource interface{}", "package api\n//plystra:resource", "package api\ntype(\n//plystra:resource a.b/v1\nResource interface{Read()}\n)"} {
 		f.Add(source)
 	}
 	f.Fuzz(func(t *testing.T, source string) {

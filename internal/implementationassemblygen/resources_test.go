@@ -115,7 +115,7 @@ func TestRenderRejectsInvalidResourcePlans(t *testing.T) {
 		"wrong module":     func(o *implementationassemblygen.Options) { o.Resources[0].ModulePath = "example.com/other" },
 		"missing upstream": func(o *implementationassemblygen.Options) { o.Resources[0].Dependencies[0].InstanceName = "absent" },
 		"upstream contract": func(o *implementationassemblygen.Options) {
-			o.Resources[0].Dependencies[0].ResourceID = mustInterfaceID(t, "data.other/v1")
+			o.Resources[0].Dependencies[0].ResourceID = mustInterfaceID(t, "storage.other/v1")
 		},
 		"cycle": func(o *implementationassemblygen.Options) {
 			o.Resources[0].Dependencies[0].InstanceName = o.Resources[0].Name
@@ -152,7 +152,7 @@ func resourceOptions(t testing.TB) implementationassemblygen.Options {
 	t.Helper()
 	options := validOptions(t)
 	resource := implementationassemblygen.ResourceInput{
-		Name: "database.primary", ResourceID: mustInterfaceID(t, "data.database/v1"),
+		Name: "database.primary", ResourceID: mustInterfaceID(t, "storage.database/v1"),
 		PackagePath: "example.com/application/resources/database", ContractDigest: sha256.Sum256([]byte("database-contract")),
 		Provider: mustSymbol(t, "example.com/application/database.New"), ModulePath: "example.com/application", HasConfiguration: true,
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/plystra/cli/internal/resourcedecl"
 )
 
-const resourceSource = "package api\n//plystra:resource data.database/v1\ntype Resource interface{Read() Value}\ntype Value struct{Data string; Next *Value}\n"
+const resourceSource = "package api\n//plystra:resource storage.database/v1\ntype Resource interface{Read() Value}\ntype Value struct{Data string; Next *Value}\n"
 
 func TestDiscoverResourceContractsUsesSharedProjectBoundary(t *testing.T) {
 	t.Parallel()
@@ -24,20 +24,20 @@ func TestDiscoverResourceContractsUsesSharedProjectBoundary(t *testing.T) {
 	writeFile(t, filepath.Join(app, "go.mod"), "module example.com/app\ngo 1.26\nrequire (\nexample.com/dependency v1.0.0\nexample.com/ordinary v1.0.0\n)\nreplace example.com/dependency => ../dependency\nreplace example.com/ordinary => ../ordinary\nreplace example.com/transitive => ../transitive\n")
 	writeFile(t, filepath.Join(root, "dependency", "go.mod"), "module example.com/dependency\ngo 1.26\nrequire example.com/transitive v1.1.0\n")
 	writeProject(t, filepath.Join(root, "transitive"), "example.com/transitive")
-	writeFile(t, filepath.Join(root, "transitive", "api.go"), strings.ReplaceAll(resourceSource, "data.database", "data.transitive"))
+	writeFile(t, filepath.Join(root, "transitive", "api.go"), strings.ReplaceAll(resourceSource, "storage.database", "storage.transitive"))
 	writeFile(t, filepath.Join(root, "ordinary", "go.mod"), "module example.com/ordinary\ngo 1.26\n")
-	writeFile(t, filepath.Join(root, "ordinary", "api.go"), strings.ReplaceAll(resourceSource, "data.database/v1", "invalid"))
+	writeFile(t, filepath.Join(root, "ordinary", "api.go"), strings.ReplaceAll(resourceSource, "storage.database/v1", "invalid"))
 	writeFile(t, filepath.Join(app, "api", "resource.go"), resourceSource)
-	writeFile(t, filepath.Join(root, "dependency", "resource.go"), strings.ReplaceAll(resourceSource, "data.database", "data.dependency"))
+	writeFile(t, filepath.Join(root, "dependency", "resource.go"), strings.ReplaceAll(resourceSource, "storage.database", "storage.dependency"))
 	writeFile(t, filepath.Join(app, "api", "interface.yaml"), "[malformed; Resource does not use this document\n")
 	for _, directory := range []string{"generated", "testdata", "vendor", "fixture", "fixtures", ".private", "_private"} {
-		writeFile(t, filepath.Join(app, directory, "resource.go"), strings.ReplaceAll(resourceSource, "data.database/v1", "invalid"))
+		writeFile(t, filepath.Join(app, directory, "resource.go"), strings.ReplaceAll(resourceSource, "storage.database/v1", "invalid"))
 	}
-	writeFile(t, filepath.Join(app, "inactive", "resource.go"), "//go:build resource_inactive\n\n"+strings.ReplaceAll(resourceSource, "data.database/v1", "invalid"))
-	writeFile(t, filepath.Join(app, "tests", "resource_test.go"), strings.ReplaceAll(resourceSource, "data.database/v1", "invalid"))
+	writeFile(t, filepath.Join(app, "inactive", "resource.go"), "//go:build resource_inactive\n\n"+strings.ReplaceAll(resourceSource, "storage.database/v1", "invalid"))
+	writeFile(t, filepath.Join(app, "tests", "resource_test.go"), strings.ReplaceAll(resourceSource, "storage.database/v1", "invalid"))
 	writeFile(t, filepath.Join(app, "ordinary", "ordinary.go"), "package ordinary\nconst marker = `//plystra:resource invalid`\n")
 	writeProject(t, filepath.Join(app, "nested"), "example.com/nested")
-	writeFile(t, filepath.Join(app, "nested", "api.go"), strings.ReplaceAll(resourceSource, "data.database/v1", "invalid"))
+	writeFile(t, filepath.Join(app, "nested", "api.go"), strings.ReplaceAll(resourceSource, "storage.database/v1", "invalid"))
 	before := snapshotFiles(t, root)
 	environment := goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"})
 	first := discoverApplication(t, app, environment).Resources().Resources()
@@ -45,7 +45,7 @@ func TestDiscoverResourceContractsUsesSharedProjectBoundary(t *testing.T) {
 	if len(first) != 3 || !reflect.DeepEqual(first, second) {
 		t.Fatalf("inventory = %#v / %#v", first, second)
 	}
-	for i, id := range []string{"data.database/v1", "data.dependency/v1", "data.transitive/v1"} {
+	for i, id := range []string{"storage.database/v1", "storage.dependency/v1", "storage.transitive/v1"} {
 		if first[i].ID() != id || len(first[i].ContractDigest()) != 71 || first[i].Declaration().Position().Line != 2 {
 			t.Fatalf("Resource = %#v", first[i])
 		}
@@ -65,10 +65,10 @@ func TestDiscoverResourceContractsUsesSharedProjectBoundary(t *testing.T) {
 	if changed[0].ContractDigest() == first[0].ContractDigest() || changed[1].ContractDigest() != first[1].ContractDigest() {
 		t.Fatal("compiled export-data public shape digest is stale or unstable")
 	}
-	imported := "package api\nimport ordinary \"example.com/ordinary\"\n//plystra:resource data.database/v1\ntype Resource interface{Read() ordinary.Value}\n"
+	imported := "package api\nimport ordinary \"example.com/ordinary\"\n//plystra:resource storage.database/v1\ntype Resource interface{Read() ordinary.Value}\n"
 	writeFile(t, filepath.Join(app, "api", "resource.go"), imported)
 	firstImported := discoverApplication(t, app, environment).Resources().Resources()[0].ContractDigest()
-	writeFile(t, filepath.Join(root, "ordinary", "api.go"), strings.Replace(strings.ReplaceAll(resourceSource, "data.database/v1", "invalid"), "Data string", "Data []byte", 1))
+	writeFile(t, filepath.Join(root, "ordinary", "api.go"), strings.Replace(strings.ReplaceAll(resourceSource, "storage.database/v1", "invalid"), "Data string", "Data []byte", 1))
 	secondImported := discoverApplication(t, app, environment).Resources().Resources()[0].ContractDigest()
 	if firstImported == secondImported {
 		t.Fatal("unchanged external named type concealed its changed public shape")
@@ -81,7 +81,7 @@ func TestDiscoverResourceFailuresRetainOwningSources(t *testing.T) {
 		name, source, kind string
 		sentinel           error
 	}{
-		{"identity", strings.ReplaceAll(resourceSource, "data.database/v1", "bad"), "resource-declaration", resourcedecl.ErrInvalid},
+		{"identity", strings.ReplaceAll(resourceSource, "storage.database/v1", "bad"), "resource-declaration", resourcedecl.ErrInvalid},
 		{"lifecycle", strings.Replace(resourceSource, "Read() Value", "Close()", 1), "resource-contract", resourcecontract.ErrInvalid},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -110,7 +110,7 @@ func TestDiscoverDuplicateResourceIDsRetainsEveryDefinition(t *testing.T) {
 	}
 	_, err := discoverApplicationResult(t, root, goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "GOSUMDB": "off"}))
 	var duplicate *interfaceinventory.DuplicateResourceIDError
-	if !errors.Is(err, interfaceinventory.ErrDuplicateResourceID) || !errors.As(err, &duplicate) || duplicate.ID() != "data.database/v1" || len(duplicate.Definitions()) != 3 {
+	if !errors.Is(err, interfaceinventory.ErrDuplicateResourceID) || !errors.As(err, &duplicate) || duplicate.ID() != "storage.database/v1" || len(duplicate.Definitions()) != 3 {
 		t.Fatalf("error = %v", err)
 	}
 	for i, name := range []string{"a", "m", "z"} {

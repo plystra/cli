@@ -17,12 +17,12 @@ func resourceProvenanceInput() interfaceprovenance.Input {
 	selection := []interfaceprovenance.ResourceSource{{Module: "example.com/app", Path: "plystra.production.yaml", Kind: "resource-selection", Line: 1, Column: 1}, {Module: "example.com/template", Path: "plystra.yaml", Kind: "resource-selection", Line: 1, Column: 1}}
 	provider := interfaceprovenance.ResourceSource{Module: "example.com/provider", Path: "database/new.go", Kind: "resource-provider-constructor", Line: 9, Column: 6}
 	for i, name := range []string{"database.primary", "database.secondary", "database.unconsumed"} {
-		input.Resources = append(input.Resources, interfaceprovenance.ResourceInput{Name: name, ResourceID: "data.database/v1", PackagePath: "example.com/contracts/database", ContractDigest: digest("d"), Provider: "example.com/provider/database.New", ModulePath: "example.com/provider", ModuleVersion: "v1.2.3", DeclarationSource: provider, SelectionSources: selection, ConstructionOrder: i + 1, ConfigurationOwner: `resources.instances["` + name + `"].config`})
+		input.Resources = append(input.Resources, interfaceprovenance.ResourceInput{Name: name, ResourceID: "storage.database/v1", PackagePath: "example.com/contracts/database", ContractDigest: digest("d"), Provider: "example.com/provider/database.New", ModulePath: "example.com/provider", ModuleVersion: "v1.2.3", DeclarationSource: provider, SelectionSources: selection, ConstructionOrder: i + 1, ConfigurationOwner: `resources.instances["` + name + `"].config`})
 	}
 	for i, name := range []string{"database", "Database", "\u03b4"} {
 		input.ResourceBindings = append(input.ResourceBindings, interfaceprovenance.ResourceBindingInput{ConsumerKind: "implementations", Consumer: "example.com/app/order.New", Constructor: "example.com/app/order.New", ResourceID: input.Resources[0].ResourceID, PackagePath: input.Resources[0].PackagePath, ParameterName: name, ParameterPosition: i + 4, InstanceName: input.Resources[i%2].Name, Provider: input.Resources[0].Provider, Reason: interfaceprovenance.SelectionExplicit, DeclarationSource: interfaceprovenance.ResourceSource{Module: "example.com/app", Path: "order/order.go", Kind: "implementation-constructor", Line: 22, Column: 1}, BindingSources: []interfaceprovenance.ResourceSource{{Module: "example.com/app", Path: "plystra.production.yaml", Kind: "resource-binding", Line: 1, Column: 1}}, SelectionSources: selection})
 	}
-	input.Resources = append(input.Resources, interfaceprovenance.ResourceInput{Name: "view", ResourceID: "data.view/v1", PackagePath: "example.com/contracts/view", ContractDigest: digest("e"), Provider: "example.com/provider/view.New", ModulePath: "example.com/provider", ModuleVersion: "v1.2.3", DeclarationSource: interfaceprovenance.ResourceSource{Module: "example.com/provider", Path: "view/new.go", Kind: "resource-provider-constructor", Line: 3, Column: 6}, SelectionSources: selection, ConstructionOrder: 4})
+	input.Resources = append(input.Resources, interfaceprovenance.ResourceInput{Name: "view", ResourceID: "storage.view/v1", PackagePath: "example.com/contracts/view", ContractDigest: digest("e"), Provider: "example.com/provider/view.New", ModulePath: "example.com/provider", ModuleVersion: "v1.2.3", DeclarationSource: interfaceprovenance.ResourceSource{Module: "example.com/provider", Path: "view/new.go", Kind: "resource-provider-constructor", Line: 3, Column: 6}, SelectionSources: selection, ConstructionOrder: 4})
 	binding := input.ResourceBindings[0]
 	binding.ConsumerKind = "instances"
 	binding.Consumer = "view"
@@ -107,7 +107,7 @@ func TestResourceProvenanceRejectsInconsistentUnsafeAndCyclicRecords(t *testing.
 			i.Resources[0].ConfigurationOwner = `config["example.com/provider/database.New"]`
 		},
 		"absent-target": func(i *interfaceprovenance.Input) { i.ResourceBindings[0].InstanceName = "missing" },
-		"contract":      func(i *interfaceprovenance.Input) { i.ResourceBindings[0].ResourceID = "data.other/v1" },
+		"contract":      func(i *interfaceprovenance.Input) { i.ResourceBindings[0].ResourceID = "storage.other/v1" },
 		"reason":        func(i *interfaceprovenance.Input) { i.ResourceBindings[0].Reason = "first" },
 		"ambiguous-implicit": func(i *interfaceprovenance.Input) {
 			i.ResourceBindings[0].Reason = interfaceprovenance.SelectionUniqueCompatible

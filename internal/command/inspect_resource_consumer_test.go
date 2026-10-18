@@ -41,7 +41,7 @@ func TestInspectImplementationResourceConsumers(t *testing.T) {
 			}
 			for _, owner := range []struct{ module, id string }{{"inspect", "local"}, {"library", "direct"}, {"transitive", "transitive"}} {
 				module := "example.com/acme/" + owner.module
-				resourceID := "data." + owner.id + "/v1"
+				resourceID := "storage." + owner.id + "/v1"
 				node := inspectGraphNodeByID(t, document.Result.Nodes, "resource-contract:"+resourceID)
 				if node.ResourceID != resourceID || node.Label != module+"/api" || !strings.HasPrefix(node.ContractDigest, "sha256:") || len(node.ContractDigest) != 71 || len(node.Sources) != 1 || node.Sources[0].Module != module || node.Sources[0].Path != "api/resource.go" || node.Sources[0].Kind != "resource-declaration" || node.Sources[0].Line != 2 {
 					t.Fatalf("Resource contract lost identity or provenance: %#v", node)
@@ -82,7 +82,7 @@ func TestInspectImplementationResourceConsumers(t *testing.T) {
 			if code != 0 || stderr != "" {
 				t.Fatalf("human inspection = %d, %s, %s", code, human, stderr)
 			}
-			for _, phrase := range []string{"Resource contracts: 3 visible", "Resource: data.local/v1", "-> data.local/v1 (resource)", "parameter 3 database", "parameter 4 Database", "parameter 5 _database", "parameter 6 \u03b4", "(dormant-explicit)", "(unselected-candidate)", "Resource instances: 0 selected", "Resolution evidence:"} {
+			for _, phrase := range []string{"Resource contracts: 3 visible", "Resource: storage.local/v1", "-> storage.local/v1 (resource)", "parameter 3 database", "parameter 4 Database", "parameter 5 _database", "parameter 6 \u03b4", "(dormant-explicit)", "(unselected-candidate)", "Resource instances: 0 selected", "Resolution evidence:"} {
 				if !strings.Contains(human, phrase) {
 					t.Fatalf("human inspection omits %q", phrase)
 				}
@@ -127,8 +127,8 @@ func TestBuiltCLIInspectsLongResourceConsumerIdentities(t *testing.T) {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
 	root, nested := createInspectResourceConsumerProject(t)
-	longID := "data." + strings.Repeat("long", 300) + "/v1"
-	writeCommandFile(t, filepath.Join(root, "api", "resource.go"), strings.Replace(commandResourceSource, "data.database/v1", longID, 1))
+	longID := "storage." + strings.Repeat("long", 300) + "/v1"
+	writeCommandFile(t, filepath.Join(root, "api", "resource.go"), strings.Replace(commandResourceSource, "storage.database/v1", longID, 1))
 	consumerPath := filepath.Join(root, "consumer", "service.go")
 	consumerSource, err := os.ReadFile(consumerPath)
 	if err != nil {
@@ -190,7 +190,7 @@ func createInspectResourceConsumerProject(t testing.TB) (string, string) {
 	for _, owner := range []struct{ dir, module, id string }{{"", "inspect", "local"}, {"library", "library", "direct"}, {"transitive", "transitive", "transitive"}} {
 		directory := filepath.Join(root, owner.dir)
 		module := "example.com/acme/" + owner.module
-		writeCommandFile(t, filepath.Join(directory, "api", "resource.go"), strings.Replace(commandResourceSource, "data.database/v1", "data."+owner.id+"/v1", 1))
+		writeCommandFile(t, filepath.Join(directory, "api", "resource.go"), strings.Replace(commandResourceSource, "storage.database/v1", "storage."+owner.id+"/v1", 1))
 		writeCommandGraphInterface(t, directory, "run/v1", "runv1", "app."+owner.id+"/v1", "Run")
 		writeCommandFile(t, filepath.Join(directory, "consumer", "service.go"), fmt.Sprintf(`package consumer
 import (

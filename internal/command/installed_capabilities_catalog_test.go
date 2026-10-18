@@ -139,8 +139,8 @@ func TestInstalledResourceAuthoringAdvertisesUnifiedCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, command := range capabilities.Commands() {
-		if strings.HasPrefix(command.ID(), "resource.") || strings.HasPrefix(command.ID(), "data.") {
-			t.Fatalf("unsupported Resource or Data command advertised: %s", command.ID())
+		if strings.HasPrefix(command.ID(), "resource.") {
+			t.Fatalf("unsupported Resource command advertised: %s", command.ID())
 		}
 		if command.ID() != "use" && command.ID() != "implement" {
 			continue

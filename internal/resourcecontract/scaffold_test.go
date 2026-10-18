@@ -41,7 +41,7 @@ func TestImplementationMethodsAreDeterministicAndCompilable(t *testing.T) {
 type hidden struct { value int }
 type Public = hidden
 type Box[T any] struct { Value T }
-//plystra:resource data.database/v1
+//plystra:resource storage.database/v1
 type Resource interface {
 	Zed(first Public, values ...Box[Public]) (result map[string]chan<- Public, err error)
 	Alpha() error
@@ -97,25 +97,25 @@ func TestImplementationMethodsRejectsInaccessibleShapes(t *testing.T) {
 			name:        "internal root",
 			packagePath: "example.com/owner/internal/resource",
 			target:      "example.com/consumer",
-			source:      "//plystra:resource data.database/v1\ntype Resource interface{}",
+			source:      "//plystra:resource storage.database/v1\ntype Resource interface{}",
 		},
 		{
 			name:        "sealed method",
 			packagePath: "example.com/resource/api",
 			target:      "example.com/consumer",
-			source:      "//plystra:resource data.database/v1\ntype Resource interface { Read(); sealed() }",
+			source:      "//plystra:resource storage.database/v1\ntype Resource interface { Read(); sealed() }",
 		},
 		{
 			name:        "private result type",
 			packagePath: "example.com/resource/api",
 			target:      "example.com/consumer",
-			source:      "type hidden struct{}\n//plystra:resource data.database/v1\ntype Resource interface { Read() hidden }",
+			source:      "type hidden struct{}\n//plystra:resource storage.database/v1\ntype Resource interface { Read() hidden }",
 		},
 		{
 			name:        "private anonymous field",
 			packagePath: "example.com/resource/api",
 			target:      "example.com/consumer",
-			source:      "//plystra:resource data.database/v1\ntype Resource interface { Read() struct { hidden int } }",
+			source:      "//plystra:resource storage.database/v1\ntype Resource interface { Read() struct { hidden int } }",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -132,7 +132,7 @@ func TestImplementationMethodsAcceptsExportedAliasToPrivateShape(t *testing.T) {
 	contract, _ := checkedResource(t, "example.com/resource/api", `
 type hidden struct { value int }
 type Public = hidden
-//plystra:resource data.database/v1
+//plystra:resource storage.database/v1
 type Resource interface { Read() Public }`)
 	methods, err := contract.ImplementationMethods("example.com/consumer", func(pkg *types.Package) string {
 		if pkg.Path() == "example.com/resource/api" {

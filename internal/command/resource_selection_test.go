@@ -198,7 +198,7 @@ func TestRunUseRejectsResourceSelectionWithoutMutation(t *testing.T) {
 		{name: "malformed instance", target: "database..primary", constructor: "replacement.New", diagnostic: diagnosticcode.UseTargetInvalid},
 		{name: "unknown instance", target: "database.missing", constructor: "replacement.New", diagnostic: diagnosticcode.UseTargetNotFound},
 		{name: "unknown Interface", target: "missing.operation/v1", constructor: "local.New", diagnostic: diagnosticcode.UseTargetNotFound},
-		{name: "Resource contract is not an instance", target: "data.database/v1", constructor: "replacement.New", diagnostic: diagnosticcode.UseTargetNotFound},
+		{name: "Resource contract is not an instance", target: "storage.database/v1", constructor: "replacement.New", diagnostic: diagnosticcode.UseTargetNotFound},
 		{name: "unknown provider", target: "database.primary", constructor: "missing.New", diagnostic: diagnosticcode.UseProviderIncompatible},
 		{name: "Interface constructor is not a provider", target: "database.primary", constructor: "local.New", diagnostic: diagnosticcode.UseProviderIncompatible},
 		{name: "wrong Resource contract", target: "database.primary", constructor: "different.New", diagnostic: diagnosticcode.UseProviderIncompatible},
@@ -241,9 +241,9 @@ resources:
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "# Selected Resource layer.\nresources: {instances: {database.primary: {config: {value: PRIVATE_OVERLAY}}}}\n")
 	writeCommandFile(t, filepath.Join(root, "plystra.ignored.yaml"), "{}\n")
 	writeCommandFile(t, filepath.Join(root, "deploy/ignored.yaml"), "{}\n")
-	writeCommandFile(t, filepath.Join(root, "database/resource.go"), "package database\n//plystra:resource data.database/v1\ntype Resource interface { Read() }\n")
-	writeCommandFile(t, filepath.Join(root, "other/resource.go"), "package other\n//plystra:resource data.other/v1\ntype Resource interface { Other() }\n")
-	for _, provider := range []struct{ name, id, method string }{{"original", "data.database/v1", "Read"}, {"replacement", "data.database/v1", "Read"}, {"different", "data.other/v1", "Other"}} {
+	writeCommandFile(t, filepath.Join(root, "database/resource.go"), "package database\n//plystra:resource storage.database/v1\ntype Resource interface { Read() }\n")
+	writeCommandFile(t, filepath.Join(root, "other/resource.go"), "package other\n//plystra:resource storage.other/v1\ntype Resource interface { Other() }\n")
+	for _, provider := range []struct{ name, id, method string }{{"original", "storage.database/v1", "Read"}, {"replacement", "storage.database/v1", "Read"}, {"different", "storage.other/v1", "Other"}} {
 		writeCommandFile(t, filepath.Join(root, provider.name, "provider.go"), fmt.Sprintf(`package %s
 type Config struct { Value string `+"`yaml:\"value\"`"+` }
 type Value struct{}

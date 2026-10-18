@@ -16,8 +16,8 @@ import (
 func TestBuildSeparatesMixedResourceAndInterfaceDependencies(t *testing.T) {
 	t.Parallel()
 	canonical := canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")
-	resource := canonicalResource(t, "data.database/v1", "example.com/resources/database")
-	other := canonicalResource(t, "data.other/v1", "example.com/resources/other")
+	resource := canonicalResource(t, "storage.database/v1", "example.com/resources/database")
+	other := canonicalResource(t, "storage.other/v1", "example.com/resources/other")
 	contract := resource.Types.Scope().Lookup("Resource").Type()
 	alias := types.NewAlias(types.NewTypeName(token.NoPos, types.NewPackage("example.com/alias", "alias"), "Database", nil), contract)
 	for _, hasConfig := range []bool{false, true} {
@@ -87,10 +87,10 @@ func TestBuildSeparatesMixedResourceAndInterfaceDependencies(t *testing.T) {
 func TestBuildRejectsNoncanonicalResourceParameters(t *testing.T) {
 	t.Parallel()
 	canonical := canonicalInterface(t, "service.operation.run/v1", "example.com/interfaces/operation", "Run")
-	resource := canonicalResource(t, "data.database/v1", "example.com/resources/database")
+	resource := canonicalResource(t, "storage.database/v1", "example.com/resources/database")
 	contract := resource.Types.Scope().Lookup("Resource").Type()
-	unshared := canonicalResource(t, "data.database/v1", resource.PackagePath)
-	invisible := canonicalResource(t, "data.invisible/v1", "example.com/ordinary/database")
+	unshared := canonicalResource(t, "storage.database/v1", resource.PackagePath)
+	invisible := canonicalResource(t, "storage.invisible/v1", "example.com/ordinary/database")
 	local := types.NewPackage("example.com/app/service", "service")
 	lookalike := types.NewNamed(types.NewTypeName(token.NoPos, local, "Copy", nil), contract.Underlying(), nil)
 	resourceCopy := types.NewNamed(types.NewTypeName(token.NoPos, resource.Types, "Resource", nil), contract.Underlying(), nil)
@@ -134,8 +134,8 @@ func TestBuildRejectsNoncanonicalResourceParameters(t *testing.T) {
 
 func TestBuildRejectsInvalidResourceInputs(t *testing.T) {
 	t.Parallel()
-	resource := canonicalResource(t, "data.database/v1", "example.com/resources/database")
-	other := canonicalResource(t, "data.other/v1", "example.com/resources/other")
+	resource := canonicalResource(t, "storage.database/v1", "example.com/resources/database")
+	other := canonicalResource(t, "storage.other/v1", "example.com/resources/other")
 	duplicateID := other
 	duplicateID.ID = resource.ID
 	duplicatePackage := resource
