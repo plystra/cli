@@ -2090,6 +2090,12 @@ contributions, explicit removals, and suppressed descendants. Use
 defining packages, owning sources and exact `resource_id` and `contract_digest` values on
 `resource-contract` nodes, selected named instances, and resolved bindings.
 This read-only view does not change selections or construct values.
+`plystra inspect resources --configured --format json` reads composed
+current-Project instance selections without requiring full graph resolution.
+Its `plystra.resource-selections/v1` payload reports exact provider references,
+configuration spans, and current provider visibility; missing providers carry
+no Resource ID. The result is configuration evidence, not binding, Config,
+backend, or assembly validation.
 All five are deterministic `plystra.graph` v1 views whose source
 references stay project-relative and whose structured results omit resolved
 Secrets and unrestricted configuration values.

@@ -1151,6 +1151,13 @@ suppressed descendants. `plystra inspect resources` shows every visible consumer
 Resource contract, its defining package and sources, exact `resource_id` and `contract_digest`
 on `resource-contract` nodes, plus selected named instances and resolved bindings.
 Inspection is read-only: it neither changes selection nor constructs values.
+`plystra inspect resources --configured --format json` instead returns one
+`plystra.result/v1` with a `plystra.resource-selections/v1` payload. It composes
+only current-Project Resource selection identities and reports each instance's
+exact provider reference, owning configuration span, and whether that provider
+is visible in the selected Go module graph. A missing provider has no Resource
+ID; this mode does not validate bindings, Config, or executable assembly. It
+can be used before a separately generated ordinary provider exists.
 All five graph views use the versioned
 `plystra.graph` v1 schema with project-relative source references and omit
 resolved Secrets and unrestricted configuration values. The command accepts the same `--env`, `--config`,

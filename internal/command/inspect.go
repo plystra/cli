@@ -11,6 +11,7 @@ import (
 
 	generation "github.com/plystra/cli/generation/v1"
 	"github.com/plystra/cli/internal/applicationresolve"
+	"github.com/plystra/cli/internal/commandschema"
 	"github.com/plystra/cli/internal/diagnosticschema"
 )
 
@@ -18,6 +19,7 @@ type inspectArguments struct {
 	graphType         diagnosticschema.GraphType
 	format            commandFormat
 	verbose           bool
+	configured        bool
 	configurationPath string
 	environmentName   string
 }
@@ -38,6 +40,9 @@ func runInspect(arguments []string, stdout, stderr io.Writer, workingDirectory s
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "configure inspect output: %v\n", err)
 		return 2
+	}
+	if parsed.configured {
+		return runInspectConfiguredResources(parsed, output, workingDirectory, environment)
 	}
 
 	_, _ = io.WriteString(output.progressWriter(), "Resolving selected application model...\n")
@@ -181,6 +186,11 @@ func parseInspectArguments(arguments []string) (inspectArguments, bool) {
 				return inspectArguments{}, false
 			}
 			result.verbose = true
+		case "--configured":
+			if result.configured {
+				return inspectArguments{}, false
+			}
+			result.configured = true
 		case "--format":
 			if formatSet || index+1 >= len(arguments) || strings.HasPrefix(arguments[index+1], "--") {
 				return inspectArguments{}, false
@@ -211,7 +221,85 @@ func parseInspectArguments(arguments []string) (inspectArguments, bool) {
 			return inspectArguments{}, false
 		}
 	}
+	if result.configured && (result.graphType != diagnosticschema.GraphTypeResources || result.verbose) {
+		return inspectArguments{}, false
+	}
 	return result, true
+}
+
+func runInspectConfiguredResources(parsed inspectArguments, output commandOutput, workingDirectory string, environment []string) int {
+	_, _ = io.WriteString(output.progressWriter(), "Reading configured Resource selections...\n")
+	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
+	defer cancel()
+	inputs, err := applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+		Start: workingDirectory, ConfigurationPath: parsed.configurationPath,
+		EnvironmentName: parsed.environmentName, Environment: environment,
+	})
+	if err != nil {
+		writeCommandFailure(output.diagnosticWriter(), "inspect configured Resource selections", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
+		return 1
+	}
+	composition, err := inputs.ComposeSelectionCandidate(inputs.SelectedSnapshot().Data())
+	if err != nil {
+		writeCommandFailure(output.diagnosticWriter(), "compose configured Resource selections", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
+		return 1
+	}
+	instances := composition.Manifest().ResourceInstances()
+	selections := make([]commandschema.ResourceSelectionInput, len(instances))
+	for index, instance := range instances {
+		source := instance.ProviderDeclarationSource()
+		selection := commandschema.ResourceSelectionInput{
+			Name: instance.Name(), Provider: instance.Provider().String(),
+			SourcePath: source.Path(), SourceLine: source.Line(), SourceColumn: source.Column(),
+		}
+		if provider, exists := inputs.Declarations().ResourceProviders().BySymbol(instance.Provider()); exists {
+			selection.ProviderVisible, selection.ResourceID = true, provider.ID()
+		}
+		selections[index] = selection
+	}
+	if err := inputs.ValidateSnapshot(ctx); err != nil {
+		writeCommandFailure(output.diagnosticWriter(), "inspect configured Resource selections", err, commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment))
+		return 1
+	}
+	payload, err := commandschema.NewResourceSelections(inputs.Module().ModulePath(), selections)
+	if err != nil {
+		_, _ = fmt.Fprintf(output.diagnosticWriter(), "encode configured Resource selections: %v\n", err)
+		return 1
+	}
+	if parsed.format != commandFormatJSON {
+		_, _ = fmt.Fprintf(output.resultWriter(), "Configured Resource instances: %d\n", len(selections))
+		for _, selection := range selections {
+			status := "not visible"
+			if selection.ProviderVisible {
+				status = selection.ResourceID
+			}
+			_, _ = fmt.Fprintf(output.resultWriter(), "%s: %s (%s; %s:%d:%d)\n", selection.Name, selection.Provider, status, selection.SourcePath, selection.SourceLine, selection.SourceColumn)
+		}
+		return 0
+	}
+	invocationID, err := generateInvocationID()
+	if err != nil {
+		return 1
+	}
+	effects, err := commandschema.NewEffects(commandschema.EffectsInput{})
+	if err != nil {
+		return 1
+	}
+	snapshot, err := changePlanSelectorSnapshot(inputs.ConfigurationSelection())
+	if err != nil {
+		return 1
+	}
+	result, err := commandschema.NewResult(commandschema.ResultInput{
+		Operation: "inspect.resources", InvocationID: invocationID,
+		Snapshot: &snapshot, Status: commandschema.StatusSuccess, Effects: effects, Payload: payload,
+	})
+	if err != nil {
+		return 1
+	}
+	if _, err := output.resultWriter().Write(append(result.CanonicalJSON(), '\n')); err != nil {
+		return 1
+	}
+	return 0
 }
 
 func inspectNextAction(selection applicationresolve.ConfigurationSelection) string {

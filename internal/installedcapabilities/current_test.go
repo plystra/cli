@@ -204,6 +204,9 @@ func assertInstalledCommandFacts(t testing.TB, commands map[string]commandschema
 			t.Fatalf("project inspection command %q facts = %#v", id, command)
 		}
 	}
+	if installedArgumentsByName(commands["inspect.resources"])["--configured"].Value() != commandschema.CapabilityArgumentFlag {
+		t.Fatal("configured Resource inspection is absent from installed capabilities")
+	}
 	capabilitiesCommand := commands["inspect.capabilities"]
 	if len(capabilitiesCommand.Arguments()) != 1 || capabilitiesCommand.Arguments()[0].Name() != "--format" || len(capabilitiesCommand.Selectors()) != 0 || !reflect.DeepEqual(capabilitiesCommand.OutputFormats(), []commandschema.CapabilityOutputFormat{commandschema.CapabilityOutputHuman, commandschema.CapabilityOutputJSON}) {
 		t.Fatalf("inspect.capabilities facts = %#v", capabilitiesCommand)

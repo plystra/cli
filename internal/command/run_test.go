@@ -17,9 +17,11 @@ var (
 	).Replace(wantUsage)
 	wantCurrentInspectUsage = strings.NewReplacer(
 		"  plystra inspect implementations [--verbose]",
-		"  plystra inspect resources [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra inspect implementations [--verbose]",
+		"  plystra inspect resources [--verbose|--configured] [--format human|json] [--env <environment>|--config <yaml-path>]\n  plystra inspect implementations [--verbose]",
 		"  implementations        Show visible constructors",
-		"  resources              Show Resource contracts, named instances, bindings, and owning sources.\n  implementations        Show visible constructors",
+		"  resources              Show resolved Resource contracts and instances; --configured shows selected references before graph resolution.\n  implementations        Show visible constructors",
+		"\n  --format human|json",
+		"\n  --configured           Show only composed Resource selections; missing providers remain unvalidated.\n  --format human|json",
 		"The configuration view retains",
 		"The resources view retains contract_digest on resource-contract nodes, selected\nresource-instance nodes, and depends-on-resource edges with exact parameter\nnames, positions, and explicit or unique-compatible reasons. Inspection never\nconstructs values. Invalid Resource declarations, contracts, or duplicate identities\nreport RESOURCE_DECLARATION_INVALID, RESOURCE_CONTRACT_INVALID, or\nRESOURCE_ID_DUPLICATE codes with the PLYSTRA_ prefix and owning sources.\nNamed instances use resources.instances.<name>.use and typed per-instance config.\nNames are 1..128 ASCII bytes in dot-separated lower-kebab segments. Bindings use\nresources.bind.implementations.<constructor>.<parameter> or\nresources.bind.instances.<consumer-instance>.<parameter> with an exact target name.\nEvery selected instance is active, even unconsumed; one provider under different\nnames is not deduplicated. A provider change discards the old instance config.\nMissing, ambiguous, or invalid bindings fail before generation with\nPLYSTRA_RESOURCE_BINDING_MISSING, PLYSTRA_RESOURCE_BINDING_AMBIGUOUS, or\nPLYSTRA_RESOURCE_BINDING_INVALID. Resources never become Interface roots,\ncatalog entries, governed proxies, or transports. Use selects a compatible\nprovider for an existing named instance without a kind flag. Implement creates\nunfinished Interface or Resource scaffolds without activation. Full Resource\nacceptance and change apply remain unsupported. The installed\nchange-plan slice supports one implementation_selection set request.\nThe configuration view retains",
 		"configuration provenance, and reachable assembly membership.\n",

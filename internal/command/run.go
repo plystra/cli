@@ -361,7 +361,7 @@ without a fabricated span.
   plystra inspect [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect modules [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect interfaces [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
-  plystra inspect resources [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
+  plystra inspect resources [--verbose|--configured] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect implementations [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
   plystra inspect configuration [--verbose] [--format human|json] [--env <environment>|--config <yaml-path>]
 
@@ -369,12 +369,13 @@ Views:
   capabilities           Show installed command, schema, selector, default, effect, limit, toolchain, and support facts.
   modules                Show the selected current-model module graph.
   interfaces             Show visible Interfaces, active selections, and constructor dependencies.
-  resources              Show Resource contracts, named instances, bindings, and owning sources.
+  resources              Show resolved Resource contracts and instances; --configured shows selected references before graph resolution.
   implementations        Show visible constructors, selection state, dependencies, configuration, and assembly.
   configuration          Show selected layers, field ownership, precedence, removals, and suppression.
 
 Options:
   --verbose              Add the complete deterministic resolution evidence to human output.
+  --configured           Show only composed Resource selections; missing providers remain unvalidated.
   --format human|json    Select concise human output or the versioned inspect schema.
   --env <environment>    Inspect root plystra.yaml with plystra.<environment>.yaml.
   --config <yaml-path>   Inspect one complete current-project configuration instead of root plystra.yaml.

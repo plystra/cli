@@ -103,8 +103,87 @@ func TestBuiltCLIInspectsSelectedResourceInstances(t *testing.T) {
 			}
 		}
 	}
+	command := exec.CommandContext(t.Context(), binary, "inspect", "resources", "--configured", "--format", "json")
+	command.Dir, command.Env = nested, inspectCommandEnvironment(nil)
+	configured, err := command.Output()
+	if err != nil || !bytes.Contains(configured, []byte(`"schema":"plystra.resource-selections/v1"`)) || !bytes.Contains(configured, []byte(`"scope":"configured_only"`)) {
+		t.Fatalf("built configured inspection: %v\n%s", err, configured)
+	}
 	if !reflect.DeepEqual(before, snapshotInspectProject(t, root)) {
 		t.Fatal("built inspection changed authored files")
+	}
+}
+
+func TestInspectResourcesNeedsSelectedProviderToExist(t *testing.T) {
+	root, nested := createInspectSelectedResourceProject(t)
+	path := filepath.Join(root, "plystra.yaml")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := strings.Replace(string(content), "    view.main:\n", "    access.generated:\n      use: example.com/acme/inspect/dataaccess.New\n    view.main:\n", 1)
+	if selected == string(content) {
+		t.Fatal("resource fixture did not contain the expected instance")
+	}
+	writeCommandFile(t, path, selected)
+	writeCommandFile(t, filepath.Join(root, "deploy/replacement.yaml"), selected)
+	before := snapshotInspectProject(t, root)
+	code, output, stderr := runCommand(t, []string{"inspect", "resources", "--format", "json"}, nested, inspectCommandEnvironment(nil))
+	if code != 1 || output != "" || !strings.Contains(stderr, "provider is not visible") {
+		t.Fatalf("complete Resource inspection = %d, stdout = %q, stderr = %q", code, output, stderr)
+	}
+	for _, selector := range []struct {
+		args       []string
+		sourcePath string
+	}{
+		{sourcePath: "plystra.yaml"},
+		{args: []string{"--env", "production"}, sourcePath: "plystra.yaml"},
+		{args: []string{"--config", "deploy/replacement.yaml"}, sourcePath: "deploy/replacement.yaml"},
+	} {
+		args := append([]string{"inspect", "resources", "--configured", "--format", "json"}, selector.args...)
+		code, output, stderr = runCommand(t, args, nested, inspectCommandEnvironment(nil))
+		if code != 0 || stderr != "Reading configured Resource selections...\n" {
+			t.Fatalf("configured Resource inspection = %d, stdout = %q, stderr = %q", code, output, stderr)
+		}
+		var result struct {
+			Schema    string `json:"schema"`
+			Operation string `json:"operation"`
+			Status    string `json:"status"`
+			ExitClass int    `json:"exit_class"`
+			Payload   struct {
+				Schema     string `json:"schema"`
+				ModulePath string `json:"module_path"`
+				Scope      string `json:"scope"`
+				Instances  []struct {
+					Name            string `json:"name"`
+					Provider        string `json:"provider"`
+					SourcePath      string `json:"source_path"`
+					ProviderVisible bool   `json:"provider_visible"`
+					ResourceID      string `json:"resource_id"`
+				} `json:"instances"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(output), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Schema != "plystra.result/v1" || result.Operation != "inspect.resources" || result.Status != "success" || result.ExitClass != 0 || result.Payload.Schema != "plystra.resource-selections/v1" || result.Payload.Scope != "configured_only" || result.Payload.ModulePath != "example.com/acme/inspect" || len(result.Payload.Instances) != 4 {
+			t.Fatalf("unexpected configured selection result: %#v", result)
+		}
+		missing := result.Payload.Instances[0]
+		if missing.Name != "access.generated" || missing.Provider != "example.com/acme/inspect/dataaccess.New" || missing.SourcePath != selector.sourcePath || missing.ProviderVisible || missing.ResourceID != "" {
+			t.Fatalf("missing provider incorrectly resolved: %#v", missing)
+		}
+		if visible := result.Payload.Instances[1]; visible.Name != "database.primary" || !visible.ProviderVisible || visible.ResourceID != "storage.database/v1" {
+			t.Fatalf("visible provider omitted: %#v", visible)
+		}
+		for _, private := range []string{root, filepath.ToSlash(root), "PRIVATE_CONFIG", "PRIVATE_DEFAULT", "PRIVATE_CONSTRUCTOR"} {
+			if strings.Contains(output, private) {
+				t.Fatalf("configured inspection exposed %q", private)
+			}
+		}
+	}
+	if !reflect.DeepEqual(before, snapshotInspectProject(t, root)) {
+		t.Fatal("failed inspection changed Project files")
 	}
 }
 
