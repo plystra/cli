@@ -52,6 +52,12 @@ func (r ResourceInstance) HasConfiguration() bool {
 	return len(r.configuration) != 0 && !r.configuration[len(r.configuration)-1].remove
 }
 
+// ConfigurationRemoved distinguishes an authored removal from an omitted
+// Config field when comparing ownership in an unrepaired source document.
+func (r ResourceInstance) ConfigurationRemoved() bool {
+	return len(r.configuration) != 0 && r.configuration[len(r.configuration)-1].remove
+}
+
 // ConfigurationYAML returns private defensive bytes. Compose supplies the fully
 // typed merged object; a parsed layer supplies only its authored delta.
 func (r ResourceInstance) ConfigurationYAML() []byte { return append([]byte(nil), r.yaml...) }
@@ -107,6 +113,11 @@ func (b ResourceBinding) DeclarationSource() ConfigurationDeclarationSource {
 // Manifest has complete Resource configuration; ApplyOverlay retains sparse layers.
 func (m Manifest) ResourceInstances() []ResourceInstance {
 	return append([]ResourceInstance(nil), m.resourceInstances...)
+}
+
+// RemovedResourceInstances returns exact-key exclusions in an authored layer.
+func (m Manifest) RemovedResourceInstances() []ResourceInstance {
+	return append([]ResourceInstance(nil), m.removedResourceInstances...)
 }
 
 // ResourceBindings returns defensive namespace/consumer/parameter-sorted bindings.

@@ -218,7 +218,7 @@ func (s SelectionInputs) schemaLookup(namespace applicationmeta.ConfigurationNam
 // nor checks graph validity, configuration ownership or required Config values.
 // Changing the root Project or selected document requires fresh discovery.
 func (s SelectionInputs) ComposeCandidate(selected []byte) (applicationmeta.Composition, error) {
-	return s.composeCandidate(selected, false)
+	return s.composeCandidate(selected, false, false)
 }
 
 // ComposeSelectionCandidate composes only selection identities and removals,
@@ -227,10 +227,16 @@ func (s SelectionInputs) ComposeCandidate(selected []byte) (applicationmeta.Comp
 // validation or executable input: compose the real edited bytes with
 // ComposeCandidate and call ValidateCandidate before any live mutation.
 func (s SelectionInputs) ComposeSelectionCandidate(selected []byte) (applicationmeta.Composition, error) {
-	return s.composeCandidate(selected, true)
+	return s.composeCandidate(selected, true, true)
 }
 
-func (s SelectionInputs) composeCandidate(selected []byte, identitiesOnly bool) (applicationmeta.Composition, error) {
+// ComposeResourceOwnershipCandidate keeps other typed configuration and all
+// binding identities while excluding old Resource Config that may be invalid.
+func (s SelectionInputs) ComposeResourceOwnershipCandidate(selected []byte) (applicationmeta.Composition, error) {
+	return s.composeCandidate(selected, false, true)
+}
+
+func (s SelectionInputs) composeCandidate(selected []byte, identitiesOnly, withoutResourceConfiguration bool) (applicationmeta.Composition, error) {
 	if s.module.Path() == "" {
 		return applicationmeta.Composition{}, fmt.Errorf("%w: selection inputs are empty", ErrResolve)
 	}
@@ -249,6 +255,9 @@ func (s SelectionInputs) composeCandidate(selected []byte, identitiesOnly bool) 
 	if identitiesOnly {
 		manifest = applicationmeta.WithoutConstructorConfiguration(manifest)
 		s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
+	} else if withoutResourceConfiguration {
+		manifest = applicationmeta.WithoutResourceConfiguration(manifest)
+		s.rootManifest = applicationmeta.WithoutResourceConfiguration(s.rootManifest)
 	}
 	_, composition, err := s.composeCurrent(s.rootManifest, manifest)
 	return composition, err

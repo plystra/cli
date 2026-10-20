@@ -143,10 +143,17 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		return nil, kind, configurationimpact.Impact{}, validationErr
 	}
 	impactBefore := before
+	impactInput := configurationimpact.Input{}
 	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
 		impactBefore = composed
+	} else if kind == "resource" {
+		if ownership, ownershipErr := inputs.ComposeResourceOwnershipCandidate(original); ownershipErr == nil {
+			impactBefore = ownership
+		}
 	}
-	impactInput := configurationimpact.Input{}
+	if kind == "resource" {
+		impactInput = authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())
+	}
 	if kind == "interface" {
 		impactInput.NewlyRequiredFields, err = newlyRequiredImplementationFields(inputs, before, candidate)
 		if err != nil {
@@ -189,11 +196,83 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 			return nil, kind, configurationimpact.Impact{}, validationErr
 		}
 	}
-	impact, err := configurationimpact.Compare(impactBefore.Manifest(), candidate.Manifest(), impactInput)
+	beforeManifest, afterManifest := impactBefore.Manifest(), candidate.Manifest()
+	if kind == "resource" {
+		beforeManifest = applicationmeta.WithoutResourceConfiguration(beforeManifest)
+		afterManifest = applicationmeta.WithoutResourceConfiguration(afterManifest)
+	}
+	impact, err := configurationimpact.Compare(beforeManifest, afterManifest, impactInput)
 	if err != nil {
 		return nil, kind, configurationimpact.Impact{}, err
 	}
 	return updated, kind, impact, nil
+}
+
+type authoredResourceConfiguration struct {
+	name, provider, source, document string
+}
+
+func resourceConfigurationContributions(layers []applicationmeta.Manifest) []authoredResourceConfiguration {
+	type owner struct {
+		provider      constructorsymbol.Symbol
+		contributions []authoredResourceConfiguration
+	}
+	owners := make(map[string]owner)
+	for _, layer := range layers {
+		for _, instance := range layer.ResourceInstances() {
+			current := owners[instance.Name()]
+			if provider := instance.Provider(); provider.String() != "" {
+				if current.provider != provider {
+					current.contributions = nil
+				}
+				current.provider = provider
+			}
+			if instance.ConfigurationRemoved() {
+				current.contributions = nil
+			} else if instance.HasConfiguration() {
+				current.contributions = append(current.contributions, authoredResourceConfiguration{
+					name: instance.Name(), provider: current.provider.String(), source: instance.Source() + ".config", document: instance.DeclarationSource().Path(),
+				})
+			}
+			owners[instance.Name()] = current
+		}
+		for _, instance := range layer.RemovedResourceInstances() {
+			delete(owners, instance.Name())
+		}
+	}
+	var result []authoredResourceConfiguration
+	for _, owner := range owners {
+		result = append(result, owner.contributions...)
+	}
+	return result
+}
+
+func authoredResourceConfigurationImpact(beforeLayers, afterLayers []applicationmeta.Manifest, selectedPath string) configurationimpact.Input {
+	before := resourceConfigurationContributions(beforeLayers)
+	after := resourceConfigurationContributions(afterLayers)
+	retained := make(map[authoredResourceConfiguration]bool, len(after))
+	retainedBySource := make(map[string]bool, len(after))
+	for _, value := range after {
+		retained[value] = true
+		retainedBySource[value.name+"\x00"+value.source] = true
+	}
+	var input configurationimpact.Input
+	retainedNames := make(map[string]bool)
+	for _, value := range before {
+		path := fmt.Sprintf("resources.instances[%q].config", value.name)
+		if retained[value] || value.provider == "" && retainedBySource[value.name+"\x00"+value.source] {
+			if !retainedNames[value.name] {
+				input.RetainedOwners = append(input.RetainedOwners, configurationimpact.RetainedOwner{Owner: value.name, Path: path, Reason: "resource-instance-remains-effective"})
+				retainedNames[value.name] = true
+			}
+		} else {
+			input.NewlyUnownedPaths = append(input.NewlyUnownedPaths, configurationimpact.NewlyUnownedPath{Owner: value.name, Path: path, Source: value.source})
+			if value.document == selectedPath {
+				input.DerivedOperations = append(input.DerivedOperations, configurationimpact.DerivedOperation{Kind: "resource_configuration", Action: "remove", Owner: value.name, Path: path, Source: value.source})
+			}
+		}
+	}
+	return input
 }
 
 func newlyRequiredImplementationFields(inputs applicationresolve.SelectionInputs, before, after applicationmeta.Composition) ([]configurationimpact.NewlyRequiredField, error) {

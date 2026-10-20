@@ -23,10 +23,10 @@ const changePlanUsage = `Usage:
   plystra change plan --request <path|-> [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Plans one bounded declarative change request without modifying the Project. This
-initial installed slice accepts one implementation_selection set operation and
-validates its final Interface/Resource ownership graph. Missing newly required
-constructor or non-pointer fixed-object child values are reported as unresolved
-decisions in a non-exact preview.
+installed slice accepts one implementation_selection or resource_selection set
+operation and validates its final Interface/Resource ownership graph. Missing
+newly required constructor or non-pointer fixed-object child values are reported
+as unresolved decisions in an Implementation-selection preview.
 Other operation kinds return a structured unsupported result until their staged
 planners are installed.
 `
@@ -79,27 +79,41 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The change request is invalid.")
 	}
 	operations := request.Operations()
-	if len(operations) != 1 || operations[0].Kind() != changerequest.KindImplementationSelection {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one implementation_selection operation.")
+	if len(operations) != 1 {
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one selection set operation.")
 	}
-	selection, ok := operations[0].ImplementationSelection()
-	if !ok || selection.Action() != changerequest.SelectionSet {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports implementation_selection set only.")
+	var target, constructor string
+	switch operations[0].Kind() {
+	case changerequest.KindImplementationSelection:
+		selection, _ := operations[0].ImplementationSelection()
+		if selection.Action() != changerequest.SelectionSet {
+			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports selection set only.")
+		}
+		target = selection.Interface()
+		constructor, _ = selection.Constructor()
+	case changerequest.KindResourceSelection:
+		selection, _ := operations[0].ResourceSelection()
+		if selection.Action() != changerequest.SelectionSet {
+			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports selection set only.")
+		}
+		target = selection.Instance()
+		constructor, _ = selection.Provider()
+	default:
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one implementation_selection or resource_selection set operation.")
 	}
-	constructor, ok := selection.Constructor()
-	if !ok {
-		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The implementation selection does not name a constructor.")
+	if constructor == "" {
+		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The selection does not name a constructor.")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
 	planned, err := implementationselect.Preview(ctx, implementationselect.Options{
-		Start: workingDirectory, Target: selection.Interface(), Constructor: constructor,
+		Start: workingDirectory, Target: target, Constructor: constructor,
 		ConfigurationPath: parsed.configurationPath, EnvironmentName: parsed.environmentName,
 		Environment: environment,
 	})
 	if err != nil {
-		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The implementation selection could not be planned against the selected Project.")
+		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The selection could not be planned against the selected Project.")
 	}
 	payload, effects, err := buildChangePlanPayload(request, operations[0], planned)
 	if err != nil {
@@ -223,9 +237,7 @@ func buildChangePlanPayload(request changerequest.Request, requested changereque
 	if inputs.SelectedSnapshot().Path() != inputs.RootSnapshot().Path() {
 		readSet = append(readSet, commandschema.ChangePlanPathInput{Path: inputs.SelectedSnapshot().Path(), Kind: "configuration", BeforeDigest: selectedDigest})
 	}
-	operations := []commandschema.ChangePlanOperationInput{{
-		Kind: string(requested.Kind()), Action: string(selectionAction(requested)), Interface: requestedInterface(requested), Constructor: requestedConstructor(requested),
-	}}
+	operations := []commandschema.ChangePlanOperationInput{requestedSelectionOperation(requested)}
 	for _, derived := range planned.ConfigurationImpact().DerivedOperations() {
 		operations = append(operations, commandschema.ChangePlanOperationInput{Kind: derived.Kind, Action: derived.Action, Owner: derived.Owner, Path: derived.Path, Derived: true})
 	}
@@ -260,18 +272,18 @@ func selectedConfigurationDigest(mode string, data []byte) (string, error) {
 	return applicationgen.ConfigurationDigest(data)
 }
 
-func selectionAction(operation changerequest.Operation) changerequest.SelectionAction {
-	selection, _ := operation.ImplementationSelection()
-	return selection.Action()
-}
-func requestedInterface(operation changerequest.Operation) string {
-	selection, _ := operation.ImplementationSelection()
-	return selection.Interface()
-}
-func requestedConstructor(operation changerequest.Operation) string {
-	selection, _ := operation.ImplementationSelection()
-	constructor, _ := selection.Constructor()
-	return constructor
+func requestedSelectionOperation(operation changerequest.Operation) commandschema.ChangePlanOperationInput {
+	result := commandschema.ChangePlanOperationInput{Kind: string(operation.Kind())}
+	if selection, ok := operation.ImplementationSelection(); ok {
+		result.Action = string(selection.Action())
+		result.Interface = selection.Interface()
+		result.Constructor, _ = selection.Constructor()
+	} else if selection, ok := operation.ResourceSelection(); ok {
+		result.Action = string(selection.Action())
+		result.Instance = selection.Instance()
+		result.Provider, _ = selection.Provider()
+	}
+	return result
 }
 
 func changePlanSelectorSnapshot(selection applicationresolve.ConfigurationSelection) (commandschema.SelectorSnapshot, error) {

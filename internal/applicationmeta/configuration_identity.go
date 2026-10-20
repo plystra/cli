@@ -27,6 +27,18 @@ func WithoutConstructorConfiguration(manifest Manifest) Manifest {
 	return manifest
 }
 
+// WithoutResourceConfiguration keeps selection and binding identities while
+// dropping Resource Config that may be invalid before a provider replacement.
+func WithoutResourceConfiguration(manifest Manifest) Manifest {
+	manifest.resourceInstances = withoutResourceConfiguration(manifest.resourceInstances)
+	manifest.removedResourceInstances = withoutResourceConfiguration(manifest.removedResourceInstances)
+	manifest.layers = slices.Clone(manifest.layers)
+	for index := range manifest.layers {
+		manifest.layers[index] = WithoutResourceConfiguration(manifest.layers[index])
+	}
+	return manifest
+}
+
 func withoutResourceConfiguration(instances []ResourceInstance) []ResourceInstance {
 	instances = slices.Clone(instances)
 	for index := range instances {

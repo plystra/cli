@@ -64,6 +64,208 @@ func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.
 	}
 }
 
+func TestRunChangePlanResourceSelectionReportsOwnershipImpact(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/replacement.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+		t.Fatalf("Resource change plan = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Status  string `json:"status"`
+		Payload struct {
+			Schema              string                     `json:"schema"`
+			Completeness        string                     `json:"completeness"`
+			ConfigurationImpact map[string]json.RawMessage `json:"configuration_impact"`
+			Operations          []struct {
+				Kind     string `json:"kind"`
+				Action   string `json:"action"`
+				Instance string `json:"instance"`
+				Provider string `json:"provider"`
+				Owner    string `json:"owner"`
+				Path     string `json:"path"`
+				Derived  bool   `json:"derived"`
+			} `json:"operations"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil || result.Status != "success" ||
+		result.Payload.Schema != "plystra.change-plan/v1" || result.Payload.Completeness != "non_exact" {
+		t.Fatalf("Resource change plan result = %#v, %v", result, err)
+	}
+	for _, name := range []string{"newly_required_fields", "retained_owners", "newly_unowned_paths", "derived_operations", "unresolved_decisions"} {
+		if len(result.Payload.ConfigurationImpact[name]) == 0 || string(result.Payload.ConfigurationImpact[name]) == "null" {
+			t.Fatalf("configuration_impact.%s = %s", name, result.Payload.ConfigurationImpact[name])
+		}
+	}
+	var retained []struct{ Owner, Path string }
+	var unowned []struct{ Owner, Path string }
+	var derived []struct{ Kind, Action, Owner, Path string }
+	for _, field := range []struct {
+		name string
+		to   any
+	}{{"retained_owners", &retained}, {"newly_unowned_paths", &unowned}, {"derived_operations", &derived}} {
+		if err := json.Unmarshal(result.Payload.ConfigurationImpact[field.name], field.to); err != nil {
+			t.Fatalf("decode configuration_impact.%s: %v", field.name, err)
+		}
+	}
+	wantPath := `resources.instances["database.primary"].config`
+	if len(unowned) != 1 || unowned[0].Owner != "database.primary" || unowned[0].Path != wantPath ||
+		len(derived) != 1 || derived[0].Kind != "resource_configuration" || derived[0].Action != "remove" || derived[0].Path != wantPath ||
+		len(retained) != 1 || retained[0].Owner != "database.retained" || len(result.Payload.Operations) != 2 {
+		t.Fatalf("Resource change impact = retained %#v, unowned %#v, derived %#v, operations %#v", retained, unowned, derived, result.Payload.Operations)
+	}
+	requested, companion := false, false
+	for _, operation := range result.Payload.Operations {
+		requested = requested || !operation.Derived && operation.Kind == "resource_selection" && operation.Action == "set" && operation.Instance == "database.primary" && operation.Provider == "example.com/acme/implementation-use/replacement.New"
+		companion = companion || operation.Derived && operation.Kind == "resource_configuration" && operation.Action == "remove" && operation.Owner == "database.primary" && operation.Path == wantPath
+	}
+	if !requested || !companion {
+		t.Fatalf("Resource change operations = %#v", result.Payload.Operations)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("Resource change plan modified Project files")
+	}
+}
+
+func TestRunChangePlanResourceSelectionRepairsInvalidOldConfiguration(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	path := filepath.Join(root, "plystra.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, path, strings.Replace(string(data), "value: PRIVATE_PRIMARY", "value: [PRIVATE_INVALID]", 1))
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/replacement.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_INVALID") {
+		t.Fatalf("repair preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Payload struct {
+			ConfigurationImpact struct {
+				RetainedOwners    []struct{ Owner string }        `json:"retained_owners"`
+				NewlyUnownedPaths []struct{ Owner string }        `json:"newly_unowned_paths"`
+				DerivedOperations []struct{ Kind, Action string } `json:"derived_operations"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatal(err)
+	}
+	impact := result.Payload.ConfigurationImpact
+	if len(impact.RetainedOwners) != 1 || impact.RetainedOwners[0].Owner != "database.retained" ||
+		len(impact.NewlyUnownedPaths) != 1 || impact.NewlyUnownedPaths[0].Owner != "database.primary" ||
+		len(impact.DerivedOperations) != 1 || impact.DerivedOperations[0].Kind != "resource_configuration" || impact.DerivedOperations[0].Action != "remove" {
+		t.Fatalf("repair impact = %#v", impact)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("repair preview modified Project files")
+	}
+}
+
+func TestRunChangePlanResourceSelectionPreservesSameProviderConfiguration(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/original.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+		t.Fatalf("same-provider preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Payload struct {
+			ConfigurationImpact struct {
+				RetainedOwners    []struct{ Owner string } `json:"retained_owners"`
+				NewlyUnownedPaths []json.RawMessage        `json:"newly_unowned_paths"`
+				DerivedOperations []json.RawMessage        `json:"derived_operations"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatal(err)
+	}
+	impact := result.Payload.ConfigurationImpact
+	if len(impact.RetainedOwners) != 2 || impact.RetainedOwners[0].Owner != "database.primary" || impact.RetainedOwners[1].Owner != "database.retained" || len(impact.NewlyUnownedPaths) != 0 || len(impact.DerivedOperations) != 0 {
+		t.Fatalf("same-provider impact = %#v", impact)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("same-provider preview modified Project files")
+	}
+}
+
+func TestRunChangePlanResourceSelectionOverlayKeepsLowerLayerUnchanged(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/replacement.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--env", "production", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+		t.Fatalf("overlay preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Payload struct {
+			ConfigurationScope struct {
+				Path string `json:"path"`
+			} `json:"configuration_scope"`
+			ConfigurationImpact struct {
+				NewlyUnownedPaths []struct{ Owner, Source string } `json:"newly_unowned_paths"`
+				DerivedOperations []struct{ Kind string }          `json:"derived_operations"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatal(err)
+	}
+	impact := result.Payload.ConfigurationImpact
+	if result.Payload.ConfigurationScope.Path != "plystra.production.yaml" || len(impact.NewlyUnownedPaths) != 2 ||
+		impact.NewlyUnownedPaths[0].Owner != "database.primary" || impact.NewlyUnownedPaths[1].Owner != "database.primary" ||
+		impact.NewlyUnownedPaths[0].Source == impact.NewlyUnownedPaths[1].Source ||
+		len(impact.DerivedOperations) != 1 || impact.DerivedOperations[0].Kind != "resource_configuration" {
+		t.Fatalf("overlay impact = %#v", result.Payload)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("overlay preview modified Project files")
+	}
+}
+
+func TestRunChangePlanResourceSelectionOverlayProviderReversion(t *testing.T) {
+	for _, value := range []string{"PRIVATE_REPLACEMENT", "[PRIVATE_INVALID]"} {
+		t.Run(value, func(t *testing.T) {
+			root := writeResourceSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "resources:\n  instances:\n    database.primary:\n      use: example.com/acme/implementation-use/replacement.New\n      config: {value: "+value+"}\n")
+			writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/original.New"}]}`)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--env", "production", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 0 || stderr != "" || strings.Contains(stdout, value) {
+				t.Fatalf("provider reversion preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Payload struct {
+					ConfigurationImpact struct {
+						RetainedOwners    []struct{ Owner string }         `json:"retained_owners"`
+						NewlyUnownedPaths []struct{ Owner, Source string } `json:"newly_unowned_paths"`
+						DerivedOperations []struct{ Kind, Source string }  `json:"derived_operations"`
+					} `json:"configuration_impact"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			impact := result.Payload.ConfigurationImpact
+			if len(impact.NewlyUnownedPaths) != 1 || impact.NewlyUnownedPaths[0].Owner != "database.primary" ||
+				!strings.Contains(impact.NewlyUnownedPaths[0].Source, "plystra.production.yaml") ||
+				len(impact.DerivedOperations) != 1 || impact.DerivedOperations[0].Kind != "resource_configuration" ||
+				!strings.Contains(impact.DerivedOperations[0].Source, "plystra.production.yaml") ||
+				len(impact.RetainedOwners) != 1 || impact.RetainedOwners[0].Owner != "database.retained" {
+				t.Fatalf("provider reversion impact = %#v", impact)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("provider reversion preview modified Project files")
+			}
+		})
+	}
+}
+
 func TestRunChangePlanRejectsUninstalledOperationWithoutMutation(t *testing.T) {
 	root := writeImplementationSelectionCommandProject(t)
 	requestPath := filepath.Join(root, "change.json")
