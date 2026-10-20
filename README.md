@@ -856,11 +856,15 @@ For a Resource provider replacement, it reports the prior provider's unowned
 configuration, deterministic cleanup, and other retained instances without
 disclosing configured values. Newly missing, statically addressable Resource
 Config fields produce source-bearing unresolved decisions in a non-exact
-preview. One newly introduced ambiguous implicit Resource binding can likewise
-list only explicit instance choices that independently validate the complete
-candidate graph; cyclic or otherwise invalid choices are excluded. Multiple
-unresolved bindings, missing or more than 64 candidates, invalid explicit bindings,
-and other requiredness failures still fail validation. `plystra use` also
+preview. Newly introduced ambiguous implicit Resource bindings on the selected
+instance can list only complete explicit instance assignments that validate the
+candidate graph, or leave only statically addressable missing Config fields on
+the selected provider. Multiple bindings are reported as validated joint
+assignments rather than independently combinable parameter choices. Cyclic and
+otherwise invalid assignments are excluded. Exploration is limited to 64
+candidate binding probes; exceeding the limit returns no partial plan. Missing
+binding candidates, invalid explicit bindings, non-enumerable required fields,
+and unrelated validation failures still fail validation. `plystra use` also
 rejects the invalid final configuration. Other operation kinds return a
 structured unsupported result; `change apply`,
 primitive-command lowering, and `--dry-run` remain unavailable. These previews

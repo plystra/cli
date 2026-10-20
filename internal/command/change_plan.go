@@ -27,8 +27,10 @@ operation and analyzes its final Interface/Resource ownership graph. Missing
 newly required, statically addressable constructor or Resource provider Config
 fields, including non-pointer fixed-object children, are reported as unresolved
 decisions.
-One newly introduced ambiguous implicit Resource binding is previewed only when
-its explicit instance candidates pass final-state validation independently.
+Ambiguous implicit bindings introduced on one Resource instance are previewed as
+complete explicit assignments only when they pass bounded final-state validation,
+possibly with statically addressable missing Config fields. The preview fails
+closed without a partial plan when more than 64 candidate bindings are probed.
 Other operation kinds return a structured unsupported result until their staged
 planners are installed.
 `

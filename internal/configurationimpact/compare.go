@@ -78,7 +78,7 @@ func Compare(before, after applicationmeta.Manifest, input Input) (Impact, error
 		if _, retained := afterBindings[key]; retained {
 			continue
 		}
-		path := fmt.Sprintf("resources.bind.%s.%s.%s", beforeValue.Namespace(), beforeValue.Consumer(), beforeValue.ParameterName())
+		path := fmt.Sprintf("resources.bind.%s[%q][%q]", beforeValue.Namespace(), beforeValue.Consumer(), beforeValue.ParameterName())
 		source := sourceOrDefault(beforeValue.Source())
 		result.NewlyUnownedPaths = append(result.NewlyUnownedPaths, NewlyUnownedPath{Owner: beforeValue.Consumer(), Path: path, Source: source})
 		result.DerivedOperations = append(result.DerivedOperations, DerivedOperation{Kind: "resource_binding", Action: "remove", Owner: beforeValue.Consumer(), Path: path, Source: source})

@@ -70,7 +70,7 @@ resources:
 			t.Fatalf("private value leaked in impact: %s", encoded)
 		}
 	}
-	if !strings.Contains(encoded, `resources.instances[\"database.primary\"].config`) || !strings.Contains(encoded, "resources.bind.implementations.example.com/app.New.Database") {
+	if !strings.Contains(encoded, `resources.instances[\"database.primary\"].config`) || !strings.Contains(encoded, `resources.bind.implementations[\"example.com/app.New\"][\"Database\"]`) {
 		t.Fatalf("exact ownership paths missing: %s", encoded)
 	}
 }
