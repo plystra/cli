@@ -23,10 +23,12 @@ const changePlanUsage = `Usage:
 
 Plans one bounded declarative change request without modifying the Project. This
 installed slice accepts one implementation_selection or resource_selection set
-operation and validates its final Interface/Resource ownership graph. Missing
+operation and analyzes its final Interface/Resource ownership graph. Missing
 newly required, statically addressable constructor or Resource provider Config
 fields, including non-pointer fixed-object children, are reported as unresolved
 decisions.
+One newly introduced ambiguous implicit Resource binding is previewed only when
+its explicit instance candidates pass final-state validation independently.
 Other operation kinds return a structured unsupported result until their staged
 planners are installed.
 `

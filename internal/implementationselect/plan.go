@@ -6,17 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/configurationimpact"
+	"github.com/plystra/cli/internal/constructorgraph"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/resourcename"
 )
+
+const maximumResourceBindingPreviewCandidates = 64
 
 // PlanResult is a read-only, validated selection plan. It contains authored
 // bytes only for the caller's private transaction boundary; public projections
@@ -40,13 +44,14 @@ func Plan(ctx context.Context, options Options) (PlanResult, error) {
 	return plan(ctx, options, false)
 }
 
-// Preview returns a non-mutating selection plan even when the candidate lacks
-// one newly required constructor value that the impact can identify exactly.
+// Preview returns a non-mutating selection plan with bounded required-value or
+// independently validated Resource-binding decisions when final validation
+// cannot yet succeed.
 func Preview(ctx context.Context, options Options) (PlanResult, error) {
 	return plan(ctx, options, true)
 }
 
-func plan(ctx context.Context, options Options, allowMissingRequired bool) (PlanResult, error) {
+func plan(ctx context.Context, options Options, allowIncomplete bool) (PlanResult, error) {
 	if ctx == nil {
 		return PlanResult{}, fmt.Errorf("%w: context is nil", ErrSelect)
 	}
@@ -65,7 +70,7 @@ func plan(ctx context.Context, options Options, allowMissingRequired bool) (Plan
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, allowMissingRequired)
+	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, allowIncomplete)
 	if err != nil {
 		var missing *interfaceresolution.UnknownInterfaceError
 		if errors.As(err, &missing) && missing.InterfaceID() == id {
@@ -97,7 +102,7 @@ func (p PlanResult) Changed() bool                                   { return !b
 func (p PlanResult) ConfigurationImpact() configurationimpact.Impact { return p.impact }
 func (p PlanResult) CompositionDigest() string                       { return p.compositionHash }
 
-func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol, allowMissingRequired bool) ([]byte, string, configurationimpact.Impact, error) {
+func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol, allowIncomplete bool) ([]byte, string, configurationimpact.Impact, error) {
 	original := inputs.SelectedSnapshot().Data()
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	var updated []byte
@@ -136,23 +141,32 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		return nil, kind, configurationimpact.Impact{}, err
 	}
 	// Planning checks the complete remaining binding graph before any live write.
-	// Generation repeats resolution and owns compilation and rollback validation.
+	// Preview may retain only a bounded, independently verified decision.
 	validationErr := inputs.ValidateCandidate(candidate)
 	var missingImplementation *applicationmeta.ConstructorConfigurationValueError
 	var missingResource *applicationmeta.ResourceConfigurationError
+	var ambiguousBinding *constructorgraph.ResourceBindingError
 	if validationErr != nil {
-		if !allowMissingRequired || !errors.Is(validationErr, applicationmeta.ErrConfigurationRequired) {
+		if !allowIncomplete {
 			return nil, kind, configurationimpact.Impact{}, validationErr
 		}
-		switch kind {
-		case "interface":
-			if !errors.As(validationErr, &missingImplementation) {
+		if kind == "resource" && errors.Is(validationErr, constructorgraph.ErrAmbiguousResourceBinding) {
+			if !errors.As(validationErr, &ambiguousBinding) || ambiguousBinding.Namespace() != constructorgraph.ResourceConsumerInstance || ambiguousBinding.Consumer() != target || ambiguousBinding.Target() != "" {
 				return nil, kind, configurationimpact.Impact{}, validationErr
 			}
-		case "resource":
-			if !errors.As(validationErr, &missingResource) || missingResource.InstanceName() != target || missingResource.Provider() != constructor {
-				return nil, kind, configurationimpact.Impact{}, validationErr
+		} else if errors.Is(validationErr, applicationmeta.ErrConfigurationRequired) {
+			switch kind {
+			case "interface":
+				if !errors.As(validationErr, &missingImplementation) {
+					return nil, kind, configurationimpact.Impact{}, validationErr
+				}
+			case "resource":
+				if !errors.As(validationErr, &missingResource) || missingResource.InstanceName() != target || missingResource.Provider() != constructor {
+					return nil, kind, configurationimpact.Impact{}, validationErr
+				}
 			}
+		} else {
+			return nil, kind, configurationimpact.Impact{}, validationErr
 		}
 	}
 	if missingResource != nil {
@@ -178,6 +192,19 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		impactInput.NewlyRequiredFields, err = newlyRequiredResourceFields(inputs, target, constructor)
 		if err != nil {
 			return nil, kind, configurationimpact.Impact{}, err
+		}
+		if ambiguousBinding != nil {
+			if !previousStateValid || len(ambiguousBinding.Candidates()) > maximumResourceBindingPreviewCandidates {
+				return nil, kind, configurationimpact.Impact{}, validationErr
+			}
+			decision, decisionErr := validResourceBindingChoices(inputs, updated, ambiguousBinding)
+			if decisionErr != nil {
+				return nil, kind, configurationimpact.Impact{}, decisionErr
+			}
+			if len(decision.Alternatives) == 0 {
+				return nil, kind, configurationimpact.Impact{}, validationErr
+			}
+			impactInput.UnresolvedDecisions = append(impactInput.UnresolvedDecisions, decision)
 		}
 	}
 	if kind == "interface" {
@@ -391,6 +418,52 @@ func newlyRequiredResourceFields(inputs applicationresolve.SelectionInputs, targ
 		fields[index].RequirednessReason = "required-field-on-newly-selected-resource-provider"
 	}
 	return fields, nil
+}
+
+func validResourceBindingChoices(inputs applicationresolve.SelectionInputs, updated []byte, failure *constructorgraph.ResourceBindingError) (configurationimpact.UnresolvedDecision, error) {
+	selected := inputs.ConfigurationSelection()
+	set := applicationmeta.SetResourceInstanceBinding
+	if selected.Mode() == "environment" {
+		set = applicationmeta.SetResourceInstanceBindingOverlay
+	}
+	sources := []string{selected.Path()}
+	dependency := failure.Dependency()
+	if declaration := dependency.DeclarationSource().Reference; declaration != "" {
+		sources = append(sources, declaration)
+	}
+	for _, source := range failure.Sources() {
+		if source.Reference != "" {
+			sources = append(sources, source.Reference)
+		}
+	}
+	for _, source := range dependency.ConsumerSelectionSources() {
+		if source.Reference != "" {
+			sources = append(sources, source.Reference)
+		}
+	}
+	var alternatives []string
+	for _, candidate := range failure.Candidates() {
+		probe, _, err := set(updated, failure.Consumer(), failure.ParameterName(), candidate.Name())
+		if err != nil {
+			return configurationimpact.UnresolvedDecision{}, err
+		}
+		composed, err := inputs.ComposeCandidate(probe)
+		if err != nil || inputs.ValidateCandidate(composed) != nil {
+			continue
+		}
+		alternatives = append(alternatives, candidate.Name())
+		for _, source := range candidate.Sources() {
+			if source.Reference != "" {
+				sources = append(sources, source.Reference)
+			}
+		}
+	}
+	sort.Strings(alternatives)
+	sort.Strings(sources)
+	return configurationimpact.UnresolvedDecision{
+		Target: fmt.Sprintf("resources.bind.instances[%q][%q]", failure.Consumer(), failure.ParameterName()),
+		Reason: "ambiguous-resource-binding", Alternatives: slices.Compact(alternatives), Sources: slices.Compact(sources),
+	}, nil
 }
 
 func selectResourceProvider(inputs applicationresolve.SelectionInputs, original []byte, target string, constructor constructorsymbol.Symbol, overlay bool) ([]byte, error) {

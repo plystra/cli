@@ -843,8 +843,9 @@ operations, 64 JSON levels, 65,536 value nodes, 4,096 decoded bytes per string o
 key, and 1,024 bytes per Implementation package path. Duplicate keys and
 conflicting targets fail without exposing submitted configuration values.
 The installed public `plystra change plan` slice accepts one
-`implementation_selection` or `resource_selection` set operation, validates its final ownership graph,
-and emits a read-only `plystra.change-plan/v1` payload with a plan digest and
+`implementation_selection` or `resource_selection` set operation, analyzes its
+final ownership graph, and emits a read-only `plystra.change-plan/v1` payload
+with a plan digest and
 all five `configuration_impact` arrays. When both the old and candidate graphs
 resolve, a newly reachable Implementation reports required top-level Config
 fields and required descendants of non-pointer fixed objects, with constructor
@@ -855,9 +856,13 @@ For a Resource provider replacement, it reports the prior provider's unowned
 configuration, deterministic cleanup, and other retained instances without
 disclosing configured values. Newly missing, statically addressable Resource
 Config fields produce source-bearing unresolved decisions in a non-exact
-preview; `plystra use` still rejects the invalid final configuration. Other
-requiredness failures and unresolved bindings still fail validation. Other
-operation kinds return a structured unsupported result; `change apply`,
+preview. One newly introduced ambiguous implicit Resource binding can likewise
+list only explicit instance choices that independently validate the complete
+candidate graph; cyclic or otherwise invalid choices are excluded. Multiple
+unresolved bindings, missing or more than 64 candidates, invalid explicit bindings,
+and other requiredness failures still fail validation. `plystra use` also
+rejects the invalid final configuration. Other operation kinds return a
+structured unsupported result; `change apply`,
 primitive-command lowering, and `--dry-run` remain unavailable. These previews
 are always `non_exact` and cannot authorize apply. Their public read/write and
 snapshot digests are typed semantic identities, not exact file preimages:

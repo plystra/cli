@@ -114,6 +114,50 @@ func TestSetResourceProviderPreservesSameProviderAndSparseConfiguration(t *testi
 	}
 }
 
+func TestSetResourceInstanceBindingEditsOnlyExactLeaf(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name, document string
+		overlay        bool
+	}{
+		{name: "complete", document: "# keep comment\nresources: {instances: {database.primary: {use: example.com/database.New, config: {value: PRIVATE_VALUE}}}, bind: {instances: {database.primary: {existing: database.primary}}}}\n"},
+		{name: "overlay", document: "# keep comment\nresources: {bind: {instances: {database.primary: {existing: database.primary}}}}\n", overlay: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := []byte(test.document)
+			before := bytes.Clone(input)
+			edit := applicationmeta.SetResourceInstanceBinding
+			if test.overlay {
+				edit = applicationmeta.SetResourceInstanceBindingOverlay
+			}
+			updated, changed, err := edit(input, "database.primary", "replica", "database.retained")
+			if err != nil || !changed {
+				t.Fatalf("set binding: changed=%t, err=%v", changed, err)
+			}
+			want := selectionYAML(t, input)
+			selectionMap(t, want, "resources", "bind", "instances", "database.primary")["replica"] = "database.retained"
+			if !reflect.DeepEqual(selectionYAML(t, updated), want) || !bytes.Contains(updated, []byte("# keep comment")) || !bytes.Equal(input, before) {
+				t.Fatal("binding edit changed unrelated intent or input bytes")
+			}
+			again, changed, err := edit(updated, "database.primary", "replica", "database.retained")
+			if err != nil || changed || !bytes.Equal(again, updated) {
+				t.Fatalf("binding edit not idempotent: changed=%t, err=%v", changed, err)
+			}
+		})
+	}
+	for _, test := range []struct{ consumer, parameter, target string }{
+		{"PRIVATE-invalid", "replica", "database.retained"},
+		{"database.primary", "_", "database.retained"},
+		{"database.primary", "PRIVATE-invalid", "database.retained"},
+		{"database.primary", "replica", "PRIVATE-invalid"},
+	} {
+		_, _, err := applicationmeta.SetResourceInstanceBinding([]byte("{}\n"), test.consumer, test.parameter, test.target)
+		if !errors.Is(err, applicationmeta.ErrSetResourceInstanceBinding) || strings.Contains(err.Error(), "PRIVATE") {
+			t.Fatalf("invalid binding address = %v", err)
+		}
+	}
+}
+
 func TestSetResourceProviderRevivesOnlySelectedInstance(t *testing.T) {
 	t.Parallel()
 	provider := mustImplementationChoiceConstructor(t, resourceProvider)

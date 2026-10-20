@@ -3,6 +3,7 @@ package applicationmeta
 import (
 	"errors"
 	"fmt"
+	"go/token"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/resourcename"
@@ -12,6 +13,10 @@ import (
 // ErrSetResourceProvider reports that a selected current-Project document could
 // not safely record a Resource provider choice and its proven ownership cleanup.
 var ErrSetResourceProvider = errors.New("set Resource provider choice")
+
+// ErrSetResourceInstanceBinding reports an invalid exact instance dependency
+// address or a selected document that cannot safely record it.
+var ErrSetResourceInstanceBinding = errors.New("set Resource instance binding")
 
 // ResourceParameterRemoval removes one exact provider dependency binding.
 // Tombstone suppresses an inherited binding; false deletes only the local leaf.
@@ -35,6 +40,38 @@ func SetResourceProvider(data []byte, name string, provider constructorsymbol.Sy
 // overlay. It does not copy inherited instance configuration or binding values.
 func SetResourceProviderOverlay(data []byte, name string, provider constructorsymbol.Symbol, removeConfiguration bool, removedParameters []ResourceParameterRemoval) ([]byte, bool, error) {
 	return setResourceProvider(data, name, provider, removeConfiguration, removedParameters, true)
+}
+
+// SetResourceInstanceBinding records one explicit dependency target in a
+// complete current-Project document. The caller validates contract compatibility
+// and the resulting full graph.
+func SetResourceInstanceBinding(data []byte, consumer, parameter, target string) ([]byte, bool, error) {
+	return setResourceInstanceBinding(data, consumer, parameter, target, false)
+}
+
+// SetResourceInstanceBindingOverlay records only the exact binding leaf in a
+// sparse environment overlay, without copying inherited instance values.
+func SetResourceInstanceBindingOverlay(data []byte, consumer, parameter, target string) ([]byte, bool, error) {
+	return setResourceInstanceBinding(data, consumer, parameter, target, true)
+}
+
+func setResourceInstanceBinding(data []byte, consumer, parameter, target string, overlay bool) ([]byte, bool, error) {
+	if resourcename.Check(consumer) != nil || resourcename.Check(target) != nil || parameter == "_" || !token.IsIdentifier(parameter) {
+		return nil, false, fmt.Errorf("%w: invalid binding address", ErrSetResourceInstanceBinding)
+	}
+	return editSelectionDocument(data, overlay, ErrSetResourceInstanceBinding, func(root *yaml.Node) (bool, error) {
+		bindings, err := ensureMappingPath(root, []string{"resources", "bind", "instances", consumer})
+		if err != nil {
+			return false, err
+		}
+		previous := mappingChild(bindings, parameter)
+		if previous != nil && previous.Kind == yaml.ScalarNode && previous.Value == target {
+			return false, nil
+		}
+		setMappingValue(bindings, parameter, stringYAMLNode(target))
+		sortYAMLMapping(bindings)
+		return true, nil
+	})
 }
 
 func setResourceProvider(data []byte, name string, provider constructorsymbol.Symbol, removeConfiguration bool, removedParameters []ResourceParameterRemoval, overlay bool) ([]byte, bool, error) {

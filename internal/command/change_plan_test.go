@@ -2,9 +2,11 @@ package command_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -555,6 +557,161 @@ func TestRunChangePlanResourceRequiredFieldsRejectInvalidPreviousProviderAlterna
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatal("invalid-previous-provider preview modified Project files")
+	}
+}
+
+func TestRunChangePlanResourceSelectionReportsValidBindingChoices(t *testing.T) {
+	for _, test := range []struct {
+		name, selectedPath string
+		selector           []string
+	}{
+		{name: "default", selectedPath: "plystra.yaml"},
+		{name: "environment", selectedPath: "plystra.production.yaml", selector: []string{"--env", "production"}},
+		{name: "replacement", selectedPath: "deploy/customer.yaml", selector: []string{"--config", "deploy/customer.yaml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeResourceSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, "ambiguous", "provider.go"), `package ambiguous
+import "example.com/acme/implementation-use/database"
+type Value struct{}
+//plystra:implements-resource storage.database/v1
+func New(replica database.Resource) (*Value, error) { return &Value{}, nil }
+func (*Value) Read() {}
+`)
+			writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/ambiguous.New"}]}`)
+			before := commandTree(t, root)
+			arguments := append([]string{"change", "plan", "--request", "change.json", "--format", "json"}, test.selector...)
+			exitCode, stdout, stderr := runCommand(t, arguments, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+				t.Fatalf("binding preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Payload struct {
+					Completeness        string `json:"completeness"`
+					PlanDigest          string `json:"plan_digest"`
+					ConfigurationImpact struct {
+						NewlyRequiredFields json.RawMessage `json:"newly_required_fields"`
+						RetainedOwners      json.RawMessage `json:"retained_owners"`
+						NewlyUnownedPaths   json.RawMessage `json:"newly_unowned_paths"`
+						DerivedOperations   json.RawMessage `json:"derived_operations"`
+						UnresolvedDecisions []struct {
+							Target       string   `json:"target"`
+							Reason       string   `json:"reason"`
+							Alternatives []string `json:"alternatives"`
+							Sources      []string `json:"sources"`
+						} `json:"unresolved_decisions"`
+					} `json:"configuration_impact"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			decisions := result.Payload.ConfigurationImpact.UnresolvedDecisions
+			if result.Payload.Completeness != "non_exact" || result.Payload.PlanDigest == "" || len(decisions) != 1 ||
+				decisions[0].Target != `resources.bind.instances["database.primary"]["replica"]` ||
+				decisions[0].Reason != "ambiguous-resource-binding" ||
+				!reflect.DeepEqual(decisions[0].Alternatives, []string{"database.retained"}) ||
+				!slices.Contains(decisions[0].Sources, test.selectedPath) ||
+				!slices.ContainsFunc(decisions[0].Sources, func(source string) bool {
+					return strings.Contains(source, "example.com/acme/implementation-use@local/ambiguous/provider.go:")
+				}) {
+				t.Fatalf("binding decisions = %#v", decisions)
+			}
+			for _, field := range []json.RawMessage{
+				result.Payload.ConfigurationImpact.NewlyRequiredFields,
+				result.Payload.ConfigurationImpact.RetainedOwners,
+				result.Payload.ConfigurationImpact.NewlyUnownedPaths,
+				result.Payload.ConfigurationImpact.DerivedOperations,
+			} {
+				if len(field) == 0 || string(field) == "null" {
+					t.Fatalf("incomplete configuration impact = %#v", result.Payload.ConfigurationImpact)
+				}
+			}
+			secondExit, secondStdout, secondStderr := runCommand(t, arguments, root, implementationSelectionCommandEnvironment(nil))
+			var second struct {
+				Payload struct {
+					PlanDigest string `json:"plan_digest"`
+				} `json:"payload"`
+			}
+			if secondExit != 0 || secondStderr != "" || json.Unmarshal([]byte(secondStdout), &second) != nil || second.Payload.PlanDigest != result.Payload.PlanDigest {
+				t.Fatalf("repeat binding preview = exit %d, stdout %q, stderr %q", secondExit, secondStdout, secondStderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("binding preview modified Project files")
+			}
+			exitCode, _, _ = runCommand(t, append([]string{"use", "database.primary", "example.com/acme/implementation-use/ambiguous.New"}, test.selector...), root, implementationSelectionCommandEnvironment(nil))
+			if exitCode == 0 {
+				t.Fatal("mutating use accepted an unresolved Resource binding")
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("failed Resource use modified Project files")
+			}
+		})
+	}
+}
+
+func TestRunChangePlanResourceBindingChoicesDoNotHideOtherFailures(t *testing.T) {
+	for _, test := range []struct {
+		name, parameters, extraDocument string
+		requiredConfig                  bool
+		invalidPreviousConfig           bool
+	}{
+		{name: "second ambiguous parameter", parameters: "replica database.Resource, backup database.Resource"},
+		{name: "invalid sibling binding", parameters: "replica database.Resource", extraDocument: "  bind:\n    instances:\n      database.retained: {bogus: database.primary}\n"},
+		{name: "invalid previous Config", parameters: "replica database.Resource", invalidPreviousConfig: true},
+		{name: "new required Config behind ambiguity", parameters: "replica database.Resource", requiredConfig: true},
+		{name: "excessive candidates", parameters: "replica database.Resource"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeResourceSelectionCommandProject(t)
+			config := ""
+			parameters := test.parameters
+			if test.requiredConfig {
+				config = "type Config struct { Name string `yaml:\"name\" plystra:\"required\"` }\n"
+				parameters = "Config, " + parameters
+			}
+			writeCommandFile(t, filepath.Join(root, "ambiguous", "provider.go"), `package ambiguous
+import "example.com/acme/implementation-use/database"
+`+config+`type Value struct{}
+//plystra:implements-resource storage.database/v1
+func New(`+parameters+`) (*Value, error) { return &Value{}, nil }
+func (*Value) Read() {}
+`)
+			extraDocument := test.extraDocument
+			if test.name == "excessive candidates" {
+				for index := range 65 {
+					extraDocument += fmt.Sprintf("    database.extra%03d: {use: example.com/acme/implementation-use/original.New}\n", index)
+				}
+			}
+			if extraDocument != "" || test.invalidPreviousConfig {
+				path := filepath.Join(root, "plystra.yaml")
+				data, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				document := string(data) + extraDocument
+				if test.invalidPreviousConfig {
+					document = strings.Replace(document, "value: PRIVATE_PRIMARY", "value: [PRIVATE_INVALID]", 1)
+				}
+				writeCommandFile(t, path, document)
+			}
+			writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/ambiguous.New"}]}`)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 3 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+				t.Fatalf("unresolved other failure = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Status  string          `json:"status"`
+				Payload json.RawMessage `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil || result.Status != "validation_failed" || string(result.Payload) != "null" {
+				t.Fatalf("incomplete binding result = %#v, %v", result, err)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("rejected binding preview modified Project files")
+			}
+		})
 	}
 }
 
