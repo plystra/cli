@@ -194,6 +194,65 @@ func TestRunChangePlanResourceSelectionPreservesSameProviderConfiguration(t *tes
 	}
 }
 
+func TestRunChangePlanDoesNotPublishPrivateResourceValueEquality(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "original", "provider.go"), `package original
+import "github.com/plystra/kernel/configuration"
+type Config struct {
+	Value string `+"`yaml:\"value\"`"+`
+	Password configuration.Secret `+"`yaml:\"password\"`"+`
+}
+type Value struct{}
+//plystra:implements-resource storage.database/v1
+func New(Config) (*Value, error) { return &Value{}, nil }
+func (*Value) Read() {}
+`)
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/original.New"}]}`)
+	path := filepath.Join(root, "plystra.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, path, strings.Replace(string(data), "config: {value: PRIVATE_PRIMARY}", "config: {value: PRIVATE_PRIMARY, password: {env: PRIVATE_TARGET_A}}", 1))
+	preview := func() json.RawMessage {
+		t.Helper()
+		before := commandTree(t, root)
+		exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+		if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+			t.Fatalf("private-value preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+		}
+		if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+			t.Fatal("private-value preview modified Project files")
+		}
+		var result struct {
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Payload
+	}
+	first := preview()
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, path, strings.Replace(string(data), "PRIVATE_PRIMARY", "PRIVATE_CHANGED", 1))
+	second := preview()
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("private-only edit changed public plan:\nfirst %s\nsecond %s", first, second)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, path, strings.Replace(string(data), "PRIVATE_TARGET_A", "PRIVATE_TARGET_B", 1))
+	third := preview()
+	if !reflect.DeepEqual(first, third) {
+		t.Fatalf("Secret target edit changed public plan:\nfirst %s\nthird %s", first, third)
+	}
+}
+
 func TestRunChangePlanResourceSelectionOverlayKeepsLowerLayerUnchanged(t *testing.T) {
 	root := writeResourceSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/replacement.New"}]}`)
@@ -264,6 +323,254 @@ func TestRunChangePlanResourceSelectionOverlayProviderReversion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunChangePlanResourceSelectionReportsEveryMissingRequiredField(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	writeRequiredResourceCommandProvider(t, root)
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/required.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+		t.Fatalf("missing Resource Config preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Payload struct {
+			Completeness        string `json:"completeness"`
+			ConfigurationImpact struct {
+				NewlyRequiredFields []struct {
+					Owner              string `json:"owner"`
+					Path               string `json:"path"`
+					SchemaSource       string `json:"schema_source"`
+					RequirednessReason string `json:"requiredness_reason"`
+					DefaultSatisfies   bool   `json:"default_satisfies"`
+				} `json:"newly_required_fields"`
+				UnresolvedDecisions []struct {
+					Target       string   `json:"target"`
+					Reason       string   `json:"reason"`
+					Alternatives []string `json:"alternatives"`
+					Sources      []string `json:"sources"`
+				} `json:"unresolved_decisions"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatal(err)
+	}
+	impact := result.Payload.ConfigurationImpact
+	wantPaths := []string{`resources.instances["database.primary"].config["name"]`, `resources.instances["database.primary"].config["settings"]["endpoint"]`}
+	if result.Payload.Completeness != "non_exact" || len(impact.NewlyRequiredFields) != len(wantPaths) || len(impact.UnresolvedDecisions) != len(wantPaths) {
+		t.Fatalf("missing Resource fields = %#v", impact)
+	}
+	for index, path := range wantPaths {
+		field, decision := impact.NewlyRequiredFields[index], impact.UnresolvedDecisions[index]
+		if field.Owner != "database.primary" || field.Path != path || !strings.Contains(field.SchemaSource, "/required/provider.go:") ||
+			field.RequirednessReason != "required-field-on-newly-selected-resource-provider" || field.DefaultSatisfies || decision.Target != path ||
+			decision.Reason != "required-configuration-value-missing" || len(decision.Alternatives) != 2 || len(decision.Sources) != 2 ||
+			decision.Sources[0] != "plystra.yaml" && decision.Sources[1] != "plystra.yaml" {
+			t.Fatalf("missing Resource field %d = %#v, decision %#v", index, field, decision)
+		}
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("missing Resource Config preview modified Project files")
+	}
+	exitCode, _, _ = runCommand(t, []string{"use", "database.primary", "example.com/acme/implementation-use/required.New"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode == 0 {
+		t.Fatal("mutating use accepted missing required Resource Config")
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("failed Resource use modified Project files")
+	}
+}
+
+func TestRunChangePlanResourceSelectionFirstProviderRequiresValues(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	writeRequiredResourceCommandProvider(t, root)
+	path := filepath.Join(root, "plystra.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, path, string(data)+"    database.pending: {}\n")
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.pending","provider":"example.com/acme/implementation-use/required.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" {
+		t.Fatalf("first-provider preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Payload struct {
+			ConfigurationImpact struct {
+				UnresolvedDecisions []struct {
+					Alternatives []string `json:"alternatives"`
+				} `json:"unresolved_decisions"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil || len(result.Payload.ConfigurationImpact.UnresolvedDecisions) != 2 {
+		t.Fatalf("first-provider decisions = %#v, %v", result, err)
+	}
+	for _, decision := range result.Payload.ConfigurationImpact.UnresolvedDecisions {
+		if len(decision.Alternatives) != 1 || decision.Alternatives[0] != "provide-required-field" {
+			t.Fatalf("first-provider alternatives = %#v", decision.Alternatives)
+		}
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("first-provider preview modified Project files")
+	}
+}
+
+func TestRunChangePlanResourceRequiredFieldsUseSelectedDocument(t *testing.T) {
+	for _, test := range []struct {
+		name, path string
+		selector   []string
+	}{
+		{name: "environment", path: "plystra.production.yaml", selector: []string{"--env", "production"}},
+		{name: "replacement", path: "deploy/customer.yaml", selector: []string{"--config", "deploy/customer.yaml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeResourceSelectionCommandProject(t)
+			writeRequiredResourceCommandProvider(t, root)
+			writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/required.New"}]}`)
+			before := commandTree(t, root)
+			arguments := append([]string{"change", "plan", "--request", "change.json", "--format", "json"}, test.selector...)
+			exitCode, stdout, stderr := runCommand(t, arguments, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+				t.Fatalf("selected required-field preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Payload struct {
+					ConfigurationScope struct {
+						Path string `json:"path"`
+					} `json:"configuration_scope"`
+					ConfigurationImpact struct {
+						UnresolvedDecisions []struct {
+							Sources []string `json:"sources"`
+						} `json:"unresolved_decisions"`
+					} `json:"configuration_impact"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Payload.ConfigurationScope.Path != test.path || len(result.Payload.ConfigurationImpact.UnresolvedDecisions) != 2 {
+				t.Fatalf("selected required-field scope and decisions = %#v", result.Payload)
+			}
+			for _, decision := range result.Payload.ConfigurationImpact.UnresolvedDecisions {
+				if len(decision.Sources) != 2 || decision.Sources[0] != test.path && decision.Sources[1] != test.path {
+					t.Fatalf("selected required-field sources = %#v", decision.Sources)
+				}
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("selected required-field preview modified Project files")
+			}
+		})
+	}
+}
+
+func TestRunChangePlanResourceRequiredFieldsDoNotHideOtherBlockers(t *testing.T) {
+	for _, test := range []struct {
+		name, provider string
+		prepare        func(*testing.T, string)
+	}{
+		{name: "another incomplete instance", provider: "required", prepare: func(t *testing.T, root string) {
+			writeRequiredResourceCommandProvider(t, root)
+			path := filepath.Join(root, "plystra.yaml")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := "database.retained:\n      use: example.com/acme/implementation-use/original.New\n      config: {value: PRIVATE_RETAINED}"
+			newValue := "database.retained:\n      use: example.com/acme/implementation-use/required.New"
+			writeCommandFile(t, path, strings.Replace(string(data), old, newValue, 1))
+		}},
+		{name: "implicit fixed-array child", provider: "arrayrequired", prepare: func(t *testing.T, root string) {
+			writeCommandFile(t, filepath.Join(root, "arrayrequired", "provider.go"), `package arrayrequired
+type Item struct { Code string `+"`yaml:\"code\" plystra:\"required\"`"+` }
+type Config struct {
+	Name string `+"`yaml:\"name\" plystra:\"required\"`"+`
+	Items [1]Item `+"`yaml:\"items\"`"+`
+}
+type Value struct{}
+//plystra:implements-resource storage.database/v1
+func New(Config) (*Value, error) { return &Value{}, nil }
+func (*Value) Read() {}
+`)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeResourceSelectionCommandProject(t)
+			test.prepare(t, root)
+			writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/`+test.provider+`.New"}]}`)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 3 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+				t.Fatalf("incomplete candidate preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Status  string          `json:"status"`
+				Payload json.RawMessage `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil || result.Status != "validation_failed" || string(result.Payload) != "null" {
+				t.Fatalf("incomplete candidate result = %#v, %v", result, err)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("incomplete candidate preview modified Project files")
+			}
+		})
+	}
+}
+
+func TestRunChangePlanResourceRequiredFieldsRejectInvalidPreviousProviderAlternative(t *testing.T) {
+	root := writeResourceSelectionCommandProject(t)
+	writeRequiredResourceCommandProvider(t, root)
+	path := filepath.Join(root, "plystra.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, path, strings.Replace(string(data), "value: PRIVATE_PRIMARY", "value: [PRIVATE_INVALID]", 1))
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"set","instance":"database.primary","provider":"example.com/acme/implementation-use/required.New"}]}`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+	if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+		t.Fatalf("invalid-previous-provider preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	}
+	var result struct {
+		Payload struct {
+			ConfigurationImpact struct {
+				UnresolvedDecisions []struct {
+					Alternatives []string `json:"alternatives"`
+				} `json:"unresolved_decisions"`
+			} `json:"configuration_impact"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil || len(result.Payload.ConfigurationImpact.UnresolvedDecisions) != 2 {
+		t.Fatalf("invalid-previous-provider decisions = %#v, %v", result, err)
+	}
+	for _, decision := range result.Payload.ConfigurationImpact.UnresolvedDecisions {
+		if len(decision.Alternatives) != 1 || decision.Alternatives[0] != "provide-required-field" {
+			t.Fatalf("invalid-previous-provider alternatives = %#v", decision.Alternatives)
+		}
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("invalid-previous-provider preview modified Project files")
+	}
+}
+
+func writeRequiredResourceCommandProvider(t *testing.T, root string) {
+	t.Helper()
+	writeCommandFile(t, filepath.Join(root, "required", "provider.go"), `package required
+type Settings struct { Endpoint string `+"`yaml:\"endpoint\" plystra:\"required\"`"+` }
+type Config struct {
+	Name string `+"`yaml:\"name\" plystra:\"required\"`"+`
+	Settings Settings `+"`yaml:\"settings\"`"+`
+}
+type Value struct{}
+//plystra:implements-resource storage.database/v1
+func New(Config) (*Value, error) { return &Value{}, nil }
+func (*Value) Read() {}
+`)
 }
 
 func TestRunChangePlanRejectsUninstalledOperationWithoutMutation(t *testing.T) {

@@ -78,7 +78,7 @@ func (c Composition) MissingRequiredImplementationFields(schemas SchemaLookup, o
 				return nil, err
 			}
 		}
-		if err := collectMissingFixedObjectFields(schema.Fields(), node, nil, owner, &paths); err != nil {
+		if err := collectMissingFixedObjectFields(schema.Fields(), node, constructorConfigPath(owner, nil), &paths); err != nil {
 			return nil, err
 		}
 	}
@@ -86,7 +86,39 @@ func (c Composition) MissingRequiredImplementationFields(schemas SchemaLookup, o
 	return paths, nil
 }
 
-func collectMissingFixedObjectFields(fields []implementationinventory.ConfigurationField, node *yaml.Node, prefix []string, owner constructorsymbol.Symbol, paths *[]string) error {
+// MissingRequiredResourceFields returns every statically addressable required
+// field absent from one composed named Resource instance.
+func (c Composition) MissingRequiredResourceFields(schemas SchemaLookup, name string) ([]string, error) {
+	if !c.Valid() || schemas == nil || name == "" {
+		return nil, ErrCompose
+	}
+	for _, instance := range c.manifest.ResourceInstances() {
+		if instance.Name() != name {
+			continue
+		}
+		schema, exists := schemas(ConfigurationNamespaceResource, instance.Provider())
+		if !exists {
+			return nil, nil
+		}
+		var node *yaml.Node
+		if data := instance.ConfigurationYAML(); len(data) != 0 {
+			var err error
+			node, err = decodeNormalizedConfigNode(data)
+			if err != nil {
+				return nil, err
+			}
+		}
+		var paths []string
+		if err := collectMissingFixedObjectFields(schema.Fields(), node, fmt.Sprintf("resources.instances[%q].config", name), &paths); err != nil {
+			return nil, err
+		}
+		sort.Strings(paths)
+		return paths, nil
+	}
+	return nil, ErrCompose
+}
+
+func collectMissingFixedObjectFields(fields []implementationinventory.ConfigurationField, node *yaml.Node, prefix string, paths *[]string) error {
 	var provided map[string]*yaml.Node
 	if node != nil {
 		var err error
@@ -97,12 +129,16 @@ func collectMissingFixedObjectFields(fields []implementationinventory.Configurat
 	}
 	for _, field := range fields {
 		child := provided[field.Name()]
-		segments := append(append([]string(nil), prefix...), field.Name())
+		path := prefix + fmt.Sprintf("[%q]", field.Name())
 		if child == nil && field.Required() {
-			*paths = append(*paths, constructorConfigPath(owner, segments))
+			*paths = append(*paths, path)
 		}
 		if field.Value().Kind() == implementationinventory.ConfigurationValueObject && (child == nil || !isNull(child)) {
-			if err := collectMissingFixedObjectFields(field.Value().Fields(), child, segments, owner, paths); err != nil {
+			if err := collectMissingFixedObjectFields(field.Value().Fields(), child, path, paths); err != nil {
+				return err
+			}
+		} else {
+			if _, err := requiredConstructorConfigValue(field.Value(), child, &constructorConfigNormalizeState{}, 0); err != nil {
 				return err
 			}
 		}

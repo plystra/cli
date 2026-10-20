@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	generation "github.com/plystra/cli/generation/v1"
-	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/changerequest"
 	"github.com/plystra/cli/internal/commandschema"
@@ -25,8 +24,9 @@ const changePlanUsage = `Usage:
 Plans one bounded declarative change request without modifying the Project. This
 installed slice accepts one implementation_selection or resource_selection set
 operation and validates its final Interface/Resource ownership graph. Missing
-newly required constructor or non-pointer fixed-object child values are reported
-as unresolved decisions in an Implementation-selection preview.
+newly required, statically addressable constructor or Resource provider Config
+fields, including non-pointer fixed-object children, are reported as unresolved
+decisions.
 Other operation kinds return a structured unsupported result until their staged
 planners are installed.
 `
@@ -221,15 +221,7 @@ func readChangeRequest(base, path string) ([]byte, error) {
 func buildChangePlanPayload(request changerequest.Request, requested changerequest.Operation, planned implementationselect.PlanResult) (commandschema.ChangePlan, commandschema.Effects, error) {
 	inputs := planned.Inputs()
 	selection := inputs.ConfigurationSelection()
-	rootDigest, err := applicationgen.ConfigurationDigest(inputs.RootSnapshot().Data())
-	if err != nil {
-		return commandschema.ChangePlan{}, commandschema.Effects{}, err
-	}
-	selectedDigest, err := selectedConfigurationDigest(selection.Mode(), inputs.SelectedSnapshot().Data())
-	if err != nil {
-		return commandschema.ChangePlan{}, commandschema.Effects{}, err
-	}
-	afterDigest, err := selectedConfigurationDigest(selection.Mode(), planned.Updated())
+	rootDigest, selectedDigest, afterDigest, err := inputs.ConfigurationLayerDigests(planned.Updated())
 	if err != nil {
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}
@@ -263,13 +255,6 @@ func buildChangePlanPayload(request changerequest.Request, requested changereque
 		Verification: []string{"plystra", "check"}, Completeness: "non_exact",
 	})
 	return payload, effects, err
-}
-
-func selectedConfigurationDigest(mode string, data []byte) (string, error) {
-	if mode == string(generation.ConfigurationModeEnvironment) {
-		return applicationgen.EnvironmentOverlayDigest(data)
-	}
-	return applicationgen.ConfigurationDigest(data)
 }
 
 func requestedSelectionOperation(operation changerequest.Operation) commandschema.ChangePlanOperationInput {

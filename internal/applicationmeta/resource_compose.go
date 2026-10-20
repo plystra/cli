@@ -283,7 +283,24 @@ func qualifyResourceSources(layer Manifest, owner Dependency) Manifest {
 }
 
 func (c Composition) validateRequiredResourceConfiguration(schemas SchemaLookup, source ConfigurationDeclarationSource) error {
+	return c.validateRequiredResourceConfigurationExcept(schemas, source, "")
+}
+
+// ValidateOtherResourceRequiredConfiguration verifies that a previewed missing
+// value is not hiding another selected instance's requiredness failure.
+func (c Composition) ValidateOtherResourceRequiredConfiguration(schemas SchemaLookup, selectedPath, excludedName string) error {
+	if !c.Valid() || schemas == nil || selectedPath == "" || excludedName == "" {
+		return ErrCompose
+	}
+	source := ConfigurationDeclarationSource{modulePath: c.current.modulePath, path: selectedPath, line: 1, column: 1}
+	return c.validateRequiredResourceConfigurationExcept(schemas, source, excludedName)
+}
+
+func (c Composition) validateRequiredResourceConfigurationExcept(schemas SchemaLookup, source ConfigurationDeclarationSource, excludedName string) error {
 	for _, instance := range c.manifest.resourceInstances {
+		if instance.Name() == excludedName {
+			continue
+		}
 		schema, exists := schemas(ConfigurationNamespaceResource, instance.provider)
 		if !exists {
 			continue

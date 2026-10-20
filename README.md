@@ -851,12 +851,19 @@ fields and required descendants of non-pointer fixed objects, with constructor
 provenance but no configured values. Every missing field of either kind is
 reported as an unresolved decision in a non-exact read-only preview. The
 `plystra use` command still rejects that invalid final configuration.
-For a valid Resource provider replacement, it reports the prior provider's
-unowned configuration, deterministic cleanup, and other retained instances
-without disclosing configured values. Missing required Resource values and
-unresolved bindings still fail validation. Other operation kinds return a
-structured unsupported result; `change apply`,
-primitive-command lowering, and `--dry-run` remain unavailable.
+For a Resource provider replacement, it reports the prior provider's unowned
+configuration, deterministic cleanup, and other retained instances without
+disclosing configured values. Newly missing, statically addressable Resource
+Config fields produce source-bearing unresolved decisions in a non-exact
+preview; `plystra use` still rejects the invalid final configuration. Other
+requiredness failures and unresolved bindings still fail validation. Other
+operation kinds return a structured unsupported result; `change apply`,
+primitive-command lowering, and `--dry-run` remain unavailable. These previews
+are always `non_exact` and cannot authorize apply. Their public read/write and
+snapshot digests are typed semantic identities, not exact file preimages:
+private runtime values and Secret targets do not enter the public plan digest.
+An eventual apply must independently capture and recheck exact owner-private
+preimages before any write.
 
 ## Authoring behavior
 

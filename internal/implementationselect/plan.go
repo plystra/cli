@@ -138,14 +138,36 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	// Planning checks the complete remaining binding graph before any live write.
 	// Generation repeats resolution and owns compilation and rollback validation.
 	validationErr := inputs.ValidateCandidate(candidate)
-	var missing *applicationmeta.ConstructorConfigurationValueError
-	if validationErr != nil && (!allowMissingRequired || kind != "interface" || !errors.Is(validationErr, applicationmeta.ErrConfigurationRequired) || !errors.As(validationErr, &missing)) {
-		return nil, kind, configurationimpact.Impact{}, validationErr
+	var missingImplementation *applicationmeta.ConstructorConfigurationValueError
+	var missingResource *applicationmeta.ResourceConfigurationError
+	if validationErr != nil {
+		if !allowMissingRequired || !errors.Is(validationErr, applicationmeta.ErrConfigurationRequired) {
+			return nil, kind, configurationimpact.Impact{}, validationErr
+		}
+		switch kind {
+		case "interface":
+			if !errors.As(validationErr, &missingImplementation) {
+				return nil, kind, configurationimpact.Impact{}, validationErr
+			}
+		case "resource":
+			if !errors.As(validationErr, &missingResource) || missingResource.InstanceName() != target || missingResource.Provider() != constructor {
+				return nil, kind, configurationimpact.Impact{}, validationErr
+			}
+		}
+	}
+	if missingResource != nil {
+		if err := inputs.ValidateOtherResourceRequiredConfiguration(candidate, target); err != nil {
+			return nil, kind, configurationimpact.Impact{}, err
+		}
 	}
 	impactBefore := before
 	impactInput := configurationimpact.Input{}
+	previousStateValid := false
 	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
 		impactBefore = composed
+		if kind == "resource" {
+			previousStateValid = inputs.ValidateCandidate(composed) == nil
+		}
 	} else if kind == "resource" {
 		if ownership, ownershipErr := inputs.ComposeResourceOwnershipCandidate(original); ownershipErr == nil {
 			impactBefore = ownership
@@ -153,6 +175,10 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	}
 	if kind == "resource" {
 		impactInput = authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())
+		impactInput.NewlyRequiredFields, err = newlyRequiredResourceFields(inputs, target, constructor)
+		if err != nil {
+			return nil, kind, configurationimpact.Impact{}, err
+		}
 	}
 	if kind == "interface" {
 		impactInput.NewlyRequiredFields, err = newlyRequiredImplementationFields(inputs, before, candidate)
@@ -160,18 +186,31 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 			return nil, kind, configurationimpact.Impact{}, err
 		}
 	}
-	if missing != nil {
-		var owners []constructorsymbol.Symbol
-		for _, field := range impactInput.NewlyRequiredFields {
-			owner, parseErr := constructorsymbol.Parse(field.Owner)
-			if parseErr != nil {
-				return nil, kind, configurationimpact.Impact{}, parseErr
+	if missingImplementation != nil || missingResource != nil {
+		var missingPaths []string
+		var missingSource string
+		alternatives := []string{"provide-required-field", "retain-previous-constructor"}
+		if missingResource != nil {
+			missingPaths, err = inputs.MissingRequiredResourceFields(candidate, target)
+			missingSource = missingResource.SourcePath()
+			alternatives = []string{"provide-required-field", "retain-previous-provider"}
+			if !previousStateValid {
+				alternatives = []string{"provide-required-field"}
 			}
-			owners = append(owners, owner)
+		} else {
+			var owners []constructorsymbol.Symbol
+			for _, field := range impactInput.NewlyRequiredFields {
+				owner, parseErr := constructorsymbol.Parse(field.Owner)
+				if parseErr != nil {
+					return nil, kind, configurationimpact.Impact{}, parseErr
+				}
+				owners = append(owners, owner)
+			}
+			missingPaths, err = inputs.MissingRequiredImplementationFields(candidate, owners)
+			missingSource = missingImplementation.SourcePath()
 		}
-		missingPaths, missingErr := inputs.MissingRequiredImplementationFields(candidate, owners)
-		if missingErr != nil {
-			return nil, kind, configurationimpact.Impact{}, missingErr
+		if err != nil {
+			return nil, kind, configurationimpact.Impact{}, validationErr
 		}
 		absent := make(map[string]bool, len(missingPaths))
 		for _, path := range missingPaths {
@@ -181,14 +220,14 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 			if !absent[field.Path] {
 				continue
 			}
-			sources := []string{field.SchemaSource, missing.SourcePath()}
+			sources := []string{field.SchemaSource, missingSource}
 			sort.Strings(sources)
 			if sources[0] == sources[1] {
 				sources = sources[:1]
 			}
 			impactInput.UnresolvedDecisions = append(impactInput.UnresolvedDecisions, configurationimpact.UnresolvedDecision{
 				Target: field.Path, Reason: "required-configuration-value-missing",
-				Alternatives: []string{"provide-required-field", "retain-previous-constructor"},
+				Alternatives: alternatives,
 				Sources:      sources,
 			})
 		}
@@ -322,6 +361,36 @@ func appendRequiredFixedObjectFields(result []configurationimpact.NewlyRequiredF
 		}
 	}
 	return result
+}
+
+func newlyRequiredResourceFields(inputs applicationresolve.SelectionInputs, target string, constructor constructorsymbol.Symbol) ([]configurationimpact.NewlyRequiredField, error) {
+	instances, _, err := applicationmeta.ResourceSelectionIdentities(inputs.CurrentLayers())
+	if err != nil {
+		return nil, err
+	}
+	var previous constructorsymbol.Symbol
+	for _, instance := range instances {
+		if instance.Name() == target {
+			previous = instance.Provider()
+			break
+		}
+	}
+	if previous == constructor {
+		return nil, nil
+	}
+	provider, exists := inputs.Declarations().ResourceProviders().BySymbol(constructor)
+	if !exists {
+		return nil, ErrProviderIncompatible
+	}
+	configuration, exists := provider.Configuration()
+	if !exists {
+		return nil, nil
+	}
+	fields := appendRequiredFixedObjectFields(nil, target, provider.Source(), fmt.Sprintf("resources.instances[%q].config", target), configuration.Fields())
+	for index := range fields {
+		fields[index].RequirednessReason = "required-field-on-newly-selected-resource-provider"
+	}
+	return fields, nil
 }
 
 func selectResourceProvider(inputs applicationresolve.SelectionInputs, original []byte, target string, constructor constructorsymbol.Symbol, overlay bool) ([]byte, error) {

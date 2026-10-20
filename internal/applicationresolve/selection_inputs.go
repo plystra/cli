@@ -79,6 +79,37 @@ func (s SelectionInputs) RootSnapshot() ManifestSnapshot { return s.rootSnapshot
 // SelectedSnapshot returns the exact preimage of the only selected YAML target.
 func (s SelectionInputs) SelectedSnapshot() ManifestSnapshot { return s.selectedSnapshot }
 
+// ConfigurationLayerDigests returns only public-safe typed identities for the
+// captured root, selected document, and one candidate selected document.
+// Private bytes remain in the snapshots used for transaction rechecks.
+func (s SelectionInputs) ConfigurationLayerDigests(updated []byte) (string, string, string, error) {
+	if s.module.Path() == "" {
+		return "", "", "", ErrResolve
+	}
+	root, err := applicationmeta.ConfigurationLayerDigest(s.rootManifest, s.schemaLookup)
+	if err != nil {
+		return "", "", "", err
+	}
+	selected, err := applicationmeta.ConfigurationLayerDigest(s.selectedManifest, s.schemaLookup)
+	if err != nil {
+		return "", "", "", err
+	}
+	parse := applicationmeta.ParseCompleteSource
+	if s.selector.mode == configurationModeEnvironment {
+		parse = applicationmeta.ParseOverlaySource
+	}
+	manifest, err := parseConfigurationSnapshot(s.module.ModulePath(), ManifestSnapshot{path: s.selector.path, data: updated}, parse)
+	if err != nil {
+		return "", "", "", err
+	}
+	manifest, err = applicationmeta.WithProjectModule(manifest, s.module.ModulePath())
+	if err != nil {
+		return "", "", "", err
+	}
+	after, err := applicationmeta.ConfigurationLayerDigest(manifest, s.schemaLookup)
+	return root, selected, after, err
+}
+
 // ConfigurationSelection returns mode, path and environment. Digest is empty:
 // schema-directed composition has deliberately not occurred at this boundary.
 func (s SelectionInputs) ConfigurationSelection() ConfigurationSelection {
@@ -342,6 +373,18 @@ func (s SelectionInputs) ValidateCandidate(composition applicationmeta.Compositi
 // objects; it does not relax final candidate validation.
 func (s SelectionInputs) MissingRequiredImplementationFields(composition applicationmeta.Composition, owners []constructorsymbol.Symbol) ([]string, error) {
 	return composition.MissingRequiredImplementationFields(s.schemaLookup, owners)
+}
+
+// MissingRequiredResourceFields inspects one selected instance's composed
+// typed Config without weakening final candidate validation.
+func (s SelectionInputs) MissingRequiredResourceFields(composition applicationmeta.Composition, name string) ([]string, error) {
+	return composition.MissingRequiredResourceFields(s.schemaLookup, name)
+}
+
+// ValidateOtherResourceRequiredConfiguration keeps an incomplete preview from
+// hiding a separate named instance's missing value.
+func (s SelectionInputs) ValidateOtherResourceRequiredConfiguration(composition applicationmeta.Composition, name string) error {
+	return composition.ValidateOtherResourceRequiredConfiguration(s.schemaLookup, s.selector.path, name)
 }
 
 func (s SelectionInputs) validateCandidateConfiguration(composition applicationmeta.Composition, resolution interfaceresolution.Result, sources applicationinput.SourceContext) error {
