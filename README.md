@@ -844,7 +844,7 @@ key, and 1,024 bytes per Implementation package path. Duplicate keys and
 conflicting targets fail without exposing submitted configuration values.
 The installed public `plystra change plan` slice accepts one `interface_root`
 present/absent operation, one `implementation_selection` set/remove operation,
-or one `resource_selection` set operation, analyzes its final ownership graph,
+or one `resource_selection` set/remove operation, analyzes its final ownership graph,
 and emits a read-only `plystra.change-plan/v1` payload with a plan digest and
 all five `configuration_impact` arrays. When both the old and candidate graphs
 resolve, a newly reachable Implementation reports required top-level Config
@@ -858,6 +858,16 @@ then uses the ordinary unique-compatible fallback. Configuration and bindings
 whose last owner disappears are reported as derived cleanup; configuration still
 owned by an automatic or explicit selection is retained. An ambiguous or missing
 fallback rejects the preview without a partial plan.
+Removing a Resource selection removes the whole exact named instance, including
+its provider and Config. Complete documents delete the entry; environment overlays
+record a whole-instance tombstone even if the root currently lacks that instance.
+Only that consumer's outgoing binding leaves are derived cleanup. Surviving
+consumers' explicit bindings are never erased or retargeted, even if another
+compatible instance exists. Ordinary implicit dependencies resolve against the
+final instance set: missing or ambiguous dependencies reject the preview.
+The old graph need not resolve; deleting an instance can repair an ambiguity or
+cycle, and invalid or schema-less selected-layer Config can be removed. Typed
+lower-layer validation and unrelated Config obligations remain enforced.
 A root request names one exact Interface and either `require` or `expose`.
 Complete requirement sets stay complete; environment overlays use sparse
 add/remove intent unless they already declare a complete set. Exposure additions
@@ -1042,7 +1052,7 @@ An Interface choice writes `interfaces.use` and requires a visible compatible fu
 
 A Resource choice writes `resources.instances.<name>.use`. Replacing a nonempty previous provider discards only that instance's old Config; selecting the same provider preserves it. An existing instance without a provider can receive its first selection, retaining unbound Config authored in the selected document. The command removes configuration whose last explicit or reachable owner disappears and only provably obsolete consumer binding parameters. It preserves other instances and still-owned configuration, revalidates surviving dependencies, and never guesses a replacement binding or newly required value. Cleanup writes only the required tombstones or sparse deltas in the selected current-Project layer; lower-layer sources and unselected documents remain unchanged.
 
-The command validates the repaired final state, not a required valid starting graph. It preserves comments and unrelated YAML, regenerates with the same selection, is byte-idempotent when already selected, and restores the selected YAML, generated tree, `go.mod`, and `go.sum` after a later failure. `plystra change plan --request change.json --format json` provides a read-only plan for one `interface_root` present/absent (require or expose), one `implementation_selection` set/remove operation, or one `resource_selection` set operation; `change apply`, primitive-command lowering, `--dry-run`, and complete Gate 13 acceptance remain unavailable.
+The command validates the repaired final state, not a required valid starting graph. It preserves comments and unrelated YAML, regenerates with the same selection, is byte-idempotent when already selected, and restores the selected YAML, generated tree, `go.mod`, and `go.sum` after a later failure. `plystra change plan --request change.json --format json` provides a read-only plan for one `interface_root` present/absent (require or expose), one `implementation_selection` set/remove operation, or one `resource_selection` set/remove operation; `change apply`, primitive-command lowering, `--dry-run`, and complete Gate 13 acceptance remain unavailable.
 
 An ordinary Go Module without root `plystra.yaml`, an absent visible contract or provider, a missing or unsafe selected file, conflicting selectors, concurrently changed configuration, unexpected generated output, generation failure, untidy module state, or validation failure leaves the selected configuration and every generated or module-owned file unchanged. `capability create --expose` remains the default-configuration authoring shortcut and uses the same rollback boundary for the new schema, Plugin declaration, implementation scaffold, root application exposure, module metadata, and generated output.
 

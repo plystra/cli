@@ -54,6 +54,60 @@ func PreviewRemoval(ctx context.Context, options Options) (PlanResult, error) {
 	return plan(ctx, options, true, true)
 }
 
+// PreviewResourceRemoval removes a whole named instance and only that consumer's
+// outgoing binding leaves. The remaining final graph must validate completely.
+func PreviewResourceRemoval(ctx context.Context, options Options) (PlanResult, error) {
+	if ctx == nil || resourcename.Check(options.Target) != nil || options.Constructor != "" {
+		return PlanResult{}, fmt.Errorf("%w: invalid Resource removal request", ErrSelect)
+	}
+	inputs, err := discoverPlanInputs(ctx, options)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	original := inputs.SelectedSnapshot().Data()
+	remove := applicationmeta.RemoveResourceInstance
+	if inputs.ConfigurationSelection().Mode() == "environment" {
+		remove = applicationmeta.RemoveResourceInstanceOverlay
+	}
+	updated, _, err := remove(original, options.Target)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	before, err := inputs.ComposeResourceOwnershipCandidate(original)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	var bindings []applicationmeta.ResourceBindingRemoval
+	for _, instance := range before.Manifest().ResourceInstances() {
+		if instance.Name() != options.Target {
+			continue
+		}
+		for _, binding := range before.Manifest().ResourceBindings() {
+			if binding.Namespace() == "instances" && binding.Consumer() == options.Target {
+				bindings = append(bindings, bindingRemoval(binding))
+			}
+		}
+		break
+	}
+	updated, err = removeOwnedPaths(inputs, updated, nil, bindings, inputs.ConfigurationSelection().Mode() == "environment")
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	candidate, err := inputs.ComposeCandidate(updated)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	if err := inputs.ValidateCandidate(candidate); err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	input := authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())
+	impact, err := configurationimpact.Compare(applicationmeta.WithoutResourceConfiguration(before.Manifest()), applicationmeta.WithoutResourceConfiguration(candidate.Manifest()), input)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	return selectionPlanResult(inputs, options.Target, "resource", constructorsymbol.Symbol{}, updated, impact)
+}
+
 // PreviewInterfaceRoot plans one exact require or expose root change without
 // installing configuration or weakening final ownership validation.
 func PreviewInterfaceRoot(ctx context.Context, options Options, root string, present bool) (PlanResult, error) {
