@@ -40,17 +40,21 @@ type PlanResult struct {
 // Plan discovers and validates one selection without writing configuration,
 // module metadata, generated output, or any other Project file.
 func Plan(ctx context.Context, options Options) (PlanResult, error) {
-	return plan(ctx, options, false)
+	return plan(ctx, options, false, false)
 }
 
 // Preview returns a non-mutating selection plan with bounded required-value or
-// independently validated Resource-binding decisions when final validation
-// cannot yet succeed.
+// validated Resource-binding decisions when final validation cannot yet succeed.
 func Preview(ctx context.Context, options Options) (PlanResult, error) {
-	return plan(ctx, options, true)
+	return plan(ctx, options, true, false)
 }
 
-func plan(ctx context.Context, options Options, allowIncomplete bool) (PlanResult, error) {
+// PreviewRemoval plans the exact removal of one authored Interface selection.
+func PreviewRemoval(ctx context.Context, options Options) (PlanResult, error) {
+	return plan(ctx, options, true, true)
+}
+
+func plan(ctx context.Context, options Options, allowIncomplete, remove bool) (PlanResult, error) {
 	if ctx == nil {
 		return PlanResult{}, fmt.Errorf("%w: context is nil", ErrSelect)
 	}
@@ -58,9 +62,17 @@ func plan(ctx context.Context, options Options, allowIncomplete bool) (PlanResul
 	if idErr != nil && resourcename.Check(options.Target) != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, ErrInvalidTarget)
 	}
-	constructor, err := constructorsymbol.Parse(options.Constructor)
-	if err != nil {
-		return PlanResult{}, fmt.Errorf("%w: %w: parse fully qualified Implementation constructor: %w", ErrSelect, ErrInvalidConstructor, err)
+	var constructor constructorsymbol.Symbol
+	if remove {
+		if idErr != nil || options.Constructor != "" {
+			return PlanResult{}, fmt.Errorf("%w: Interface removal requires an exact Interface and no constructor", ErrSelect)
+		}
+	} else {
+		var err error
+		constructor, err = constructorsymbol.Parse(options.Constructor)
+		if err != nil {
+			return PlanResult{}, fmt.Errorf("%w: %w: parse fully qualified Implementation constructor: %w", ErrSelect, ErrInvalidConstructor, err)
+		}
 	}
 	inputs, err := applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
 		Start: options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
@@ -69,7 +81,7 @@ func plan(ctx context.Context, options Options, allowIncomplete bool) (PlanResul
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, allowIncomplete)
+	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, allowIncomplete, remove)
 	if err != nil {
 		var missing *interfaceresolution.UnknownInterfaceError
 		if errors.As(err, &missing) && missing.InterfaceID() == id {
@@ -101,7 +113,7 @@ func (p PlanResult) Changed() bool                                   { return !b
 func (p PlanResult) ConfigurationImpact() configurationimpact.Impact { return p.impact }
 func (p PlanResult) CompositionDigest() string                       { return p.compositionHash }
 
-func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol, allowIncomplete bool) ([]byte, string, configurationimpact.Impact, error) {
+func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol, allowIncomplete, remove bool) ([]byte, string, configurationimpact.Impact, error) {
 	original := inputs.SelectedSnapshot().Data()
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	var updated []byte
@@ -109,12 +121,23 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	var before applicationmeta.Composition
 	kind := "interface"
 	if id.String() != "" {
-		set := applicationmeta.SetImplementationChoice
-		if overlay {
-			set = applicationmeta.SetImplementationChoiceOverlay
+		if remove {
+			removeChoice := applicationmeta.RemoveImplementationChoice
+			if overlay {
+				removeChoice = applicationmeta.RemoveImplementationChoiceOverlay
+			}
+			updated, _, err = removeChoice(original, id)
+		} else {
+			set := applicationmeta.SetImplementationChoice
+			if overlay {
+				set = applicationmeta.SetImplementationChoiceOverlay
+			}
+			updated, _, err = set(original, id, constructor)
 		}
-		updated, _, err = set(original, id, constructor)
 	} else {
+		if remove {
+			return nil, kind, configurationimpact.Impact{}, ErrInvalidTarget
+		}
 		kind = "resource"
 		updated, err = selectResourceProvider(inputs, original, target, constructor, overlay)
 	}
@@ -169,7 +192,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		}
 	}
 	impactBefore := before
-	impactInput := configurationimpact.Input{}
+	impactInput := authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())
 	previousStateValid := false
 	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
 		impactBefore = composed
@@ -182,7 +205,6 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		}
 	}
 	if kind == "resource" {
-		impactInput = authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())
 		impactInput.NewlyRequiredFields, err = newlyRequiredResourceFields(inputs, target, constructor)
 		if err != nil {
 			return nil, kind, configurationimpact.Impact{}, err
@@ -208,6 +230,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		}
 	}
 	if kind == "interface" {
+		impactInput = authoredImplementationConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), impactInput)
 		impactInput.NewlyRequiredFields, err = newlyRequiredImplementationFields(inputs, before, candidate)
 		if err != nil {
 			return nil, kind, configurationimpact.Impact{}, err
@@ -262,16 +285,35 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 			return nil, kind, configurationimpact.Impact{}, validationErr
 		}
 	}
-	beforeManifest, afterManifest := impactBefore.Manifest(), candidate.Manifest()
-	if kind == "resource" {
-		beforeManifest = applicationmeta.WithoutResourceConfiguration(beforeManifest)
-		afterManifest = applicationmeta.WithoutResourceConfiguration(afterManifest)
+	beforeManifest := applicationmeta.WithoutResourceConfiguration(impactBefore.Manifest())
+	afterManifest := applicationmeta.WithoutResourceConfiguration(candidate.Manifest())
+	if kind == "interface" {
+		beforeManifest = applicationmeta.WithoutImplementationConfiguration(beforeManifest)
+		afterManifest = applicationmeta.WithoutImplementationConfiguration(afterManifest)
 	}
 	impact, err := configurationimpact.Compare(beforeManifest, afterManifest, impactInput)
 	if err != nil {
 		return nil, kind, configurationimpact.Impact{}, err
 	}
 	return updated, kind, impact, nil
+}
+
+func authoredImplementationConfigurationImpact(beforeLayers, afterLayers []applicationmeta.Manifest, input configurationimpact.Input) configurationimpact.Input {
+	retained := make(map[constructorsymbol.Symbol]bool)
+	for _, configured := range applicationmeta.ConstructorConfigurationIdentities(afterLayers) {
+		retained[configured.Constructor()] = true
+	}
+	for _, configured := range applicationmeta.ConstructorConfigurationIdentities(beforeLayers) {
+		owner := configured.Constructor().String()
+		path := "config." + owner
+		if retained[configured.Constructor()] {
+			input.RetainedOwners = append(input.RetainedOwners, configurationimpact.RetainedOwner{Owner: owner, Path: path, Reason: "owner-remains-effective"})
+		} else {
+			input.NewlyUnownedPaths = append(input.NewlyUnownedPaths, configurationimpact.NewlyUnownedPath{Owner: owner, Path: path, Source: configured.Source()})
+			input.DerivedOperations = append(input.DerivedOperations, configurationimpact.DerivedOperation{Kind: "configuration", Action: "remove", Owner: owner, Path: path, Source: configured.Source()})
+		}
+	}
+	return input
 }
 
 type authoredResourceConfiguration struct {

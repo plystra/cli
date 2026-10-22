@@ -131,6 +131,80 @@ func TestSetImplementationChoiceRejectsInvalidInputWithoutSecretDisclosure(t *te
 	}
 }
 
+func TestRemoveImplementationChoicePreservesOtherIntentAndIsIdempotent(t *testing.T) {
+	t.Parallel()
+	id := mustImplementationChoiceInterfaceID(t, "email.send/v1")
+	for _, overlay := range []bool{false, true} {
+		t.Run(map[bool]string{false: "complete", true: "overlay"}[overlay], func(t *testing.T) {
+			input := []byte(`# Selected choices.
+interfaces:
+  require: [audit.write/v1]
+  use:
+    audit.write/v1: example.com/audit/file.New # retain this choice
+    email.send/v1: example.com/email/smtp.New
+config:
+  example.com/email/smtp.New: {host: PRIVATE_HOST}
+`)
+			remove := applicationmeta.RemoveImplementationChoice
+			parse := applicationmeta.Parse
+			if overlay {
+				remove = applicationmeta.RemoveImplementationChoiceOverlay
+				parse = func(data []byte) (applicationmeta.Manifest, error) {
+					return applicationmeta.ParseOverlaySource("plystra.production.yaml", data)
+				}
+			}
+			updated, changed, err := remove(input, id)
+			if err != nil || !changed {
+				t.Fatalf("remove = changed %t, %v", changed, err)
+			}
+			for _, fragment := range []string{"# Selected choices.", "# retain this choice", "audit.write/v1: example.com/audit/file.New", "require: [audit.write/v1]", "PRIVATE_HOST"} {
+				if !bytes.Contains(updated, []byte(fragment)) {
+					t.Fatalf("removal lost %q: %s", fragment, updated)
+				}
+			}
+			manifest, err := parse(updated)
+			if err != nil || len(manifest.ImplementationChoices()) != 1 || manifest.ImplementationChoices()[0].InterfaceID().String() != "audit.write/v1" {
+				t.Fatalf("remaining choices = %#v, %v", manifest.ImplementationChoices(), err)
+			}
+			if bytes.Contains(updated, []byte("email.send/v1: {$remove: true}")) != overlay {
+				t.Fatalf("unexpected removal marker: %s", updated)
+			}
+			repeated, repeatedChanged, err := remove(updated, id)
+			if err != nil || repeatedChanged || !bytes.Equal(repeated, updated) {
+				t.Fatalf("repeat remove = changed %t, data %q, %v", repeatedChanged, repeated, err)
+			}
+		})
+	}
+	for _, input := range []string{"{}\n", "interfaces: {use: {audit.write/v1: example.com/audit/file.New}}\n"} {
+		unchanged, changed, err := applicationmeta.RemoveImplementationChoice([]byte(input), id)
+		if err != nil || changed || string(unchanged) != input {
+			t.Fatalf("absent local choice = changed %t, data %q, %v", changed, unchanged, err)
+		}
+		updated, changed, err := applicationmeta.RemoveImplementationChoiceOverlay([]byte(input), id)
+		if err != nil || !changed || !bytes.Contains(updated, []byte("email.send/v1: {$remove: true}")) {
+			t.Fatalf("absent overlay choice = changed %t, data %q, %v", changed, updated, err)
+		}
+	}
+}
+
+func TestRemoveImplementationChoiceRejectsInvalidInputWithoutDisclosure(t *testing.T) {
+	t.Parallel()
+	for _, remove := range []func([]byte, interfaceid.Identifier) ([]byte, bool, error){applicationmeta.RemoveImplementationChoice, applicationmeta.RemoveImplementationChoiceOverlay} {
+		for _, test := range []struct {
+			data string
+			id   interfaceid.Identifier
+		}{
+			{data: "{}\n"},
+			{data: "unknown: PRIVATE_VALUE\n", id: mustImplementationChoiceInterfaceID(t, "email.send/v1")},
+		} {
+			updated, changed, err := remove([]byte(test.data), test.id)
+			if !errors.Is(err, applicationmeta.ErrRemoveImplementationChoice) || changed || updated != nil || strings.Contains(err.Error(), "PRIVATE_VALUE") {
+				t.Fatalf("invalid removal = changed %t, data %q, %v", changed, updated, err)
+			}
+		}
+	}
+}
+
 func mustImplementationChoiceInterfaceID(t testing.TB, value string) interfaceid.Identifier {
 	t.Helper()
 	id, err := interfaceid.Parse(value)

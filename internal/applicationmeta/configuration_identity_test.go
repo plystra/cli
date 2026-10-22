@@ -194,3 +194,77 @@ func TestWithoutConstructorConfigurationAllowsPlanningButNotInvalidFinalState(t 
 		t.Fatal("identity plan retained Implementation Config or removals", err)
 	}
 }
+
+func TestConstructorConfigurationIdentitiesPreserveOwnershipWithoutValues(t *testing.T) {
+	t.Parallel()
+	lookup := composeSchemaLookup(map[string]implementationinventory.Configuration{
+		"example.com/service.New": composeSchema(t, "Value string"),
+		"example.com/removed.New": composeSchema(t, "Value string"),
+	})
+	document := `interfaces: {use: {app.run/v1: example.com/service.New}}
+config:
+  example.com/service.New: {value: [PRIVATE_INVALID]}
+  example.com/removed.New: {value: PRIVATE_REMOVED}
+resources:
+  instances: {primary: {use: example.com/database.New}}
+  bind:
+    implementations:
+      example.com/service.New: {database: primary}
+`
+	root := resourceManifest(t, "plystra.yaml", document)
+	overlay := parseOverlayManifest(t, "plystra.production.yaml", `config:
+  example.com/service.New: {value: PRIVATE_OVERLAY}
+  example.com/removed.New: {$remove: true}
+`)
+	if _, err := applicationmeta.ApplyOverlay(root, overlay, lookup); !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) {
+		t.Fatalf("invalid lower Config unexpectedly composed: %v", err)
+	}
+	projected := applicationmeta.WithoutImplementationConfiguration(root)
+	if !reflect.DeepEqual(projected, applicationmeta.WithoutImplementationConfiguration(projected)) || len(projected.Configurations()) != 0 {
+		t.Fatal("configuration exclusion is not empty and idempotent")
+	}
+	if !reflect.DeepEqual(projected.ImplementationChoices(), root.ImplementationChoices()) || !reflect.DeepEqual(projected.ResourceBindings(), root.ResourceBindings()) || !reflect.DeepEqual(projected.ResourceInstances(), root.ResourceInstances()) {
+		t.Fatal("ownership projection changed selections or Resource intent")
+	}
+	configurations := applicationmeta.ConstructorConfigurationIdentities([]applicationmeta.Manifest{root, overlay})
+	if len(configurations) != 1 || configurations[0].Constructor().String() != "example.com/service.New" || configurations[0].DeclarationSource().Path() != "plystra.production.yaml" || len(configurations[0].YAML()) != 0 {
+		t.Fatalf("ownership identities = %#v", configurations)
+	}
+	if identities := applicationmeta.ConstructorConfigurationIdentities([]applicationmeta.Manifest{root, overlay, root}); len(identities) != 2 || identities[0].Constructor().String() != "example.com/removed.New" || identities[1].Constructor().String() != "example.com/service.New" {
+		t.Fatal("later mapping did not restore membership in sorted order")
+	}
+	for _, fragment := range []string{"{}", "{value: {$remove: true}}"} {
+		upper := parseOverlayManifest(t, "plystra.selected.yaml", "config:\n  example.com/service.New: "+fragment+"\n")
+		identities := applicationmeta.ConstructorConfigurationIdentities([]applicationmeta.Manifest{root, upper})
+		if len(identities) != 2 || identities[1].Constructor().String() != "example.com/service.New" || identities[1].DeclarationSource().Path() != "plystra.selected.yaml" || len(identities[1].YAML()) != 0 {
+			t.Fatal("empty object or nested removal lost whole-object ownership or source")
+		}
+	}
+	validRoot := resourceManifest(t, "plystra.yaml", strings.ReplaceAll(document, "[PRIVATE_INVALID]", "PRIVATE_VALID"))
+	layered, err := applicationmeta.ApplyOverlay(validRoot, overlay, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	composition, err := applicationmeta.Compose(nil, applicationmeta.WithoutImplementationConfiguration(layered), lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fromLayers := applicationmeta.ConstructorConfigurationIdentities([]applicationmeta.Manifest{layered}); !reflect.DeepEqual(configurations, fromLayers) {
+		t.Fatal("stored layers lost membership, source, or removals")
+	}
+	if len(composition.CurrentLayers()) != 2 {
+		t.Fatal("ownership projection lost stored layers")
+	}
+	for _, layer := range composition.CurrentLayers() {
+		for _, configured := range layer.Configurations() {
+			t.Fatalf("excluded stored layer retained Config for %s", configured.Constructor())
+		}
+	}
+	service, exists := root.Configuration(mustImplementationChoiceConstructor(t, "example.com/service.New"))
+	if !exists || !bytes.Contains(service.YAML(), []byte("PRIVATE_INVALID")) || !bytes.Contains(overlay.Configurations()[0].YAML(), []byte("PRIVATE_OVERLAY")) {
+		t.Fatal("ownership projection modified its inputs")
+	}
+	if _, err := applicationmeta.ApplyOverlay(root, overlay, lookup); !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) {
+		t.Fatal("planning weakened real Config validation", err)
+	}
+}

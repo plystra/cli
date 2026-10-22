@@ -2,6 +2,7 @@ package applicationmeta
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
@@ -37,6 +38,44 @@ func WithoutResourceConfiguration(manifest Manifest) Manifest {
 		manifest.layers[index] = WithoutResourceConfiguration(manifest.layers[index])
 	}
 	return manifest
+}
+
+// WithoutImplementationConfiguration removes ordinary constructor Config and
+// removals from an identity-only planning copy, preserving all Resource intent.
+func WithoutImplementationConfiguration(manifest Manifest) Manifest {
+	manifest.configurations = nil
+	manifest.removedConfigurations = nil
+	manifest.layers = slices.Clone(manifest.layers)
+	for index := range manifest.layers {
+		manifest.layers[index] = WithoutImplementationConfiguration(manifest.layers[index])
+	}
+	return manifest
+}
+
+// ConstructorConfigurationIdentities folds whole-object membership and removal
+// through authored layers without requiring a Config schema. Returned identities
+// retain only the highest object source, never private values or typed validity.
+func ConstructorConfigurationIdentities(layers []Manifest) []ConstructorConfiguration {
+	selected := make(map[constructorsymbol.Symbol]ConstructorConfiguration)
+	for _, manifest := range layers {
+		for _, layer := range manifestLayers(manifest) {
+			for _, removed := range layer.removedConfigurations {
+				delete(selected, removed.constructor)
+			}
+			for _, configured := range layer.configurations {
+				configured.yaml = nil
+				selected[configured.constructor] = configured
+			}
+		}
+	}
+	result := make([]ConstructorConfiguration, 0, len(selected))
+	for _, configured := range selected {
+		result = append(result, configured)
+	}
+	slices.SortFunc(result, func(left, right ConstructorConfiguration) int {
+		return strings.Compare(left.constructor.String(), right.constructor.String())
+	})
+	return result
 }
 
 func withoutResourceConfiguration(instances []ResourceInstance) []ResourceInstance {

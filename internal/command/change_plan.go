@@ -22,9 +22,9 @@ const changePlanUsage = `Usage:
   plystra change plan --request <path|-> [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Plans one bounded declarative change request without modifying the Project. This
-installed slice accepts one implementation_selection or resource_selection set
-operation and analyzes its final Interface/Resource ownership graph. Missing
-newly required, statically addressable constructor or Resource provider Config
+installed slice accepts one implementation_selection set or remove operation,
+or one resource_selection set operation, and analyzes its final ownership graph.
+Missing newly required, statically addressable constructor or Resource provider Config
 fields, including non-pointer fixed-object children, are reported as unresolved
 decisions.
 Ambiguous implicit bindings introduced on one Resource instance are previewed as
@@ -84,14 +84,19 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	}
 	operations := request.Operations()
 	if len(operations) != 1 {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one selection set operation.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one selection operation.")
 	}
 	var target, constructor string
+	remove := false
+	planner := implementationselect.Preview
 	switch operations[0].Kind() {
 	case changerequest.KindImplementationSelection:
 		selection, _ := operations[0].ImplementationSelection()
-		if selection.Action() != changerequest.SelectionSet {
-			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports selection set only.")
+		if selection.Action() == changerequest.SelectionRemove {
+			remove = true
+			planner = implementationselect.PreviewRemoval
+		} else if selection.Action() != changerequest.SelectionSet {
+			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice does not support that selection action.")
 		}
 		target = selection.Interface()
 		constructor, _ = selection.Constructor()
@@ -103,15 +108,15 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		target = selection.Instance()
 		constructor, _ = selection.Provider()
 	default:
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one implementation_selection or resource_selection set operation.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one implementation_selection set/remove or resource_selection set operation.")
 	}
-	if constructor == "" {
+	if constructor == "" && !remove {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The selection does not name a constructor.")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
-	planned, err := implementationselect.Preview(ctx, implementationselect.Options{
+	planned, err := planner(ctx, implementationselect.Options{
 		Start: workingDirectory, Target: target, Constructor: constructor,
 		ConfigurationPath: parsed.configurationPath, EnvironmentName: parsed.environmentName,
 		Environment: environment,
@@ -237,14 +242,20 @@ func buildChangePlanPayload(request changerequest.Request, requested changereque
 	for _, derived := range planned.ConfigurationImpact().DerivedOperations() {
 		operations = append(operations, commandschema.ChangePlanOperationInput{Kind: derived.Kind, Action: derived.Action, Owner: derived.Owner, Path: derived.Path, Derived: true})
 	}
-	effect, err := commandschema.NewEffect(commandschema.EffectInput{
-		ID: "apply-change-plan", Class: commandschema.EffectProjectWrite, Phase: "apply", Target: selection.Path(),
-		Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_configuration_change", Reversibility: "rollback", Verification: []string{"plystra", "check"},
-	})
-	if err != nil {
-		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+	var writeSet []commandschema.ChangePlanPathInput
+	var plannedEffects []commandschema.Effect
+	if planned.Changed() {
+		writeSet = append(writeSet, commandschema.ChangePlanPathInput{Path: selection.Path(), Kind: "configuration", BeforeDigest: selectedDigest, AfterDigest: afterDigest})
+		effect, err := commandschema.NewEffect(commandschema.EffectInput{
+			ID: "apply-change-plan", Class: commandschema.EffectProjectWrite, Phase: "apply", Target: selection.Path(),
+			Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_configuration_change", Reversibility: "rollback", Verification: []string{"plystra", "check"},
+		})
+		if err != nil {
+			return commandschema.ChangePlan{}, commandschema.Effects{}, err
+		}
+		plannedEffects = append(plannedEffects, effect)
 	}
-	effects, err := commandschema.NewEffects(commandschema.EffectsInput{Planned: []commandschema.Effect{effect}})
+	effects, err := commandschema.NewEffects(commandschema.EffectsInput{Planned: plannedEffects})
 	if err != nil {
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}
@@ -252,7 +263,7 @@ func buildChangePlanPayload(request changerequest.Request, requested changereque
 		RequestDigest:       request.Digest(),
 		InputSnapshot:       commandschema.ChangePlanSnapshotInput{ModulePath: inputs.Module().ModulePath(), ConfigurationMode: selection.Mode(), ConfigurationPath: selection.Path(), Environment: selection.Environment(), RootDigest: rootDigest, SelectedDigest: selectedDigest},
 		ReadSet:             readSet,
-		WriteSet:            []commandschema.ChangePlanPathInput{{Path: selection.Path(), Kind: "configuration", BeforeDigest: selectedDigest, AfterDigest: afterDigest}},
+		WriteSet:            writeSet,
 		Operations:          operations,
 		ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: selection.Mode(), Path: selection.Path(), Environment: selection.Environment()},
 		ConfigurationImpact: planned.ConfigurationImpact(), Effects: effects, FinalModelDigest: planned.CompositionDigest(),

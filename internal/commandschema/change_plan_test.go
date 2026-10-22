@@ -80,6 +80,25 @@ func TestChangePlanCanonicalizesIdentityAndKeepsAllImpactArrays(t *testing.T) {
 	if !strings.HasPrefix(first.PlanDigest(), "sha256:") {
 		t.Fatalf("plan digest = %q", first.PlanDigest())
 	}
+
+	input.WriteSet = nil
+	noWrite, err := commandschema.NewChangePlan(input)
+	if err != nil {
+		t.Fatalf("empty write set: %v", err)
+	}
+	var noWriteDocument struct {
+		WriteSet json.RawMessage `json:"write_set"`
+	}
+	if err := json.Unmarshal(noWrite.CanonicalJSON(), &noWriteDocument); err != nil {
+		t.Fatal(err)
+	}
+	if !noWrite.Valid() || string(noWriteDocument.WriteSet) != "[]" || noWrite.PlanDigest() == first.PlanDigest() {
+		t.Fatalf("no-write plan = %s", noWrite.CanonicalJSON())
+	}
+	input.ReadSet = nil
+	if _, err := commandschema.NewChangePlan(input); err == nil {
+		t.Fatal("empty read set was accepted")
+	}
 }
 
 func TestChangePlanRejectsInvalidNewWritePaths(t *testing.T) {

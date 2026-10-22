@@ -319,8 +319,11 @@ func validOperation(value ChangePlanOperationInput) bool {
 }
 
 func validatePathSet(name string, values []ChangePlanPathInput, writes bool) error {
-	if len(values) == 0 || len(values) > 4096 {
+	if !writes && len(values) == 0 {
 		return fmt.Errorf("%s must contain between 1 and 4096 entries", name)
+	}
+	if len(values) > 4096 {
+		return fmt.Errorf("%s must contain at most 4096 entries", name)
 	}
 	seen := make(map[string]struct{}, len(values))
 	for index, value := range values {

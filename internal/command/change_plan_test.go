@@ -1,15 +1,59 @@
 package command_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 )
+
+func TestBuiltCLIChangePlanRemovesSelectionReadOnly(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "plystra.exe")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/plystra")
+	build.Dir, build.Env = commandRepositoryRoot(t), commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandConfigurableImplementation(t, root, "smtp", "email.send/v1", "email/send/v1", "Send")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), `interfaces:
+  require: [reports.read/v1]
+  use: {email.send/v1: example.com/acme/implementation-use/smtp.New}
+config:
+  example.com/acme/implementation-use/smtp.New: {endpoint: PRIVATE_ENDPOINT}
+`)
+	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+	before := commandTree(t, root)
+	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json", "--env", "production")
+	command.Dir, command.Env = filepath.Join(root, "smtp"), implementationSelectionCommandEnvironment(nil)
+	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"remove","interface":"email.send/v1"}]}`)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	output, err := command.Output()
+	if err != nil || stderr.Len() != 0 || bytes.Contains(output, []byte("PRIVATE_")) {
+		t.Fatalf("built CLI removal: %v\n%s\n%s", err, output, &stderr)
+	}
+	var result struct {
+		Status  string `json:"status"`
+		Payload struct {
+			WriteSet   []struct{ Path string }         `json:"write_set"`
+			Operations []struct{ Kind, Action string } `json:"operations"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil || result.Status != "success" || len(result.Payload.WriteSet) != 1 || result.Payload.WriteSet[0].Path != "plystra.production.yaml" || len(result.Payload.Operations) != 2 {
+		t.Fatalf("built CLI removal result = %s, %v", output, err)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(before, after) {
+		t.Fatal("built CLI preview changed Project files")
+	}
+	assertNoCommandTransactions(t, root)
+}
 
 func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.T) {
 	root := writeImplementationSelectionCommandProject(t)
@@ -63,6 +107,282 @@ func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.
 	}
 	if err := json.Unmarshal([]byte(secondStdout), &second); err != nil || string(second.Payload) != string(first.Payload) {
 		t.Fatalf("repeat payload = %s, want %s; err=%v", second.Payload, first.Payload, err)
+	}
+}
+
+func TestRunChangePlanRemoveDormantImplementationSelection(t *testing.T) {
+	for _, test := range []struct {
+		name, selectedPath string
+		selector           []string
+		invalidConfig      bool
+		noSchema           bool
+	}{
+		{name: "default", selectedPath: "plystra.yaml"},
+		{name: "environment", selectedPath: "plystra.production.yaml", selector: []string{"--env", "production"}},
+		{name: "replacement", selectedPath: "deploy/customer.yaml", selector: []string{"--config", "deploy/customer.yaml"}},
+		{name: "default invalid old Config", selectedPath: "plystra.yaml", invalidConfig: true},
+		{name: "environment invalid old Config", selectedPath: "plystra.production.yaml", selector: []string{"--env", "production"}, invalidConfig: true},
+		{name: "replacement invalid old Config", selectedPath: "deploy/customer.yaml", selector: []string{"--config", "deploy/customer.yaml"}, invalidConfig: true},
+		{name: "default schema-less old Config", selectedPath: "plystra.yaml", noSchema: true},
+		{name: "replacement schema-less old Config", selectedPath: "deploy/customer.yaml", selector: []string{"--config", "deploy/customer.yaml"}, noSchema: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeResourceSelectionCommandProject(t)
+			source := `package smtp
+import (
+  "context"
+  "example.com/acme/implementation-use/database"
+  contract "example.com/acme/implementation-use/interfaces/email/send/v1"
+)
+type Config struct { Endpoint string ` + "`plystra:\"required\"`" + ` }
+type Service struct{}
+//plystra:implements email.send/v1
+func New(cfg Config, db database.Resource) (*Service, error) { return &Service{}, nil }
+func (*Service) Send(context.Context, contract.Request) (contract.Response, error) {
+  return contract.Response{}, nil
+}
+`
+			if test.noSchema {
+				source = strings.ReplaceAll(source, "func New(cfg Config, db database.Resource)", "func New(db database.Resource)")
+			}
+			writeCommandFile(t, filepath.Join(root, "smtp", "implementation.go"), source)
+			document := `interfaces:
+  require: [reports.read/v1]
+  use:
+    email.send/v1: example.com/acme/implementation-use/smtp.New
+config:
+  example.com/acme/implementation-use/smtp.New:
+    endpoint: PRIVATE_ENDPOINT
+resources:
+  instances:
+    database.primary:
+      use: example.com/acme/implementation-use/original.New
+      config: {value: PRIVATE_PRIMARY}
+    database.retained:
+      use: example.com/acme/implementation-use/original.New
+      config: {value: PRIVATE_RETAINED}
+  bind:
+    implementations:
+      example.com/acme/implementation-use/smtp.New:
+        db: database.primary
+`
+			if test.invalidConfig {
+				document = strings.ReplaceAll(document, "endpoint: PRIVATE_ENDPOINT", "endpoint: [PRIVATE_INVALID]")
+			}
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), document)
+			writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+			writeCommandFile(t, filepath.Join(root, "deploy", "customer.yaml"), document)
+			if test.invalidConfig && strings.HasPrefix(test.name, "environment") {
+				writeCommandFile(t, filepath.Join(root, "plystra.yaml"), strings.ReplaceAll(document, "endpoint: [PRIVATE_INVALID]", "endpoint: PRIVATE_ENDPOINT"))
+				writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "config:\n  example.com/acme/implementation-use/smtp.New: {endpoint: [PRIVATE_INVALID]}\n")
+			}
+			writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"remove","interface":"email.send/v1"}]}`)
+			before := commandTree(t, root)
+			args := append([]string{"change", "plan", "--request", "change.json", "--format", "json"}, test.selector...)
+			exitCode, stdout, stderr := runCommand(t, args, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 0 || stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+				t.Fatalf("remove preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Status  string `json:"status"`
+				Payload struct {
+					Completeness        string                     `json:"completeness"`
+					PlanDigest          string                     `json:"plan_digest"`
+					ConfigurationImpact map[string]json.RawMessage `json:"configuration_impact"`
+					WriteSet            []struct{ Path string }    `json:"write_set"`
+					Operations          []struct {
+						Kind, Action, Interface, Path string
+						Derived                       bool `json:"derived"`
+					} `json:"operations"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != "success" || result.Payload.Completeness != "non_exact" {
+				t.Fatalf("remove preview result = %#v", result)
+			}
+			for _, name := range []string{"newly_required_fields", "retained_owners", "newly_unowned_paths", "derived_operations", "unresolved_decisions"} {
+				if value := result.Payload.ConfigurationImpact[name]; len(value) == 0 || string(value) == "null" {
+					t.Fatalf("missing impact %s: %#v", name, result.Payload.ConfigurationImpact)
+				}
+			}
+			var retained []struct{ Owner, Path string }
+			if err := json.Unmarshal(result.Payload.ConfigurationImpact["retained_owners"], &retained); err != nil {
+				t.Fatal(err)
+			}
+			if len(retained) != 2 || retained[0].Owner != "database.primary" || retained[1].Owner != "database.retained" {
+				t.Fatalf("removal lost retained Resource configuration: %#v", retained)
+			}
+			bindingPath := `resources.bind.implementations["example.com/acme/implementation-use/smtp.New"]["db"]`
+			requested, derived, binding := false, false, false
+			for _, operation := range result.Payload.Operations {
+				requested = requested || operation.Kind == "implementation_selection" && operation.Action == "remove" && operation.Interface == "email.send/v1" && !operation.Derived
+				derived = derived || operation.Kind == "configuration" && operation.Action == "remove" && operation.Path == "config.example.com/acme/implementation-use/smtp.New" && operation.Derived
+				binding = binding || operation.Kind == "resource_binding" && operation.Action == "remove" && operation.Path == bindingPath && operation.Derived
+			}
+			if len(result.Payload.Operations) != 3 || !requested || !derived || !binding {
+				t.Fatalf("remove operations = %#v", result.Payload.Operations)
+			}
+			var unowned []struct{ Owner, Path, Source string }
+			if err := json.Unmarshal(result.Payload.ConfigurationImpact["newly_unowned_paths"], &unowned); err != nil {
+				t.Fatal(err)
+			}
+			if len(unowned) != 2 {
+				t.Fatalf("unowned paths = %#v", unowned)
+			}
+			sourcePath := test.selectedPath
+			if strings.HasPrefix(test.name, "environment") {
+				sourcePath = "plystra.yaml"
+			}
+			for _, path := range unowned {
+				wantSource := sourcePath
+				if test.invalidConfig && strings.HasPrefix(test.name, "environment") && path.Path != bindingPath {
+					wantSource = test.selectedPath
+				}
+				if path.Owner != "example.com/acme/implementation-use/smtp.New" || !strings.HasPrefix(path.Source, wantSource+" ") || path.Path != "config.example.com/acme/implementation-use/smtp.New" && path.Path != bindingPath {
+					t.Fatalf("unowned path = %#v", path)
+				}
+			}
+			if len(result.Payload.WriteSet) != 1 || result.Payload.WriteSet[0].Path != test.selectedPath {
+				t.Fatalf("remove write set = %#v", result.Payload.WriteSet)
+			}
+			secondExit, secondStdout, secondStderr := runCommand(t, args, root, implementationSelectionCommandEnvironment(nil))
+			var second struct {
+				Payload struct {
+					PlanDigest string `json:"plan_digest"`
+				} `json:"payload"`
+			}
+			if secondExit != 0 || secondStderr != "" || json.Unmarshal([]byte(secondStdout), &second) != nil || result.Payload.PlanDigest == "" || second.Payload.PlanDigest != result.Payload.PlanDigest {
+				t.Fatalf("repeat removal = exit %d, stdout %q, stderr %q", secondExit, secondStdout, secondStderr)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("remove preview changed Project files")
+			}
+		})
+	}
+}
+
+func TestRunChangePlanRemoveSatisfiedImplementationSelectionHasNoWrites(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		selector []string
+		target   string
+	}{
+		{name: "default"},
+		{name: "replacement", selector: []string{"--config", "deploy/customer.yaml"}},
+		{name: "existing overlay tombstone", selector: []string{"--env", "production"}},
+		{name: "unknown default", target: "deleted.read/v1"},
+		{name: "unknown replacement", target: "deleted.read/v1", selector: []string{"--config", "deploy/customer.yaml"}},
+		{name: "unknown overlay tombstone", target: "deleted.read/v1", selector: []string{"--env", "production"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			target := test.target
+			if target == "" {
+				target = "email.send/v1"
+			}
+			document := "interfaces:\n  require: [reports.read/v1]\n"
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), document)
+			writeCommandFile(t, filepath.Join(root, "deploy/customer.yaml"), document)
+			writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), fmt.Sprintf("interfaces:\n  use:\n    %s: {$remove: true}\n", target))
+			writeCommandFile(t, filepath.Join(root, "change.json"), fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"remove","interface":%q}]}`, target))
+			before := commandTree(t, root)
+			args := append([]string{"change", "plan", "--request", "change.json", "--format", "json"}, test.selector...)
+			exitCode, stdout, stderr := runCommand(t, args, root, implementationSelectionCommandEnvironment(nil))
+			if exitCode != 0 || stderr != "" {
+				t.Fatalf("satisfied removal = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Payload struct {
+					WriteSet json.RawMessage `json:"write_set"`
+					Effects  struct {
+						Planned json.RawMessage `json:"planned"`
+					} `json:"effects"`
+					Operations []json.RawMessage `json:"operations"`
+				} `json:"payload"`
+				Effects struct {
+					Planned json.RawMessage `json:"planned"`
+				} `json:"effects"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			if string(result.Payload.WriteSet) != "[]" || string(result.Payload.Effects.Planned) != "[]" || string(result.Effects.Planned) != "[]" || len(result.Payload.Operations) != 1 {
+				t.Fatalf("satisfied removal advertised writes: %s", stdout)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("satisfied removal preview changed Project files")
+			}
+		})
+	}
+}
+
+func TestRunChangePlanRemoveImplementationSelectionFallsBackOrRejectsAmbiguity(t *testing.T) {
+	for _, test := range []struct {
+		name                     string
+		unique, missing, invalid bool
+	}{
+		{name: "unique fallback", unique: true},
+		{name: "ambiguous fallback"},
+		{name: "missing fallback", missing: true},
+		{name: "still-owned invalid Config", unique: true, invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			if test.unique || test.missing {
+				writeCommandFile(t, filepath.Join(root, "local", "implementation.go"), "package local\n")
+			}
+			writeCommandConfigurableImplementation(t, root, "smtp", "email.send/v1", "email/send/v1", "Send")
+			if test.missing {
+				writeCommandFile(t, filepath.Join(root, "smtp", "implementation.go"), "package smtp\n")
+			}
+			document := `interfaces:
+  require: [email.send/v1]
+  use:
+    email.send/v1: example.com/acme/implementation-use/smtp.New
+config:
+  example.com/acme/implementation-use/smtp.New:
+    endpoint: PRIVATE_ENDPOINT
+`
+			if test.invalid {
+				document = strings.ReplaceAll(document, "endpoint: PRIVATE_ENDPOINT", "endpoint: [PRIVATE_INVALID]")
+			}
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), document)
+			writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"remove","interface":"email.send/v1"}]}`)
+			before := commandTree(t, root)
+			exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
+			if stderr != "" || strings.Contains(stdout, "PRIVATE_") {
+				t.Fatalf("fallback preview = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Status  string          `json:"status"`
+				Payload json.RawMessage `json:"payload"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			if test.unique && !test.invalid {
+				var payload struct {
+					Impact struct {
+						Retained []struct{ Owner, Reason string } `json:"retained_owners"`
+						Unowned  []json.RawMessage                `json:"newly_unowned_paths"`
+						Derived  []json.RawMessage                `json:"derived_operations"`
+					} `json:"configuration_impact"`
+				}
+				if err := json.Unmarshal(result.Payload, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if exitCode != 0 || result.Status != "success" || len(payload.Impact.Retained) != 1 || payload.Impact.Retained[0].Owner != "example.com/acme/implementation-use/smtp.New" || payload.Impact.Retained[0].Reason != "owner-remains-effective" || len(payload.Impact.Unowned) != 0 || len(payload.Impact.Derived) != 0 {
+					t.Fatalf("unique fallback = exit %d, %#v", exitCode, result)
+				}
+			} else if exitCode != 3 || result.Status != "validation_failed" || string(result.Payload) != "null" {
+				t.Fatalf("ambiguous fallback = exit %d, %#v", exitCode, result)
+			}
+			if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+				t.Fatal("fallback preview changed Project files")
+			}
+		})
 	}
 }
 

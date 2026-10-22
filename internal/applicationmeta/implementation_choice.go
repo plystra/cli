@@ -16,6 +16,9 @@ import (
 // could not safely record one explicit Implementation replacement.
 var ErrSetImplementationChoice = errors.New("set Interface Implementation choice")
 
+// ErrRemoveImplementationChoice reports an unsafe selected-layer choice removal.
+var ErrRemoveImplementationChoice = errors.New("remove Interface Implementation choice")
+
 // SetImplementationChoice returns deterministic current-Project YAML bytes
 // that map an Interface to a constructor under interfaces.use. Existing bytes
 // are returned unchanged when the exact choice is already present. Comments
@@ -30,6 +33,72 @@ func SetImplementationChoiceOverlay(data []byte, id interfaceid.Identifier, cons
 	return setImplementationChoice(data, id, constructor, func(input []byte) (Manifest, error) {
 		return ParseOverlaySource("plystra.<environment>.yaml", input)
 	})
+}
+
+// RemoveImplementationChoice deletes only the exact local choice. A complete
+// document cannot author a removal marker.
+func RemoveImplementationChoice(data []byte, id interfaceid.Identifier) ([]byte, bool, error) {
+	return removeImplementationChoice(data, id, Parse, false)
+}
+
+// RemoveImplementationChoiceOverlay excludes an inherited choice at the exact
+// Interface key without changing the lower document.
+func RemoveImplementationChoiceOverlay(data []byte, id interfaceid.Identifier) ([]byte, bool, error) {
+	return removeImplementationChoice(data, id, func(input []byte) (Manifest, error) {
+		return ParseOverlaySource("plystra.<environment>.yaml", input)
+	}, true)
+}
+
+func removeImplementationChoice(data []byte, id interfaceid.Identifier, parse func([]byte) (Manifest, error), overlay bool) ([]byte, bool, error) {
+	if id.String() == "" {
+		return nil, false, fmt.Errorf("%w: Interface is empty", ErrRemoveImplementationChoice)
+	}
+	before, err := parse(data)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrRemoveImplementationChoice, err)
+	}
+	if overlay && hasInterfaceRemoval(before.removedImplementationChoices, id) {
+		return append([]byte(nil), data...), false, nil
+	}
+	if !overlay && !slices.ContainsFunc(before.ImplementationChoices(), func(choice ImplementationChoice) bool { return choice.InterfaceID() == id }) {
+		return append([]byte(nil), data...), false, nil
+	}
+
+	document, err := decodeDocument(data)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrRemoveImplementationChoice, err)
+	}
+	interfacesNode := mappingChild(document, "interfaces")
+	if interfacesNode == nil && overlay {
+		interfacesNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		setMappingValue(document, "interfaces", interfacesNode)
+	}
+	useNode := mappingChild(interfacesNode, "use")
+	if useNode == nil && overlay {
+		useNode = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		setMappingValue(interfacesNode, "use", useNode)
+	}
+	if overlay {
+		setMappingValue(useNode, id.String(), configurationRemovalYAMLNode())
+	} else {
+		removeMappingValue(useNode, id.String())
+	}
+	sortYAMLMapping(useNode)
+	updated, err := encodeConfigurationDocument(document)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: encode application manifest: %w", ErrRemoveImplementationChoice, err)
+	}
+	after, err := parse(updated)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: validate updated application manifest: %w", ErrRemoveImplementationChoice, err)
+	}
+	if difference := manifestDifferenceOutsideImplementationChoice(before, after, id); difference != "" {
+		return nil, false, fmt.Errorf("%w: updated application manifest changed %s", ErrRemoveImplementationChoice, difference)
+	}
+	if slices.ContainsFunc(after.ImplementationChoices(), func(choice ImplementationChoice) bool { return choice.InterfaceID() == id }) || hasInterfaceRemoval(after.removedImplementationChoices, id) != overlay {
+		return nil, false, fmt.Errorf("%w: updated application manifest did not remove exactly %s", ErrRemoveImplementationChoice, id)
+	}
+	return append([]byte(nil), updated...), true, nil
 }
 
 func setImplementationChoice(data []byte, id interfaceid.Identifier, constructor constructorsymbol.Symbol, parse func([]byte) (Manifest, error)) ([]byte, bool, error) {

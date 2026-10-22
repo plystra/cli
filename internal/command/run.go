@@ -430,8 +430,8 @@ catalog entries, governed proxies, or transports. Use selects a compatible
 provider for an existing named instance without a kind flag. Implement creates
 unfinished Interface or Resource scaffolds without activation. Full Resource
 acceptance and change apply remain unsupported. The installed
-change-plan slice supports one implementation_selection or resource_selection
-set request.
+change-plan slice supports one implementation_selection set/remove request or
+one resource_selection set request.
 The configuration view retains the selected current-Project layer, redacted
 field summaries, ownership and precedence, effective and overridden
 contributions, explicit removals, and configuration suppression.
