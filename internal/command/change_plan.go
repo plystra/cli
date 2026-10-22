@@ -22,8 +22,10 @@ const changePlanUsage = `Usage:
   plystra change plan --request <path|-> [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Plans one bounded declarative change request without modifying the Project. This
-installed slice accepts one implementation_selection set or remove operation,
-or one resource_selection set operation, and analyzes its final ownership graph.
+installed slice accepts one interface_root present/absent (require or expose),
+implementation_selection set/remove, or resource_selection set operation and
+analyzes its final ownership graph. Root changes preserve complete-set boundaries
+or sparse environment intent and clean up only owners lost in the final state.
 Missing newly required, statically addressable constructor or Resource provider Config
 fields, including non-pointer fixed-object children, are reported as unresolved
 decisions.
@@ -84,16 +86,16 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	}
 	operations := request.Operations()
 	if len(operations) != 1 {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one selection operation.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root or selection operation.")
 	}
 	var target, constructor string
-	remove := false
+	requiresConstructor := true
 	planner := implementationselect.Preview
 	switch operations[0].Kind() {
 	case changerequest.KindImplementationSelection:
 		selection, _ := operations[0].ImplementationSelection()
 		if selection.Action() == changerequest.SelectionRemove {
-			remove = true
+			requiresConstructor = false
 			planner = implementationselect.PreviewRemoval
 		} else if selection.Action() != changerequest.SelectionSet {
 			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice does not support that selection action.")
@@ -107,10 +109,17 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		}
 		target = selection.Instance()
 		constructor, _ = selection.Provider()
+	case changerequest.KindInterfaceRoot:
+		root, _ := operations[0].InterfaceRoot()
+		target = root.Interface()
+		requiresConstructor = false
+		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
+			return implementationselect.PreviewInterfaceRoot(ctx, options, string(root.Root()), root.Action() == changerequest.RootPresent)
+		}
 	default:
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one implementation_selection set/remove or resource_selection set operation.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one interface_root present/absent, implementation_selection set/remove, or resource_selection set operation.")
 	}
-	if constructor == "" && !remove {
+	if constructor == "" && requiresConstructor {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The selection does not name a constructor.")
 	}
 
@@ -282,6 +291,10 @@ func requestedSelectionOperation(operation changerequest.Operation) commandschem
 		result.Action = string(selection.Action())
 		result.Instance = selection.Instance()
 		result.Provider, _ = selection.Provider()
+	} else if root, ok := operation.InterfaceRoot(); ok {
+		result.Action = string(root.Action())
+		result.Interface = root.Interface()
+		result.Root = string(root.Root())
 	}
 	return result
 }

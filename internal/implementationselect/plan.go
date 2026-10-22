@@ -21,7 +21,7 @@ import (
 
 const maximumResourceBindingPreviewCandidates = 64
 
-// PlanResult is a read-only, validated selection plan. It contains authored
+// PlanResult is a read-only root or selection preview. It contains authored
 // bytes only for the caller's private transaction boundary; public projections
 // must use the identity accessors and ConfigurationImpact.
 type PlanResult struct {
@@ -54,6 +54,64 @@ func PreviewRemoval(ctx context.Context, options Options) (PlanResult, error) {
 	return plan(ctx, options, true, true)
 }
 
+// PreviewInterfaceRoot plans one exact require or expose root change without
+// installing configuration or weakening final ownership validation.
+func PreviewInterfaceRoot(ctx context.Context, options Options, root string, present bool) (PlanResult, error) {
+	id, err := interfaceid.Parse(options.Target)
+	if ctx == nil || err != nil || options.Constructor != "" || root != "require" && root != "expose" {
+		return PlanResult{}, fmt.Errorf("%w: invalid Interface root request", ErrSelect)
+	}
+	inputs, err := discoverPlanInputs(ctx, options)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	original := inputs.SelectedSnapshot().Data()
+	before, err := inputs.ComposeSelectionCandidate(original)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	updated := original
+	if !present || !interfaceRootPresent(before.Manifest(), id, root) {
+		edit := applicationmeta.SetInterfaceRoot
+		if inputs.ConfigurationSelection().Mode() == "environment" {
+			edit = applicationmeta.SetInterfaceRootOverlay
+		}
+		updated, _, err = edit(original, id, root, present)
+		if err != nil {
+			return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+		}
+	}
+	updated, kind, impact, err := planEditedSelection(inputs, updated, "interface_root", options.Target, constructorsymbol.Symbol{}, true)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	return selectionPlanResult(inputs, options.Target, kind, constructorsymbol.Symbol{}, updated, impact)
+}
+
+func interfaceRootPresent(manifest applicationmeta.Manifest, id interfaceid.Identifier, root string) bool {
+	if root == "require" {
+		for _, requirement := range manifest.InterfaceRequirements() {
+			if requirement.ID() == id {
+				return true
+			}
+		}
+	} else {
+		for _, exposure := range manifest.HTTPExposures() {
+			if exposure.ID() == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func discoverPlanInputs(ctx context.Context, options Options) (applicationresolve.SelectionInputs, error) {
+	return applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+		Start: options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+		GoCommand: options.GoCommand, Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
+	})
+}
+
 func plan(ctx context.Context, options Options, allowIncomplete, remove bool) (PlanResult, error) {
 	if ctx == nil {
 		return PlanResult{}, fmt.Errorf("%w: context is nil", ErrSelect)
@@ -74,10 +132,7 @@ func plan(ctx context.Context, options Options, allowIncomplete, remove bool) (P
 			return PlanResult{}, fmt.Errorf("%w: %w: parse fully qualified Implementation constructor: %w", ErrSelect, ErrInvalidConstructor, err)
 		}
 	}
-	inputs, err := applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
-		Start: options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
-		GoCommand: options.GoCommand, Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
-	})
+	inputs, err := discoverPlanInputs(ctx, options)
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
@@ -89,13 +144,17 @@ func plan(ctx context.Context, options Options, allowIncomplete, remove bool) (P
 		}
 		return PlanResult{}, fmt.Errorf("%w: %w: %w", ErrSelect, ErrConfigurationWrite, err)
 	}
+	return selectionPlanResult(inputs, options.Target, kind, constructor, updated, impact)
+}
+
+func selectionPlanResult(inputs applicationresolve.SelectionInputs, target, kind string, constructor constructorsymbol.Symbol, updated []byte, impact configurationimpact.Impact) (PlanResult, error) {
 	original := inputs.SelectedSnapshot().Data()
 	candidate, err := inputs.ComposeCandidate(updated)
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
 	return PlanResult{
-		inputs: inputs, target: options.Target, kind: kind, constructor: constructor,
+		inputs: inputs, target: target, kind: kind, constructor: constructor,
 		moduleRoot: inputs.Module().Path(), manifestPath: filepath.Join(inputs.Module().Path(), filepath.FromSlash(inputs.ConfigurationSelection().Path())),
 		original: original, updated: updated, impact: impact, compositionHash: candidate.CompositionDigest(),
 	}, nil
@@ -118,7 +177,6 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	var updated []byte
 	var err error
-	var before applicationmeta.Composition
 	kind := "interface"
 	if id.String() != "" {
 		if remove {
@@ -144,7 +202,15 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	if err != nil {
 		return nil, kind, configurationimpact.Impact{}, err
 	}
-	if kind == "interface" {
+	return planEditedSelection(inputs, updated, kind, target, constructor, allowIncomplete)
+}
+
+func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []byte, kind, target string, constructor constructorsymbol.Symbol, allowIncomplete bool) ([]byte, string, configurationimpact.Impact, error) {
+	original := inputs.SelectedSnapshot().Data()
+	overlay := inputs.ConfigurationSelection().Mode() == "environment"
+	var before applicationmeta.Composition
+	var err error
+	if kind != "resource" {
 		before, err = inputs.ComposeSelectionCandidate(original)
 		if err != nil {
 			return nil, kind, configurationimpact.Impact{}, err
@@ -178,7 +244,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 			}
 		} else if errors.Is(validationErr, applicationmeta.ErrConfigurationRequired) {
 			switch kind {
-			case "interface":
+			case "interface", "interface_root":
 				if !errors.As(validationErr, &missingImplementation) {
 					return nil, kind, configurationimpact.Impact{}, validationErr
 				}
@@ -196,7 +262,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	previousStateValid := false
 	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
 		impactBefore = composed
-		if kind == "resource" {
+		if kind == "resource" || kind == "interface_root" {
 			previousStateValid = inputs.ValidateCandidate(composed) == nil
 		}
 	} else if kind == "resource" {
@@ -229,7 +295,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 			return nil, kind, configurationimpact.Impact{}, err
 		}
 	}
-	if kind == "interface" {
+	if kind != "resource" {
 		impactInput = authoredImplementationConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), impactInput)
 		impactInput.NewlyRequiredFields, err = newlyRequiredImplementationFields(inputs, before, candidate)
 		if err != nil {
@@ -240,6 +306,12 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		var missingPaths []string
 		var missingSource string
 		alternatives := []string{"provide-required-field", "retain-previous-constructor"}
+		if kind == "interface_root" {
+			alternatives = []string{"provide-required-field"}
+			if previousStateValid {
+				alternatives = append(alternatives, "retain-previous-root-state")
+			}
+		}
 		if missingResource != nil {
 			missingPaths, err = inputs.MissingRequiredResourceFields(candidate, target)
 			missingSource = missingResource.SourcePath()
@@ -248,15 +320,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 				alternatives = []string{"provide-required-field"}
 			}
 		} else {
-			var owners []constructorsymbol.Symbol
-			for _, field := range impactInput.NewlyRequiredFields {
-				owner, parseErr := constructorsymbol.Parse(field.Owner)
-				if parseErr != nil {
-					return nil, kind, configurationimpact.Impact{}, parseErr
-				}
-				owners = append(owners, owner)
-			}
-			missingPaths, err = inputs.MissingRequiredImplementationFields(candidate, owners)
+			missingPaths, err = boundedMissingImplementationFields(inputs, candidate, impactInput.NewlyRequiredFields)
 			missingSource = missingImplementation.SourcePath()
 		}
 		if err != nil {
@@ -287,7 +351,7 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	}
 	beforeManifest := applicationmeta.WithoutResourceConfiguration(impactBefore.Manifest())
 	afterManifest := applicationmeta.WithoutResourceConfiguration(candidate.Manifest())
-	if kind == "interface" {
+	if kind != "resource" {
 		beforeManifest = applicationmeta.WithoutImplementationConfiguration(beforeManifest)
 		afterManifest = applicationmeta.WithoutImplementationConfiguration(afterManifest)
 	}
@@ -296,6 +360,45 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 		return nil, kind, configurationimpact.Impact{}, err
 	}
 	return updated, kind, impact, nil
+}
+
+func boundedMissingImplementationFields(inputs applicationresolve.SelectionInputs, candidate applicationmeta.Composition, fields []configurationimpact.NewlyRequiredField) ([]string, error) {
+	resolution, err := inputs.ResolveCandidateInterfaces(candidate)
+	if err != nil {
+		return nil, err
+	}
+	var owners []constructorsymbol.Symbol
+	for _, node := range resolution.Graph().ConstructionOrder() {
+		owners = append(owners, node.Symbol())
+	}
+	for _, configured := range candidate.Manifest().Configurations() {
+		owners = append(owners, configured.Constructor())
+	}
+	// Enumerate all final requiredness obligations, not just constructors with
+	// supported new fields. A decision must not hide another owner's failure.
+	paths, err := inputs.MissingRequiredImplementationFields(candidate, owners)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		allowed[field.Path] = true
+	}
+	for _, path := range paths {
+		if !allowed[path] {
+			return nil, applicationmeta.ErrConfigurationRequired
+		}
+	}
+	for _, instance := range candidate.Manifest().ResourceInstances() {
+		missing, err := inputs.MissingRequiredResourceFields(candidate, instance.Name())
+		if err != nil {
+			return nil, err
+		}
+		if len(missing) != 0 {
+			return nil, applicationmeta.ErrConfigurationRequired
+		}
+	}
+	return paths, nil
 }
 
 func authoredImplementationConfigurationImpact(beforeLayers, afterLayers []applicationmeta.Manifest, input configurationimpact.Input) configurationimpact.Input {

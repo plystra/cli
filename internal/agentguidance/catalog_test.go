@@ -237,6 +237,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"resource.provider.scaffold", "no guessed Config, dependency, or hook is added",
 		"plystra change plan --request change.json --format json",
 		"implementation_selection",
+		"interface_root", "present/absent", "require or expose",
 		"plystra.change-plan/v1",
 		"other operation kinds are structured unsupported results",
 		"change apply",

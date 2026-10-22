@@ -46,6 +46,7 @@ type ChangePlanOperationInput struct {
 	Kind        string
 	Action      string
 	Interface   string
+	Root        string
 	Constructor string
 	Instance    string
 	Provider    string
@@ -115,6 +116,7 @@ type changePlanOperationDocument struct {
 	Kind        string `json:"kind"`
 	Action      string `json:"action"`
 	Interface   string `json:"interface,omitempty"`
+	Root        string `json:"root,omitempty"`
 	Constructor string `json:"constructor,omitempty"`
 	Instance    string `json:"instance,omitempty"`
 	Provider    string `json:"provider,omitempty"`
@@ -310,7 +312,14 @@ func validOperation(value ChangePlanOperationInput) bool {
 	if value.Kind == "" || value.Action == "" || len(value.Kind) > 128 || len(value.Action) > 128 || strings.ContainsRune(value.Kind, '\x00') || strings.ContainsRune(value.Action, '\x00') {
 		return false
 	}
-	for _, field := range []string{value.Interface, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path} {
+	if value.Kind == "interface_root" {
+		if value.Root != "require" && value.Root != "expose" {
+			return false
+		}
+	} else if value.Root != "" {
+		return false
+	}
+	for _, field := range []string{value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path} {
 		if len(field) > 4096 || strings.ContainsRune(field, '\x00') {
 			return false
 		}
@@ -375,7 +384,7 @@ func sortChangePlan(p *ChangePlan) {
 }
 
 func operationKey(value ChangePlanOperationInput) string {
-	return strings.Join([]string{value.Kind, value.Action, value.Interface, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path, fmt.Sprint(value.Derived)}, "\x00")
+	return strings.Join([]string{value.Kind, value.Action, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path, fmt.Sprint(value.Derived)}, "\x00")
 }
 
 func snapshotDocument(value ChangePlanSnapshotInput) changePlanSnapshotDocument {
@@ -391,7 +400,7 @@ func pathDocuments(values []ChangePlanPathInput) []changePlanPathDocument {
 func operationDocuments(values []ChangePlanOperationInput) []changePlanOperationDocument {
 	result := make([]changePlanOperationDocument, len(values))
 	for index, value := range values {
-		result[index] = changePlanOperationDocument{Kind: value.Kind, Action: value.Action, Interface: value.Interface, Constructor: value.Constructor, Instance: value.Instance, Provider: value.Provider, Owner: value.Owner, Path: value.Path, Derived: value.Derived}
+		result[index] = changePlanOperationDocument{Kind: value.Kind, Action: value.Action, Interface: value.Interface, Root: value.Root, Constructor: value.Constructor, Instance: value.Instance, Provider: value.Provider, Owner: value.Owner, Path: value.Path, Derived: value.Derived}
 	}
 	return result
 }

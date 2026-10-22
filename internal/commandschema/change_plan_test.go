@@ -99,6 +99,27 @@ func TestChangePlanCanonicalizesIdentityAndKeepsAllImpactArrays(t *testing.T) {
 	if _, err := commandschema.NewChangePlan(input); err == nil {
 		t.Fatal("empty read set was accepted")
 	}
+	input.ReadSet = []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest}}
+	input.Operations = []commandschema.ChangePlanOperationInput{{Kind: "interface_root", Action: "present", Interface: "email.send/v1", Root: "require"}}
+	require, err := commandschema.NewChangePlan(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.Operations[0].Root = "expose"
+	expose, err := commandschema.NewChangePlan(input)
+	if err != nil || require.PlanDigest() == expose.PlanDigest() || !bytes.Contains(expose.CanonicalJSON(), []byte(`"root":"expose"`)) {
+		t.Fatalf("root identity not encoded or bound: %v", err)
+	}
+	for _, root := range []string{"", "unknown"} {
+		input.Operations[0].Root = root
+		if _, err := commandschema.NewChangePlan(input); err == nil {
+			t.Fatalf("invalid root %q accepted", root)
+		}
+	}
+	input.Operations[0] = commandschema.ChangePlanOperationInput{Kind: "implementation_selection", Action: "remove", Interface: "email.send/v1", Root: "require"}
+	if _, err := commandschema.NewChangePlan(input); err == nil {
+		t.Fatal("selection accepted root field")
+	}
 }
 
 func TestChangePlanRejectsInvalidNewWritePaths(t *testing.T) {
