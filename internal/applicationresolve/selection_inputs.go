@@ -12,7 +12,6 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
-	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -262,25 +261,9 @@ func (s SelectionInputs) ComposeSelectionCandidate(selected []byte) (application
 	return s.composeCandidate(selected, true, true)
 }
 
-// ProjectImplementationSelection composes only captured ownership identities
-// after one choice change, without encoding or validating intermediate Config.
-// The original typed layers still govern ComposeCandidate and ValidateCandidate.
-func (s SelectionInputs) ProjectImplementationSelection(id interfaceid.Identifier, constructor constructorsymbol.Symbol, remove bool) (applicationmeta.Composition, error) {
-	if s.module.Path() == "" {
-		return applicationmeta.Composition{}, ErrResolve
-	}
-	selected, err := applicationmeta.ImplementationSelectionIdentity(s.selectedManifest, id, constructor, remove, s.selector.mode == configurationModeEnvironment)
-	if err != nil {
-		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
-	_, composition, err := s.composeCurrent(s.rootManifest, selected)
-	return composition, err
-}
-
-// ProjectInterfaceRoots composes captured root identities without intermediate
-// Config validation or encoding. Already-effective present roots are unchanged.
-func (s SelectionInputs) ProjectInterfaceRoots(roots []applicationmeta.InterfaceRootEdit) (applicationmeta.Composition, error) {
+// ProjectInterfaceChanges composes captured roots and choices without encoding
+// or intermediate Config validation. Already-effective present roots stay put.
+func (s SelectionInputs) ProjectInterfaceChanges(roots []applicationmeta.InterfaceRootEdit, selections []applicationmeta.ImplementationSelectionEdit) (applicationmeta.Composition, error) {
 	if s.module.Path() == "" {
 		return applicationmeta.Composition{}, ErrResolve
 	}
@@ -294,7 +277,7 @@ func (s SelectionInputs) ProjectInterfaceRoots(roots []applicationmeta.Interface
 	for index := range roots {
 		roots[index].PreserveRoot = roots[index].Present && before.Manifest().HasInterfaceRoot(roots[index].Interface, roots[index].Root)
 	}
-	selected, err = applicationmeta.InterfaceRootsIdentity(selected, roots, s.selector.mode == configurationModeEnvironment)
+	selected, err = applicationmeta.InterfaceChangesIdentity(selected, roots, selections, s.selector.mode == configurationModeEnvironment)
 	if err != nil {
 		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}

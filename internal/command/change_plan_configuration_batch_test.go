@@ -184,10 +184,10 @@ func TestRunChangePlanConfigurationBatchChecksNoOpsAndRejectsInvalidFinalStates(
 func TestRunChangePlanConfigurationBatchRejectsMixedKindsWithoutDiscovery(t *testing.T) {
 	configuration := configurationPlanRequest(t, "database.primary", "value", "set", json.RawMessage(`"PRIVATE_NEW"`))
 	for _, other := range []string{
-		`{"kind":"interface_root","action":"present","root":"require","interface":"email.send/v1"},{"kind":"implementation_selection","action":"remove","interface":"email.send/v1"}`,
+		`{"kind":"interface_root","action":"present","root":"require","interface":"email.send/v1"},{"kind":"resource_selection","action":"remove","instance":"database.primary"}`,
 		`{"kind":"resource_selection","action":"remove","instance":"database.primary"},{"kind":"resource_selection","action":"remove","instance":"database.retained"}`,
 		`{"kind":"resource_selection","action":"remove","instance":"database.primary"},{"kind":"implementation_selection","action":"remove","interface":"email.send/v1"}`,
-		`{"kind":"implementation_selection","action":"remove","interface":"email.send/v1"},{"kind":"implementation_selection","action":"remove","interface":"email.copy/v1"}`,
+		`{"kind":"implementation_selection","action":"remove","interface":"email.send/v1"},{"kind":"dependency","action":"remove","module":"example.com/unused"}`,
 	} {
 		request := configurationBatchRequest(t, configuration, []byte(`{"schema":"plystra.change/v1","operations":[`+other+`]}`))
 		for _, request := range [][]byte{request, reverseConfigurationBatchRequest(t, request)} {

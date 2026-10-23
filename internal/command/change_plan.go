@@ -25,10 +25,9 @@ const changePlanUsage = `Usage:
 
 Plans one bounded declarative change request without modifying the Project. This
 installed slice accepts batches of interface_root present/absent (require or
-expose) and configuration set/remove operations, or one implementation_selection
-set/remove or resource_selection set/remove. One selection may also be combined
-with configuration edits
-(at most 1024 requested operations).
+expose), implementation_selection set/remove and configuration set/remove
+operations. It also accepts one resource_selection set/remove with optional
+configuration edits (at most 1024 requested operations).
 It analyzes the final ownership graph.
 Root changes preserve complete-set boundaries
 or sparse environment intent and clean up only owners lost in the final state.
@@ -49,7 +48,7 @@ delete removed fields; environments record exact field exclusions. All final Con
 and binding obligations must validate, including already-satisfied removals.
 Configuration-only batches edit disjoint paths and validate only the complete final
 state. Same-owner ancestor/descendant targets conflict regardless of request order.
-Root batches and combined selection/configuration previews require a valid complete final state;
+Interface batches and combined Resource/configuration previews require a valid complete final state;
 they do not enumerate missing-value decisions. Edits use the final owners' schemas,
 and obsolete Config and binding cleanup happens in the same document edit.
 Resource set requires an existing effective instance. A provider change discards
@@ -124,65 +123,59 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			roots++
 		}
 	}
-	rootBatch := roots > 0 && roots+configurations == len(operations)
-	compound := configurations > 0 && implementationSelections+resourceSelections == 1 && configurations+1 == len(operations)
-	if len(operations) == 0 || len(operations) != 1 && configurations != len(operations) && !compound && !rootBatch {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports root/configuration batches, one selection, or one selection with configuration edits.")
+	interfaceBatch := len(operations) > 1 && roots+implementationSelections > 0 && roots+implementationSelections+configurations == len(operations)
+	resourceCompound := configurations > 0 && resourceSelections == 1 && configurations+1 == len(operations)
+	if len(operations) == 0 || len(operations) != 1 && configurations != len(operations) && !resourceCompound && !interfaceBatch {
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports Interface root/selection/configuration batches, configuration-only batches, or one Resource selection with optional configuration edits.")
 	}
 	var target, constructor string
 	requiresConstructor := true
 	planner := implementationselect.Preview
-	switch operations[0].Kind() {
-	case changerequest.KindImplementationSelection:
-		selection, _ := operations[0].ImplementationSelection()
-		if selection.Action() == changerequest.SelectionRemove {
-			requiresConstructor = false
-			planner = implementationselect.PreviewRemoval
-		} else if selection.Action() != changerequest.SelectionSet {
-			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice does not support that selection action.")
+	if interfaceBatch {
+		requiresConstructor = false
+		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
+			return implementationselect.PreviewInterfaceConfigurations(ctx, options, request)
 		}
-		target = selection.Interface()
-		constructor, _ = selection.Constructor()
-	case changerequest.KindResourceSelection:
-		selection, _ := operations[0].ResourceSelection()
-		if selection.Action() == changerequest.SelectionRemove {
-			requiresConstructor = false
-			planner = implementationselect.PreviewResourceRemoval
-		} else if selection.Action() != changerequest.SelectionSet {
-			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice does not support that selection action.")
-		}
-		target = selection.Instance()
-		constructor, _ = selection.Provider()
-	case changerequest.KindInterfaceRoot:
-		if len(operations) > 1 {
+	} else {
+		switch operations[0].Kind() {
+		case changerequest.KindImplementationSelection:
+			selection, _ := operations[0].ImplementationSelection()
+			if selection.Action() == changerequest.SelectionRemove {
+				requiresConstructor = false
+				planner = implementationselect.PreviewRemoval
+			} else if selection.Action() != changerequest.SelectionSet {
+				return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice does not support that selection action.")
+			}
+			target = selection.Interface()
+			constructor, _ = selection.Constructor()
+		case changerequest.KindResourceSelection:
+			selection, _ := operations[0].ResourceSelection()
+			if selection.Action() == changerequest.SelectionRemove {
+				requiresConstructor = false
+				planner = implementationselect.PreviewResourceRemoval
+			} else if selection.Action() != changerequest.SelectionSet {
+				return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice does not support that selection action.")
+			}
+			target = selection.Instance()
+			constructor, _ = selection.Provider()
+		case changerequest.KindInterfaceRoot:
+			root, _ := operations[0].InterfaceRoot()
+			target = root.Interface()
 			requiresConstructor = false
 			planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
-				return implementationselect.PreviewRootConfigurations(ctx, options, request)
+				return implementationselect.PreviewInterfaceRoot(ctx, options, string(root.Root()), root.Action() == changerequest.RootPresent)
 			}
-			break
+		case changerequest.KindConfiguration:
+			requiresConstructor = false
+			planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
+				if resourceCompound {
+					return implementationselect.PreviewResourceConfigurations(ctx, options, request)
+				}
+				return implementationselect.PreviewConfigurations(ctx, options, request)
+			}
+		default:
+			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports Interface root/selection/configuration batches, configuration-only batches, or one Resource selection with optional configuration edits.")
 		}
-		root, _ := operations[0].InterfaceRoot()
-		target = root.Interface()
-		requiresConstructor = false
-		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
-			return implementationselect.PreviewInterfaceRoot(ctx, options, string(root.Root()), root.Action() == changerequest.RootPresent)
-		}
-	case changerequest.KindConfiguration:
-		requiresConstructor = false
-		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
-			if rootBatch {
-				return implementationselect.PreviewRootConfigurations(ctx, options, request)
-			}
-			if compound && resourceSelections == 1 {
-				return implementationselect.PreviewResourceConfigurations(ctx, options, request)
-			}
-			if compound {
-				return implementationselect.PreviewImplementationConfigurations(ctx, options, request)
-			}
-			return implementationselect.PreviewConfigurations(ctx, options, request)
-		}
-	default:
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports root/configuration batches, one implementation_selection set/remove, or one resource_selection set/remove with optional configuration edits.")
 	}
 	if constructor == "" && requiresConstructor {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The selection does not name a constructor.")

@@ -11,39 +11,44 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 )
 
-// PreviewImplementationConfigurations plans one Implementation selection and
-// typed configuration edits together. Every final obligation must validate;
-// intermediate ownership projections have no configuration or apply authority.
-func PreviewImplementationConfigurations(ctx context.Context, options Options, request changerequest.Request) (PlanResult, error) {
+// PreviewInterfaceConfigurations plans roots, choices and optional typed fields
+// against their shared final ownership. No intermediate candidate is installed.
+func PreviewInterfaceConfigurations(ctx context.Context, options Options, request changerequest.Request) (PlanResult, error) {
 	if ctx == nil || !request.Valid() || options.Target != "" || options.Constructor != "" {
 		return PlanResult{}, ErrSelect
 	}
-	var selection changerequest.ImplementationSelection
+	var roots []applicationmeta.InterfaceRootEdit
+	var selections []applicationmeta.ImplementationSelectionEdit
 	var changes []changerequest.Configuration
 	for _, operation := range request.Operations() {
 		if change, ok := operation.Configuration(); ok {
 			changes = append(changes, change)
-		} else if choice, ok := operation.ImplementationSelection(); ok && selection.Interface() == "" {
-			selection = choice
+		} else if change, ok := operation.InterfaceRoot(); ok {
+			id, err := interfaceid.Parse(change.Interface())
+			if err != nil {
+				return PlanResult{}, ErrSelect
+			}
+			roots = append(roots, applicationmeta.InterfaceRootEdit{Interface: id, Root: string(change.Root()), Present: change.Action() == changerequest.RootPresent})
+		} else if change, ok := operation.ImplementationSelection(); ok {
+			id, err := interfaceid.Parse(change.Interface())
+			if err != nil {
+				return PlanResult{}, ErrSelect
+			}
+			selection := applicationmeta.ImplementationSelectionEdit{Interface: id, Remove: change.Action() == changerequest.SelectionRemove}
+			if !selection.Remove {
+				name, _ := change.Constructor()
+				selection.Constructor, err = constructorsymbol.Parse(name)
+				if err != nil || change.Action() != changerequest.SelectionSet {
+					return PlanResult{}, ErrSelect
+				}
+			}
+			selections = append(selections, selection)
 		} else {
 			return PlanResult{}, ErrSelect
 		}
 	}
-	if selection.Interface() == "" || len(changes) == 0 {
+	if len(roots)+len(selections) == 0 {
 		return PlanResult{}, ErrSelect
-	}
-	id, err := interfaceid.Parse(selection.Interface())
-	if err != nil {
-		return PlanResult{}, ErrSelect
-	}
-	remove := selection.Action() == changerequest.SelectionRemove
-	var constructor constructorsymbol.Symbol
-	if !remove {
-		name, _ := selection.Constructor()
-		constructor, err = constructorsymbol.Parse(name)
-		if err != nil || selection.Action() != changerequest.SelectionSet {
-			return PlanResult{}, ErrSelect
-		}
 	}
 	inputs, err := discoverPlanInputs(ctx, options)
 	if err != nil {
@@ -54,7 +59,7 @@ func PreviewImplementationConfigurations(ctx context.Context, options Options, r
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	identities, err := inputs.ProjectImplementationSelection(id, constructor, remove)
+	identities, err := inputs.ProjectInterfaceChanges(roots, selections)
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
@@ -68,16 +73,17 @@ func PreviewImplementationConfigurations(ctx context.Context, options Options, r
 	}
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	if overlay {
-		// Only the captured root can reintroduce these exact leaves. Reading its
-		// raw membership avoids validating an unfinished typed candidate here.
 		lower := inputs.RootManifest()
 		for index := range configurations {
 			_, configurations[index].Tombstone = lower.Configuration(configurations[index].Constructor)
 		}
 		markInheritedBindingRemovals(lower, bindings)
 	}
-	updated, _, err := applicationmeta.EditImplementationConfiguration(original, applicationmeta.ImplementationConfigurationEdit{
-		Interface: id, Constructor: constructor, Remove: remove,
+	for index := range roots {
+		roots[index].PreserveRoot = roots[index].Present && before.Manifest().HasInterfaceRoot(roots[index].Interface, roots[index].Root)
+	}
+	updated, _, err := applicationmeta.EditInterfaceConfiguration(original, applicationmeta.InterfaceConfigurationEdit{
+		Roots: roots, Selections: selections,
 		Configurations: configurations, Bindings: bindings, Values: edits,
 	}, overlay)
 	if err != nil {
@@ -100,7 +106,7 @@ func PreviewImplementationConfigurations(ctx context.Context, options Options, r
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	result, err := selectionPlanResult(inputs, selection.Interface(), "interface", constructor, updated, impact)
+	result, err := selectionPlanResult(inputs, "", "interface_configuration", constructorsymbol.Symbol{}, updated, impact)
 	if err != nil {
 		return PlanResult{}, err
 	}

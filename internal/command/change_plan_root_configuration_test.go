@@ -357,7 +357,7 @@ func previewRootConfiguration(t *testing.T, root string, data []byte, selector .
 			options.ConfigurationPath = selector[1]
 		}
 	}
-	plan, err := implementationselect.PreviewRootConfigurations(t.Context(), options, request)
+	plan, err := implementationselect.PreviewInterfaceConfigurations(t.Context(), options, request)
 	if err != nil {
 		t.Fatal(err)
 	}

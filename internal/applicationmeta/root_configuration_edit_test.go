@@ -76,7 +76,7 @@ func TestInterfaceRootIdentityMatchesAuthoredEdit(t *testing.T) {
 	}
 }
 
-func TestEditRootConfigurationUsesOnlyFinalBounds(t *testing.T) {
+func TestEditInterfaceConfigurationUsesOnlyFinalBounds(t *testing.T) {
 	t.Parallel()
 	owner := mustImplementationChoiceConstructor(t, "example.com/email/old.New")
 	schema := composeSchema(t, "Value string\n")
@@ -89,18 +89,77 @@ func TestEditRootConfigurationUsesOnlyFinalBounds(t *testing.T) {
 	if _, _, err := applicationmeta.SetInterfaceRoot(input, id, "expose", true); err == nil {
 		t.Fatal("fixture does not exceed the root-only intermediate bound")
 	}
-	edit := applicationmeta.RootConfigurationEdit{Roots: []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "expose", Present: true}, {Interface: id, Root: "require", Present: true}}, Values: []applicationmeta.ConfigurationValueEdit{value}}
-	updated, changed, err := applicationmeta.EditRootConfiguration(input, edit, false)
+	edit := applicationmeta.InterfaceConfigurationEdit{Roots: []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "expose", Present: true}, {Interface: id, Root: "require", Present: true}}, Values: []applicationmeta.ConfigurationValueEdit{value}}
+	updated, changed, err := applicationmeta.EditInterfaceConfiguration(input, edit, false)
 	if err != nil || !changed || len(updated) > 1024 || !bytes.Contains(updated, []byte("# KEEP")) {
 		t.Fatalf("valid complete root edit rejected: %t, %v", changed, err)
 	}
 	edit.Configurations = []applicationmeta.ConstructorConfigurationRemoval{{Constructor: owner}}
-	if data, changed, err := applicationmeta.EditRootConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || data != nil {
+	if data, changed, err := applicationmeta.EditInterfaceConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || data != nil {
 		t.Fatal("field edit on removed owner accepted")
 	}
 	edit.Configurations, edit.Roots[0].PreserveRoot, edit.Roots[0].Present = nil, true, false
-	if _, _, err := applicationmeta.EditRootConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
+	if _, _, err := applicationmeta.EditInterfaceConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
 		t.Fatal("preserving an absent root accepted")
+	}
+}
+
+func TestInterfaceChangesIdentityMatchesFinalAuthoredEdit(t *testing.T) {
+	t.Parallel()
+	id := mustInterfaceRootID(t)
+	other, _ := interfaceid.Parse("other.run/v1")
+	constructor := mustImplementationChoiceConstructor(t, "example.com/email/new.New")
+	roots := []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "require"}, {Interface: id, Root: "expose", Present: true}}
+	selections := []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: constructor}, {Interface: other, Remove: true}}
+	schemas := func(applicationmeta.ConfigurationNamespace, constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
+	}
+	for _, overlay := range []bool{false, true} {
+		input := []byte("# KEEP\ninterfaces: {require: [app.run/v1], use: {other.run/v1: example.com/email/old.New}}\nconfig: {example.com/email/old.New: {value: PRIVATE_VALUE}}\n")
+		parse := applicationmeta.ParseCompleteSource
+		if overlay {
+			parse = applicationmeta.ParseOverlaySource
+		}
+		before, err := parse("selected.yaml", input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, reverse := range []bool{false, true} {
+			rootEdits, choices := slices.Clone(roots), slices.Clone(selections)
+			if reverse {
+				slices.Reverse(rootEdits)
+				slices.Reverse(choices)
+			}
+			updated, _, err := applicationmeta.EditInterfaceConfiguration(input, applicationmeta.InterfaceConfigurationEdit{Roots: rootEdits, Selections: choices}, overlay)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected, err := parse("selected.yaml", updated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected, err := applicationmeta.InterfaceChangesIdentity(before, rootEdits, choices, overlay)
+			if err != nil || len(projected.Configurations()) != 0 || len(before.Configurations()) != 1 {
+				t.Fatalf("joint projection mutated Config: %v", err)
+			}
+			want, err := applicationmeta.ConfigurationLayerDigest(applicationmeta.WithoutConstructorConfiguration(expected), schemas)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := applicationmeta.ConfigurationLayerDigest(projected, schemas)
+			if err != nil || got != want {
+				t.Fatalf("joint identity differs from authored final document: %v", err)
+			}
+		}
+	}
+	for _, choices := range [][]applicationmeta.ImplementationSelectionEdit{{}, {selections[0], selections[0]}, {{Interface: id}}, {{Interface: id, Constructor: constructor, Remove: true}}} {
+		manifest, _ := applicationmeta.Parse([]byte("{}"))
+		if _, err := applicationmeta.InterfaceChangesIdentity(manifest, nil, choices, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
+			t.Fatal("invalid joint identity accepted")
+		}
+		if data, changed, err := applicationmeta.EditInterfaceConfiguration([]byte("{}"), applicationmeta.InterfaceConfigurationEdit{Selections: choices}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || data != nil {
+			t.Fatal("invalid joint edit accepted")
+		}
 	}
 }
 
@@ -134,7 +193,7 @@ func TestInterfaceRootBatchIdentityMatchesFinalAuthoredEdit(t *testing.T) {
 				if reversed {
 					slices.Reverse(edits)
 				}
-				updated, _, err := applicationmeta.EditRootConfiguration([]byte(document), applicationmeta.RootConfigurationEdit{Roots: edits}, overlay)
+				updated, _, err := applicationmeta.EditInterfaceConfiguration([]byte(document), applicationmeta.InterfaceConfigurationEdit{Roots: edits}, overlay)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -162,7 +221,7 @@ func TestInterfaceRootBatchIdentityMatchesFinalAuthoredEdit(t *testing.T) {
 		if _, err := applicationmeta.InterfaceRootsIdentity(manifest, invalid, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
 			t.Fatal("invalid root batch identity accepted")
 		}
-		if data, changed, err := applicationmeta.EditRootConfiguration([]byte("{}"), applicationmeta.RootConfigurationEdit{Roots: invalid}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || data != nil || changed {
+		if data, changed, err := applicationmeta.EditInterfaceConfiguration([]byte("{}"), applicationmeta.InterfaceConfigurationEdit{Roots: invalid}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || data != nil || changed {
 			t.Fatal("invalid root batch edit accepted")
 		}
 	}

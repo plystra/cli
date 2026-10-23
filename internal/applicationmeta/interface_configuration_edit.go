@@ -90,18 +90,41 @@ type InterfaceRootEdit struct {
 	PreserveRoot bool
 }
 
-// RootConfigurationEdit combines root requests, proven ownership cleanup and
-// disjoint field edits in one complete document.
-type RootConfigurationEdit struct {
+// InterfaceConfigurationEdit combines roots, choices, proven ownership cleanup
+// and disjoint field edits in one complete document.
+type InterfaceConfigurationEdit struct {
 	Roots          []InterfaceRootEdit
+	Selections     []ImplementationSelectionEdit
 	Configurations []ConstructorConfigurationRemoval
 	Bindings       []ResourceBindingRemoval
 	Values         []ConfigurationValueEdit
 }
 
-// EditRootConfiguration encodes only the complete candidate document.
-func EditRootConfiguration(data []byte, edit RootConfigurationEdit, overlay bool) ([]byte, bool, error) {
-	if validateInterfaceRootEdits(edit.Roots) != nil || len(edit.Values) > 0 && validateConfigurationEdits(edit.Values) != nil {
+// InterfaceChangesIdentity projects final ownership without Config or encoding.
+// The real captured typed layers still govern final candidate validation.
+func InterfaceChangesIdentity(manifest Manifest, roots []InterfaceRootEdit, selections []ImplementationSelectionEdit, overlay bool) (Manifest, error) {
+	if validateInterfaceChanges(roots, selections) != nil {
+		return Manifest{}, ErrEditConfiguration
+	}
+	var err error
+	if len(roots) > 0 {
+		manifest, err = InterfaceRootsIdentity(manifest, roots, overlay)
+		if err != nil {
+			return Manifest{}, err
+		}
+	}
+	for _, selection := range selections {
+		manifest, err = ImplementationSelectionIdentity(manifest, selection.Interface, selection.Constructor, selection.Remove, overlay)
+		if err != nil {
+			return Manifest{}, err
+		}
+	}
+	return manifest, nil
+}
+
+// EditInterfaceConfiguration encodes only the complete candidate document.
+func EditInterfaceConfiguration(data []byte, edit InterfaceConfigurationEdit, overlay bool) ([]byte, bool, error) {
+	if validateInterfaceChanges(edit.Roots, edit.Selections) != nil || len(edit.Values) > 0 && validateConfigurationEdits(edit.Values) != nil {
 		return nil, false, ErrEditConfiguration
 	}
 	configurations, bindings, err := selectionRemovals(edit.Configurations, edit.Bindings)
@@ -127,6 +150,13 @@ func EditRootConfiguration(data []byte, edit RootConfigurationEdit, overlay bool
 			}
 			changed = changed || applied
 		}
+		for _, selection := range edit.Selections {
+			applied, err := applyImplementationSelection(document, selection, overlay)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || applied
+		}
 		cleaned, err := applySelectionRemovals(document, configurations, bindings)
 		if err != nil {
 			return false, err
@@ -134,6 +164,20 @@ func EditRootConfiguration(data []byte, edit RootConfigurationEdit, overlay bool
 		configured, err := applyConfigurationEdits(document, edit.Values, overlay)
 		return changed || cleaned || configured, err
 	})
+}
+
+func validateInterfaceChanges(roots []InterfaceRootEdit, selections []ImplementationSelectionEdit) error {
+	if len(roots)+len(selections) == 0 || len(roots) > 0 && validateInterfaceRootEdits(roots) != nil {
+		return ErrEditConfiguration
+	}
+	seen := make(map[interfaceid.Identifier]bool, len(selections))
+	for _, selection := range selections {
+		if selection.Interface.String() == "" || selection.Remove != (selection.Constructor.String() == "") || seen[selection.Interface] {
+			return ErrEditConfiguration
+		}
+		seen[selection.Interface] = true
+	}
+	return nil
 }
 
 func validateInterfaceRootEdits(roots []InterfaceRootEdit) error {

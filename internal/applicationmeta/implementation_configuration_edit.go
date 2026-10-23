@@ -35,55 +35,22 @@ func ImplementationSelectionIdentity(manifest Manifest, id interfaceid.Identifie
 	return manifest, nil
 }
 
-// ImplementationConfigurationEdit combines one choice, proven ownership cleanup,
-// and disjoint typed field edits. The caller proves final ownership and validates
-// the full composed Config and graph; no intermediate document is authoritative.
-type ImplementationConfigurationEdit struct {
-	Interface      interfaceid.Identifier
-	Constructor    constructorsymbol.Symbol
-	Remove         bool
-	Configurations []ConstructorConfigurationRemoval
-	Bindings       []ResourceBindingRemoval
-	Values         []ConfigurationValueEdit
+// ImplementationSelectionEdit changes one exact selected-layer choice.
+type ImplementationSelectionEdit struct {
+	Interface   interfaceid.Identifier
+	Constructor constructorsymbol.Symbol
+	Remove      bool
 }
 
-// EditImplementationConfiguration checks bounds only on input and complete
-// output, preserving comments, exclusions and unrelated authored intent.
-func EditImplementationConfiguration(data []byte, edit ImplementationConfigurationEdit, overlay bool) ([]byte, bool, error) {
-	if edit.Interface.String() == "" || edit.Remove != (edit.Constructor.String() == "") || validateConfigurationEdits(edit.Values) != nil {
-		return nil, false, ErrEditConfiguration
+func applyImplementationSelection(root *yaml.Node, edit ImplementationSelectionEdit, overlay bool) (bool, error) {
+	path := []string{"interfaces", "use", edit.Interface.String()}
+	if edit.Remove {
+		return removeSelectionLeaf(root, path, overlay)
 	}
-	configurations, bindings, err := selectionRemovals(edit.Configurations, edit.Bindings)
-	if err != nil {
-		return nil, false, ErrEditConfiguration
+	previous := mappingChild(mappingChild(mappingChild(root, "interfaces"), "use"), edit.Interface.String())
+	if previous != nil && previous.Kind == yaml.ScalarNode && previous.Tag == "!!str" && previous.Value == edit.Constructor.String() {
+		return false, nil
 	}
-	for _, removal := range configurations {
-		for _, value := range edit.Values {
-			if len(value.names) >= 2 && value.names[0] == "config" && value.names[1] == removal.Constructor.String() {
-				return nil, false, ErrEditConfiguration
-			}
-		}
-	}
-	return editSelectionDocument(data, overlay, ErrEditConfiguration, func(root *yaml.Node) (bool, error) {
-		path := []string{"interfaces", "use", edit.Interface.String()}
-		choiceChanged := false
-		if edit.Remove {
-			choiceChanged, err = removeSelectionLeaf(root, path, overlay)
-		} else {
-			previous := mappingChild(mappingChild(mappingChild(root, "interfaces"), "use"), edit.Interface.String())
-			if previous == nil || previous.Kind != yaml.ScalarNode || previous.Tag != "!!str" || previous.Value != edit.Constructor.String() {
-				err = setKeyedConfigurationDecision(root, path[:2], path[2], stringYAMLNode(edit.Constructor.String()))
-				choiceChanged = true
-			}
-		}
-		if err != nil {
-			return false, err
-		}
-		cleaned, err := applySelectionRemovals(root, configurations, bindings)
-		if err != nil {
-			return false, err
-		}
-		configured, err := applyConfigurationEdits(root, edit.Values, overlay)
-		return choiceChanged || cleaned || configured, err
-	})
+	err := setKeyedConfigurationDecision(root, path[:2], path[2], stringYAMLNode(edit.Constructor.String()))
+	return true, err
 }

@@ -240,9 +240,9 @@ func TestImplementationConfigurationPreviewRejectsInvalidShapeBeforeDiscovery(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, input := range [][]byte{configuration, selection, configurationBatchRequest(t, configuration, selection, []byte(`{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"remove","instance":"database.primary"}]}`))} {
+	for _, input := range [][]byte{configuration, nil, configurationBatchRequest(t, configuration, selection, []byte(`{"schema":"plystra.change/v1","operations":[{"kind":"resource_selection","action":"remove","instance":"database.primary"}]}`))} {
 		request, _ := changerequest.Parse(input)
-		plan, err := implementationselect.PreviewImplementationConfigurations(t.Context(), implementationselect.Options{}, request)
+		plan, err := implementationselect.PreviewInterfaceConfigurations(t.Context(), implementationselect.Options{}, request)
 		if !errors.Is(err, implementationselect.ErrSelect) || !reflect.DeepEqual(plan, implementationselect.PlanResult{}) {
 			t.Fatal("invalid shape returned a plan")
 		}
@@ -253,7 +253,7 @@ func TestImplementationConfigurationPreviewRejectsInvalidShapeBeforeDiscovery(t 
 	}{
 		{nil, implementationselect.Options{}}, {t.Context(), implementationselect.Options{Constructor: compoundImplementationOwner}}, {t.Context(), implementationselect.Options{Target: "email.send/v1"}},
 	} {
-		if _, err := implementationselect.PreviewImplementationConfigurations(test.ctx, test.options, valid); !errors.Is(err, implementationselect.ErrSelect) {
+		if _, err := implementationselect.PreviewInterfaceConfigurations(test.ctx, test.options, valid); !errors.Is(err, implementationselect.ErrSelect) {
 			t.Fatal("invalid options accepted")
 		}
 	}
@@ -339,7 +339,7 @@ func previewImplementationConfiguration(t *testing.T, root string, data []byte, 
 			options.ConfigurationPath = selector[1]
 		}
 	}
-	plan, err := implementationselect.PreviewImplementationConfigurations(t.Context(), options, request)
+	plan, err := implementationselect.PreviewInterfaceConfigurations(t.Context(), options, request)
 	if err != nil {
 		t.Fatal(err)
 	}
