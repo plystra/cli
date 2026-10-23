@@ -120,6 +120,22 @@ func TestChangePlanCanonicalizesIdentityAndKeepsAllImpactArrays(t *testing.T) {
 	if _, err := commandschema.NewChangePlan(input); err == nil {
 		t.Fatal("selection accepted root field")
 	}
+	input.Operations[0] = commandschema.ChangePlanOperationInput{Kind: "configuration", Action: "set", Owner: "database.primary", Path: "nested.value"}
+	configuration, err := commandschema.NewChangePlan(input)
+	if err != nil || !bytes.Contains(configuration.CanonicalJSON(), []byte(`"path":"nested.value"`)) {
+		t.Fatalf("configuration projection: %v", err)
+	}
+	for _, operation := range []commandschema.ChangePlanOperationInput{
+		{Kind: "configuration", Action: "set", Path: "value"},
+		{Kind: "configuration", Action: "remove", Owner: "database.primary"},
+		{Kind: "configuration", Action: "other", Owner: "database.primary", Path: "value"},
+		{Kind: "configuration", Action: "set", Owner: "database.primary", Path: "value", Provider: "example.com/db.New"},
+	} {
+		input.Operations[0] = operation
+		if _, err := commandschema.NewChangePlan(input); err == nil {
+			t.Fatal("incomplete or unrelated configuration operation projection accepted")
+		}
+	}
 }
 
 func TestChangePlanRejectsInvalidNewWritePaths(t *testing.T) {

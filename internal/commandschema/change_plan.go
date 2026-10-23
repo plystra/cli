@@ -312,6 +312,11 @@ func validOperation(value ChangePlanOperationInput) bool {
 	if value.Kind == "" || value.Action == "" || len(value.Kind) > 128 || len(value.Action) > 128 || strings.ContainsRune(value.Kind, '\x00') || strings.ContainsRune(value.Action, '\x00') {
 		return false
 	}
+	if value.Kind == "configuration" && !value.Derived {
+		if value.Action != "set" && value.Action != "remove" || value.Owner == "" || value.Path == "" || value.Interface != "" || value.Constructor != "" || value.Instance != "" || value.Provider != "" {
+			return false
+		}
+	}
 	if value.Kind == "interface_root" {
 		if value.Root != "require" && value.Root != "expose" {
 			return false

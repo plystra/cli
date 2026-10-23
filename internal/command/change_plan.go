@@ -2,6 +2,8 @@ package command
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,8 +25,9 @@ const changePlanUsage = `Usage:
 
 Plans one bounded declarative change request without modifying the Project. This
 installed slice accepts one interface_root present/absent (require or expose),
-implementation_selection set/remove, or resource_selection set/remove operation and
-analyzes its final ownership graph. Root changes preserve complete-set boundaries
+implementation_selection set/remove, resource_selection set/remove, or
+configuration set/remove operation. It analyzes the final ownership graph.
+Root changes preserve complete-set boundaries
 or sparse environment intent and clean up only owners lost in the final state.
 Resource removal deletes the whole exact instance, including provider and Config,
 and only that consumer's outgoing bindings. Surviving explicit bindings are never
@@ -36,6 +39,14 @@ Ambiguous implicit bindings introduced on one Resource instance are previewed as
 complete explicit assignments only when they pass bounded final-state validation,
 possibly with statically addressable missing Config fields. The preview fails
 closed without a partial plan when more than 64 candidate bindings are probed.
+Configuration requests name an exact owned Implementation constructor or effective
+Resource instance and an owner-relative declared field path. Paths traverse only
+non-pointer fixed objects; atomic values must be supplied whole. Complete documents
+delete removed fields; environments record exact field exclusions. All final Config
+and binding obligations must validate, including already-satisfied removals.
+Public request identity omits submitted values. Every configuration set declares a
+planned write, even for equal values, so private equality is not disclosed.
+This preview is non_exact and cannot authorize apply. Change apply remains uninstalled.
 Other operation kinds return a structured unsupported result until their staged
 planners are installed.
 `
@@ -89,7 +100,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	}
 	operations := request.Operations()
 	if len(operations) != 1 {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root or selection operation.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root, selection, or configuration operation.")
 	}
 	var target, constructor string
 	requiresConstructor := true
@@ -122,8 +133,14 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
 			return implementationselect.PreviewInterfaceRoot(ctx, options, string(root.Root()), root.Action() == changerequest.RootPresent)
 		}
+	case changerequest.KindConfiguration:
+		change, _ := operations[0].Configuration()
+		target, requiresConstructor = change.Owner(), false
+		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
+			return implementationselect.PreviewConfiguration(ctx, options, change)
+		}
 	default:
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one interface_root present/absent, implementation_selection set/remove, or resource_selection set/remove operation.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one interface_root present/absent, implementation_selection set/remove, resource_selection set/remove, or configuration set/remove operation.")
 	}
 	if constructor == "" && requiresConstructor {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The selection does not name a constructor.")
@@ -137,7 +154,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		Environment: environment,
 	})
 	if err != nil {
-		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The selection could not be planned against the selected Project.")
+		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The change could not be planned against the selected Project.")
 	}
 	payload, effects, err := buildChangePlanPayload(request, operations[0], planned)
 	if err != nil {
@@ -274,8 +291,18 @@ func buildChangePlanPayload(request changerequest.Request, requested changereque
 	if err != nil {
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}
+	requestDigest := request.Digest()
+	if requested.Kind() == changerequest.KindConfiguration {
+		// Non-exact previews bind a public request projection. The private
+		// canonical request digest would reveal submitted value equality.
+		identity, err := json.Marshal(operations[0])
+		if err != nil {
+			return commandschema.ChangePlan{}, commandschema.Effects{}, err
+		}
+		requestDigest = fmt.Sprintf("sha256:%x", sha256.Sum256(append([]byte("plystra.change-plan/v1:public-request\x00"), identity...)))
+	}
 	payload, err := commandschema.NewChangePlan(commandschema.ChangePlanInput{
-		RequestDigest:       request.Digest(),
+		RequestDigest:       requestDigest,
 		InputSnapshot:       commandschema.ChangePlanSnapshotInput{ModulePath: inputs.Module().ModulePath(), ConfigurationMode: selection.Mode(), ConfigurationPath: selection.Path(), Environment: selection.Environment(), RootDigest: rootDigest, SelectedDigest: selectedDigest},
 		ReadSet:             readSet,
 		WriteSet:            writeSet,
@@ -301,6 +328,10 @@ func requestedSelectionOperation(operation changerequest.Operation) commandschem
 		result.Action = string(root.Action())
 		result.Interface = root.Interface()
 		result.Root = string(root.Root())
+	} else if configuration, ok := operation.Configuration(); ok {
+		result.Action = string(configuration.Action())
+		result.Owner = configuration.Owner()
+		result.Path = configuration.Path()
 	}
 	return result
 }

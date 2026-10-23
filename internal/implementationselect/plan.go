@@ -35,6 +35,7 @@ type PlanResult struct {
 	updated         []byte
 	impact          configurationimpact.Impact
 	compositionHash string
+	writeRequired   bool
 }
 
 // Plan discovers and validates one selection without writing configuration,
@@ -222,7 +223,7 @@ func (p PlanResult) ModuleRoot() string                              { return p.
 func (p PlanResult) ManifestPath() string                            { return p.manifestPath }
 func (p PlanResult) Original() []byte                                { return append([]byte(nil), p.original...) }
 func (p PlanResult) Updated() []byte                                 { return append([]byte(nil), p.updated...) }
-func (p PlanResult) Changed() bool                                   { return !bytes.Equal(p.original, p.updated) }
+func (p PlanResult) Changed() bool                                   { return p.writeRequired || !bytes.Equal(p.original, p.updated) }
 func (p PlanResult) ConfigurationImpact() configurationimpact.Impact { return p.impact }
 func (p PlanResult) CompositionDigest() string                       { return p.compositionHash }
 

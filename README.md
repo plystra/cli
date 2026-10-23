@@ -844,7 +844,8 @@ key, and 1,024 bytes per Implementation package path. Duplicate keys and
 conflicting targets fail without exposing submitted configuration values.
 The installed public `plystra change plan` slice accepts one `interface_root`
 present/absent operation, one `implementation_selection` set/remove operation,
-or one `resource_selection` set/remove operation, analyzes its final ownership graph,
+one `resource_selection` set/remove operation, or one `configuration` set/remove
+operation, analyzes its final ownership graph,
 and emits a read-only `plystra.change-plan/v1` payload with a plan digest and
 all five `configuration_impact` arrays. When both the old and candidate graphs
 resolve, a newly reachable Implementation reports required top-level Config
@@ -878,8 +879,23 @@ any constructor still owned by another root, dependency, or explicit dormant
 choice. A newly reachable constructor can report statically addressable missing
 Config as unresolved decisions; missing or ambiguous Implementations and invalid
 still-owned Config fail validation without a partial plan.
-An already-satisfied request retains its normalized operation but reports an
-empty write set and no planned Project-write effects.
+A configuration request names an exact owned Implementation constructor or
+effective Resource instance and an owner-relative dotted declared field path.
+Paths traverse only non-pointer fixed objects, never atomic pointer, collection,
+or Secret internals. A declared atomic field may be supplied as a whole typed
+JSON value. Removal deletes the exact field in a complete document or records
+its exact environment exclusion, even when root currently lacks a value.
+The preview can repair invalid selected-layer values but never replaces an
+invalid scalar ancestor or an ancestor exclusion to widen the edit. All final
+typed Config and binding obligations must validate; no missing-field decision
+or partial payload conceals another invalid value.
+An already-satisfied removal retains its normalized operation but reports an
+empty write set and no planned Project-write effects after final validation.
+Every configuration set declares a planned write, even for equal private values
+or identical encoded bytes. Its public `request_digest` binds the value-free
+operation projection; build-visible final values remain bound by the plan's
+public semantic digests. Private values, Secret targets, and their equality
+never enter public request identity or no-op effects.
 For a Resource provider replacement, it reports the prior provider's unowned
 configuration, deterministic cleanup, and other retained instances without
 disclosing configured values. Newly missing, statically addressable Resource
@@ -1052,7 +1068,7 @@ An Interface choice writes `interfaces.use` and requires a visible compatible fu
 
 A Resource choice writes `resources.instances.<name>.use`. Replacing a nonempty previous provider discards only that instance's old Config; selecting the same provider preserves it. An existing instance without a provider can receive its first selection, retaining unbound Config authored in the selected document. The command removes configuration whose last explicit or reachable owner disappears and only provably obsolete consumer binding parameters. It preserves other instances and still-owned configuration, revalidates surviving dependencies, and never guesses a replacement binding or newly required value. Cleanup writes only the required tombstones or sparse deltas in the selected current-Project layer; lower-layer sources and unselected documents remain unchanged.
 
-The command validates the repaired final state, not a required valid starting graph. It preserves comments and unrelated YAML, regenerates with the same selection, is byte-idempotent when already selected, and restores the selected YAML, generated tree, `go.mod`, and `go.sum` after a later failure. `plystra change plan --request change.json --format json` provides a read-only plan for one `interface_root` present/absent (require or expose), one `implementation_selection` set/remove operation, or one `resource_selection` set/remove operation; `change apply`, primitive-command lowering, `--dry-run`, and complete Gate 13 acceptance remain unavailable.
+The command validates the repaired final state, not a required valid starting graph. It preserves comments and unrelated YAML, regenerates with the same selection, is byte-idempotent when already selected, and restores the selected YAML, generated tree, `go.mod`, and `go.sum` after a later failure. `plystra change plan --request change.json --format json` provides a read-only plan for one `interface_root` present/absent (require or expose), one `implementation_selection` set/remove operation, one `resource_selection` set/remove operation, or one `configuration` set/remove operation; `change apply`, primitive-command lowering, `--dry-run`, and complete Gate 13 acceptance remain unavailable.
 
 An ordinary Go Module without root `plystra.yaml`, an absent visible contract or provider, a missing or unsafe selected file, conflicting selectors, concurrently changed configuration, unexpected generated output, generation failure, untidy module state, or validation failure leaves the selected configuration and every generated or module-owned file unchanged. `capability create --expose` remains the default-configuration authoring shortcut and uses the same rollback boundary for the new schema, Plugin declaration, implementation scaffold, root application exposure, module metadata, and generated output.
 
