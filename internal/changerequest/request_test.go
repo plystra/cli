@@ -173,6 +173,47 @@ func TestParseRejectsClosedFieldAndOperationConflicts(t *testing.T) {
 	}
 }
 
+func TestParseRejectsOverlappingConfigurationTargetsRegardlessOfOrder(t *testing.T) {
+	for _, owner := range []string{"example.com/orders.New", "database.primary"} {
+		for _, firstAction := range []string{"set", "remove"} {
+			for _, secondAction := range []string{"set", "remove"} {
+				for _, reversed := range []bool{false, true} {
+					operations := []string{
+						fmt.Sprintf(`{"kind":"configuration","action":%q,"owner":%q,"path":"nested"%s}`, firstAction, owner, configurationValue(firstAction)),
+						fmt.Sprintf(`{"kind":"configuration","action":%q,"owner":%q,"path":"nested.value"%s}`, secondAction, owner, configurationValue(secondAction)),
+					}
+					if reversed {
+						operations[0], operations[1] = operations[1], operations[0]
+					}
+					request := `{"schema":"plystra.change/v1","operations":[` + strings.Join(operations, ",") + `]}`
+					if _, err := changerequest.Parse([]byte(request)); !errors.Is(err, changerequest.ErrInvalid) || strings.Contains(err.Error(), "PRIVATE_") {
+						t.Fatalf("overlapping targets accepted or exposed values: %v", err)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestParseKeepsDisjointConfigurationOwnersAndPathSegments(t *testing.T) {
+	request := []byte(`{"schema":"plystra.change/v1","operations":[
+{"kind":"configuration","action":"set","owner":"database.primary","path":"nested","value":{}},
+{"kind":"configuration","action":"remove","owner":"database.primary","path":"nested_other.value"},
+{"kind":"configuration","action":"set","owner":"database.retained","path":"nested.value","value":"PRIVATE_VALUE"},
+{"kind":"configuration","action":"remove","owner":"example.com/orders.New","path":"nested.value"}
+]}`)
+	if parsed, err := changerequest.Parse(request); err != nil || len(parsed.Operations()) != 4 {
+		t.Fatalf("disjoint targets rejected: %v", err)
+	}
+}
+
+func configurationValue(action string) string {
+	if action == "set" {
+		return `,"value":{"private_key":"PRIVATE_VALUE"}`
+	}
+	return ""
+}
+
 func TestParseRejectsMalformedKindsAndUnsafeValues(t *testing.T) {
 	tests := []string{
 		`{"schema":"plystra.change/v2","operations":[]}`,

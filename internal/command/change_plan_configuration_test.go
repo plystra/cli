@@ -47,7 +47,7 @@ func TestRunChangePlanConfigurationHelpDescribesInstalledBounds(t *testing.T) {
 		if exit != 0 || stderr != "" {
 			t.Fatalf("change help: %d, %s", exit, stderr)
 		}
-		for _, phrase := range []string{"configuration set/remove", "owner-relative declared field path", "non-pointer fixed objects", "already-satisfied removals", "Public request identity omits submitted values", "even for equal values", "non_exact and cannot authorize apply"} {
+		for _, phrase := range []string{"configuration set/remove", "at most 1024", "owner-relative declared field path", "non-pointer fixed objects", "already-satisfied removals", "Public request identity omits submitted values", "even for equal values", "non_exact and cannot authorize apply", "Same-owner ancestor/descendant targets conflict", "Mixed operation kinds remain unsupported"} {
 			if !strings.Contains(stdout, phrase) {
 				t.Fatalf("help omits %q", phrase)
 			}
@@ -442,6 +442,12 @@ func runConfigurationPlan(t *testing.T, root string, request []byte, success boo
 		}
 	} else if exit == 0 || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
 		t.Fatalf("invalid configuration accepted: %s", stdout)
+	}
+	if !success {
+		var failure struct{ Payload json.RawMessage }
+		if err := json.Unmarshal([]byte(stdout), &failure); err != nil || len(failure.Payload) != 0 && string(failure.Payload) != "null" || len(result.Effects.Planned) != 0 {
+			t.Fatalf("failed preview published a partial plan: %s", stdout)
+		}
 	}
 	if !reflect.DeepEqual(commandTree(t, root), before) {
 		t.Fatal("preview changed Project bytes")

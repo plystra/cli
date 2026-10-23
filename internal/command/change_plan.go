@@ -25,8 +25,8 @@ const changePlanUsage = `Usage:
 
 Plans one bounded declarative change request without modifying the Project. This
 installed slice accepts one interface_root present/absent (require or expose),
-implementation_selection set/remove, resource_selection set/remove, or
-configuration set/remove operation. It analyzes the final ownership graph.
+implementation_selection set/remove, resource_selection set/remove, or a batch
+of configuration set/remove operations (at most 1024). It analyzes the final ownership graph.
 Root changes preserve complete-set boundaries
 or sparse environment intent and clean up only owners lost in the final state.
 Resource removal deletes the whole exact instance, including provider and Config,
@@ -44,6 +44,9 @@ Resource instance and an owner-relative declared field path. Paths traverse only
 non-pointer fixed objects; atomic values must be supplied whole. Complete documents
 delete removed fields; environments record exact field exclusions. All final Config
 and binding obligations must validate, including already-satisfied removals.
+Configuration-only batches edit disjoint paths and validate only the complete final
+state. Same-owner ancestor/descendant targets conflict regardless of request order.
+Mixed operation kinds remain unsupported.
 Public request identity omits submitted values. Every configuration set declares a
 planned write, even for equal values, so private equality is not disclosed.
 This preview is non_exact and cannot authorize apply. Change apply remains uninstalled.
@@ -99,8 +102,12 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The change request is invalid.")
 	}
 	operations := request.Operations()
-	if len(operations) != 1 {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root, selection, or configuration operation.")
+	configurationOnly := len(operations) > 0
+	for _, operation := range operations {
+		configurationOnly = configurationOnly && operation.Kind() == changerequest.KindConfiguration
+	}
+	if len(operations) != 1 && !configurationOnly {
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root or selection operation, or a configuration-only batch.")
 	}
 	var target, constructor string
 	requiresConstructor := true
@@ -134,13 +141,12 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			return implementationselect.PreviewInterfaceRoot(ctx, options, string(root.Root()), root.Action() == changerequest.RootPresent)
 		}
 	case changerequest.KindConfiguration:
-		change, _ := operations[0].Configuration()
-		target, requiresConstructor = change.Owner(), false
+		requiresConstructor = false
 		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
-			return implementationselect.PreviewConfiguration(ctx, options, change)
+			return implementationselect.PreviewConfigurations(ctx, options, request)
 		}
 	default:
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one interface_root present/absent, implementation_selection set/remove, resource_selection set/remove, or configuration set/remove operation.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one interface_root present/absent, implementation_selection set/remove, resource_selection set/remove, or a configuration-only batch.")
 	}
 	if constructor == "" && requiresConstructor {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The selection does not name a constructor.")
@@ -156,7 +162,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	if err != nil {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The change could not be planned against the selected Project.")
 	}
-	payload, effects, err := buildChangePlanPayload(request, operations[0], planned)
+	payload, effects, err := buildChangePlanPayload(request, planned)
 	if err != nil {
 		return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The change plan could not be encoded.")
 	}
@@ -259,7 +265,7 @@ func readChangeRequest(base, path string) ([]byte, error) {
 	return data, nil
 }
 
-func buildChangePlanPayload(request changerequest.Request, requested changerequest.Operation, planned implementationselect.PlanResult) (commandschema.ChangePlan, commandschema.Effects, error) {
+func buildChangePlanPayload(request changerequest.Request, planned implementationselect.PlanResult) (commandschema.ChangePlan, commandschema.Effects, error) {
 	inputs := planned.Inputs()
 	selection := inputs.ConfigurationSelection()
 	rootDigest, selectedDigest, afterDigest, err := inputs.ConfigurationLayerDigests(planned.Updated())
@@ -270,7 +276,13 @@ func buildChangePlanPayload(request changerequest.Request, requested changereque
 	if inputs.SelectedSnapshot().Path() != inputs.RootSnapshot().Path() {
 		readSet = append(readSet, commandschema.ChangePlanPathInput{Path: inputs.SelectedSnapshot().Path(), Kind: "configuration", BeforeDigest: selectedDigest})
 	}
-	operations := []commandschema.ChangePlanOperationInput{requestedSelectionOperation(requested)}
+	var operations []commandschema.ChangePlanOperationInput
+	configurationRequested := false
+	for _, requested := range request.Operations() {
+		operations = append(operations, requestedSelectionOperation(requested))
+		configurationRequested = configurationRequested || requested.Kind() == changerequest.KindConfiguration
+	}
+	requestedCount := len(operations)
 	for _, derived := range planned.ConfigurationImpact().DerivedOperations() {
 		operations = append(operations, commandschema.ChangePlanOperationInput{Kind: derived.Kind, Action: derived.Action, Owner: derived.Owner, Path: derived.Path, Derived: true})
 	}
@@ -292,10 +304,10 @@ func buildChangePlanPayload(request changerequest.Request, requested changereque
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}
 	requestDigest := request.Digest()
-	if requested.Kind() == changerequest.KindConfiguration {
+	if configurationRequested {
 		// Non-exact previews bind a public request projection. The private
 		// canonical request digest would reveal submitted value equality.
-		identity, err := json.Marshal(operations[0])
+		identity, err := json.Marshal(operations[:requestedCount])
 		if err != nil {
 			return commandschema.ChangePlan{}, commandschema.Effects{}, err
 		}

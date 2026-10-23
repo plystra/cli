@@ -16,8 +16,35 @@ import (
 // complete final graph and configuration. Private values remain behind the
 // result's explicit byte accessors and never enter its public identity.
 func PreviewConfiguration(ctx context.Context, options Options, change changerequest.Configuration) (PlanResult, error) {
-	if ctx == nil || change.Owner() == "" || options.Constructor != "" {
+	return previewConfigurations(ctx, options, []changerequest.Configuration{change})
+}
+
+// PreviewConfigurations plans a configuration-only request against one captured
+// input snapshot. Only the complete candidate, not intermediate edits, must pass
+// graph, ownership and requiredness validation.
+func PreviewConfigurations(ctx context.Context, options Options, request changerequest.Request) (PlanResult, error) {
+	if !request.Valid() {
 		return PlanResult{}, ErrSelect
+	}
+	var changes []changerequest.Configuration
+	for _, operation := range request.Operations() {
+		change, ok := operation.Configuration()
+		if !ok {
+			return PlanResult{}, ErrSelect
+		}
+		changes = append(changes, change)
+	}
+	return previewConfigurations(ctx, options, changes)
+}
+
+func previewConfigurations(ctx context.Context, options Options, changes []changerequest.Configuration) (PlanResult, error) {
+	if ctx == nil || len(changes) == 0 || options.Constructor != "" {
+		return PlanResult{}, ErrSelect
+	}
+	for _, change := range changes {
+		if change.Owner() == "" {
+			return PlanResult{}, ErrSelect
+		}
 	}
 	inputs, err := discoverPlanInputs(ctx, options)
 	if err != nil {
@@ -28,36 +55,60 @@ func PreviewConfiguration(ctx context.Context, options Options, change changereq
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	namespace := applicationmeta.ConfigurationNamespaceResource
-	var schema implementationinventory.Configuration
-	var exists bool
-	if constructor, parseErr := constructorsymbol.Parse(change.Owner()); parseErr == nil {
-		namespace = applicationmeta.ConfigurationNamespaceImplementation
-		owners, ownerErr := inputs.CandidateOwners(before)
-		if ownerErr != nil || !slices.Contains(owners, constructor) {
+	owners, err := inputs.CandidateOwners(before)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+	}
+	type ownerSchema struct {
+		namespace applicationmeta.ConfigurationNamespace
+		schema    implementationinventory.Configuration
+	}
+	schemas := make(map[string]ownerSchema)
+	var edits []applicationmeta.ConfigurationValueEdit
+	writeRequired := false
+	for _, change := range changes {
+		if err := ctx.Err(); err != nil {
+			return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+		}
+		owner, known := schemas[change.Owner()]
+		if !known {
+			owner.namespace = applicationmeta.ConfigurationNamespaceResource
+			var exists bool
+			if constructor, parseErr := constructorsymbol.Parse(change.Owner()); parseErr == nil {
+				owner.namespace = applicationmeta.ConfigurationNamespaceImplementation
+				if !slices.Contains(owners, constructor) {
+					return PlanResult{}, ErrSelect
+				}
+				if declaration, found := inputs.Declarations().Implementations().BySymbol(constructor); found {
+					owner.schema, exists = declaration.Configuration()
+				}
+			} else {
+				for _, instance := range before.Manifest().ResourceInstances() {
+					if instance.Name() == change.Owner() {
+						if provider, found := inputs.Declarations().ResourceProviders().BySymbol(instance.Provider()); found {
+							owner.schema, exists = provider.Configuration()
+						}
+						break
+					}
+				}
+			}
+			if !exists {
+				return PlanResult{}, ErrSelect
+			}
+			schemas[change.Owner()] = owner
+		}
+		value, hasValue := change.Value()
+		if change.Action() != changerequest.ConfigurationSet && change.Action() != changerequest.ConfigurationRemove || hasValue != (change.Action() == changerequest.ConfigurationSet) {
 			return PlanResult{}, ErrSelect
 		}
-		if declaration, found := inputs.Declarations().Implementations().BySymbol(constructor); found {
-			schema, exists = declaration.Configuration()
+		edit, err := applicationmeta.PrepareConfigurationValueEdit(owner.namespace, change.Owner(), change.Path(), owner.schema, value)
+		if err != nil {
+			return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 		}
-	} else {
-		for _, instance := range before.Manifest().ResourceInstances() {
-			if instance.Name() == change.Owner() {
-				if provider, found := inputs.Declarations().ResourceProviders().BySymbol(instance.Provider()); found {
-					schema, exists = provider.Configuration()
-				}
-				break
-			}
-		}
+		edits = append(edits, edit)
+		writeRequired = writeRequired || change.Action() == changerequest.ConfigurationSet
 	}
-	if !exists {
-		return PlanResult{}, ErrSelect
-	}
-	value, hasValue := change.Value()
-	if change.Action() != changerequest.ConfigurationSet && change.Action() != changerequest.ConfigurationRemove || hasValue != (change.Action() == changerequest.ConfigurationSet) {
-		return PlanResult{}, ErrSelect
-	}
-	updated, _, err := applicationmeta.EditConfigurationValue(original, namespace, change.Owner(), change.Path(), schema, value, inputs.ConfigurationSelection().Mode() == "environment")
+	updated, _, err := applicationmeta.EditConfigurationValues(original, edits, inputs.ConfigurationSelection().Mode() == "environment")
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
@@ -74,12 +125,16 @@ func PreviewConfiguration(ctx context.Context, options Options, change changereq
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	result, err := selectionPlanResult(inputs, change.Owner(), "configuration", constructorsymbol.Symbol{}, updated, impact)
+	var target string
+	if len(changes) == 1 {
+		target = changes[0].Owner()
+	}
+	result, err := selectionPlanResult(inputs, target, "configuration", constructorsymbol.Symbol{}, updated, impact)
 	if err != nil {
 		return PlanResult{}, err
 	}
 	// A set declares a write independently of private value equality, including
 	// when encoding happens to reproduce the same bytes.
-	result.writeRequired = change.Action() == changerequest.ConfigurationSet
+	result.writeRequired = writeRequired
 	return result, nil
 }

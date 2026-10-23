@@ -21,7 +21,7 @@ import (
 
 const maximumResourceBindingPreviewCandidates = 64
 
-// PlanResult is a read-only root or selection preview. It contains authored
+// PlanResult is a read-only root, selection or configuration preview. It contains authored
 // bytes only for the caller's private transaction boundary; public projections
 // must use the identity accessors and ConfigurationImpact.
 type PlanResult struct {

@@ -39,9 +39,8 @@ must remain valid; the command never guesses a replacement binding or missing
 required value. It regenerates and validates the selected final state, with
 rollback on failure. plystra change plan --request change.json --format json
 previews one interface_root present/absent, implementation_selection set/remove,
-resource_selection set/remove, or configuration set/remove request without mutation.
-Change apply, primitive-command
-lowering, and --dry-run are not installed.
+resource_selection set/remove, or a configuration-only batch without mutation.
+Change apply, primitive-command lowering, and --dry-run are not installed.
 
 An effective choice for an intrinsic kernel.* Interface emits
 PLYSTRA_RESOLVE_INTRINSIC_INTERFACE_SELECTION with every contributing

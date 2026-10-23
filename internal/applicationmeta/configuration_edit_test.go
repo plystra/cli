@@ -3,6 +3,7 @@ package applicationmeta_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -92,5 +93,88 @@ func TestEditConfigurationValueRemovalRetainsAncestorExclusions(t *testing.T) {
 		if err != nil || changed || !bytes.Equal(input, updated) {
 			t.Fatalf("ancestor exclusion was widened: %t, %v", changed, err)
 		}
+	}
+}
+
+func TestEditConfigurationValuesChecksOnlyFinalDocumentSize(t *testing.T) {
+	t.Parallel()
+	schema := composeSchema(t, "Before string\nZAfter string\n")
+	input := []byte("config:\n  " + constructorConfigurationSymbol + ":\n    zafter: " + strings.Repeat("x", applicationmeta.MaximumSize-150) + "\n")
+	value := []byte(fmt.Sprintf("%q", strings.Repeat("a", 256)))
+	if _, _, err := applicationmeta.EditConfigurationValue(input, applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, "before", schema, value, false); err == nil {
+		t.Fatal("size fixture does not exceed the intermediate document bound")
+	}
+	set, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, "before", schema, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remove, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, "zafter", schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, changed, err := applicationmeta.EditConfigurationValues(input, []applicationmeta.ConfigurationValueEdit{set, remove}, false)
+	if err != nil || !changed || len(updated) >= 1024 {
+		t.Fatalf("final-sized batch rejected: %t, %v", changed, err)
+	}
+	reversed, _, err := applicationmeta.EditConfigurationValues(input, []applicationmeta.ConfigurationValueEdit{remove, set}, false)
+	if err != nil || !bytes.Equal(updated, reversed) {
+		t.Fatalf("batch bytes depend on request order: %v", err)
+	}
+	if fmt.Sprintf("%#v", set) != "<redacted-configuration-edit>" {
+		t.Fatal("prepared value is not redacted")
+	}
+}
+
+func TestEditConfigurationValuesRejectsOverlapAndInvalidPreparedEdits(t *testing.T) {
+	t.Parallel()
+	schema := composeSchema(t, "Nested struct { Count int8 }\nValue string\n")
+	parent, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, "nested", schema, []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, "nested.count", schema, []byte(`0`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, edits := range [][]applicationmeta.ConfigurationValueEdit{nil, {{}}, {parent, parent}, {parent, child}, {child, parent}} {
+		updated, changed, err := applicationmeta.EditConfigurationValues([]byte("{}\n"), edits, false)
+		if !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || updated != nil {
+			t.Fatalf("invalid batch accepted: %t, %v", changed, err)
+		}
+	}
+}
+
+func TestEditConfigurationValuesPreparedEditsRemainImmutable(t *testing.T) {
+	t.Parallel()
+	schema := composeSchema(t, "Value string\nNested struct { Value string }\n")
+	for _, test := range []struct{ path, previous, value string }{
+		{"value", "old", `"new"`},
+		{"nested", "{value: old}", `{"value":"new"}`},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			edit, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, test.path, schema, []byte(test.value))
+			if err != nil {
+				t.Fatal(err)
+			}
+			apply := func(t *testing.T, comment string) {
+				t.Helper()
+				input := []byte("config:\n  " + constructorConfigurationSymbol + ":\n    " + test.path + ": " + test.previous + " # " + comment + "\n")
+				updated, changed, err := applicationmeta.EditConfigurationValues(input, []applicationmeta.ConfigurationValueEdit{edit}, false)
+				if err != nil || !changed || !bytes.Contains(updated, []byte("# "+comment)) {
+					t.Fatalf("edit lost its own document comment: %t, %v", changed, err)
+				}
+				updated, changed, err = applicationmeta.EditConfigurationValues([]byte("{}\n"), []applicationmeta.ConfigurationValueEdit{edit}, false)
+				if err != nil || !changed || bytes.Contains(updated, []byte("#")) {
+					t.Fatalf("reused edit carried another document's comment: %t, %v", changed, err)
+				}
+			}
+			apply(t, "PRIVATE_COMMENT")
+			for index := range 8 {
+				t.Run(fmt.Sprint(index), func(t *testing.T) {
+					t.Parallel()
+					apply(t, fmt.Sprintf("PRIVATE_COMMENT_%d", index))
+				})
+			}
+		})
 	}
 }

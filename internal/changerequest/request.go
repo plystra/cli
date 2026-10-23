@@ -413,6 +413,13 @@ func Parse(data []byte) (Request, error) {
 	sort.SliceStable(operations, func(left, right int) bool {
 		return operationSortKey(operations[left]) < operationSortKey(operations[right])
 	})
+	// Canonical target order places an ancestor just before its first descendant.
+	for index := 1; index < len(operations); index++ {
+		previous, current := operations[index-1].configuration, operations[index].configuration
+		if previous != nil && current != nil && previous.owner == current.owner && strings.HasPrefix(current.path, previous.path+".") {
+			return Request{}, invalidf("configuration targets overlap")
+		}
+	}
 
 	documentOperations := make([]any, len(operations))
 	for index, operation := range operations {
