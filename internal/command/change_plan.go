@@ -26,8 +26,9 @@ const changePlanUsage = `Usage:
 Plans one bounded declarative change request without modifying the Project. This
 installed slice accepts one interface_root present/absent (require or expose),
 implementation_selection set/remove, resource_selection set/remove, or a batch
-of configuration set/remove operations. One implementation_selection set/remove
-may also be combined with configuration edits (at most 1024 requested operations).
+of configuration set/remove operations. One implementation_selection or
+resource_selection set/remove may also be combined with configuration edits
+(at most 1024 requested operations).
 It analyzes the final ownership graph.
 Root changes preserve complete-set boundaries
 or sparse environment intent and clean up only owners lost in the final state.
@@ -51,6 +52,8 @@ state. Same-owner ancestor/descendant targets conflict regardless of request ord
 Combined selection/configuration previews require a valid complete final state;
 they do not enumerate missing-value decisions. Edits use the final owners' schemas,
 and obsolete Config and binding cleanup happens in the same document edit.
+Resource set requires an existing effective instance. A provider change discards
+old selected Config, including its exclusion; matching fields are never migrated.
 Other mixed operation kinds remain unsupported. Public plans allow at most 1024
 derived operations separately; cleanup does not consume the request limit.
 Public request identity omits submitted values. Every configuration set declares a
@@ -108,18 +111,20 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The change request is invalid.")
 	}
 	operations := request.Operations()
-	configurations, implementationSelections := 0, 0
+	configurations, implementationSelections, resourceSelections := 0, 0, 0
 	for _, operation := range operations {
 		switch operation.Kind() {
 		case changerequest.KindConfiguration:
 			configurations++
 		case changerequest.KindImplementationSelection:
 			implementationSelections++
+		case changerequest.KindResourceSelection:
+			resourceSelections++
 		}
 	}
-	compound := configurations > 0 && implementationSelections == 1 && configurations+1 == len(operations)
+	compound := configurations > 0 && implementationSelections+resourceSelections == 1 && configurations+1 == len(operations)
 	if len(operations) == 0 || len(operations) != 1 && configurations != len(operations) && !compound {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root or selection, configuration-only batches, or one Implementation selection with configuration edits.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root or selection, configuration-only batches, or one selection with configuration edits.")
 	}
 	var target, constructor string
 	requiresConstructor := true
@@ -155,6 +160,9 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	case changerequest.KindConfiguration:
 		requiresConstructor = false
 		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
+			if compound && resourceSelections == 1 {
+				return implementationselect.PreviewResourceConfigurations(ctx, options, request)
+			}
 			if compound {
 				return implementationselect.PreviewImplementationConfigurations(ctx, options, request)
 			}

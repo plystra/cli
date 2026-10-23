@@ -625,6 +625,22 @@ func selectResourceProvider(inputs applicationresolve.SelectionInputs, original 
 	if err != nil {
 		return nil, err
 	}
+	changedProvider, bindings, err := resourceProviderChange(inputs, instances, previousBindings, target, constructor)
+	if err != nil {
+		return nil, err
+	}
+	set := applicationmeta.SetResourceProvider
+	if overlay {
+		set = applicationmeta.SetResourceProviderOverlay
+	}
+	updated, _, err := set(original, target, constructor, changedProvider, nil)
+	if err != nil || len(bindings) == 0 {
+		return updated, err
+	}
+	return removeOwnedPaths(inputs, updated, nil, bindings, overlay)
+}
+
+func resourceProviderChange(inputs applicationresolve.SelectionInputs, instances []applicationmeta.ResourceInstance, previousBindings []applicationmeta.ResourceBinding, target string, constructor constructorsymbol.Symbol) (bool, []applicationmeta.ResourceBindingRemoval, error) {
 	var instance applicationmeta.ResourceInstance
 	found := false
 	for _, value := range instances {
@@ -634,21 +650,16 @@ func selectResourceProvider(inputs applicationresolve.SelectionInputs, original 
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("%w: named Resource instance %s", ErrTargetNotFound, target)
+		return false, nil, fmt.Errorf("%w: named Resource instance %s", ErrTargetNotFound, target)
 	}
 	provider, visible := inputs.Declarations().ResourceProviders().BySymbol(constructor)
 	previous, previousVisible := inputs.Declarations().ResourceProviders().BySymbol(instance.Provider())
 	if !visible || previousVisible && previous.ID() != provider.ID() {
-		return nil, fmt.Errorf("%w: %s for %s", ErrProviderIncompatible, constructor, target)
+		return false, nil, fmt.Errorf("%w: %s for %s", ErrProviderIncompatible, constructor, target)
 	}
 	changedProvider := instance.Provider().String() != "" && instance.Provider() != constructor
-	set := applicationmeta.SetResourceProvider
-	if overlay {
-		set = applicationmeta.SetResourceProviderOverlay
-	}
-	updated, _, err := set(original, target, constructor, changedProvider, nil)
-	if err != nil || !changedProvider || !previousVisible {
-		return updated, err
+	if !changedProvider || !previousVisible {
+		return changedProvider, nil, nil
 	}
 	oldParameters, newParameters := make(map[string]bool), make(map[string]bool)
 	for _, dependency := range previous.Dependencies() {
@@ -663,7 +674,18 @@ func selectResourceProvider(inputs applicationresolve.SelectionInputs, original 
 			bindings = append(bindings, bindingRemoval(binding))
 		}
 	}
-	return removeOwnedPaths(inputs, updated, nil, bindings, overlay)
+	return changedProvider, bindings, nil
+}
+
+func markInheritedBindingRemovals(root applicationmeta.Manifest, removals []applicationmeta.ResourceBindingRemoval) {
+	inherited := make(map[[3]string]bool)
+	for _, binding := range root.ResourceBindings() {
+		inherited[[3]string{binding.Namespace(), binding.Consumer(), binding.ParameterName()}] = true
+	}
+	for index := range removals {
+		removal := &removals[index]
+		removal.Tombstone = inherited[[3]string{removal.Namespace, removal.Consumer, removal.ParameterName}]
+	}
 }
 
 func cleanupImplementationOwners(inputs applicationresolve.SelectionInputs, before, candidate applicationmeta.Composition, updated []byte, overlay bool) ([]byte, error) {

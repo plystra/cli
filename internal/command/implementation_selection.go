@@ -40,7 +40,7 @@ required value. It regenerates and validates the selected final state, with
 rollback on failure. plystra change plan --request change.json --format json
 previews one interface_root present/absent, implementation_selection set/remove,
 resource_selection set/remove, a configuration-only batch, or one Implementation
-selection combined with configuration edits without mutation.
+or Resource selection combined with configuration edits without mutation.
 Change apply, primitive-command lowering, and --dry-run are not installed.
 
 An effective choice for an intrinsic kernel.* Interface emits

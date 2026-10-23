@@ -66,8 +66,15 @@ func Compare(before, after applicationmeta.Manifest, input Input) (Impact, error
 		result.DerivedOperations = append(result.DerivedOperations, DerivedOperation{Kind: "resource_configuration", Action: "remove", Owner: name, Path: path, Source: source})
 	}
 
-	beforeBindings := bindingMap(before.ResourceBindings())
-	afterBindings := bindingMap(after.ResourceBindings())
+	return CompareBindings(before.ResourceBindings(), after.ResourceBindings(), result)
+}
+
+// CompareBindings compares effective exact binding identities independently of
+// Config validity or provider completeness in the captured pre-change state.
+func CompareBindings(before, after []applicationmeta.ResourceBinding, input Input) (Impact, error) {
+	result := input
+	beforeBindings := bindingMap(before)
+	afterBindings := bindingMap(after)
 	bindingKeys := make([]string, 0, len(beforeBindings))
 	for key := range beforeBindings {
 		bindingKeys = append(bindingKeys, key)

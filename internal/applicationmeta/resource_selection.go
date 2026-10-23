@@ -90,34 +90,36 @@ func setResourceProvider(data []byte, name string, provider constructorsymbol.Sy
 		return nil, false, fmt.Errorf("%w: %w", ErrSetResourceProvider, err)
 	}
 	return editSelectionDocument(data, overlay, ErrSetResourceProvider, func(root *yaml.Node) (bool, error) {
-		instances, err := ensureMappingPath(root, []string{"resources", "instances"})
+		changed, err := applyResourceProvider(root, name, provider, removeConfiguration)
 		if err != nil {
 			return false, err
 		}
-		instance := mappingChild(instances, name)
-		changed := false
-		if instance == nil || isRemovalMapping(instance) {
-			instance = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-			setMappingValue(instances, name, instance)
-			sortYAMLMapping(instances)
-			changed = true
-		}
-		use := mappingChild(instance, "use")
-		if use == nil || use.Value != provider.String() {
-			setMappingValue(instance, "use", stringYAMLNode(provider.String()))
-			changed = true
-		}
-		if removeConfiguration && mappingChild(instance, "config") != nil {
-			removeMappingValue(instance, "config")
-			changed = true
-		}
-		for _, removal := range bindings {
-			removed, err := removeSelectionLeaf(root, resourceBindingRemovalPath(removal), removal.Tombstone)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || removed
-		}
-		return changed, nil
+		cleaned, err := applySelectionRemovals(root, nil, bindings)
+		return changed || cleaned, err
 	})
+}
+
+func applyResourceProvider(root *yaml.Node, name string, provider constructorsymbol.Symbol, removeConfiguration bool) (bool, error) {
+	instances, err := ensureMappingPath(root, []string{"resources", "instances"})
+	if err != nil {
+		return false, err
+	}
+	instance := mappingChild(instances, name)
+	changed := false
+	if instance == nil || isRemovalMapping(instance) {
+		instance = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		setMappingValue(instances, name, instance)
+		sortYAMLMapping(instances)
+		changed = true
+	}
+	use := mappingChild(instance, "use")
+	if use == nil || use.Value != provider.String() {
+		setMappingValue(instance, "use", stringYAMLNode(provider.String()))
+		changed = true
+	}
+	if removeConfiguration && mappingChild(instance, "config") != nil {
+		removeMappingValue(instance, "config")
+		changed = true
+	}
+	return changed, nil
 }

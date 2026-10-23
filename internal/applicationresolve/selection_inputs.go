@@ -278,6 +278,22 @@ func (s SelectionInputs) ProjectImplementationSelection(id interfaceid.Identifie
 	return composition, err
 }
 
+// ProjectResourceSelection composes captured identities after one instance
+// change, including an existing provider-less instance's first assignment.
+// Original typed layers still govern final composition and validation.
+func (s SelectionInputs) ProjectResourceSelection(name string, provider constructorsymbol.Symbol, remove bool) (applicationmeta.Composition, error) {
+	if s.module.Path() == "" {
+		return applicationmeta.Composition{}, ErrResolve
+	}
+	selected, err := applicationmeta.ResourceSelectionIdentity(s.selectedManifest, name, provider, remove, s.selector.mode == configurationModeEnvironment)
+	if err != nil {
+		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
+	_, composition, err := s.composeCurrent(s.rootManifest, selected)
+	return composition, err
+}
+
 // ComposeResourceOwnershipCandidate keeps other typed configuration and all
 // binding identities while excluding old Resource Config that may be invalid.
 func (s SelectionInputs) ComposeResourceOwnershipCandidate(selected []byte) (applicationmeta.Composition, error) {

@@ -74,3 +74,36 @@ resources:
 		t.Fatalf("exact ownership paths missing: %s", encoded)
 	}
 }
+
+func TestCompareBindingsUsesExactAddressesWithoutConfigValidity(t *testing.T) {
+	before, err := applicationmeta.ParseCompleteSource("deploy/before.yaml", []byte(`resources:
+  instances: {database.primary: {config: {value: [PRIVATE_INVALID]}}}
+  bind:
+    instances:
+      database.primary: {Old: database.retained, old: database.retained, Keep: database.retained}
+    implementations:
+      example.com/app.New: {Old: database.retained}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := applicationmeta.ParseCompleteSource("deploy/after.yaml", []byte(`resources:
+  bind:
+    instances:
+      database.primary: {old: database.retained, Keep: database.other}
+    implementations:
+      example.com/app.New: {Old: database.retained}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := configurationimpact.Input{RetainedOwners: []configurationimpact.RetainedOwner{{Owner: "database.retained", Path: "resources.instances[\"database.retained\"].config", Reason: "resource-instance-remains-effective"}}}
+	impact, err := configurationimpact.CompareBindings(before.ResourceBindings(), after.ResourceBindings(), input)
+	if err != nil || len(impact.DerivedOperations()) != 1 || len(impact.NewlyUnownedPaths()) != 1 || len(impact.RetainedOwners()) != 1 {
+		t.Fatalf("exact binding comparison failed: %v", err)
+	}
+	operation := impact.DerivedOperations()[0]
+	if operation.Path != "resources.bind.instances[\"database.primary\"][\"Old\"]" || !strings.HasPrefix(operation.Source, "deploy/before.yaml") || strings.Contains(string(impact.CanonicalJSON()), "PRIVATE_") {
+		t.Fatal("binding comparison widened address, lost source, or exposed private Config")
+	}
+}

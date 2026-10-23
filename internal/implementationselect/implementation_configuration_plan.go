@@ -74,14 +74,7 @@ func PreviewImplementationConfigurations(ctx context.Context, options Options, r
 		for index := range configurations {
 			_, configurations[index].Tombstone = lower.Configuration(configurations[index].Constructor)
 		}
-		for index := range bindings {
-			for _, binding := range lower.ResourceBindings() {
-				if binding.Namespace() == bindings[index].Namespace && binding.Consumer() == bindings[index].Consumer && binding.ParameterName() == bindings[index].ParameterName {
-					bindings[index].Tombstone = true
-					break
-				}
-			}
-		}
+		markInheritedBindingRemovals(lower, bindings)
 	}
 	updated, _, err := applicationmeta.EditImplementationConfiguration(original, applicationmeta.ImplementationConfigurationEdit{
 		Interface: id, Constructor: constructor, Remove: remove,
