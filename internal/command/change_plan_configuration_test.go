@@ -47,7 +47,7 @@ func TestRunChangePlanConfigurationHelpDescribesInstalledBounds(t *testing.T) {
 		if exit != 0 || stderr != "" {
 			t.Fatalf("change help: %d, %s", exit, stderr)
 		}
-		for _, phrase := range []string{"configuration set/remove", "at most 1024", "owner-relative declared field path", "non-pointer fixed objects", "already-satisfied removals", "Public request identity omits submitted values", "even for equal values", "non_exact and cannot authorize apply", "Same-owner ancestor/descendant targets conflict", "Mixed operation kinds remain unsupported"} {
+		for _, phrase := range []string{"configuration set/remove", "at most 1024 requested operations", "owner-relative declared field path", "non-pointer fixed objects", "already-satisfied removals", "Public request identity omits submitted values", "even for equal values", "non_exact and cannot authorize apply", "Same-owner ancestor/descendant targets conflict", "One implementation_selection set/remove", "require a valid complete final state", "Other mixed operation kinds remain unsupported", "derived operations separately"} {
 			if !strings.Contains(stdout, phrase) {
 				t.Fatalf("help omits %q", phrase)
 			}

@@ -98,33 +98,44 @@ func PrepareConfigurationValueEdit(namespace ConfigurationNamespace, owner, path
 // document limits only before and after the complete batch. The caller proves
 // owner/schema associations and validates the complete final model.
 func EditConfigurationValues(data []byte, edits []ConfigurationValueEdit, overlay bool) ([]byte, bool, error) {
+	if err := validateConfigurationEdits(edits); err != nil {
+		return nil, false, err
+	}
+	return editSelectionDocument(data, overlay, ErrEditConfiguration, func(root *yaml.Node) (bool, error) {
+		return applyConfigurationEdits(root, edits, overlay)
+	})
+}
+
+func validateConfigurationEdits(edits []ConfigurationValueEdit) error {
 	if len(edits) == 0 {
-		return nil, false, ErrEditConfiguration
+		return ErrEditConfiguration
 	}
 	keys := make([]string, len(edits))
 	for index, edit := range edits {
 		if len(edit.names) == 0 {
-			return nil, false, ErrEditConfiguration
+			return ErrEditConfiguration
 		}
 		keys[index] = strings.Join(edit.names, "\x00")
 	}
 	sort.Strings(keys)
 	for index := 1; index < len(keys); index++ {
 		if keys[index] == keys[index-1] || strings.HasPrefix(keys[index], keys[index-1]+"\x00") {
-			return nil, false, ErrEditConfiguration
+			return ErrEditConfiguration
 		}
 	}
-	return editSelectionDocument(data, overlay, ErrEditConfiguration, func(root *yaml.Node) (bool, error) {
-		changed := false
-		for _, edit := range edits {
-			edited, err := edit.apply(root, overlay)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || edited
+	return nil
+}
+
+func applyConfigurationEdits(root *yaml.Node, edits []ConfigurationValueEdit, overlay bool) (bool, error) {
+	changed := false
+	for _, edit := range edits {
+		edited, err := edit.apply(root, overlay)
+		if err != nil {
+			return false, err
 		}
-		return changed, nil
-	})
+		changed = changed || edited
+	}
+	return changed, nil
 }
 
 func (edit ConfigurationValueEdit) apply(root *yaml.Node, overlay bool) (bool, error) {

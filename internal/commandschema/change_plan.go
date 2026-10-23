@@ -280,13 +280,25 @@ func validateChangePlanInput(input ChangePlanInput) error {
 	if input.ConfigurationScope.Mode != input.InputSnapshot.ConfigurationMode || input.ConfigurationScope.Path != input.InputSnapshot.ConfigurationPath || input.ConfigurationScope.Environment != input.InputSnapshot.Environment {
 		return errors.New("configuration scope does not match input snapshot")
 	}
-	if len(input.Operations) == 0 || len(input.Operations) > 1024 {
-		return errors.New("operations must contain between 1 and 1024 entries")
+	if len(input.Operations) == 0 || len(input.Operations) > 2048 {
+		return errors.New("operations must contain between 1 and 2048 entries")
 	}
+	requested, derived := 0, 0
 	for index, operation := range input.Operations {
 		if !validOperation(operation) {
 			return fmt.Errorf("operations[%d] is invalid", index)
 		}
+		if operation.Derived {
+			derived++
+		} else {
+			requested++
+		}
+	}
+	if requested == 0 || requested > 1024 {
+		return errors.New("operations must contain between 1 and 1024 requested entries")
+	}
+	if derived > 1024 {
+		return errors.New("operations must contain at most 1024 derived entries")
 	}
 	if err := validatePathSet("read_set", input.ReadSet, false); err != nil {
 		return err

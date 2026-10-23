@@ -53,23 +53,27 @@ func cleanupSelectionOwnership(data []byte, configurations []ConstructorConfigur
 		return nil, false, fmt.Errorf("%w: %w", ErrCleanupSelectionOwnership, err)
 	}
 	return editSelectionDocument(data, overlay, ErrCleanupSelectionOwnership, func(root *yaml.Node) (bool, error) {
-		changed := false
-		for _, removal := range configurations {
-			removed, err := removeSelectionLeaf(root, []string{"config", removal.Constructor.String()}, removal.Tombstone)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || removed
-		}
-		for _, removal := range bindings {
-			removed, err := removeSelectionLeaf(root, resourceBindingRemovalPath(removal), removal.Tombstone)
-			if err != nil {
-				return false, err
-			}
-			changed = changed || removed
-		}
-		return changed, nil
+		return applySelectionRemovals(root, configurations, bindings)
 	})
+}
+
+func applySelectionRemovals(root *yaml.Node, configurations []ConstructorConfigurationRemoval, bindings []ResourceBindingRemoval) (bool, error) {
+	changed := false
+	for _, removal := range configurations {
+		removed, err := removeSelectionLeaf(root, []string{"config", removal.Constructor.String()}, removal.Tombstone)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || removed
+	}
+	for _, removal := range bindings {
+		removed, err := removeSelectionLeaf(root, resourceBindingRemovalPath(removal), removal.Tombstone)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || removed
+	}
+	return changed, nil
 }
 
 func selectionRemovals(configurations []ConstructorConfigurationRemoval, bindings []ResourceBindingRemoval) ([]ConstructorConfigurationRemoval, []ResourceBindingRemoval, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -259,6 +260,22 @@ func (s SelectionInputs) ComposeCandidate(selected []byte) (applicationmeta.Comp
 // ComposeCandidate and call ValidateCandidate before any live mutation.
 func (s SelectionInputs) ComposeSelectionCandidate(selected []byte) (applicationmeta.Composition, error) {
 	return s.composeCandidate(selected, true, true)
+}
+
+// ProjectImplementationSelection composes only captured ownership identities
+// after one choice change, without encoding or validating intermediate Config.
+// The original typed layers still govern ComposeCandidate and ValidateCandidate.
+func (s SelectionInputs) ProjectImplementationSelection(id interfaceid.Identifier, constructor constructorsymbol.Symbol, remove bool) (applicationmeta.Composition, error) {
+	if s.module.Path() == "" {
+		return applicationmeta.Composition{}, ErrResolve
+	}
+	selected, err := applicationmeta.ImplementationSelectionIdentity(s.selectedManifest, id, constructor, remove, s.selector.mode == configurationModeEnvironment)
+	if err != nil {
+		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
+	_, composition, err := s.composeCurrent(s.rootManifest, selected)
+	return composition, err
 }
 
 // ComposeResourceOwnershipCandidate keeps other typed configuration and all

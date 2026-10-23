@@ -667,9 +667,17 @@ func selectResourceProvider(inputs applicationresolve.SelectionInputs, original 
 }
 
 func cleanupImplementationOwners(inputs applicationresolve.SelectionInputs, before, candidate applicationmeta.Composition, updated []byte, overlay bool) ([]byte, error) {
-	finalOwners, err := inputs.CandidateOwners(candidate)
+	configurations, bindings, err := implementationOwnerRemovals(inputs, before, candidate)
 	if err != nil {
 		return nil, err
+	}
+	return removeOwnedPaths(inputs, updated, configurations, bindings, overlay)
+}
+
+func implementationOwnerRemovals(inputs applicationresolve.SelectionInputs, before, candidate applicationmeta.Composition) ([]applicationmeta.ConstructorConfigurationRemoval, []applicationmeta.ResourceBindingRemoval, error) {
+	finalOwners, err := inputs.CandidateOwners(candidate)
+	if err != nil {
+		return nil, nil, err
 	}
 	retained := make(map[constructorsymbol.Symbol]bool, len(finalOwners))
 	for _, constructor := range finalOwners {
@@ -704,13 +712,13 @@ func cleanupImplementationOwners(inputs applicationresolve.SelectionInputs, befo
 		}
 		constructor, err := constructorsymbol.Parse(binding.Consumer())
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if previousOwners[constructor] && !retained[constructor] {
 			bindings = append(bindings, bindingRemoval(binding))
 		}
 	}
-	return removeOwnedPaths(inputs, updated, configurations, bindings, overlay)
+	return configurations, bindings, nil
 }
 
 func bindingRemoval(binding applicationmeta.ResourceBinding) applicationmeta.ResourceBindingRemoval {

@@ -3,6 +3,7 @@ package commandschema_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,6 +12,58 @@ import (
 )
 
 const changePlanDigest = "sha256:" + "1111111111111111111111111111111111111111111111111111111111111111"
+
+func TestChangePlanBoundsRequestedAndDerivedOperationsSeparately(t *testing.T) {
+	impact, err := configurationimpact.New(configurationimpact.Input{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects, err := commandschema.NewEffects(commandschema.EffectsInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name               string
+		requested, derived int
+		valid              bool
+	}{
+		{"maximum request with cleanup", 1024, 1, true},
+		{"maximum combined", 1024, 1024, true},
+		{"too many requested", 1025, 0, false},
+		{"too many derived", 1, 1025, false},
+		{"too many combined", 1024, 1025, false},
+		{"only derived", 0, 1, false},
+		{"empty", 0, 0, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			operations := make([]commandschema.ChangePlanOperationInput, 0, test.requested+test.derived)
+			for index := 0; index < test.requested+test.derived; index++ {
+				operations = append(operations, commandschema.ChangePlanOperationInput{
+					Kind: "configuration", Action: "remove", Owner: "example.com/email/smtp.New",
+					Path: fmt.Sprintf("field_%04d", index), Derived: index >= test.requested,
+				})
+			}
+			plan, err := commandschema.NewChangePlan(commandschema.ChangePlanInput{
+				RequestDigest: changePlanDigest,
+				InputSnapshot: commandschema.ChangePlanSnapshotInput{
+					ModulePath: "example.com/acme/app", ConfigurationMode: "default", ConfigurationPath: "plystra.yaml",
+					RootDigest: changePlanDigest, SelectedDigest: changePlanDigest,
+				},
+				ReadSet:    []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest}},
+				Operations: operations, ConfigurationScope: commandschema.ChangePlanConfigurationScopeInput{Mode: "default", Path: "plystra.yaml"},
+				ConfigurationImpact: impact, Effects: effects, FinalModelDigest: changePlanDigest,
+				Verification: []string{"plystra", "check"}, Completeness: "non_exact",
+			})
+			if test.valid {
+				if err != nil || !plan.Valid() {
+					t.Fatalf("bounded operations rejected: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("out-of-bounds operations accepted")
+			}
+		})
+	}
+}
 
 func TestChangePlanCanonicalizesIdentityAndKeepsAllImpactArrays(t *testing.T) {
 	impact, err := configurationimpact.New(configurationimpact.Input{})

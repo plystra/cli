@@ -432,7 +432,8 @@ unfinished Interface or Resource scaffolds without activation. Full Resource
 acceptance and change apply remain unsupported. The installed
 change-plan slice supports one interface_root present/absent,
 implementation_selection set/remove or resource_selection set/remove request,
-or a configuration-only batch of up to 1024 set/remove operations.
+or a configuration-only batch. One Implementation selection may be combined with
+configuration edits, with at most 1024 requested operations in total.
 The configuration view retains the selected current-Project layer, redacted
 field summaries, ownership and precedence, effective and overridden
 contributions, explicit removals, and configuration suppression.
