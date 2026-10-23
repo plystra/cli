@@ -48,7 +48,7 @@ func TestSelectionInputsProjectInterfaceRootUsesCapturedIdentities(t *testing.T)
 					if err != nil {
 						t.Fatal(err)
 					}
-					got, err := inputs.ProjectInterfaceChanges([]applicationmeta.InterfaceRootEdit{{Interface: id, Root: kind, Present: present}}, nil)
+					got, err := inputs.ProjectSelectionChanges([]applicationmeta.InterfaceRootEdit{{Interface: id, Root: kind, Present: present}}, nil, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -68,7 +68,7 @@ func TestSelectionInputsProjectInterfaceRootUsesCapturedIdentities(t *testing.T)
 			roots := []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "require"}, {Interface: id, Root: "expose", Present: true}}
 			constructor, _ := constructorsymbol.Parse("example.com/resource-consumer/entry.New")
 			choices := []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: constructor}}
-			updated, _, err := applicationmeta.EditInterfaceConfiguration([]byte(document), applicationmeta.InterfaceConfigurationEdit{Roots: roots, Selections: choices}, mode == "environment")
+			updated, _, err := applicationmeta.EditSelectionConfiguration([]byte(document), applicationmeta.SelectionConfigurationEdit{Roots: roots, Selections: choices}, mode == "environment")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,13 +76,13 @@ func TestSelectionInputsProjectInterfaceRootUsesCapturedIdentities(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := inputs.ProjectInterfaceChanges(roots, choices)
+			got, err := inputs.ProjectSelectionChanges(roots, choices, nil)
 			if err != nil || !reflect.DeepEqual(got.Manifest().InterfaceRequirements(), want.Manifest().InterfaceRequirements()) || !reflect.DeepEqual(got.Manifest().HTTPExposures(), want.Manifest().HTTPExposures()) || !reflect.DeepEqual(got.Manifest().ImplementationChoices(), want.Manifest().ImplementationChoices()) || roots[0].PreserveRoot || roots[1].PreserveRoot || choices[0].Constructor != constructor {
 				t.Fatalf("captured root batch differs from authored candidate or mutated request: %v", err)
 			}
 			writeFile(t, filepath.Join(root, path), "[PRIVATE_LATER_EDIT]\n")
 			before := snapshotTree(t, root)
-			if _, err := inputs.ProjectInterfaceChanges(roots, choices); err != nil {
+			if _, err := inputs.ProjectSelectionChanges(roots, choices, nil); err != nil {
 				t.Fatalf("projection reread changed input: %v", err)
 			}
 			if !reflect.DeepEqual(captured, inputs.CurrentLayers()) || string(inputs.SelectedSnapshot().Data()) != document {
@@ -93,7 +93,7 @@ func TestSelectionInputsProjectInterfaceRootUsesCapturedIdentities(t *testing.T)
 			}
 		})
 	}
-	if _, err := (applicationresolve.SelectionInputs{}).ProjectInterfaceChanges(nil, nil); !errors.Is(err, applicationresolve.ErrResolve) {
+	if _, err := (applicationresolve.SelectionInputs{}).ProjectSelectionChanges(nil, nil, nil); !errors.Is(err, applicationresolve.ErrResolve) {
 		t.Fatal("empty root projection accepted")
 	}
 }

@@ -71,7 +71,7 @@ func TestSelectionInputsProjectImplementationSelectionUsesCapturedIdentities(t *
 				if err != nil {
 					t.Fatal(err)
 				}
-				got, err := inputs.ProjectInterfaceChanges(nil, []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: choice, Remove: remove}})
+				got, err := inputs.ProjectSelectionChanges(nil, []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: choice, Remove: remove}}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -96,7 +96,7 @@ func TestSelectionInputsProjectImplementationSelectionUsesCapturedIdentities(t *
 			// Projection has no filesystem reads; a later edit is snapshot drift.
 			writeFile(t, filepath.Join(root, path), "[PRIVATE_LATER_EDIT]\n")
 			drifted := snapshotTree(t, root)
-			if _, err := inputs.ProjectInterfaceChanges(nil, []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: constructor}}); err != nil {
+			if _, err := inputs.ProjectSelectionChanges(nil, []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: constructor}}, nil); err != nil {
 				t.Fatalf("projection reread a changed document: %v", err)
 			}
 			if !reflect.DeepEqual(captured, inputs.CurrentLayers()) || string(inputs.SelectedSnapshot().Data()) != document {
@@ -331,7 +331,7 @@ func TestSelectionInputsRejectEmptyAndCancelledCalls(t *testing.T) {
 		}
 	}
 	var inputs applicationresolve.SelectionInputs
-	if _, err := inputs.ProjectInterfaceChanges(nil, []applicationmeta.ImplementationSelectionEdit{{Remove: true}}); !errors.Is(err, applicationresolve.ErrResolve) {
+	if _, err := inputs.ProjectSelectionChanges(nil, []applicationmeta.ImplementationSelectionEdit{{Remove: true}}, nil); !errors.Is(err, applicationresolve.ErrResolve) {
 		t.Fatal("empty input projected selection identities")
 	}
 	if _, err := inputs.ComposeCandidate([]byte("{}")); !errors.Is(err, applicationresolve.ErrResolve) {

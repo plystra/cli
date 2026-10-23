@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/resourcename"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -90,20 +91,21 @@ type InterfaceRootEdit struct {
 	PreserveRoot bool
 }
 
-// InterfaceConfigurationEdit combines roots, choices, proven ownership cleanup
+// SelectionConfigurationEdit combines roots, choices, proven ownership cleanup
 // and disjoint field edits in one complete document.
-type InterfaceConfigurationEdit struct {
+type SelectionConfigurationEdit struct {
 	Roots          []InterfaceRootEdit
 	Selections     []ImplementationSelectionEdit
+	Resources      []ResourceSelectionEdit
 	Configurations []ConstructorConfigurationRemoval
 	Bindings       []ResourceBindingRemoval
 	Values         []ConfigurationValueEdit
 }
 
-// InterfaceChangesIdentity projects final ownership without Config or encoding.
+// SelectionChangesIdentity projects final ownership without Config or encoding.
 // The real captured typed layers still govern final candidate validation.
-func InterfaceChangesIdentity(manifest Manifest, roots []InterfaceRootEdit, selections []ImplementationSelectionEdit, overlay bool) (Manifest, error) {
-	if validateInterfaceChanges(roots, selections) != nil {
+func SelectionChangesIdentity(manifest Manifest, roots []InterfaceRootEdit, selections []ImplementationSelectionEdit, resources []ResourceSelectionEdit, overlay bool) (Manifest, error) {
+	if validateSelectionChanges(roots, selections, resources) != nil {
 		return Manifest{}, ErrEditConfiguration
 	}
 	var err error
@@ -119,12 +121,18 @@ func InterfaceChangesIdentity(manifest Manifest, roots []InterfaceRootEdit, sele
 			return Manifest{}, err
 		}
 	}
+	for _, resource := range resources {
+		manifest, err = ResourceSelectionIdentity(manifest, resource.Instance, resource.Provider, resource.Remove, overlay)
+		if err != nil {
+			return Manifest{}, err
+		}
+	}
 	return manifest, nil
 }
 
-// EditInterfaceConfiguration encodes only the complete candidate document.
-func EditInterfaceConfiguration(data []byte, edit InterfaceConfigurationEdit, overlay bool) ([]byte, bool, error) {
-	if validateInterfaceChanges(edit.Roots, edit.Selections) != nil || len(edit.Values) > 0 && validateConfigurationEdits(edit.Values) != nil {
+// EditSelectionConfiguration encodes only the complete candidate document.
+func EditSelectionConfiguration(data []byte, edit SelectionConfigurationEdit, overlay bool) ([]byte, bool, error) {
+	if validateSelectionChanges(edit.Roots, edit.Selections, edit.Resources) != nil || len(edit.Values) > 0 && validateConfigurationEdits(edit.Values) != nil {
 		return nil, false, ErrEditConfiguration
 	}
 	configurations, bindings, err := selectionRemovals(edit.Configurations, edit.Bindings)
@@ -134,6 +142,13 @@ func EditInterfaceConfiguration(data []byte, edit InterfaceConfigurationEdit, ov
 	for _, removal := range configurations {
 		for _, value := range edit.Values {
 			if len(value.names) >= 2 && value.names[0] == "config" && value.names[1] == removal.Constructor.String() {
+				return nil, false, ErrEditConfiguration
+			}
+		}
+	}
+	for _, resource := range edit.Resources {
+		for _, value := range edit.Values {
+			if resource.Remove && len(value.names) >= 3 && value.names[0] == "resources" && value.names[1] == "instances" && value.names[2] == resource.Instance {
 				return nil, false, ErrEditConfiguration
 			}
 		}
@@ -157,6 +172,19 @@ func EditInterfaceConfiguration(data []byte, edit InterfaceConfigurationEdit, ov
 			}
 			changed = changed || applied
 		}
+		for _, resource := range edit.Resources {
+			var applied bool
+			var err error
+			if resource.Remove {
+				applied, err = removeSelectionLeaf(document, []string{"resources", "instances", resource.Instance}, overlay)
+			} else {
+				applied, err = applyResourceProvider(document, resource.Instance, resource.Provider, resource.DiscardConfiguration)
+			}
+			if err != nil {
+				return false, err
+			}
+			changed = changed || applied
+		}
 		cleaned, err := applySelectionRemovals(document, configurations, bindings)
 		if err != nil {
 			return false, err
@@ -166,8 +194,8 @@ func EditInterfaceConfiguration(data []byte, edit InterfaceConfigurationEdit, ov
 	})
 }
 
-func validateInterfaceChanges(roots []InterfaceRootEdit, selections []ImplementationSelectionEdit) error {
-	if len(roots)+len(selections) == 0 || len(roots) > 0 && validateInterfaceRootEdits(roots) != nil {
+func validateSelectionChanges(roots []InterfaceRootEdit, selections []ImplementationSelectionEdit, resources []ResourceSelectionEdit) error {
+	if len(roots)+len(selections)+len(resources) == 0 || len(roots) > 0 && validateInterfaceRootEdits(roots) != nil {
 		return ErrEditConfiguration
 	}
 	seen := make(map[interfaceid.Identifier]bool, len(selections))
@@ -176,6 +204,13 @@ func validateInterfaceChanges(roots []InterfaceRootEdit, selections []Implementa
 			return ErrEditConfiguration
 		}
 		seen[selection.Interface] = true
+	}
+	instances := make(map[string]bool, len(resources))
+	for _, resource := range resources {
+		if resourcename.Check(resource.Instance) != nil || resource.Remove != (resource.Provider.String() == "") || resource.Remove && resource.DiscardConfiguration || instances[resource.Instance] {
+			return ErrEditConfiguration
+		}
+		instances[resource.Instance] = true
 	}
 	return nil
 }

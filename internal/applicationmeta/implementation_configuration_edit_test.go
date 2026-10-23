@@ -72,7 +72,7 @@ func TestImplementationSelectionIdentityMatchesAuthoredEdit(t *testing.T) {
 	}
 }
 
-func TestEditInterfaceConfigurationSelectionUsesOnlyFinalBounds(t *testing.T) {
+func TestEditSelectionConfigurationSelectionUsesOnlyFinalBounds(t *testing.T) {
 	t.Parallel()
 	id := mustImplementationChoiceInterfaceID(t, "email.send/v1")
 	constructor := mustImplementationChoiceConstructor(t, "example.com/email/new.New")
@@ -86,13 +86,13 @@ func TestEditInterfaceConfigurationSelectionUsesOnlyFinalBounds(t *testing.T) {
 	if _, _, err := applicationmeta.SetImplementationChoice(input, id, constructor); err == nil {
 		t.Fatal("fixture does not exceed the selection-only intermediate bound")
 	}
-	edit := applicationmeta.InterfaceConfigurationEdit{Roots: []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "expose", Present: true}}, Selections: []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: constructor}}, Values: []applicationmeta.ConfigurationValueEdit{value}, Configurations: []applicationmeta.ConstructorConfigurationRemoval{{Constructor: old}}}
-	updated, changed, err := applicationmeta.EditInterfaceConfiguration(input, edit, false)
+	edit := applicationmeta.SelectionConfigurationEdit{Roots: []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "expose", Present: true}}, Selections: []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: constructor}}, Values: []applicationmeta.ConfigurationValueEdit{value}, Configurations: []applicationmeta.ConstructorConfigurationRemoval{{Constructor: old}}}
+	updated, changed, err := applicationmeta.EditSelectionConfiguration(input, edit, false)
 	if err != nil || !changed || len(updated) > 1024 || !bytes.Contains(updated, []byte("# KEEP")) {
 		t.Fatalf("valid complete edit rejected: %t, %v", changed, err)
 	}
 	edit.Configurations = []applicationmeta.ConstructorConfigurationRemoval{{Constructor: constructor}}
-	if updated, changed, err := applicationmeta.EditInterfaceConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || updated != nil {
+	if updated, changed, err := applicationmeta.EditSelectionConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || updated != nil {
 		t.Fatal("overlapping owner cleanup accepted")
 	}
 }

@@ -161,6 +161,17 @@ func (c Composition) CompositionDigest() string {
 // Compose applies only the selected current-project layers. Ordinary Go Module
 // dependencies remain visible to discovery but never contribute configuration.
 func Compose(_ []Dependency, current Manifest, schemas SchemaLookup) (Composition, error) {
+	return compose(current, schemas, false)
+}
+
+// ComposeSelectionIdentities folds captured selection intent without Config or
+// requiring every Resource to have a provider. This is repair/ownership input,
+// never a substitute for ordinary typed composition and final validation.
+func ComposeSelectionIdentities(current Manifest, schemas SchemaLookup) (Composition, error) {
+	return compose(WithoutConstructorConfiguration(current), schemas, true)
+}
+
+func compose(current Manifest, schemas SchemaLookup, identitiesOnly bool) (Composition, error) {
 	if schemas == nil {
 		return Composition{}, fmt.Errorf("%w: schema lookup is nil", ErrCompose)
 	}
@@ -211,9 +222,11 @@ func Compose(_ []Dependency, current Manifest, schemas SchemaLookup) (Compositio
 	if err != nil {
 		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 	}
-	effective, err = finalizeResources(effective, schemas)
-	if err != nil {
-		return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+	if !identitiesOnly {
+		effective, err = finalizeResources(effective, schemas)
+		if err != nil {
+			return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
+		}
 	}
 	effective.modulePath, effective.source = current.modulePath, current.source
 	effective.layers = nil

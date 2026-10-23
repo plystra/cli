@@ -38,9 +38,9 @@ binding parameters, preserving still-owned configuration. Surviving dependencies
 must remain valid; the command never guesses a replacement binding or missing
 required value. It regenerates and validates the selected final state, with
 rollback on failure. plystra change plan --request change.json --format json
-previews Interface root/selection/configuration batches, configuration-only
-batches, or one resource_selection set/remove with optional configuration edits
-without mutation. Multi-operation Interface batches require a valid complete final state.
+previews Interface root, Implementation/Resource selection, and configuration
+batches without mutation. Every multi-operation selection batch requires a valid
+complete final state.
 Change apply, primitive-command lowering, and --dry-run are not installed.
 
 An effective choice for an intrinsic kernel.* Interface emits

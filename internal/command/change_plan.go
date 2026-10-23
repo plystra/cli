@@ -25,9 +25,8 @@ const changePlanUsage = `Usage:
 
 Plans one bounded declarative change request without modifying the Project. This
 installed slice accepts batches of interface_root present/absent (require or
-expose), implementation_selection set/remove and configuration set/remove
-operations. It also accepts one resource_selection set/remove with optional
-configuration edits (at most 1024 requested operations).
+expose), implementation_selection set/remove, resource_selection set/remove,
+and configuration set/remove operations (at most 1024 requested operations).
 It analyzes the final ownership graph.
 Root changes preserve complete-set boundaries
 or sparse environment intent and clean up only owners lost in the final state.
@@ -48,12 +47,12 @@ delete removed fields; environments record exact field exclusions. All final Con
 and binding obligations must validate, including already-satisfied removals.
 Configuration-only batches edit disjoint paths and validate only the complete final
 state. Same-owner ancestor/descendant targets conflict regardless of request order.
-Interface batches and combined Resource/configuration previews require a valid complete final state;
-they do not enumerate missing-value decisions. Edits use the final owners' schemas,
+Every multi-operation selection batch requires a valid complete final state;
+it does not enumerate missing-value decisions. Edits use the final owners' schemas,
 and obsolete Config and binding cleanup happens in the same document edit.
 Resource set requires an existing effective instance. A provider change discards
 old selected Config, including its exclusion; matching fields are never migrated.
-Other mixed operation kinds remain unsupported. Public plans allow at most 1024
+Other operation kinds remain unsupported. Public plans allow at most 1024
 derived operations separately; cleanup does not consume the request limit.
 Public request identity omits submitted values. Every configuration set declares a
 planned write, even for equal values, so private equality is not disclosed.
@@ -123,18 +122,17 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			roots++
 		}
 	}
-	interfaceBatch := len(operations) > 1 && roots+implementationSelections > 0 && roots+implementationSelections+configurations == len(operations)
-	resourceCompound := configurations > 0 && resourceSelections == 1 && configurations+1 == len(operations)
-	if len(operations) == 0 || len(operations) != 1 && configurations != len(operations) && !resourceCompound && !interfaceBatch {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports Interface root/selection/configuration batches, configuration-only batches, or one Resource selection with optional configuration edits.")
+	selectionBatch := len(operations) > 1 && roots+implementationSelections+resourceSelections > 0 && roots+implementationSelections+resourceSelections+configurations == len(operations)
+	if len(operations) == 0 || len(operations) != 1 && configurations != len(operations) && !selectionBatch {
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports Interface root, Implementation/Resource selection, and configuration batches.")
 	}
 	var target, constructor string
 	requiresConstructor := true
 	planner := implementationselect.Preview
-	if interfaceBatch {
+	if selectionBatch {
 		requiresConstructor = false
 		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
-			return implementationselect.PreviewInterfaceConfigurations(ctx, options, request)
+			return implementationselect.PreviewSelectionConfigurations(ctx, options, request)
 		}
 	} else {
 		switch operations[0].Kind() {
@@ -168,13 +166,10 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		case changerequest.KindConfiguration:
 			requiresConstructor = false
 			planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
-				if resourceCompound {
-					return implementationselect.PreviewResourceConfigurations(ctx, options, request)
-				}
 				return implementationselect.PreviewConfigurations(ctx, options, request)
 			}
 		default:
-			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports Interface root/selection/configuration batches, configuration-only batches, or one Resource selection with optional configuration edits.")
+			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports Interface root, Implementation/Resource selection, and configuration batches.")
 		}
 	}
 	if constructor == "" && requiresConstructor {

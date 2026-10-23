@@ -135,32 +135,32 @@ type Options struct {
 	DependencyOutputLimit     int
 	// Offline constrains module and eligible-package discovery to locally
 	// available selected sources. Other Go helpers still need their own guard.
-	Offline               bool
-	CompileTimeout        time.Duration
-	ExecutionTimeout      time.Duration
-	TemporaryParent       string
+	Offline          bool
+	CompileTimeout   time.Duration
+	ExecutionTimeout time.Duration
+	TemporaryParent  string
 }
 
 // Result is one immutable filesystem provenance and stable generation
 // resolution assembled from the same application snapshot.
 type Result struct {
-	module                   modulelocate.Module
-	currentManifest          applicationmeta.Manifest
-	composition              applicationmeta.Composition
-	dependencies             moduledependency.Index
-	interfaces               interfaceinventory.Index
-	resources                interfaceinventory.ResourceIndex
-	resourceProviders        resourceproviderinventory.Index
-	implementations          implementationinventory.Index
-	interfaceResolution      interfaceresolution.Result
-	inventory                plugininventory.Index
-	resolution               generationresolution.ExtensionResult
-	configs                  configurationresolve.Result
-	selection                ConfigurationSelection
-	evidence                 resolutionevidence.Evidence
-	rootData                 []byte
-	rootDigest               string
-	configurationSource      []byte
+	module              modulelocate.Module
+	currentManifest     applicationmeta.Manifest
+	composition         applicationmeta.Composition
+	dependencies        moduledependency.Index
+	interfaces          interfaceinventory.Index
+	resources           interfaceinventory.ResourceIndex
+	resourceProviders   resourceproviderinventory.Index
+	implementations     implementationinventory.Index
+	interfaceResolution interfaceresolution.Result
+	inventory           plugininventory.Index
+	resolution          generationresolution.ExtensionResult
+	configs             configurationresolve.Result
+	selection           ConfigurationSelection
+	evidence            resolutionevidence.Evidence
+	rootData            []byte
+	rootDigest          string
+	configurationSource []byte
 }
 
 // Module returns the nearest Plystra Project Go Module.
@@ -253,7 +253,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	interfaces := declarations.Interfaces()
 	implementations := declarations.Implementations()
 	inventory, schemaLookup := inputs.inventory, inputs.schemaLookup
-	currentManifest, composition, err := inputs.composeCurrent(rootManifest, selectedManifest)
+	currentManifest, composition, err := inputs.composeCurrent(rootManifest, selectedManifest, false)
 	if err != nil {
 		return Result{}, err
 	}
@@ -380,9 +380,9 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 			environment: selector.environment,
 			digest:      selectedDigest,
 		},
-		rootData:                 append([]byte(nil), rootData...),
-		rootDigest:               rootDigest,
-		configurationSource:      configurationSnapshot.Data(),
+		rootData:            append([]byte(nil), rootData...),
+		rootDigest:          rootDigest,
+		configurationSource: configurationSnapshot.Data(),
 	}
 	return result, nil
 }

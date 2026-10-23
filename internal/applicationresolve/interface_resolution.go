@@ -24,7 +24,7 @@ func resolveInterfaces(manifest applicationmeta.Manifest, composition applicatio
 	return interfaceresolution.Resolve(input)
 }
 
-func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Input, error) {
+func interfaceSelectionInput(manifest applicationmeta.Manifest, interfaces interfaceinventory.Index, implementations implementationinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Input, error) {
 	requirements := manifest.InterfaceRequirements()
 	exposures := manifest.HTTPExposures()
 	rootRequirements := make([]interfaceresolution.Requirement, 0, len(requirements)+len(exposures))
@@ -105,6 +105,17 @@ func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces inte
 			Sources:     choiceSources,
 		}
 	}
+	return interfaceresolution.Input{
+		Interfaces: interfaces, Implementations: implementations,
+		Requirements: rootRequirements, Choices: explicitChoices,
+	}, nil
+}
+
+func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces interfaceinventory.Index, implementations implementationinventory.Index, resourceProviders resourceproviderinventory.Index, legacyPlugins plugininventory.Index, sourceContext applicationinput.SourceContext) (interfaceresolution.Input, error) {
+	input, err := interfaceSelectionInput(manifest, interfaces, implementations, legacyPlugins, sourceContext)
+	if err != nil {
+		return interfaceresolution.Input{}, err
+	}
 	resourceInstances := make([]constructorgraph.ResourceInstanceInput, 0, len(manifest.ResourceInstances()))
 	for _, instance := range manifest.ResourceInstances() {
 		sources, err := resourceConfigurationSources(sourceContext, instance.ProviderSource(), fmt.Sprintf("resources.instances[%q].use", instance.Name()), instance.ProviderDeclarationSource())
@@ -124,15 +135,10 @@ func interfaceResolutionInput(manifest applicationmeta.Manifest, interfaces inte
 			Namespace: constructorgraph.ResourceConsumerNamespace(binding.Namespace()), Consumer: binding.Consumer(), Parameter: binding.ParameterName(), Target: binding.Target(), Sources: sources,
 		})
 	}
-	return interfaceresolution.Input{
-		Interfaces:         interfaces,
-		Implementations:    implementations,
-		Requirements:       rootRequirements,
-		Choices:            explicitChoices,
-		ResourceProviders:  resourceProviders,
-		ResourceInstances:  resourceInstances,
-		ResourceBindings:   resourceBindings,
-	}, nil
+	input.ResourceProviders = resourceProviders
+	input.ResourceInstances = resourceInstances
+	input.ResourceBindings = resourceBindings
+	return input, nil
 }
 
 func resourceConfigurationSources(context applicationinput.SourceContext, reference, field string, declaration applicationmeta.ConfigurationDeclarationSource) ([]constructorgraph.ResourceSource, error) {

@@ -261,15 +261,15 @@ func (s SelectionInputs) ComposeSelectionCandidate(selected []byte) (application
 	return s.composeCandidate(selected, true, true)
 }
 
-// ProjectInterfaceChanges composes captured roots and choices without encoding
+// ProjectSelectionChanges composes captured roots and choices without encoding
 // or intermediate Config validation. Already-effective present roots stay put.
-func (s SelectionInputs) ProjectInterfaceChanges(roots []applicationmeta.InterfaceRootEdit, selections []applicationmeta.ImplementationSelectionEdit) (applicationmeta.Composition, error) {
+func (s SelectionInputs) ProjectSelectionChanges(roots []applicationmeta.InterfaceRootEdit, selections []applicationmeta.ImplementationSelectionEdit, resources []applicationmeta.ResourceSelectionEdit) (applicationmeta.Composition, error) {
 	if s.module.Path() == "" {
 		return applicationmeta.Composition{}, ErrResolve
 	}
 	s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
 	selected := applicationmeta.WithoutConstructorConfiguration(s.selectedManifest)
-	_, before, err := s.composeCurrent(s.rootManifest, selected)
+	_, before, err := s.composeCurrent(s.rootManifest, selected, true)
 	if err != nil {
 		return applicationmeta.Composition{}, err
 	}
@@ -277,27 +277,11 @@ func (s SelectionInputs) ProjectInterfaceChanges(roots []applicationmeta.Interfa
 	for index := range roots {
 		roots[index].PreserveRoot = roots[index].Present && before.Manifest().HasInterfaceRoot(roots[index].Interface, roots[index].Root)
 	}
-	selected, err = applicationmeta.InterfaceChangesIdentity(selected, roots, selections, s.selector.mode == configurationModeEnvironment)
+	selected, err = applicationmeta.SelectionChangesIdentity(selected, roots, selections, resources, s.selector.mode == configurationModeEnvironment)
 	if err != nil {
 		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	_, composition, err := s.composeCurrent(s.rootManifest, selected)
-	return composition, err
-}
-
-// ProjectResourceSelection composes captured identities after one instance
-// change, including an existing provider-less instance's first assignment.
-// Original typed layers still govern final composition and validation.
-func (s SelectionInputs) ProjectResourceSelection(name string, provider constructorsymbol.Symbol, remove bool) (applicationmeta.Composition, error) {
-	if s.module.Path() == "" {
-		return applicationmeta.Composition{}, ErrResolve
-	}
-	selected, err := applicationmeta.ResourceSelectionIdentity(s.selectedManifest, name, provider, remove, s.selector.mode == configurationModeEnvironment)
-	if err != nil {
-		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
-	}
-	s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
-	_, composition, err := s.composeCurrent(s.rootManifest, selected)
+	_, composition, err := s.composeCurrent(s.rootManifest, selected, true)
 	return composition, err
 }
 
@@ -330,11 +314,11 @@ func (s SelectionInputs) composeCandidate(selected []byte, identitiesOnly, witho
 		manifest = applicationmeta.WithoutResourceConfiguration(manifest)
 		s.rootManifest = applicationmeta.WithoutResourceConfiguration(s.rootManifest)
 	}
-	_, composition, err := s.composeCurrent(s.rootManifest, manifest)
+	_, composition, err := s.composeCurrent(s.rootManifest, manifest, identitiesOnly)
 	return composition, err
 }
 
-func (s SelectionInputs) composeCurrent(base, selected applicationmeta.Manifest) (applicationmeta.Manifest, applicationmeta.Composition, error) {
+func (s SelectionInputs) composeCurrent(base, selected applicationmeta.Manifest, identitiesOnly bool) (applicationmeta.Manifest, applicationmeta.Composition, error) {
 	current := selected
 	if s.selector.mode == configurationModeEnvironment {
 		var err error
@@ -344,7 +328,13 @@ func (s SelectionInputs) composeCurrent(base, selected applicationmeta.Manifest)
 		}
 	}
 	current = applicationmeta.WithRootMetadata(current, s.rootManifest)
-	composition, err := applicationmeta.Compose(nil, current, s.schemaLookup)
+	var composition applicationmeta.Composition
+	var err error
+	if identitiesOnly {
+		composition, err = applicationmeta.ComposeSelectionIdentities(current, s.schemaLookup)
+	} else {
+		composition, err = applicationmeta.Compose(nil, current, s.schemaLookup)
+	}
 	if err != nil {
 		return applicationmeta.Manifest{}, applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
@@ -382,7 +372,7 @@ func (s SelectionInputs) CandidateOwners(composition applicationmeta.Composition
 	if err != nil {
 		return nil, err
 	}
-	input, err := interfaceResolutionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.declarations.ResourceProviders(), s.inventory, sources)
+	input, err := interfaceSelectionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.inventory, sources)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrResolve, err)
 	}

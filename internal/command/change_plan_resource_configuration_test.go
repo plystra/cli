@@ -335,9 +335,9 @@ func TestResourceConfigurationPreviewRejectsInvalidShapeBeforeDiscovery(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, data := range [][]byte{configuration, selection, configurationBatchRequest(t, configuration, selection, resourceConfigurationSelectionRequest(t, "database.retained", "remove", ""))} {
+	for _, data := range [][]byte{configuration, selection, configurationBatchRequest(t, configuration, selection, []byte(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"remove","module":"example.com/unused"}]}`))} {
 		request, _ := changerequest.Parse(data)
-		plan, err := implementationselect.PreviewResourceConfigurations(t.Context(), implementationselect.Options{}, request)
+		plan, err := implementationselect.PreviewSelectionConfigurations(t.Context(), implementationselect.Options{}, request)
 		if !errors.Is(err, implementationselect.ErrSelect) || !reflect.DeepEqual(plan, implementationselect.PlanResult{}) {
 			t.Fatal("invalid shape returned a partial plan")
 		}
@@ -346,7 +346,7 @@ func TestResourceConfigurationPreviewRejectsInvalidShapeBeforeDiscovery(t *testi
 		ctx     context.Context
 		options implementationselect.Options
 	}{{nil, implementationselect.Options{}}, {t.Context(), implementationselect.Options{Target: "database.primary"}}, {t.Context(), implementationselect.Options{Constructor: originalCompoundResourceProvider}}} {
-		if _, err := implementationselect.PreviewResourceConfigurations(test.ctx, test.options, valid); !errors.Is(err, implementationselect.ErrSelect) {
+		if _, err := implementationselect.PreviewSelectionConfigurations(test.ctx, test.options, valid); !errors.Is(err, implementationselect.ErrSelect) {
 			t.Fatal("invalid options accepted")
 		}
 	}
@@ -403,7 +403,7 @@ func previewResourceConfiguration(t *testing.T, root string, data []byte, select
 			options.ConfigurationPath = selector[1]
 		}
 	}
-	plan, err := implementationselect.PreviewResourceConfigurations(t.Context(), options, request)
+	plan, err := implementationselect.PreviewSelectionConfigurations(t.Context(), options, request)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/implementationinventory"
+	"github.com/plystra/cli/internal/interfaceid"
 )
 
 func TestSelectionInputsProjectResourceSelectionUsesCapturedIdentities(t *testing.T) {
@@ -57,7 +58,7 @@ func TestSelectionInputsProjectResourceSelectionUsesCapturedIdentities(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
-				got, err := inputs.ProjectResourceSelection("database.primary", choice, remove)
+				got, err := inputs.ProjectSelectionChanges(nil, nil, []applicationmeta.ResourceSelectionEdit{{Instance: "database.primary", Provider: choice, Remove: remove}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -76,12 +77,47 @@ func TestSelectionInputsProjectResourceSelectionUsesCapturedIdentities(t *testin
 					t.Fatalf("projection relaxed final typed composition: %v", err)
 				}
 			}
+			id, _ := interfaceid.Parse("app.resource/v1")
+			constructor, _ := constructorsymbol.Parse("example.com/resource-consumer/entry.New")
+			roots := []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "expose", Present: true}}
+			choices := []applicationmeta.ImplementationSelectionEdit{{Interface: id, Constructor: constructor}}
+			resources := []applicationmeta.ResourceSelectionEdit{{Instance: "database.primary", Provider: provider}, {Instance: "database.retained", Remove: true}}
+			updated, _, err := applicationmeta.EditSelectionConfiguration([]byte(document), applicationmeta.SelectionConfigurationEdit{Roots: roots, Selections: choices, Resources: resources}, mode == "environment")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := inputs.ComposeSelectionCandidate(updated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := inputs.ProjectSelectionChanges(roots, choices, resources)
+			if err != nil {
+				t.Fatal(err)
+			}
+			schemas := func(applicationmeta.ConfigurationNamespace, constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+				return implementationinventory.Configuration{}, false
+			}
+			wantDigest, err := applicationmeta.ConfigurationLayerDigest(want.Manifest(), schemas)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotDigest, err := applicationmeta.ConfigurationLayerDigest(got.Manifest(), schemas)
+			if err != nil || wantDigest != gotDigest || roots[0].PreserveRoot || resources[0].DiscardConfiguration || choices[0].Constructor != constructor {
+				t.Fatalf("mixed selection identity differs from authored edit or changed caller slices: %v", err)
+			}
+			unbound, err := inputs.ComposeSelectionCandidate([]byte(document))
+			if err != nil {
+				t.Fatalf("identity composition rejected a repairable old instance: %v", err)
+			}
+			if err := inputs.ValidateCandidate(unbound); err == nil {
+				t.Fatal("unbound identity projection authorized an executable candidate")
+			}
 			if !reflect.DeepEqual(before, snapshotTree(t, root)) {
 				t.Fatal("Resource projection changed Project files")
 			}
 			writeFile(t, filepath.Join(root, path), "[PRIVATE_LATER_EDIT]\n")
 			drifted := snapshotTree(t, root)
-			if _, err := inputs.ProjectResourceSelection("database.primary", provider, false); err != nil {
+			if _, err := inputs.ProjectSelectionChanges(roots, choices, resources); err != nil {
 				t.Fatalf("projection reread changed file: %v", err)
 			}
 			if !reflect.DeepEqual(captured, inputs.CurrentLayers()) || string(inputs.SelectedSnapshot().Data()) != document {
@@ -95,7 +131,7 @@ func TestSelectionInputsProjectResourceSelectionUsesCapturedIdentities(t *testin
 			}
 		})
 	}
-	if _, err := (applicationresolve.SelectionInputs{}).ProjectResourceSelection("database.primary", constructorsymbol.Symbol{}, true); !errors.Is(err, applicationresolve.ErrResolve) {
+	if _, err := (applicationresolve.SelectionInputs{}).ProjectSelectionChanges(nil, nil, []applicationmeta.ResourceSelectionEdit{{Instance: "database.primary", Remove: true}}); !errors.Is(err, applicationresolve.ErrResolve) {
 		t.Fatal("empty input projected Resource selection")
 	}
 }
