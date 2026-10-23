@@ -126,7 +126,7 @@ func PreviewInterfaceRoot(ctx context.Context, options Options, root string, pre
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
 	updated := original
-	if !present || !interfaceRootPresent(before.Manifest(), id, root) {
+	if !present || !before.Manifest().HasInterfaceRoot(id, root) {
 		edit := applicationmeta.SetInterfaceRoot
 		if inputs.ConfigurationSelection().Mode() == "environment" {
 			edit = applicationmeta.SetInterfaceRootOverlay
@@ -141,23 +141,6 @@ func PreviewInterfaceRoot(ctx context.Context, options Options, root string, pre
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
 	return selectionPlanResult(inputs, options.Target, kind, constructorsymbol.Symbol{}, updated, impact)
-}
-
-func interfaceRootPresent(manifest applicationmeta.Manifest, id interfaceid.Identifier, root string) bool {
-	if root == "require" {
-		for _, requirement := range manifest.InterfaceRequirements() {
-			if requirement.ID() == id {
-				return true
-			}
-		}
-	} else {
-		for _, exposure := range manifest.HTTPExposures() {
-			if exposure.ID() == id {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func discoverPlanInputs(ctx context.Context, options Options) (applicationresolve.SelectionInputs, error) {

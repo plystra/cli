@@ -278,6 +278,29 @@ func (s SelectionInputs) ProjectImplementationSelection(id interfaceid.Identifie
 	return composition, err
 }
 
+// ProjectInterfaceRoot composes captured root identities without intermediate
+// Config validation or encoding. An already-effective present root is unchanged.
+func (s SelectionInputs) ProjectInterfaceRoot(id interfaceid.Identifier, root string, present bool) (applicationmeta.Composition, error) {
+	if s.module.Path() == "" || id.String() == "" || root != "require" && root != "expose" {
+		return applicationmeta.Composition{}, ErrResolve
+	}
+	s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
+	selected := applicationmeta.WithoutConstructorConfiguration(s.selectedManifest)
+	_, before, err := s.composeCurrent(s.rootManifest, selected)
+	if err != nil {
+		return applicationmeta.Composition{}, err
+	}
+	if present && before.Manifest().HasInterfaceRoot(id, root) {
+		return before, nil
+	}
+	selected, err = applicationmeta.InterfaceRootIdentity(selected, id, root, present, s.selector.mode == configurationModeEnvironment)
+	if err != nil {
+		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	_, composition, err := s.composeCurrent(s.rootManifest, selected)
+	return composition, err
+}
+
 // ProjectResourceSelection composes captured identities after one instance
 // change, including an existing provider-less instance's first assignment.
 // Original typed layers still govern final composition and validation.

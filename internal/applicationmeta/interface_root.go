@@ -28,66 +28,89 @@ func setInterfaceRoot(data []byte, id interfaceid.Identifier, root string, prese
 		return nil, false, fmt.Errorf("%w: exact Interface and root kind are required", ErrSetInterfaceRoot)
 	}
 	return editSelectionDocument(data, overlay, ErrSetInterfaceRoot, func(document *yaml.Node) (bool, error) {
-		if root == "expose" {
+		return applyInterfaceRoot(document, id, root, present, overlay)
+	})
+}
+
+func applyInterfaceRoot(document *yaml.Node, id interfaceid.Identifier, root string, present, overlay bool) (bool, error) {
+	if root == "expose" {
+		if !present {
+			return removeSelectionLeaf(document, []string{"http", "expose", id.String()}, overlay)
+		}
+		current := mappingChild(mappingChild(mappingChild(document, "http"), "expose"), id.String())
+		if current != nil && !isRemovalMapping(current) {
+			return false, nil
+		}
+		exposure := HTTPExposure{id: id, transport: HTTPTransportConnect}
+		if err := setKeyedConfigurationDecision(document, []string{"http", "expose"}, id.String(), httpExposureYAML(exposure)); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+
+	interfaces := mappingChild(document, "interfaces")
+	requirements := mappingChild(interfaces, "require")
+	if !overlay || requirements != nil && requirements.Kind == yaml.SequenceNode {
+		if requirements == nil {
 			if !present {
-				return removeSelectionLeaf(document, []string{"http", "expose", id.String()}, overlay)
-			}
-			current := mappingChild(mappingChild(mappingChild(document, "http"), "expose"), id.String())
-			if current != nil && !isRemovalMapping(current) {
 				return false, nil
 			}
-			exposure := HTTPExposure{id: id, transport: HTTPTransportConnect}
-			if err := setKeyedConfigurationDecision(document, []string{"http", "expose"}, id.String(), httpExposureYAML(exposure)); err != nil {
-				return false, err
-			}
-			return true, nil
-		}
-
-		interfaces := mappingChild(document, "interfaces")
-		requirements := mappingChild(interfaces, "require")
-		if !overlay || requirements != nil && requirements.Kind == yaml.SequenceNode {
-			if requirements == nil {
-				if !present {
-					return false, nil
-				}
-				var err error
-				interfaces, err = ensureMappingPath(document, []string{"interfaces"})
-				if err != nil {
-					return false, err
-				}
-				requirements = interfaceRootSequence()
-				setMappingValue(interfaces, "require", requirements)
-			}
-			if requirements.Kind != yaml.SequenceNode {
-				return false, ErrInvalidManifest
-			}
-			return editInterfaceRootSequence(requirements, id, present), nil
-		}
-
-		if requirements == nil {
 			var err error
 			interfaces, err = ensureMappingPath(document, []string{"interfaces"})
 			if err != nil {
 				return false, err
 			}
-			requirements = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			requirements = interfaceRootSequence()
 			setMappingValue(interfaces, "require", requirements)
 		}
-		addKey, removeKey := "add", "remove"
-		if !present {
-			addKey, removeKey = removeKey, addKey
+		if requirements.Kind != yaml.SequenceNode {
+			return false, ErrInvalidManifest
 		}
-		changed := false
-		if opposite := mappingChild(requirements, removeKey); opposite != nil {
-			changed = editInterfaceRootSequence(opposite, id, false)
+		return editInterfaceRootSequence(requirements, id, present), nil
+	}
+
+	if requirements == nil {
+		var err error
+		interfaces, err = ensureMappingPath(document, []string{"interfaces"})
+		if err != nil {
+			return false, err
 		}
-		selected := mappingChild(requirements, addKey)
-		if selected == nil {
-			selected = interfaceRootSequence()
-			setMappingValue(requirements, addKey, selected)
+		requirements = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		setMappingValue(interfaces, "require", requirements)
+	}
+	addKey, removeKey := "add", "remove"
+	if !present {
+		addKey, removeKey = removeKey, addKey
+	}
+	changed := false
+	if opposite := mappingChild(requirements, removeKey); opposite != nil {
+		changed = editInterfaceRootSequence(opposite, id, false)
+	}
+	selected := mappingChild(requirements, addKey)
+	if selected == nil {
+		selected = interfaceRootSequence()
+		setMappingValue(requirements, addKey, selected)
+	}
+	return editInterfaceRootSequence(selected, id, true) || changed, nil
+}
+
+// HasInterfaceRoot reports authored require or expose membership, not dependency
+// reachability. A composed manifest includes only the effective declarations.
+func (m Manifest) HasInterfaceRoot(id interfaceid.Identifier, root string) bool {
+	if root == "require" {
+		for _, requirement := range m.interfaceRequirements {
+			if requirement.id == id {
+				return true
+			}
 		}
-		return editInterfaceRootSequence(selected, id, true) || changed, nil
-	})
+	} else if root == "expose" {
+		for _, exposure := range m.httpExposures {
+			if exposure.id == id {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func interfaceRootSequence() *yaml.Node {

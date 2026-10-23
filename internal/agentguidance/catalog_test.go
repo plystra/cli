@@ -248,7 +248,7 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"even for no-op removals", "Public request identity omits values",
 		"Configuration-only batches accept up to 1,024 disjoint operations",
 		"Same-owner ancestor/descendant targets conflict regardless of order",
-		"One Implementation or Resource selection may be combined with disjoint configuration edits",
+		"One Interface root or selection may be combined with disjoint configuration edits",
 		"Combined previews require a valid complete final state",
 		"Public plans allow at most 1,024 derived operations separately",
 		"Other mixed operation kinds remain unsupported",
