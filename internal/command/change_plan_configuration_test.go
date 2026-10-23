@@ -52,6 +52,11 @@ func TestRunChangePlanConfigurationHelpDescribesInstalledBounds(t *testing.T) {
 				t.Fatalf("help omits %q", phrase)
 			}
 		}
+		for _, phrase := range []string{"Required Implementation fields compare complete Interface selection closures", "old Resource errors do not hide them", "Dormant ownership is not reachability", "An incomplete old Interface closure does not prove newly reachable fields", "Previous-state alternatives require complete validation of that previous state"} {
+			if !strings.Contains(stdout, phrase) {
+				t.Fatalf("help omits required-field evidence boundary %q", phrase)
+			}
+		}
 	}
 }
 

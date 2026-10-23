@@ -64,12 +64,12 @@ func Resolve(input Input) (Result, error) {
 		graphRequirements[index] = constructorgraph.Requirement(requirement)
 	}
 	graph, err := constructorgraph.Build(constructorgraph.Input{
-		Implementations:    input.Implementations,
-		Requirements:       graphRequirements,
-		Selections:         selections,
-		ResourceProviders:  input.ResourceProviders,
-		ResourceInstances:  input.ResourceInstances,
-		ResourceBindings:   input.ResourceBindings,
+		Implementations:   input.Implementations,
+		Requirements:      graphRequirements,
+		Selections:        selections,
+		ResourceProviders: input.ResourceProviders,
+		ResourceInstances: input.ResourceInstances,
+		ResourceBindings:  input.ResourceBindings,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
@@ -114,6 +114,25 @@ func SelectedConstructors(input Input) ([]constructorsymbol.Symbol, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].String() < result[j].String() })
 	return result, err
+}
+
+// ReachableConstructors returns the complete Interface-reachable constructor
+// set, excluding dormant choices. It validates selection closure, not Resource
+// bindings, constructor cycles or Config. An incomplete closure returns no set.
+func ReachableConstructors(input Input) ([]constructorsymbol.Symbol, error) {
+	resolver, _, _, missing, err := selectConstructors(input)
+	if err != nil {
+		return nil, err
+	}
+	if missing {
+		return nil, fmt.Errorf("%w: %w", ErrResolve, constructorgraph.ErrMissingBinding)
+	}
+	result := make([]constructorsymbol.Symbol, 0, len(resolver.visitedConstructors))
+	for symbol := range resolver.visitedConstructors {
+		result = append(result, resolver.catalog.constructors[symbol].symbol)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].String() < result[j].String() })
+	return result, nil
 }
 
 func selectConstructors(input Input) (selector, []Requirement, []IntrinsicRequirement, bool, error) {

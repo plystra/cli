@@ -847,11 +847,16 @@ present/absent, `implementation_selection` set/remove, `resource_selection`
 set/remove, and `configuration` set/remove operations, with up to 1,024 requested
 operations in total. All selections and fields share the final ownership graph
 and one selected-document edit. The read-only `plystra.change-plan/v1` payload contains a plan digest and
-all five `configuration_impact` arrays. When both the old and candidate graphs
-resolve, a newly reachable Implementation reports required top-level Config
-fields and required descendants of non-pointer fixed objects, with constructor
-provenance but no configured values. Every missing field of either kind is
-reported as an unresolved decision in a non-exact read-only preview. The
+all five `configuration_impact` arrays. When both old and candidate Interface
+selection closures are complete, a newly reachable Implementation reports
+required top-level Config fields and required descendants of non-pointer fixed
+objects, with constructor provenance but no configured values. Old Resource provider or binding errors do
+not suppress these fields. Dormant choices retain configuration ownership but
+are not previously reachable constructors. An incomplete old Interface closure
+does not prove newly reachable fields. Complete final Config, Resource and
+binding validation remains mandatory. A previous-constructor alternative is
+offered only after its complete state validates. Every missing field of either
+kind is reported as an unresolved decision in a non-exact read-only preview. The
 `plystra use` command still rejects that invalid final configuration.
 Removing an Implementation selection deletes its exact local key in a complete
 document or records a tombstone in the selected environment overlay. Resolution

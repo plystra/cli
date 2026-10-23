@@ -300,7 +300,7 @@ func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []by
 	previousStateValid := false
 	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
 		impactBefore = composed
-		if kind == "resource" || kind == "interface_root" {
+		if allowIncomplete {
 			previousStateValid = inputs.ValidateCandidate(composed) == nil
 		}
 	} else if kind == "resource" {
@@ -343,7 +343,10 @@ func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []by
 	if missingImplementation != nil || missingResource != nil {
 		var missingPaths []string
 		var missingSource string
-		alternatives := []string{"provide-required-field", "retain-previous-constructor"}
+		alternatives := []string{"provide-required-field"}
+		if previousStateValid {
+			alternatives = append(alternatives, "retain-previous-constructor")
+		}
 		if kind == "interface_root" {
 			alternatives = []string{"provide-required-field"}
 			if previousStateValid {
@@ -525,24 +528,24 @@ func authoredResourceConfigurationImpact(beforeLayers, afterLayers []application
 }
 
 func newlyRequiredImplementationFields(inputs applicationresolve.SelectionInputs, before, after applicationmeta.Composition) ([]configurationimpact.NewlyRequiredField, error) {
-	previous, err := inputs.ResolveCandidateInterfaces(before)
+	previous, err := inputs.CandidateReachableConstructors(before)
 	if err != nil {
 		return nil, nil
 	}
-	current, err := inputs.ResolveCandidateInterfaces(after)
+	current, err := inputs.CandidateReachableConstructors(after)
 	if err != nil {
 		return nil, err
 	}
 	oldOwners := make(map[constructorsymbol.Symbol]bool)
-	for _, node := range previous.Graph().ConstructionOrder() {
-		oldOwners[node.Symbol()] = true
+	for _, constructor := range previous {
+		oldOwners[constructor] = true
 	}
 	var fields []configurationimpact.NewlyRequiredField
-	for _, node := range current.Graph().ConstructionOrder() {
-		if oldOwners[node.Symbol()] {
+	for _, constructor := range current {
+		if oldOwners[constructor] {
 			continue
 		}
-		implementation, exists := inputs.Declarations().Implementations().BySymbol(node.Symbol())
+		implementation, exists := inputs.Declarations().Implementations().BySymbol(constructor)
 		if !exists {
 			continue
 		}

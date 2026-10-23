@@ -36,6 +36,10 @@ erased or retargeted; implicit dependencies resolve against the final instance s
 Single-root and single-selection previews report missing newly required,
 statically addressable constructor or Resource provider Config fields,
 including non-pointer fixed-object children, as unresolved decisions.
+Required Implementation fields compare complete Interface selection closures;
+old Resource errors do not hide them. Dormant ownership is not reachability.
+An incomplete old Interface closure does not prove newly reachable fields.
+Previous-state alternatives require complete validation of that previous state.
 Ambiguous implicit bindings introduced on one Resource instance are previewed as
 complete explicit assignments only when they pass bounded final-state validation,
 possibly with statically addressable missing Config fields. The preview fails

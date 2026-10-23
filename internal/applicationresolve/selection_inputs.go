@@ -365,22 +365,45 @@ func (s SelectionInputs) ResolveCandidateInterfaces(composition applicationmeta.
 // error; any returned owners then prove presence only, never absence. Ownership
 // is cleanup evidence, not proof of a valid application.
 func (s SelectionInputs) CandidateOwners(composition applicationmeta.Composition) ([]constructorsymbol.Symbol, error) {
-	if s.module.Path() == "" || !composition.Valid() {
-		return nil, fmt.Errorf("%w: selection inputs or composition are empty", ErrResolve)
-	}
-	sources, err := s.candidateSourceContext(composition)
+	input, err := s.candidateInterfaceSelectionInput(composition)
 	if err != nil {
 		return nil, err
-	}
-	input, err := interfaceSelectionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.inventory, sources)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	owners, err := interfaceresolution.SelectedConstructors(input)
 	if err != nil {
 		return owners, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	return owners, nil
+}
+
+// CandidateReachableConstructors requires a complete Interface selection closure
+// without depending on Resource completeness or Config. Dormant choices are not
+// reachable; this evidence never replaces complete final candidate validation.
+func (s SelectionInputs) CandidateReachableConstructors(composition applicationmeta.Composition) ([]constructorsymbol.Symbol, error) {
+	input, err := s.candidateInterfaceSelectionInput(composition)
+	if err != nil {
+		return nil, err
+	}
+	constructors, err := interfaceresolution.ReachableConstructors(input)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	return constructors, nil
+}
+
+func (s SelectionInputs) candidateInterfaceSelectionInput(composition applicationmeta.Composition) (interfaceresolution.Input, error) {
+	if s.module.Path() == "" || !composition.Valid() {
+		return interfaceresolution.Input{}, fmt.Errorf("%w: selection inputs or composition are empty", ErrResolve)
+	}
+	sources, err := s.candidateSourceContext(composition)
+	if err != nil {
+		return interfaceresolution.Input{}, err
+	}
+	input, err := interfaceSelectionInput(composition.Manifest(), s.declarations.Interfaces(), s.declarations.Implementations(), s.inventory, sources)
+	if err != nil {
+		return interfaceresolution.Input{}, fmt.Errorf("%w: %w", ErrResolve, err)
+	}
+	return input, nil
 }
 
 // ValidateCandidate checks the complete candidate Interface/Resource graph,
