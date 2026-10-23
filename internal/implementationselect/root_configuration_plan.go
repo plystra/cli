@@ -11,31 +11,30 @@ import (
 	"github.com/plystra/cli/internal/interfaceid"
 )
 
-// PreviewRootConfigurations plans one root and typed field edits against final
+// PreviewRootConfigurations plans roots and optional typed field edits against final
 // ownership. Only the complete candidate must validate; no bytes are installed.
 func PreviewRootConfigurations(ctx context.Context, options Options, request changerequest.Request) (PlanResult, error) {
 	if ctx == nil || !request.Valid() || options.Target != "" || options.Constructor != "" {
 		return PlanResult{}, ErrSelect
 	}
-	var root changerequest.InterfaceRoot
+	var roots []applicationmeta.InterfaceRootEdit
 	var changes []changerequest.Configuration
 	for _, operation := range request.Operations() {
 		if change, ok := operation.Configuration(); ok {
 			changes = append(changes, change)
-		} else if change, ok := operation.InterfaceRoot(); ok && root.Interface() == "" {
-			root = change
+		} else if change, ok := operation.InterfaceRoot(); ok {
+			id, err := interfaceid.Parse(change.Interface())
+			if err != nil {
+				return PlanResult{}, ErrSelect
+			}
+			roots = append(roots, applicationmeta.InterfaceRootEdit{Interface: id, Root: string(change.Root()), Present: change.Action() == changerequest.RootPresent})
 		} else {
 			return PlanResult{}, ErrSelect
 		}
 	}
-	if root.Interface() == "" || len(changes) == 0 {
+	if len(roots) == 0 {
 		return PlanResult{}, ErrSelect
 	}
-	id, err := interfaceid.Parse(root.Interface())
-	if err != nil {
-		return PlanResult{}, ErrSelect
-	}
-	present := root.Action() == changerequest.RootPresent
 	inputs, err := discoverPlanInputs(ctx, options)
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
@@ -45,7 +44,7 @@ func PreviewRootConfigurations(ctx context.Context, options Options, request cha
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	identities, err := inputs.ProjectInterfaceRoot(id, string(root.Root()), present)
+	identities, err := inputs.ProjectInterfaceRoots(roots)
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
@@ -65,9 +64,11 @@ func PreviewRootConfigurations(ctx context.Context, options Options, request cha
 		}
 		markInheritedBindingRemovals(lower, bindings)
 	}
+	for index := range roots {
+		roots[index].PreserveRoot = roots[index].Present && before.Manifest().HasInterfaceRoot(roots[index].Interface, roots[index].Root)
+	}
 	updated, _, err := applicationmeta.EditRootConfiguration(original, applicationmeta.RootConfigurationEdit{
-		Interface: id, Root: string(root.Root()), Present: present,
-		PreserveRoot:   present && before.Manifest().HasInterfaceRoot(id, string(root.Root())),
+		Roots:          roots,
 		Configurations: configurations, Bindings: bindings, Values: edits,
 	}, overlay)
 	if err != nil {
@@ -90,7 +91,11 @@ func PreviewRootConfigurations(ctx context.Context, options Options, request cha
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	result, err := selectionPlanResult(inputs, root.Interface(), "interface_root", constructorsymbol.Symbol{}, updated, impact)
+	var target string
+	if len(roots) == 1 {
+		target = roots[0].Interface.String()
+	}
+	result, err := selectionPlanResult(inputs, target, "interface_root", constructorsymbol.Symbol{}, updated, impact)
 	if err != nil {
 		return PlanResult{}, err
 	}

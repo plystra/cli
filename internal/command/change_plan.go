@@ -24,11 +24,10 @@ const changePlanUsage = `Usage:
   plystra change plan --request <path|-> [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Plans one bounded declarative change request without modifying the Project. This
-installed slice accepts one interface_root present/absent (require or expose),
-implementation_selection set/remove, resource_selection set/remove, or a batch
-of configuration set/remove operations. One interface_root present/absent,
-implementation_selection set/remove, or resource_selection set/remove may also
-be combined with configuration edits
+installed slice accepts batches of interface_root present/absent (require or
+expose) and configuration set/remove operations, or one implementation_selection
+set/remove or resource_selection set/remove. One selection may also be combined
+with configuration edits
 (at most 1024 requested operations).
 It analyzes the final ownership graph.
 Root changes preserve complete-set boundaries
@@ -36,9 +35,9 @@ or sparse environment intent and clean up only owners lost in the final state.
 Resource removal deletes the whole exact instance, including provider and Config,
 and only that consumer's outgoing bindings. Surviving explicit bindings are never
 erased or retargeted; implicit dependencies resolve against the final instance set.
-Missing newly required, statically addressable constructor or Resource provider Config
-fields, including non-pointer fixed-object children, are reported as unresolved
-decisions.
+Single-root and single-selection previews report missing newly required,
+statically addressable constructor or Resource provider Config fields,
+including non-pointer fixed-object children, as unresolved decisions.
 Ambiguous implicit bindings introduced on one Resource instance are previewed as
 complete explicit assignments only when they pass bounded final-state validation,
 possibly with statically addressable missing Config fields. The preview fails
@@ -50,7 +49,7 @@ delete removed fields; environments record exact field exclusions. All final Con
 and binding obligations must validate, including already-satisfied removals.
 Configuration-only batches edit disjoint paths and validate only the complete final
 state. Same-owner ancestor/descendant targets conflict regardless of request order.
-Combined root/selection and configuration previews require a valid complete final state;
+Root batches and combined selection/configuration previews require a valid complete final state;
 they do not enumerate missing-value decisions. Edits use the final owners' schemas,
 and obsolete Config and binding cleanup happens in the same document edit.
 Resource set requires an existing effective instance. A provider change discards
@@ -125,9 +124,10 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			roots++
 		}
 	}
-	compound := configurations > 0 && implementationSelections+resourceSelections+roots == 1 && configurations+1 == len(operations)
-	if len(operations) == 0 || len(operations) != 1 && configurations != len(operations) && !compound {
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one root or selection, configuration-only batches, or one root or selection with configuration edits.")
+	rootBatch := roots > 0 && roots+configurations == len(operations)
+	compound := configurations > 0 && implementationSelections+resourceSelections == 1 && configurations+1 == len(operations)
+	if len(operations) == 0 || len(operations) != 1 && configurations != len(operations) && !compound && !rootBatch {
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports root/configuration batches, one selection, or one selection with configuration edits.")
 	}
 	var target, constructor string
 	requiresConstructor := true
@@ -154,6 +154,13 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		target = selection.Instance()
 		constructor, _ = selection.Provider()
 	case changerequest.KindInterfaceRoot:
+		if len(operations) > 1 {
+			requiresConstructor = false
+			planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
+				return implementationselect.PreviewRootConfigurations(ctx, options, request)
+			}
+			break
+		}
 		root, _ := operations[0].InterfaceRoot()
 		target = root.Interface()
 		requiresConstructor = false
@@ -163,7 +170,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	case changerequest.KindConfiguration:
 		requiresConstructor = false
 		planner = func(ctx context.Context, options implementationselect.Options) (implementationselect.PlanResult, error) {
-			if compound && roots == 1 {
+			if rootBatch {
 				return implementationselect.PreviewRootConfigurations(ctx, options, request)
 			}
 			if compound && resourceSelections == 1 {
@@ -175,7 +182,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			return implementationselect.PreviewConfigurations(ctx, options, request)
 		}
 	default:
-		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports one interface_root present/absent, implementation_selection set/remove, resource_selection set/remove, or a configuration-only batch.")
+		return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "This installed change-plan slice supports root/configuration batches, one implementation_selection set/remove, or one resource_selection set/remove with optional configuration edits.")
 	}
 	if constructor == "" && requiresConstructor {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The selection does not name a constructor.")

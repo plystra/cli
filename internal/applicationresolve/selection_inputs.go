@@ -278,10 +278,10 @@ func (s SelectionInputs) ProjectImplementationSelection(id interfaceid.Identifie
 	return composition, err
 }
 
-// ProjectInterfaceRoot composes captured root identities without intermediate
-// Config validation or encoding. An already-effective present root is unchanged.
-func (s SelectionInputs) ProjectInterfaceRoot(id interfaceid.Identifier, root string, present bool) (applicationmeta.Composition, error) {
-	if s.module.Path() == "" || id.String() == "" || root != "require" && root != "expose" {
+// ProjectInterfaceRoots composes captured root identities without intermediate
+// Config validation or encoding. Already-effective present roots are unchanged.
+func (s SelectionInputs) ProjectInterfaceRoots(roots []applicationmeta.InterfaceRootEdit) (applicationmeta.Composition, error) {
+	if s.module.Path() == "" {
 		return applicationmeta.Composition{}, ErrResolve
 	}
 	s.rootManifest = applicationmeta.WithoutConstructorConfiguration(s.rootManifest)
@@ -290,10 +290,11 @@ func (s SelectionInputs) ProjectInterfaceRoot(id interfaceid.Identifier, root st
 	if err != nil {
 		return applicationmeta.Composition{}, err
 	}
-	if present && before.Manifest().HasInterfaceRoot(id, root) {
-		return before, nil
+	roots = append([]applicationmeta.InterfaceRootEdit(nil), roots...)
+	for index := range roots {
+		roots[index].PreserveRoot = roots[index].Present && before.Manifest().HasInterfaceRoot(roots[index].Interface, roots[index].Root)
 	}
-	selected, err = applicationmeta.InterfaceRootIdentity(selected, id, root, present, s.selector.mode == configurationModeEnvironment)
+	selected, err = applicationmeta.InterfaceRootsIdentity(selected, roots, s.selector.mode == configurationModeEnvironment)
 	if err != nil {
 		return applicationmeta.Composition{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}

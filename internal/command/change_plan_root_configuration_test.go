@@ -315,15 +315,19 @@ func TestBuiltCLIChangePlanRootConfigurationFromStdin(t *testing.T) {
 	}
 	root, _ := writeConfigurationPlanProject(t)
 	before := commandTree(t, root)
-	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json", "--env", "production")
-	command.Dir, command.Env = filepath.Join(root, "original"), implementationSelectionCommandEnvironment(nil)
-	command.Stdin = bytes.NewReader(configurationBatchRequest(t, rootConfigurationRequest(t, "expose", "present"), configurationPlanRequest(t, "database.primary", "value", "set", json.RawMessage(`"PRIVATE_NEW"`))))
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.Output()
-	var result configurationChangePlanResult
-	if decodeErr := json.Unmarshal(output, &result); err != nil || decodeErr != nil || stderr.Len() != 0 || result.Status != "success" || bytes.Contains(output, []byte("PRIVATE_")) {
-		t.Fatalf("compiled root preview: %v\n%s\n%s", err, output, &stderr)
+	single := configurationBatchRequest(t, rootConfigurationRequest(t, "expose", "present"), configurationPlanRequest(t, "database.primary", "value", "set", json.RawMessage(`"PRIVATE_NEW"`)))
+	roots := configurationBatchRequest(t, rootConfigurationRequest(t, "require", "absent"), rootConfigurationRequest(t, "expose", "present"))
+	for _, request := range [][]byte{single, roots, configurationBatchRequest(t, roots, configurationPlanRequest(t, "database.primary", "value", "set", json.RawMessage(`"PRIVATE_NEW"`)))} {
+		command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json", "--env", "production")
+		command.Dir, command.Env = filepath.Join(root, "original"), implementationSelectionCommandEnvironment(nil)
+		command.Stdin = bytes.NewReader(request)
+		var stderr bytes.Buffer
+		command.Stderr = &stderr
+		output, err := command.Output()
+		var result configurationChangePlanResult
+		if decodeErr := json.Unmarshal(output, &result); err != nil || decodeErr != nil || stderr.Len() != 0 || result.Status != "success" || bytes.Contains(output, []byte("PRIVATE_")) {
+			t.Fatalf("compiled root preview: %v\n%s\n%s", err, output, &stderr)
+		}
 	}
 	if !reflect.DeepEqual(before, commandTree(t, root)) {
 		t.Fatal("compiled root preview changed Project")

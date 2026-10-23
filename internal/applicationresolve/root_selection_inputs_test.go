@@ -48,7 +48,7 @@ func TestSelectionInputsProjectInterfaceRootUsesCapturedIdentities(t *testing.T)
 					if err != nil {
 						t.Fatal(err)
 					}
-					got, err := inputs.ProjectInterfaceRoot(id, kind, present)
+					got, err := inputs.ProjectInterfaceRoots([]applicationmeta.InterfaceRootEdit{{Interface: id, Root: kind, Present: present}})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -65,9 +65,22 @@ func TestSelectionInputsProjectInterfaceRootUsesCapturedIdentities(t *testing.T)
 					}
 				}
 			}
+			roots := []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "require"}, {Interface: id, Root: "expose", Present: true}}
+			updated, _, err := applicationmeta.EditRootConfiguration([]byte(document), applicationmeta.RootConfigurationEdit{Roots: roots}, mode == "environment")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := inputs.ComposeSelectionCandidate(updated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := inputs.ProjectInterfaceRoots(roots)
+			if err != nil || !reflect.DeepEqual(got.Manifest().InterfaceRequirements(), want.Manifest().InterfaceRequirements()) || !reflect.DeepEqual(got.Manifest().HTTPExposures(), want.Manifest().HTTPExposures()) || roots[0].PreserveRoot || roots[1].PreserveRoot {
+				t.Fatalf("captured root batch differs from authored candidate or mutated request: %v", err)
+			}
 			writeFile(t, filepath.Join(root, path), "[PRIVATE_LATER_EDIT]\n")
 			before := snapshotTree(t, root)
-			if _, err := inputs.ProjectInterfaceRoot(id, "require", true); err != nil {
+			if _, err := inputs.ProjectInterfaceRoots([]applicationmeta.InterfaceRootEdit{{Interface: id, Root: "require", Present: true}}); err != nil {
 				t.Fatalf("projection reread changed input: %v", err)
 			}
 			if !reflect.DeepEqual(captured, inputs.CurrentLayers()) || string(inputs.SelectedSnapshot().Data()) != document {
@@ -78,7 +91,7 @@ func TestSelectionInputsProjectInterfaceRootUsesCapturedIdentities(t *testing.T)
 			}
 		})
 	}
-	if _, err := (applicationresolve.SelectionInputs{}).ProjectInterfaceRoot(interfaceid.Identifier{}, "require", true); !errors.Is(err, applicationresolve.ErrResolve) {
+	if _, err := (applicationresolve.SelectionInputs{}).ProjectInterfaceRoots(nil); !errors.Is(err, applicationresolve.ErrResolve) {
 		t.Fatal("empty root projection accepted")
 	}
 }

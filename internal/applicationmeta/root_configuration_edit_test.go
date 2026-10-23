@@ -46,7 +46,7 @@ func TestInterfaceRootIdentityMatchesAuthoredEdit(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					projected, err := applicationmeta.InterfaceRootIdentity(before, id, kind, present, overlay)
+					projected, err := applicationmeta.InterfaceRootsIdentity(before, []applicationmeta.InterfaceRootEdit{{Interface: id, Root: kind, Present: present}}, overlay)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -67,11 +67,11 @@ func TestInterfaceRootIdentityMatchesAuthoredEdit(t *testing.T) {
 	}
 	for _, kind := range []string{"", "invalid"} {
 		manifest, _ := applicationmeta.Parse([]byte("{}"))
-		if _, err := applicationmeta.InterfaceRootIdentity(manifest, id, kind, true, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
+		if _, err := applicationmeta.InterfaceRootsIdentity(manifest, []applicationmeta.InterfaceRootEdit{{Interface: id, Root: kind, Present: true}}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
 			t.Fatal("invalid root identity accepted")
 		}
 	}
-	if _, err := applicationmeta.InterfaceRootIdentity(applicationmeta.Manifest{}, interfaceid.Identifier{}, "require", true, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
+	if _, err := applicationmeta.InterfaceRootsIdentity(applicationmeta.Manifest{}, []applicationmeta.InterfaceRootEdit{{Interface: interfaceid.Identifier{}, Root: "require", Present: true}}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
 		t.Fatal("empty identity accepted")
 	}
 }
@@ -89,7 +89,7 @@ func TestEditRootConfigurationUsesOnlyFinalBounds(t *testing.T) {
 	if _, _, err := applicationmeta.SetInterfaceRoot(input, id, "expose", true); err == nil {
 		t.Fatal("fixture does not exceed the root-only intermediate bound")
 	}
-	edit := applicationmeta.RootConfigurationEdit{Interface: id, Root: "expose", Present: true, Values: []applicationmeta.ConfigurationValueEdit{value}}
+	edit := applicationmeta.RootConfigurationEdit{Roots: []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "expose", Present: true}, {Interface: id, Root: "require", Present: true}}, Values: []applicationmeta.ConfigurationValueEdit{value}}
 	updated, changed, err := applicationmeta.EditRootConfiguration(input, edit, false)
 	if err != nil || !changed || len(updated) > 1024 || !bytes.Contains(updated, []byte("# KEEP")) {
 		t.Fatalf("valid complete root edit rejected: %t, %v", changed, err)
@@ -98,8 +98,72 @@ func TestEditRootConfigurationUsesOnlyFinalBounds(t *testing.T) {
 	if data, changed, err := applicationmeta.EditRootConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || data != nil {
 		t.Fatal("field edit on removed owner accepted")
 	}
-	edit.Configurations, edit.PreserveRoot, edit.Present = nil, true, false
+	edit.Configurations, edit.Roots[0].PreserveRoot, edit.Roots[0].Present = nil, true, false
 	if _, _, err := applicationmeta.EditRootConfiguration(input, edit, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
 		t.Fatal("preserving an absent root accepted")
+	}
+}
+
+func TestInterfaceRootBatchIdentityMatchesFinalAuthoredEdit(t *testing.T) {
+	t.Parallel()
+	id := mustInterfaceRootID(t)
+	other, _ := interfaceid.Parse("other.run/v1")
+	roots := []applicationmeta.InterfaceRootEdit{{Interface: id, Root: "require"}, {Interface: id, Root: "expose", Present: true}, {Interface: other, Root: "require", Present: true}}
+	schemas := func(applicationmeta.ConfigurationNamespace, constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
+		return implementationinventory.Configuration{}, false
+	}
+	for _, overlay := range []bool{false, true} {
+		for _, document := range []string{"{}\n", "interfaces: {require: [app.run/v1]}\nhttp: {expose: {}}\n", "interfaces: {require: {add: [app.run/v1], remove: [other.run/v1]}}\nhttp: {expose: {app.run/v1: {$remove: true}}}\n"} {
+			if !overlay && strings.Contains(document, "remove:") {
+				continue
+			}
+			parse := applicationmeta.ParseCompleteSource
+			if overlay {
+				parse = applicationmeta.ParseOverlaySource
+			}
+			before, err := parse("selected.yaml", []byte(document))
+			if err != nil {
+				t.Fatal(err)
+			}
+			captured, err := applicationmeta.ConfigurationLayerDigest(before, schemas)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, reversed := range []bool{false, true} {
+				edits := slices.Clone(roots)
+				if reversed {
+					slices.Reverse(edits)
+				}
+				updated, _, err := applicationmeta.EditRootConfiguration([]byte(document), applicationmeta.RootConfigurationEdit{Roots: edits}, overlay)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expected, err := parse("selected.yaml", updated)
+				if err != nil {
+					t.Fatal(err)
+				}
+				projected, err := applicationmeta.InterfaceRootsIdentity(before, edits, overlay)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want, _ := applicationmeta.ConfigurationLayerDigest(expected, schemas)
+				got, err := applicationmeta.ConfigurationLayerDigest(projected, schemas)
+				if err != nil || want != got {
+					t.Fatalf("batch projection differs from complete authored edit: %v", err)
+				}
+			}
+			if after, _ := applicationmeta.ConfigurationLayerDigest(before, schemas); after != captured {
+				t.Fatal("batch projection mutated captured root declarations")
+			}
+		}
+	}
+	manifest, _ := applicationmeta.Parse([]byte("{}"))
+	for _, invalid := range [][]applicationmeta.InterfaceRootEdit{nil, {roots[0], roots[0]}, {{Interface: id, Root: "invalid"}}, {{Interface: id, Root: "require", PreserveRoot: true}}} {
+		if _, err := applicationmeta.InterfaceRootsIdentity(manifest, invalid, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
+			t.Fatal("invalid root batch identity accepted")
+		}
+		if data, changed, err := applicationmeta.EditRootConfiguration([]byte("{}"), applicationmeta.RootConfigurationEdit{Roots: invalid}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || data != nil || changed {
+			t.Fatal("invalid root batch edit accepted")
+		}
 	}
 }
