@@ -44,6 +44,8 @@ Ambiguous implicit bindings introduced on one Resource instance are previewed as
 complete explicit assignments only when they pass bounded final-state validation,
 possibly with statically addressable missing Config fields. The preview fails
 closed without a partial plan when more than 64 candidate bindings are probed.
+Final-state binding choices do not require a valid old provider state; invalid
+previous states are never offered as provider-retention alternatives.
 Configuration requests name an exact owned Implementation constructor or effective
 Resource instance and an owner-relative declared field path. Paths traverse only
 non-pointer fixed objects; atomic values must be supplied whole. Complete documents

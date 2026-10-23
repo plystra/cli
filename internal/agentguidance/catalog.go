@@ -517,6 +517,8 @@ Configuration previews name an exact owned Implementation constructor or effecti
 
 Required Implementation fields are compared through complete old and final Interface selection closures, independently of Resource provider completeness or binding validity. Dormant choices retain configuration ownership but become newly reachable only when activated. An incomplete old Interface closure proves no newly reachable fields; final validation remains mandatory. A previous-constructor alternative is offered only after its complete state validates.
 
+Single-Resource provider previews enumerate only final-state-validated binding assignments, even when old selected Config or obsolete bindings are invalid. Invalid previous states are never offered as provider-retention alternatives. Typed lower layers, unrelated final obligations, cycle rejection, and the 64-probe bound remain enforced.
+
 See the [Project README](../../../../README.md) for the currently supported application surface.
 `
 

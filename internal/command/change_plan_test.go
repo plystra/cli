@@ -1136,11 +1136,11 @@ func TestRunChangePlanResourceBindingChoicesDoNotHideOtherFailures(t *testing.T)
 	for _, test := range []struct {
 		name, parameters, extraDocument string
 		arrayConfig                     bool
-		invalidPreviousConfig           bool
+		invalidRetainedConfig           bool
 		otherResource                   bool
 	}{
 		{name: "invalid sibling binding", parameters: "replica database.Resource", extraDocument: "  bind:\n    instances:\n      database.retained: {bogus: database.primary}\n"},
-		{name: "invalid previous Config", parameters: "replica database.Resource", invalidPreviousConfig: true},
+		{name: "invalid retained Config", parameters: "replica database.Resource", invalidRetainedConfig: true},
 		{name: "non-enumerable required array child", parameters: "replica database.Resource", arrayConfig: true},
 		{name: "no compatible instance", parameters: "replica other.Resource", otherResource: true},
 		{name: "excessive candidates", parameters: "replica database.Resource"},
@@ -1175,15 +1175,15 @@ func (*Value) Read() {}
 					extraDocument += fmt.Sprintf("    database.extra%03d: {use: example.com/acme/implementation-use/original.New}\n", index)
 				}
 			}
-			if extraDocument != "" || test.invalidPreviousConfig {
+			if extraDocument != "" || test.invalidRetainedConfig {
 				path := filepath.Join(root, "plystra.yaml")
 				data, err := os.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)
 				}
 				document := string(data) + extraDocument
-				if test.invalidPreviousConfig {
-					document = strings.Replace(document, "value: PRIVATE_PRIMARY", "value: [PRIVATE_INVALID]", 1)
+				if test.invalidRetainedConfig {
+					document = strings.Replace(document, "value: PRIVATE_RETAINED", "value: [PRIVATE_INVALID]", 1)
 				}
 				writeCommandFile(t, path, document)
 			}

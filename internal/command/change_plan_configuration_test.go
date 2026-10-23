@@ -57,6 +57,11 @@ func TestRunChangePlanConfigurationHelpDescribesInstalledBounds(t *testing.T) {
 				t.Fatalf("help omits required-field evidence boundary %q", phrase)
 			}
 		}
+		for _, phrase := range []string{"Final-state binding choices do not require a valid old provider state", "previous states are never offered as provider-retention alternatives"} {
+			if !strings.Contains(stdout, phrase) {
+				t.Fatalf("help omits binding repair boundary %q", phrase)
+			}
+		}
 	}
 }
 

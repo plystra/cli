@@ -950,8 +950,12 @@ candidate graph, or leave only statically addressable missing Config fields on
 the selected provider. Multiple bindings are reported as validated joint
 assignments rather than independently combinable parameter choices. Cyclic and
 otherwise invalid assignments are excluded. Exploration is limited to 64
-candidate binding probes; exceeding the limit returns no partial plan. Missing
-binding candidates, invalid explicit bindings, non-enumerable required fields,
+candidate binding probes; exceeding the limit returns no partial plan.
+Old-state validity does not gate these final-state binding choices: replacement
+can discard invalid selected old Config or remove proven obsolete bindings.
+An invalid previous state is never offered as a provider-retention alternative.
+Typed lower-layer validation and every unrelated final obligation still apply.
+Missing binding candidates, invalid explicit bindings, non-enumerable required fields,
 and unrelated validation failures still fail validation. `plystra use` also
 rejects the invalid final configuration. Other operation kinds return a
 structured unsupported result; `change apply`,

@@ -314,9 +314,7 @@ func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []by
 			return nil, kind, configurationimpact.Impact{}, err
 		}
 		if unresolvedBinding != nil {
-			if !previousStateValid {
-				return nil, kind, configurationimpact.Impact{}, validationErr
-			}
+			// New assignments prove final viability, not validity of the old provider.
 			decisions, missing, decisionErr := viableResourceBindingDecisions(inputs, updated, target, constructor)
 			if decisionErr != nil {
 				return nil, kind, configurationimpact.Impact{}, decisionErr
