@@ -833,6 +833,25 @@ New project trees, template dependency metadata, optional CI and skill files, an
 
 Commands below a module root use the nearest real enclosing `go.mod`; nested modules do not leak mutations into an outer module. The Module Cache remains read-only.
 
+The internal `projectstage` package captures an owner-private working copy for
+final-state planners. It includes untracked authored files, embedded assets,
+generated history, and private baselines, excluding only VCS administration
+entries. Local module replacements and the selected workspace are relocated
+with version overrides and module/workspace vendor inventories preserved.
+Relative replacements retain Go's logical workspace-member paths even when
+directory aliases resolve to different physical copy roots.
+Private byte, path-identity, mode, directory-membership, and path-alias evidence
+is rechecked against the original inputs; none is a public plan identity.
+Destination writes and cleanup use opened directory roots. Copies are bounded
+to 1,024 module roots and directory-alias inputs, 65,536 entries, 64 MiB per
+file, and 512 MiB of tree contents. Main-module, workspace, and vendor metadata
+parsed for relocation have individual 1 MiB limits; non-main dependency
+manifests remain uninterpreted source inputs.
+Included symbolic and nonregular entries, source-nested temporary parents, and
+alternate `-modfile` or `-overlay` inputs fail closed. This is filesystem
+isolation, not a sandbox for trusted native code. It is a planning prerequisite,
+not an installed scaffold/dependency preview or change-apply implementation.
+
 The internal `changerequest` package parses `plystra.change/v1` intent for
 Interface and Implementation creation, dependencies, configuration, Interface
 roots, and Implementation and Resource selections. Parsing is independent of
