@@ -101,10 +101,21 @@ func TestPrepareSourcesPreservesWorkspaceChecksumAuthorities(t *testing.T) {
 			for name, path := range paths {
 				before[name], _ = os.ReadFile(path)
 			}
+			command, env, trace := tracePreparation(t, filepath.Dir(app), env)
 			var prepared []moduledependency.Module
-			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, Offline: strings.HasPrefix(mode, "offline")}, func(sources []moduledependency.Module) error {
+			completed := map[module.Version]int{}
+			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command, Offline: strings.HasPrefix(mode, "offline")}, func(sources []moduledependency.Module) error {
 				for _, source := range sources {
-					if len(source.ProjectGoMod()) != 0 {
+					version := module.Version{Path: source.Path(), Version: source.SelectedVersion()}
+					if replacement, ok := source.Replacement(); ok {
+						version = module.Version{Path: replacement.Path(), Version: replacement.Version()}
+					}
+					downloads := strings.Count(string(readFile(t, trace)), "mod download -json "+version.String()+"\n")
+					if downloads > completed[version] {
+						if downloads != completed[version]+1 || len(source.ProjectGoMod()) != 0 {
+							t.Fatal("acquired-source retention crossed its validation boundary")
+						}
+						completed[version] = downloads
 						prepared = append(prepared, source)
 					}
 				}

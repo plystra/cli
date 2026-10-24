@@ -19,12 +19,12 @@ import (
 // PrepareSources materializes explicitly requested canonical versions without
 // loading their packages or changing Project metadata. Retain captures each
 // eligible warm source before acquisition and each completed effective source
-// before the next acquisition or resolution. Early retention provides source
-// provenance and original checksums, not parsed declarations. The same source
-// may be retained again after acquisition to recheck the original evidence;
-// metadata remains guarded through the last callback. Local sources must
-// already be captured. Mutable queries and transitive selections remain outside
-// this boundary.
+// before extracted-manifest validation, the next acquisition, or resolution.
+// Retention provides source provenance and checksums, not parsed declarations.
+// The same source may be retained again after acquisition to recheck the
+// original evidence; metadata remains guarded through the last callback. Local
+// sources must already be captured. Mutable queries and transitive selections
+// remain outside this boundary.
 func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func([]Module) error) (resultErr error) {
 	if ctx == nil || application.Path() == "" || len(requested) > 1_024 || retain == nil {
 		return ErrInvalidOutput
@@ -140,7 +140,7 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		}
 	}
 	if len(sources) == 0 {
-		return retain(sources)
+		return errors.Join(retain(sources), ctx.Err(), inputs.recheck())
 	}
 	indices := map[module.Version]int{}
 	var groups [][]Module
@@ -158,12 +158,9 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		if err := retainWarmPreparedSources(ctx, root, group, checksums, options, environment, inputs, retain); err != nil {
 			return err
 		}
-		// Retaining a completed source before another Go process starts keeps
-		// later acquisition failures from discarding or refreshing its evidence.
-		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment, nil); err != nil {
-			return err
-		}
-		if err := retain(group); err != nil {
+		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment, func(acquired []Module) error {
+			return errors.Join(retain(acquired), ctx.Err(), inputs.recheck())
+		}); err != nil {
 			return err
 		}
 	}

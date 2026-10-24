@@ -160,6 +160,214 @@ func tracePreparation(t *testing.T, root string, environment []string) (string, 
 	return command, environment, trace
 }
 
+func TestPrepareSourcesRetainsAcquiredSourcesBeforeValidation(t *testing.T) {
+	for _, workspace := range []bool{false, true} {
+		for _, mode := range []string{"success", "invalid-manifest", "rejected", "cancelled", "cancelled-and-metadata", "changed-metadata", "rejected-and-metadata", "mutated-callback", "legacy", "unrecorded", "offline"} {
+			phase := "module"
+			if workspace {
+				phase = "workspace"
+			}
+			t.Run(phase+"/"+mode, func(t *testing.T) {
+				t.Parallel()
+				const later = "example.com/zz-later"
+				fixture := warmPreparation(t, workspace, mode == "legacy")
+				writeModuleProxy(t, fixture.root, later, "v1.0.0")
+				project := filepath.Join(fixture.app, "go.mod")
+				if workspace {
+					writeModule(t, filepath.Join(fixture.root, "later"), later)
+					writeFile(t, project, string(readFile(t, project))+"replace "+later+" => ../later\n")
+					writeFile(t, fixture.work, string(readFile(t, fixture.work))+"replace "+later+" => "+later+" v1.0.0\n")
+				}
+				if mode == "unrecorded" {
+					if err := os.Remove(fixture.authority); err != nil {
+						t.Fatal(err)
+					}
+				}
+				relative, err := filepath.Rel(fixture.cache, fixture.downloaded.Dir)
+				if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+					t.Fatal("source removal escaped isolated cache")
+				}
+				if err := os.RemoveAll(fixture.downloaded.Dir); err != nil {
+					t.Fatal(err)
+				}
+				originals := map[string][]byte{project: readFile(t, project)}
+				originals[fixture.authority], _ = os.ReadFile(fixture.authority)
+				if workspace {
+					originals[fixture.work] = readFile(t, fixture.work)
+				}
+				stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: fixture.app, Environment: fixture.environment})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := stage.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				rejected := errors.New("acquired preparation rejected")
+				calls, parsedAtRetention := 0, false
+				mutated := mode == "invalid-manifest" || mode == "rejected" || mode == "cancelled" || strings.Contains(mode, "metadata")
+				requested := []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}, {Path: later, Version: "v1.0.0"}}
+				if mode == "offline" {
+					requested = requested[:1]
+				}
+				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command, Offline: mode == "offline"}, func(sources []moduledependency.Module) error {
+					if len(sources) == 0 {
+						return nil
+					}
+					calls++
+					if len(sources) != 1 {
+						t.Fatalf("unexpected acquired source group: %v", sources)
+					}
+					parsedAtRetention = parsedAtRetention || len(sources[0].ProjectGoMod()) != 0
+					if err := retainWarmBundle(t, stage, ctx, sources); err != nil {
+						return err
+					}
+					if calls != 1 {
+						return nil
+					}
+					if strings.Contains(string(readFile(t, trace)), "mod download -json "+later+"@") {
+						t.Fatal("later acquisition preceded source retention")
+					}
+					if source := sources[0]; source.Path() != warmRequestedModule || source.SourceDirectory() != fixture.downloaded.Dir || source.GoModFile() != fixture.downloaded.GoMod || source.Checksum() != fixture.downloaded.Sum || source.GoModChecksum() != fixture.downloaded.GoModSum {
+						t.Fatal("acquired preparation lost source identity or checksum authority")
+					}
+					if mutated {
+						manifest := filepath.Join(fixture.downloaded.Dir, "go.mod")
+						if err := os.Chmod(manifest, 0o644); err != nil {
+							t.Fatal(err)
+						}
+						writeFile(t, manifest, "module (\n")
+					}
+					if strings.Contains(mode, "metadata") {
+						path := filepath.Join(stage.Root(), "go.mod")
+						writeFile(t, path, string(readFile(t, path))+"// concurrent preparation edit\n")
+					}
+					switch mode {
+					case "rejected", "rejected-and-metadata":
+						return rejected
+					case "cancelled", "cancelled-and-metadata":
+						cancel()
+					case "mutated-callback":
+						sources[0] = moduledependency.Module{}
+					}
+					return nil
+				})
+				if parsedAtRetention {
+					t.Error("retention consumed an extracted manifest before preserving source evidence")
+				}
+				wantCalls := len(requested)
+				if mutated {
+					wantCalls = 1
+					if calls != wantCalls || strings.Contains(string(readFile(t, trace)), "mod download -json "+later+"@") {
+						t.Fatalf("validation or callback failure permitted later acquisition: calls=%d, error=%v", calls, err)
+					}
+				}
+				switch mode {
+				case "invalid-manifest":
+					if !errors.Is(err, moduledependency.ErrInvalidOutput) {
+						t.Fatalf("changed extracted manifest was already validated: %v", err)
+					}
+				case "rejected", "rejected-and-metadata":
+					if !errors.Is(err, rejected) || errors.Is(err, moduledependency.ErrInvalidOutput) || mode == "rejected-and-metadata" && !errors.Is(err, moduledependency.ErrConcurrentChange) {
+						t.Fatalf("retention rejection lost or followed by validation: %v", err)
+					}
+				case "cancelled", "cancelled-and-metadata":
+					if !errors.Is(err, context.Canceled) || errors.Is(err, moduledependency.ErrInvalidOutput) || mode == "cancelled-and-metadata" && !errors.Is(err, moduledependency.ErrConcurrentChange) {
+						t.Fatalf("retention cancellation lost or followed by validation: %v", err)
+					}
+				case "changed-metadata":
+					if !errors.Is(err, moduledependency.ErrConcurrentChange) || errors.Is(err, moduledependency.ErrInvalidOutput) {
+						t.Fatalf("original metadata drift lost or followed by validation: %v", err)
+					}
+				default:
+					if err != nil || calls != wantCalls {
+						t.Fatalf("cold preparation rejected: calls=%d, error=%v", calls, err)
+					}
+				}
+				for path, before := range originals {
+					after, readErr := os.ReadFile(path)
+					if !bytes.Equal(before, after) || before == nil && !errors.Is(readErr, os.ErrNotExist) {
+						t.Fatal("preparation changed authored metadata")
+					}
+				}
+				inputs := stage.Inputs()
+				if err := stage.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := inputs.Recheck(t.Context()); mutated != errors.Is(err, projectstage.ErrConcurrentChange) || !mutated && err != nil {
+					t.Fatalf("retained evidence did not survive cleanup: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestPrepareSourcesStopsAfterEmptyRetention(t *testing.T) {
+	for _, phase := range []string{"module", "workspace"} {
+		for _, requested := range []string{"empty", "local"} {
+			for _, mode := range []string{"cancelled", "cancelled-and-metadata", "rejected-cancelled-and-metadata"} {
+				t.Run(phase+"/"+requested+"/"+mode, func(t *testing.T) {
+					t.Parallel()
+					root := t.TempDir()
+					app := filepath.Join(root, "app")
+					writeModule(t, app, "example.com/app")
+					writeFile(t, filepath.Join(app, "plystra.yaml"), "{}\n")
+					project := filepath.Join(app, "go.mod")
+					var versions []module.Version
+					if requested == "local" {
+						writeModule(t, filepath.Join(root, "local"), "example.com/local")
+						writeFile(t, project, string(readFile(t, project))+"replace example.com/local => ../local\n")
+						versions = []module.Version{{Path: "example.com/local", Version: "v1.0.0"}}
+					}
+					environment := isolatedGoEnvironment(t, root)
+					if phase == "workspace" {
+						work := filepath.Join(root, "selected.work")
+						writeFile(t, work, "go 1.26\nuse ./app\n")
+						environment = append(withoutEnvironmentKey(environment, "GOWORK"), "GOWORK="+work)
+					}
+					command, environment, trace := tracePreparation(t, root, environment)
+					before := string(readFile(t, project))
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+					rejected := errors.New("empty retention rejected")
+					calls := 0
+					err := moduledependency.PrepareSources(ctx, locate(t, app), versions, moduledependency.Options{Environment: environment, GoCommand: command}, func(sources []moduledependency.Module) error {
+						calls++
+						if len(sources) != 0 {
+							t.Fatal("empty retention acquired a source")
+						}
+						if strings.Contains(mode, "metadata") {
+							writeFile(t, project, before+"// concurrent empty preparation edit\n")
+						}
+						cancel()
+						if strings.HasPrefix(mode, "rejected") {
+							return rejected
+						}
+						return nil
+					})
+					if calls != 1 || !errors.Is(err, context.Canceled) || strings.Contains(mode, "metadata") && !errors.Is(err, moduledependency.ErrConcurrentChange) || strings.HasPrefix(mode, "rejected") && !errors.Is(err, rejected) {
+						t.Fatalf("empty retention lost failures or continued: calls=%d, error=%v", calls, err)
+					}
+					if len(readFile(t, trace)) != 0 {
+						t.Fatal("Go ran after empty retention failed")
+					}
+					want := before
+					if strings.Contains(mode, "metadata") {
+						want += "// concurrent empty preparation edit\n"
+					}
+					if string(readFile(t, project)) != want {
+						t.Fatal("empty preparation overwrote concurrent metadata")
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestPrepareSourcesStopsAtAcquisitionBoundary(t *testing.T) {
 	for _, mode := range []string{"callback-error", "callback-cancellation", "shared-source", "invalid-request", "checksum-conflict"} {
 		t.Run(mode, func(t *testing.T) {

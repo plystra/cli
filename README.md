@@ -1007,10 +1007,15 @@ replacement performed by Go for noncanonical cached JSON. Complete capture of
 information created or consumed during workspace selection and cold reads
 remains unfinished.
 Within each preparation phase, distinct effective sources are acquired in
-first-request order. Each verified acquisition is retained before the next Go
-download starts, including every logical target sharing that source. A later
+first-request order. Complete acquisition output is checked before retention;
+each source is retained before CLI extracted-manifest validation or the next Go
+download, including every logical target sharing that source. Retention receives
+source identity and checksums without parsed declarations. A later
 download or checksum failure preserves earlier retained evidence while still
-failing preparation. Retention errors or cancellation stop later acquisitions.
+failing preparation. Retention errors, cancellation, or changed original metadata
+stop validation and later acquisitions without replacing the retained evidence.
+Empty-source callbacks apply the same failure checks before preparation returns
+or advances to workspace selection.
 The workspace phase independently verifies its original checksum authorities
 even when it selects a source already acquired by the single-module phase.
 This does not capture every input partially consumed by a failed acquisition.
