@@ -97,12 +97,17 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 		if version.Path == "" {
 			continue
 		}
+		if reported := modules[index].goModChecksum; reported != "" && !validSourceChecksum(reported) {
+			return fmt.Errorf("%w: invalid module manifest checksum", ErrInvalidOutput)
+		}
 		if expected, exists := checksums[version]; exists {
 			if reported := modules[index].checksum; reported != "" && reported != expected {
 				return fmt.Errorf("%w: source checksum disagrees with Project go.sum", ErrInvalidOutput)
 			}
 			modules[index].checksum = expected
-			continue
+			if modules[index].goModChecksum != "" {
+				continue
+			}
 		}
 		if _, exists := queries[version]; !exists {
 			arguments = append(arguments, version.String())
@@ -113,7 +118,7 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 		return nil
 	}
 	if options.Offline {
-		return fmt.Errorf("%w: full source checksums are not recorded in Project go.sum", ErrModuleUnavailable)
+		return fmt.Errorf("%w: source or module manifest checksums are unavailable offline", ErrModuleUnavailable)
 	}
 
 	root, err := os.MkdirTemp("", "plystra-module-checksums-")
@@ -147,15 +152,17 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 		}
 		version := module.Version{Path: downloaded.Path, Version: downloaded.Version}
 		indices, exists := queries[version]
-		if !exists || !validSourceChecksum(downloaded.Checksum) {
+		if !exists || !validSourceChecksum(downloaded.Checksum) || !validSourceChecksum(downloaded.GoModSum) {
 			return fmt.Errorf("%w: inconsistent source checksum result", ErrInvalidOutput)
 		}
 		for _, index := range indices {
 			if !sameDirectory(modules[index].root, downloaded.Dir) ||
-				modules[index].checksum != "" && modules[index].checksum != downloaded.Checksum {
+				modules[index].checksum != "" && modules[index].checksum != downloaded.Checksum ||
+				modules[index].goModChecksum != "" && modules[index].goModChecksum != downloaded.GoModSum {
 				return fmt.Errorf("%w: source changed during checksum resolution", ErrConcurrentChange)
 			}
 			modules[index].checksum = downloaded.Checksum
+			modules[index].goModChecksum = downloaded.GoModSum
 		}
 		delete(queries, version)
 	}

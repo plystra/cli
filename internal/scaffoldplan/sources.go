@@ -57,10 +57,10 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 		}
 		escaped, err := module.EscapeVersion(version)
 		manifest := dependency.GoModFile()
-		if err != nil || !filepath.IsAbs(manifest) || filepath.Base(manifest) != escaped+".mod" {
+		if err != nil || !filepath.IsAbs(manifest) || filepath.Base(manifest) != escaped+".mod" || dependency.GoModChecksum() == "" {
 			return moduledependency.ErrSourceIntegrity
 		}
-		metadata = append(metadata, projectstage.MetadataInput{Path: manifest}, projectstage.MetadataInput{
+		metadata = append(metadata, projectstage.MetadataInput{Path: manifest, GoModChecksum: dependency.GoModChecksum()}, projectstage.MetadataInput{
 			Path: strings.TrimSuffix(manifest, ".mod") + ".ziphash", Expected: []byte(dependency.Checksum()),
 		})
 		sources = append(sources, projectstage.Source{Directory: filepath.Clean(dependency.SourceDirectory()),

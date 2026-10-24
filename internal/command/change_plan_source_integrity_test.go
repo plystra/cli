@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -276,7 +277,8 @@ import (
 func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9) } }
 func main() {
  backup := ""
- firstGet := len(os.Args) > 1 && os.Args[1] == "get"
+ mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download"
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -310,6 +312,21 @@ func main() {
    check(os.Chmod(path, info.Mode()))
    check(os.WriteFile(marker, []byte("checksum changed after module listing\n"), 0600))
   } else { check(markerErr) }
+ }
+ afterList := len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m"
+ afterDownload := len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download"
+ if err == nil && (mode == "manifest-after-list" && afterList || mode == "manifest-after-download" && afterDownload) {
+  marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
+  path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+  _, pathErr := os.Stat(path)
+  if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) && pathErr == nil {
+   data, readErr := os.ReadFile(path); check(readErr)
+   info, statErr := os.Stat(path); check(statErr)
+   check(os.Chmod(path, 0600))
+   check(os.WriteFile(path, append(data, []byte("\n// changed after verified Go output\n")...), 0600))
+   check(os.Chmod(path, info.Mode()))
+   check(os.WriteFile(marker, []byte("manifest changed after Go output\n"), 0600))
+  } else if markerErr != nil && !os.IsNotExist(markerErr) { check(markerErr) }
  }
  if backup != "" { check(os.Chmod(backup, 0600)); check(os.Remove(backup)) }
  if err != nil {
@@ -372,6 +389,150 @@ func TestScaffoldPreviewRejectsChangedChecksumReferenceBeforeRetention(t *testin
 	}
 	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
 		t.Fatal("failed metadata capture retained private stage files")
+	}
+	assertNoCommandTransactions(t, root)
+}
+
+func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T) {
+	command := sourcePreparationGoWrapper(t)
+	for _, mode := range []string{"unchanged", "existing", "removal", "prepared", "workspace", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
+			environment := previewDependencyEnvironment(t, proxy)
+			root := writeImplementationSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
+			required := previewDependencyModule
+			if mode == "replacement" {
+				required = "example.com/preview/original"
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+required+"="+previewDependencyModule+"@v1.0.0"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode != "prepared" {
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "get", required+"@v1.0.0"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "workspace" {
+				work := filepath.Join(t.TempDir(), "go.work")
+				writeCommandFile(t, work, "go 1.26\nuse "+fmt.Sprintf("%q\n", filepath.ToSlash(root)))
+				environment = append(environment, "GOWORK="+work)
+			}
+			var cache string
+			for _, entry := range environment {
+				if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {
+					cache = value
+				}
+			}
+			if cache == "" {
+				t.Fatal("missing isolated source cache")
+			}
+			path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
+			marker := filepath.Join(t.TempDir(), "manifest-changed")
+			race := "manifest-after-list"
+			if mode == "prepared" || mode == "workspace" {
+				race = "manifest-after-download"
+			} else if mode == "unchanged" {
+				race = "unchanged"
+			}
+			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+race)
+			data := []byte(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
+			if mode == "removal" {
+				data = []byte(fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"remove","module":%q}]}`, required))
+			} else if mode == "prepared" {
+				data = []byte(fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"add","module":%q}]}`, required+"@v1.0.0"))
+			}
+			request, err := changerequest.Parse(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, parent := commandTree(t, root), t.TempDir()
+			planned, err := scaffoldplan.Preview(t.Context(), scaffoldplan.Options{
+				Start: root, Environment: environment, GoCommand: command, TemporaryParent: parent,
+			}, request)
+			if mode == "unchanged" {
+				if err != nil || !planned.Capture().Valid() || planned.FinalModelDigest() == "" {
+					t.Fatalf("unchanged module manifest rejected: %v", err)
+				}
+				if err := planned.Capture().Recheck(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if data, markerErr := os.ReadFile(marker); markerErr != nil || string(data) != "manifest changed after Go output\n" {
+					t.Fatalf("module-manifest race was not exercised: %v, preview=%v", markerErr, err)
+				}
+				if !errors.Is(err, moduledependency.ErrSourceIntegrity) || planned.Capture().Valid() || planned.FinalModelDigest() != "" {
+					t.Fatalf("changed module manifest was not rejected at capture: %v, capture=%v", err, planned.Capture().Valid())
+				}
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("metadata validation changed the original Project")
+			}
+			if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+				t.Fatal("metadata validation retained private stage files")
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
+	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
+	environment := previewDependencyEnvironment(t, proxy)
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
+	seedPreviewDependency(t, root, environment, "v1.0.0")
+	var cache string
+	for _, entry := range environment {
+		if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {
+			cache = value
+		}
+	}
+	if cache == "" {
+		t.Fatal("missing isolated source cache")
+	}
+	binary := filepath.Join(t.TempDir(), "plystra.exe")
+	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-o", binary, "./cmd/plystra")
+	build.Dir, build.Env = commandRepositoryRoot(t), commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+	wrapper := sourcePreparationGoWrapper(t)
+	goName := "go"
+	if runtime.GOOS == "windows" {
+		goName += ".exe"
+	}
+	if err := os.Rename(wrapper, filepath.Join(filepath.Dir(wrapper), goName)); err != nil {
+		t.Fatal(err)
+	}
+	for index, entry := range environment {
+		if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "PATH") {
+			environment[index] = name + "=" + filepath.Dir(wrapper) + string(os.PathListSeparator) + value
+		}
+	}
+	path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
+	marker := filepath.Join(t.TempDir(), "manifest-changed")
+	environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE=manifest-after-list")
+	before := commandTree(t, root)
+	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
+	command.Dir, command.Env = root, environment
+	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	output, err := command.Output()
+	var exited *exec.ExitError
+	var result scaffoldPlanDocument
+	if !errors.As(err, &exited) || exited.ExitCode() != 3 || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
+		t.Fatalf("compiled CLI accepted manifest drift: %v\n%s\n%s", err, output, &stderr)
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "manifest changed after Go output\n" {
+		t.Fatalf("compiled CLI did not exercise manifest race: %v", err)
+	}
+	if bytes.Contains(output, []byte(cache)) || bytes.Contains(output, []byte(root)) || bytes.Contains(output, []byte("changed after verified Go output")) {
+		t.Fatal("compiled CLI disclosed private manifest evidence")
+	}
+	if !reflect.DeepEqual(before, commandTree(t, root)) {
+		t.Fatal("compiled CLI changed the authored Project")
 	}
 	assertNoCommandTransactions(t, root)
 }

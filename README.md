@@ -889,7 +889,13 @@ cache module manifest (`.mod`) and its sibling archive checksum reference
 provenance across later phases and temporary cleanup; later removal from the
 selected graph does not discard their evidence. Repeated capture never refreshes
 an earlier baseline. The captured checksum-reference bytes must match the
-independently resolved archive checksum. Unrelated files in the same cache
+independently resolved archive checksum. Captured manifest bytes must match
+Go's separately obtained manifest `h1:` checksum, hashing one entry named
+`go.mod` rather than the cache basename. Both checks validate the retained read
+itself. Missing manifest checksums use the same isolated Go verification and
+Project checksum authority as source checksums; offline discovery does not fill
+missing evidence. A download cannot replace an earlier nonempty archive or
+manifest checksum with a conflicting result. Unrelated files in the same cache
 directory remain outside the read set. These metadata files have individual
 1 MiB limits and share the
 cumulative entry and content bounds with source trees. This does not establish

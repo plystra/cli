@@ -2,13 +2,17 @@ package moduledependency_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/moduledependency"
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/sumdb/dirhash"
 )
 
@@ -84,8 +88,15 @@ func TestDiscoverRequiresEffectiveSourceChecksums(t *testing.T) {
 				if !exists || selected.Checksum() != expected {
 					t.Fatalf("effective archive checksum = %q, want %q", selected.Checksum(), expected)
 				}
-				if strings.HasPrefix(mode, "replacement-") && selected.GoModChecksum() == "" {
-					t.Fatal("replacement lost nested manifest checksum")
+				manifest, err := os.ReadFile(selected.GoModFile())
+				if err != nil {
+					t.Fatal(err)
+				}
+				manifestSum, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(manifest)), nil
+				})
+				if err != nil || selected.GoModChecksum() != manifestSum {
+					t.Fatalf("effective manifest checksum = %q, want %q: %v", selected.GoModChecksum(), manifestSum, err)
 				}
 			}
 			after, afterErr := os.ReadFile(filepath.Join(app, "go.sum"))
@@ -119,5 +130,111 @@ func TestDiscoverSourceChecksumsAcceptUnchangedAbsentGoSum(t *testing.T) {
 				t.Fatal("checksum verification created go.sum")
 			}
 		})
+	}
+}
+
+func TestDiscoverRequiresCompleteManifestChecksumEvidence(t *testing.T) {
+	for _, fact := range []string{"missing-list", "offline-missing-list", "malformed-list", "missing-download", "changed-download", "preparation-missing-download"} {
+		t.Run(fact, func(t *testing.T) {
+			t.Parallel()
+			const path, version = "example.com/Source/Dependency", "v1.2.3"
+			root := t.TempDir()
+			proxy := writeModuleProxy(t, root, path, version)
+			app := filepath.Join(root, "app")
+			writeFile(t, filepath.Join(app, "go.mod"), "module example.com/app\n\ngo 1.26\nrequire "+path+" "+version+"\n")
+			env := isolatedGoEnvironment(t, proxy)
+			runGo(t, app, env, "mod", "download", path+"@"+version)
+			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env})
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, exists := index.ByPath(path)
+			if !exists || original.GoModChecksum() == "" {
+				t.Fatal("missing original manifest checksum")
+			}
+			if fact == "changed-download" {
+				var lines []string
+				for _, line := range strings.Split(string(readFile(t, filepath.Join(app, "go.sum"))), "\n") {
+					if strings.Contains(line, "/go.mod ") {
+						lines = append(lines, line)
+					}
+				}
+				writeFile(t, filepath.Join(app, "go.sum"), strings.Join(lines, "\n")+"\n")
+			}
+			before := readFile(t, filepath.Join(app, "go.sum"))
+			realGo, err := exec.LookPath("go")
+			if err != nil {
+				t.Fatal(err)
+			}
+			env = append(env, "PLYSTRA_MODULE_DEPENDENCY_HELPER=checksum-facts", "PLYSTRA_MODULE_REAL_GO="+realGo, "PLYSTRA_MODULE_CHECKSUM_FACT="+fact)
+			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RequireSourceChecksums: true, Offline: fact == "offline-missing-list"}
+			if fact == "preparation-missing-download" {
+				called := false
+				err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: path, Version: version}}, options, func([]moduledependency.Module) error {
+					called = true
+					return nil
+				})
+				if !errors.Is(err, moduledependency.ErrSourceIntegrity) || called {
+					t.Fatalf("incomplete preparation checksum accepted: %v, callback=%v", err, called)
+				}
+			} else {
+				index, err = moduledependency.Discover(t.Context(), locate(t, app), options)
+				if fact == "missing-list" {
+					selected, exists := index.ByPath(path)
+					if err != nil || !exists || selected.GoModChecksum() != original.GoModChecksum() || selected.Checksum() != original.Checksum() {
+						t.Fatalf("isolated manifest checksum fallback: %v, selected=%v", err, selected)
+					}
+				} else {
+					cause := moduledependency.ErrInvalidOutput
+					if fact == "offline-missing-list" {
+						cause = moduledependency.ErrModuleUnavailable
+					} else if fact == "changed-download" {
+						cause = moduledependency.ErrConcurrentChange
+					}
+					if !errors.Is(err, moduledependency.ErrSourceIntegrity) || !errors.Is(err, cause) {
+						t.Fatalf("invalid %s checksum evidence accepted: %v", fact, err)
+					}
+				}
+			}
+			if !bytes.Equal(before, readFile(t, filepath.Join(app, "go.sum"))) {
+				t.Fatal("manifest checksum resolution changed Project sums")
+			}
+		})
+	}
+}
+
+func runChecksumFactsHelper() int {
+	command := exec.Command(os.Getenv("PLYSTRA_MODULE_REAL_GO"), os.Args[1:]...)
+	command.Stderr = os.Stderr
+	output, err := command.Output()
+	if err != nil {
+		return 9
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	encoder := json.NewEncoder(os.Stdout)
+	for {
+		var result map[string]any
+		if err := decoder.Decode(&result); errors.Is(err, io.EOF) {
+			return 0
+		} else if err != nil {
+			return 10
+		}
+		if result["Path"] == "example.com/Source/Dependency" {
+			fact := os.Getenv("PLYSTRA_MODULE_CHECKSUM_FACT")
+			if len(os.Args) > 1 && os.Args[1] == "list" {
+				if fact == "malformed-list" {
+					result["GoModSum"] = "h1:invalid"
+				} else if fact != "changed-download" {
+					delete(result, "GoModSum")
+				}
+			} else if fact == "missing-download" || fact == "preparation-missing-download" {
+				delete(result, "GoModSum")
+			} else if fact == "changed-download" {
+				result["GoModSum"] = "h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+			}
+		}
+		if err := encoder.Encode(result); err != nil {
+			return 11
+		}
 	}
 }

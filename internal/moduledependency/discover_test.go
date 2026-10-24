@@ -658,6 +658,9 @@ func TestDiscoverRejectsUnsafeDependencyProjectMarker(t *testing.T) {
 }
 
 func runHelper(mode string) int {
+	if mode == "checksum-facts" {
+		return runChecksumFactsHelper()
+	}
 	want := []string{"list", "-m", "-json", "-mod=readonly", "all"}
 	switch mode {
 	case "valid", "batch", "synthetic", "missing", "missing-main", "duplicate", "malformed", "older", "unavailable", "oversized", "concurrent":

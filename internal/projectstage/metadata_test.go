@@ -1,13 +1,16 @@
 package projectstage_test
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/projectstage"
+	"golang.org/x/mod/sumdb/dirhash"
 )
 
 func TestRetainedMetadataRejectsDriftAfterCleanup(t *testing.T) {
@@ -143,6 +146,63 @@ func TestRetainMetadataValidatesExpectedCapturedBytes(t *testing.T) {
 			input.Expected = []byte("conflicting checksum")
 			if err := stage.RetainMetadata(t.Context(), []projectstage.MetadataInput{input}); err == nil {
 				t.Fatal("conflicting expected metadata accepted")
+			}
+		})
+	}
+}
+
+func TestRetainMetadataValidatesGoModChecksum(t *testing.T) {
+	for _, mode := range []string{"valid", "changed", "wrong-name", "malformed", "repeated-conflict", "expected-conflict"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			root, parent := fixture(t)
+			metadata := t.TempDir()
+			data := []byte("module example.com/dependency\n")
+			write(t, metadata, "v1.0.0.mod", string(data))
+			stage := capturedStage(t, root, parent)
+			name := "go.mod"
+			if mode == "wrong-name" {
+				name = "v1.0.0.mod"
+			}
+			checksum, err := dirhash.Hash1([]string{name}, func(string) (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(data)), nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := projectstage.MetadataInput{Path: filepath.Join(metadata, "v1.0.0.mod"), GoModChecksum: checksum}
+			switch mode {
+			case "changed":
+				write(t, metadata, "v1.0.0.mod", string(data)+"// changed before capture\n")
+			case "malformed":
+				input.GoModChecksum = "h1:invalid"
+			case "repeated-conflict":
+				if err := stage.RetainMetadata(t.Context(), []projectstage.MetadataInput{input}); err != nil {
+					t.Fatal(err)
+				}
+				input.GoModChecksum = "h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+			case "expected-conflict":
+				input.Expected = []byte("conflicting expected bytes")
+			}
+			err = stage.RetainMetadata(t.Context(), []projectstage.MetadataInput{input})
+			if mode != "valid" {
+				if !errors.Is(err, projectstage.ErrStage) {
+					t.Fatalf("invalid %s manifest checksum accepted: %v", mode, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := stage.RetainMetadata(t.Context(), []projectstage.MetadataInput{input}); err != nil {
+				t.Fatal(err)
+			}
+			inputs := stage.Inputs()
+			if err := stage.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := inputs.Recheck(t.Context()); err != nil {
+				t.Fatalf("checksum-validated metadata was not retained: %v", err)
 			}
 		})
 	}

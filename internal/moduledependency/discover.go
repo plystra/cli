@@ -54,8 +54,8 @@ type Options struct {
 	// Offline requires the selected module sources to be present locally and
 	// prevents Go from contacting a module proxy or checksum service.
 	Offline bool
-	// RequireSourceChecksums binds every versioned source to its effective
-	// module's archive checksum, using Project go.sum or ordinary Go download
+	// RequireSourceChecksums obtains both archive and manifest checksums for
+	// every versioned source, using Project go.sum or ordinary Go download
 	// verification in an isolated module. It never hashes the extracted tree.
 	// Workspace discovery always normalizes complete checksum fields under
 	// workspace authority; this flag additionally requires recorded full sums
@@ -117,8 +117,9 @@ func (m Module) SelectedVersion() string { return m.selectedVersion }
 // workspace and local-replacement sources have no archive checksum.
 func (m Module) Checksum() string { return m.checksum }
 
-// GoModChecksum returns the verified Go checksum for the selected module's
-// go.mod file. It is empty when Go does not report one for the source.
+// GoModChecksum returns Go's checksum for the effective source's go.mod file.
+// RequireSourceChecksums obtains missing evidence through an isolated download.
+// Otherwise it is empty when Go does not report one for the source.
 func (m Module) GoModChecksum() string { return m.goModChecksum }
 
 // GoModFile returns the exact module manifest path reported by Go. Versioned
@@ -591,6 +592,10 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		}
 		if downloaded.Path != queryPath || downloaded.Version != queryVersion {
 			return fmt.Errorf("%w: downloaded source for module %q returned %s@%s, expected %s", ErrInvalidOutput, modules[index].path, downloaded.Path, downloaded.Version, query)
+		}
+		if modules[index].checksum != "" && modules[index].checksum != downloaded.Checksum ||
+			modules[index].goModChecksum != "" && modules[index].goModChecksum != downloaded.GoModSum {
+			return errors.Join(ErrSourceIntegrity, ErrConcurrentChange)
 		}
 		root, goModData, err := validateModuleRoot(modules[index].path, downloaded.Dir, downloaded.GoMod, queryPath, false)
 		if err != nil {

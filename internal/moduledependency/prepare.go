@@ -145,7 +145,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		}
 		version := module.Version{Path: downloaded.Path, Version: downloaded.Version}
 		indices, exists := queries[version]
-		if !exists || !filepath.IsAbs(downloaded.Dir) || !validSourceChecksum(downloaded.Checksum) || checksums[version] != "" && checksums[version] != downloaded.Checksum {
+		if !exists || !filepath.IsAbs(downloaded.Dir) || !validSourceChecksum(downloaded.Checksum) || !validSourceChecksum(downloaded.GoModSum) || checksums[version] != "" && checksums[version] != downloaded.Checksum {
 			return ErrSourceIntegrity
 		}
 		canonical, manifest, err := validateModuleRoot(version.Path, downloaded.Dir, downloaded.GoMod, version.Path, false)

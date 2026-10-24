@@ -3,14 +3,18 @@ package projectstage
 import (
 	"bytes"
 	"context"
+	"io"
 	"path/filepath"
+
+	"golang.org/x/mod/sumdb/dirhash"
 )
 
 // MetadataInput names one external file. Non-nil Expected bytes must match the
 // retained read itself, rather than a separate read before or after capture.
 type MetadataInput struct {
-	Path     string
-	Expected []byte
+	Path          string
+	Expected      []byte
+	GoModChecksum string // Optional Go h1 checksum over one file named go.mod.
 }
 
 // RetainMetadata retains regular external input files without modifying them
@@ -41,7 +45,7 @@ func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error
 		captured := false
 		for _, file := range s.metadata {
 			if file.parent == parent && file.name == name {
-				if input.Expected != nil && !bytes.Equal(input.Expected, file.data) {
+				if !input.matches(file.data) {
 					return ErrStage
 				}
 				captured = true
@@ -55,7 +59,7 @@ func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error
 		if err != nil {
 			return err
 		}
-		if input.Expected != nil && !bytes.Equal(input.Expected, file.data) {
+		if !input.matches(file.data) {
 			return ErrStage
 		}
 		used.entries++
@@ -67,6 +71,19 @@ func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error
 	}
 	s.inputs = s.captureInputs()
 	return s.Recheck(ctx)
+}
+
+func (input MetadataInput) matches(data []byte) bool {
+	if input.Expected != nil && !bytes.Equal(input.Expected, data) {
+		return false
+	}
+	if input.GoModChecksum == "" {
+		return true
+	}
+	checksum, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(data)), nil
+	})
+	return err == nil && checksum == input.GoModChecksum
 }
 
 func (s *Stage) inputBudget() budget {
