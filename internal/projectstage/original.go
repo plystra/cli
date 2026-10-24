@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 type relocationImage struct {
@@ -19,6 +21,38 @@ type replacementToken struct {
 	start int
 	end   int
 	text  string
+}
+
+// Relocation provenance retains the authored query; Go owns its resolution.
+func originalModuleVersion(_ string, version string) (string, error) {
+	if module.CanonicalVersion(version) == "" {
+		return "", ErrStage
+	}
+	return version, nil
+}
+
+// Match an observed version without selecting or resolving one. Exact captured
+// keys take precedence over resolved query spellings and vendor wildcards.
+func replacementVersionMatch(original, current string, vendor bool) int {
+	if original == current {
+		return 3
+	}
+	if original == "" && vendor {
+		return 1
+	}
+	if current == "" || module.CanonicalVersion(current) != current {
+		return 0
+	}
+	if original == semver.Major(original) || original == semver.MajorMinor(original) {
+		if strings.HasPrefix(current, original+".") && semver.Compare(current, original) >= 0 {
+			return 2
+		}
+		return 0
+	}
+	if module.CanonicalVersion(original) == current {
+		return 2
+	}
+	return 0
 }
 
 // Parse normalizes quoted tokens in place. Recover the authored target from
@@ -105,7 +139,7 @@ func (s *Stage) OriginalProjectBytes(path string, stagedData []byte) ([]byte, er
 }
 
 func (s *Stage) originalModule(data []byte) ([]byte, error) {
-	module, err := modfile.Parse("go.mod", data, nil)
+	module, err := modfile.Parse("go.mod", data, originalModuleVersion)
 	if err != nil {
 		return nil, ErrStage
 	}
@@ -115,15 +149,22 @@ func (s *Stage) originalModule(data []byte) ([]byte, error) {
 			continue
 		}
 		var selected *replacementRelocation
+		best, ambiguous := 0, false
 		for _, relocation := range s.relocations {
 			if relocation.workspace || relocation.owner != s.project || relocation.module != replacement.Old.Path ||
-				relocation.version != replacement.Old.Version || !s.sameTarget(replacement.New.Path, relocation.mapped) {
+				!s.sameTarget(replacement.New.Path, relocation.mapped) {
 				continue
 			}
-			if selected != nil && selected.originalToken != relocation.originalToken {
-				return nil, ErrStage
+			match := replacementVersionMatch(relocation.version, replacement.Old.Version, false)
+			if match == 0 || match < best {
+				continue
 			}
+			ambiguous = match == best && (ambiguous || selected.originalToken != relocation.originalToken)
 			selected = &relocation
+			best = match
+		}
+		if ambiguous {
+			return nil, ErrStage
 		}
 		if selected == nil {
 			if !s.authoredTarget(replacement.Old.Path, replacement.Old.Version, replacement.New.Path, false) && s.temporaryTarget(replacement.New.Path) {
@@ -177,20 +218,22 @@ func (s *Stage) originalVendor(data []byte) ([]byte, error) {
 			version = fields[2]
 		}
 		var selected *replacementRelocation
+		best, ambiguous := 0, false
 		for _, relocation := range s.relocations {
 			if relocation.workspace || relocation.owner != s.project || relocation.module != fields[1] ||
-				relocation.version != "" && relocation.version != version || !s.sameTarget(target, relocation.mapped) {
+				!s.sameTarget(target, relocation.mapped) {
 				continue
 			}
-			if selected != nil {
-				if selected.version != "" && relocation.version == "" {
-					continue
-				}
-				if selected.version == relocation.version && selected.original != relocation.original {
-					return nil, ErrStage
-				}
+			match := replacementVersionMatch(relocation.version, version, true)
+			if match == 0 || match < best {
+				continue
 			}
+			ambiguous = match == best && (ambiguous || selected.original != relocation.original)
 			selected = &relocation
+			best = match
+		}
+		if ambiguous {
+			return nil, ErrStage
 		}
 		if selected != nil {
 			lines[index] = prefix + " => " + selected.original + ending
@@ -202,13 +245,13 @@ func (s *Stage) originalVendor(data []byte) ([]byte, error) {
 }
 
 func (s *Stage) authoredTarget(modulePath, version, target string, vendor bool) bool {
-	module, err := modfile.Parse("go.mod", s.projectImages["go.mod"].original, nil)
+	module, err := modfile.Parse("go.mod", s.projectImages["go.mod"].original, originalModuleVersion)
 	if err != nil {
 		return false
 	}
 	for _, replacement := range module.Replace {
 		if replacement.Old.Path == modulePath && replacement.New.Version == "" && replacement.New.Path == target &&
-			(replacement.Old.Version == version || vendor && replacement.Old.Version == "") {
+			replacementVersionMatch(replacement.Old.Version, version, vendor) != 0 {
 			return true
 		}
 	}

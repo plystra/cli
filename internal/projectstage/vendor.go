@@ -57,16 +57,22 @@ func (s *Stage) relocateVendor(path string, relocations []replacementRelocation,
 			version = fields[2]
 		}
 		best := -1
+		bestMatch := 0
 		for candidate, relocation := range relocations {
 			original := relocation.original
 			if workspace {
 				original = relocation.workspaceOriginal
 			}
-			if relocation.module != fields[1] || original != target || relocation.version != "" && relocation.version != version {
+			if relocation.module != fields[1] || original != target {
 				continue
 			}
-			if best < 0 || relocation.workspace && !relocations[best].workspace || relocation.workspace == relocations[best].workspace && relocation.version == version {
+			match := replacementVersionMatch(relocation.version, version, true)
+			if match == 0 {
+				continue
+			}
+			if best < 0 || relocation.workspace && !relocations[best].workspace || relocation.workspace == relocations[best].workspace && match >= bestMatch {
 				best = candidate
+				bestMatch = match
 			}
 		}
 		if best >= 0 {

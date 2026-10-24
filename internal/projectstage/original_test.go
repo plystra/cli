@@ -160,6 +160,139 @@ func TestOriginalProjectBytesRetainsRealGetAndTidyEdits(t *testing.T) {
 	}
 }
 
+func TestOriginalProjectBytesRetainsResolvedReplacementQuery(t *testing.T) {
+	for _, query := range []string{"v1", "v1.1", "v1.1.0+build"} {
+		t.Run(query, func(t *testing.T) {
+			root, parent := fixture(t)
+			dependency := filepath.Join(filepath.Dir(root), "dependency")
+			write(t, dependency, "go.mod", "module example.com/dependency\n\ngo 1.26\n")
+			write(t, dependency, "value.go", "package dependency\nconst Value = 1\n")
+			original := "module example.com/app\n\ngo 1.26\nrequire example.com/dependency v1.1.0\nreplace (\nexample.com/dependency => ../dependency\nexample.com/dependency " + query + " => \".././dependency\"\n)\n"
+			write(t, root, "go.mod", original)
+			write(t, root, "app.go", "package app\nimport \"example.com/dependency\"\nvar Value = dependency.Value\n")
+			write(t, root, "vendor/modules.txt", "# example.com/dependency v1.1.0 => .././dependency\n## explicit; go 1.26\n# example.com/dependency v1.1.0 => .././dependency\n# example.com/dependency => ../dependency\n")
+			stage := capturedStage(t, root, parent, "GOWORK=off", "GOENV=off", "GOFLAGS=-mod=mod -modcacherw", "GOTOOLCHAIN=local", "GOPROXY="+versionQueryProxy(t, "example.com/dependency"), "GONOPROXY=none", "GOSUMDB=off", "GOMODCACHE="+t.TempDir())
+			if bytes.Contains(readStage(t, stage, "vendor/modules.txt"), []byte("../dependency")) || bytes.Contains(readStage(t, stage, "vendor/modules.txt"), []byte(".././dependency")) {
+				t.Fatal("vendor inventory did not relocate the query target")
+			}
+			options := gocommand.Options{Directory: stage.Root(), Environment: stage.Environment()}
+			if err := gocommand.Run(t.Context(), options, "get", "example.com/dependency@v1.1.0"); err != nil {
+				t.Fatal(err)
+			}
+			if err := gocommand.Run(t.Context(), options, "mod", "tidy"); err != nil {
+				t.Fatal(err)
+			}
+			final := readStage(t, stage, "go.mod")
+			module, err := modfile.Parse("go.mod", final, nil)
+			if err != nil || len(module.Replace) != 2 || module.Replace[1].Old.Version != "v1.1.0" {
+				t.Fatalf("Go did not resolve the replacement query: %s, %v", final, err)
+			}
+			restored, err := stage.OriginalProjectBytes("go.mod", final)
+			if err != nil || !bytes.Contains(restored, []byte("example.com/dependency v1.1.0 => \".././dependency\"")) || !bytes.Contains(restored, []byte("example.com/dependency => ../dependency")) || bytes.Contains(restored, []byte("plystra-stage-")) {
+				t.Fatalf("resolved replacement was not restored: %s, %v", restored, err)
+			}
+			if err := gocommand.Run(t.Context(), options, "mod", "vendor"); err != nil {
+				t.Fatal(err)
+			}
+			vendor, err := stage.OriginalProjectBytes("vendor/modules.txt", readStage(t, stage, "vendor/modules.txt"))
+			if err != nil || !bytes.Contains(vendor, []byte("v1.1.0 => .././dependency")) || !bytes.Contains(vendor, []byte("# example.com/dependency => ../dependency")) || bytes.Contains(vendor, []byte("plystra-stage-")) {
+				t.Fatalf("resolved vendor replacement was not restored: %s, %v", vendor, err)
+			}
+			if data, err := os.ReadFile(filepath.Join(root, "go.mod")); err != nil || string(data) != original {
+				t.Fatal("candidate tooling changed the authored module")
+			}
+			if err := stage.Inputs().Recheck(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestOriginalProjectBytesChecksResolvedReplacementQueryRange(t *testing.T) {
+	for _, test := range []struct {
+		query, resolved string
+		accepted        bool
+	}{
+		{"v1", "v1.1.0", true},
+		{"v1", "v2.0.0+incompatible", false},
+		{"v1.1", "v1.1.2", true},
+		{"v1.1", "v1.0.9", false},
+		{"v1.1", "v1.2.0", false},
+		{"v1.1", "v1.1.0-rc.1", false},
+		{"v1", "v1.1.0-rc.1", true},
+		{"v1.1.0+build", "v1.1.0", true},
+		{"v1.1.0+build", "v1.1.1", false},
+	} {
+		t.Run(test.query+"/"+test.resolved, func(t *testing.T) {
+			root, parent := fixture(t)
+			write(t, filepath.Join(filepath.Dir(root), "dependency"), "go.mod", "module example.com/dependency\n\ngo 1.26\n")
+			write(t, root, "go.mod", "module example.com/app\ngo 1.26\nreplace example.com/dependency "+test.query+" => \".././dependency\"\n")
+			stage := capturedStage(t, root, parent, "GOWORK=off", "GOENV=off")
+			module, err := modfile.Parse("go.mod", readStage(t, stage, "go.mod"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mapped := module.Replace[0].New.Path
+			for name, final := range map[string]string{
+				"go.mod":             "module example.com/app\ngo 1.26\nreplace example.com/dependency " + test.resolved + " => " + modfile.AutoQuote(mapped) + "\n",
+				"vendor/modules.txt": "# example.com/dependency " + test.resolved + " => " + mapped + "\n",
+			} {
+				restored, err := stage.OriginalProjectBytes(name, []byte(final))
+				if test.accepted {
+					if err != nil || !bytes.Contains(restored, []byte(".././dependency")) || bytes.Contains(restored, []byte("plystra-stage-")) {
+						t.Fatalf("accepted %s query mapping failed: %s, %v", name, restored, err)
+					}
+				} else if !errors.Is(err, projectstage.ErrStage) || restored != nil {
+					t.Fatalf("out-of-range %s mapping was accepted: %s, %v", name, restored, err)
+				}
+			}
+		})
+	}
+}
+
+func TestOriginalProjectBytesRejectsAmbiguousResolvedReplacementQueries(t *testing.T) {
+	for _, mode := range []string{"ambiguous", "exact-first", "exact-last"} {
+		t.Run(mode, func(t *testing.T) {
+			root, parent := fixture(t)
+			write(t, filepath.Join(filepath.Dir(root), "dependency"), "go.mod", "module example.com/dependency\n\ngo 1.26\n")
+			replacements := "example.com/dependency v1 => .././dependency\nexample.com/dependency v1.1 => ../dependency/.\n"
+			exact := "example.com/dependency v1.1.0 => \"../dependency\"\n"
+			if mode == "exact-first" {
+				replacements = exact + replacements
+			} else if mode == "exact-last" {
+				replacements += exact
+			}
+			write(t, root, "go.mod", "module example.com/app\ngo 1.26\nreplace (\n"+replacements+")\n")
+			stage := capturedStage(t, root, parent, "GOWORK=off", "GOENV=off")
+			module, err := modfile.Parse("go.mod", readStage(t, stage, "go.mod"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mapped := module.Replace[0].New.Path
+			for name, final := range map[string]string{
+				"go.mod":             "module example.com/app\ngo 1.26\nreplace example.com/dependency v1.1.0 => " + modfile.AutoQuote(mapped) + "\n",
+				"vendor/modules.txt": "# example.com/dependency v1.1.0 => " + mapped + "\n",
+			} {
+				restored, err := stage.OriginalProjectBytes(name, []byte(final))
+				if mode == "ambiguous" {
+					if !errors.Is(err, projectstage.ErrStage) || restored != nil {
+						t.Fatalf("ambiguous %s mapping was accepted: %s, %v", name, restored, err)
+					}
+				} else {
+					target := "../dependency"
+					if name == "go.mod" {
+						target = `"../dependency"`
+					}
+					prefix, _, _ := strings.Cut(final, " => ")
+					if err != nil || string(restored) != prefix+" => "+target+"\n" {
+						t.Fatalf("exact %s mapping lost priority: %s, %v", name, restored, err)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestOriginalProjectBytesScopesReplacementSpellingsToCurrentProject(t *testing.T) {
 	root, parent, _, _ := replacementFixture(t)
 	base := filepath.Dir(root)

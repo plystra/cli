@@ -846,6 +846,11 @@ Relocating current-Project and workspace-member `go.mod` files changes only
 local replacement target tokens. Other bytes, including version-query spellings,
 comments, quoting, and line endings, remain intact so Go selects the same versions
 as in the authored modules.
+Relocation evidence also retains replacement version queries. After Go resolves
+one, reverse mapping preserves its observed version and restores only the
+authored local target spelling. Exact captured keys take precedence over
+matching query spellings and vendor wildcards; out-of-range or ambiguous
+staging-local mappings fail rather than leaking temporary paths.
 Private byte, path-identity, mode, directory-membership, and path-alias evidence
 is rechecked against the original inputs; none is a public plan identity.
 The Go-selected `GOENV` file is retained as private input, including its absence

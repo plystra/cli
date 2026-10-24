@@ -546,7 +546,7 @@ func (s *Stage) relocateModule(root string) error {
 		return err
 	}
 	originalData := append([]byte(nil), data...)
-	module, err := modfile.Parse("go.mod", data, nil)
+	module, err := modfile.Parse("go.mod", data, originalModuleVersion)
 	if err != nil {
 		return err
 	}

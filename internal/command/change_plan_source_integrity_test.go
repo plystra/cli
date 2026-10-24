@@ -28,49 +28,73 @@ func TestBuiltCLIChangePlanPreservesModuleVersionQueries(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
-	// Only the latest matching version supplies the required Interface.
-	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
-		{path: previewDependencyModule, version: "v1.0.0", ordinary: true},
-		previewDependency(t, "v1.1.0", false),
-	})
-	environment := previewDependencyEnvironment(t, proxy)
-	root := writeImplementationSelectionCommandProject(t)
-	options := gocommand.Options{Directory: root, Environment: environment}
-	if err := gocommand.Run(t.Context(), options, "get", previewDependencyModule+"@v1.1.0"); err != nil {
-		t.Fatal(err)
+	for _, mode := range []string{"requirement", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			// Only the latest matching selection supplies the required Interface.
+			latest := previewDependency(t, "v1.1.0", false)
+			selectedModule := latest
+			if mode == "replacement" {
+				selectedModule = commandProxyModule{path: previewDependencyModule, version: "v1.1.0", ordinary: true}
+			}
+			proxy := writeCommandDependencyProxy(t, []commandProxyModule{
+				{path: previewDependencyModule, version: "v1.0.0", ordinary: true},
+				selectedModule,
+			})
+			environment := previewDependencyEnvironment(t, proxy)
+			root := writeImplementationSelectionCommandProject(t)
+			options := gocommand.Options{Directory: root, Environment: environment}
+			if err := gocommand.Run(t.Context(), options, "get", previewDependencyModule+"@v1.1.0"); err != nil {
+				t.Fatal(err)
+			}
+			module, err := os.ReadFile(filepath.Join(root, "go.mod"))
+			if err != nil || !bytes.Contains(module, []byte(previewDependencyModule+" v1.1.0")) {
+				t.Fatalf("missing exact seed requirement: %v", err)
+			}
+			local := ""
+			if mode == "replacement" {
+				local = t.TempDir()
+				writeCommandFile(t, filepath.Join(local, "go.mod"), "module "+previewDependencyModule+"\ngo 1.26\n")
+				writeCommandFile(t, filepath.Join(local, "plystra.yaml"), latest.manifest)
+				for name, source := range latest.sources {
+					writeCommandFile(t, filepath.Join(local, filepath.FromSlash(name)), source)
+				}
+				writeCommandFile(t, filepath.Join(root, "go.mod"), string(module)+"\nreplace "+previewDependencyModule+" v1 => "+strconv.Quote(filepath.ToSlash(local))+"\n")
+			} else {
+				writeCommandFile(t, filepath.Join(root, "go.mod"), strings.Replace(string(module), previewDependencyModule+" v1.1.0", previewDependencyModule+" v1", 1))
+			}
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [remote.echo/v1]\nconfig:\n  "+previewDependencyModule+"/remote.New: {endpoint: PRIVATE_ENDPOINT}\n")
+			workRoot := t.TempDir()
+			writeCommandFile(t, filepath.Join(workRoot, "go.work"), "go 1.26\nuse "+strconv.Quote(filepath.ToSlash(root))+"\n")
+			environment = append(environment, "GOWORK="+filepath.Join(workRoot, "go.work"))
+			options.Environment = environment
+			selected, err := gocommand.Output(t.Context(), options, "list", "-m", "-mod=readonly", "-f", "{{.Version}}", previewDependencyModule)
+			if err != nil || strings.TrimSpace(string(selected)) != "v1.1.0" {
+				t.Fatalf("original version query = %q, %v", selected, err)
+			}
+			before, beforeWorkspace := commandTree(t, root), commandTree(t, workRoot)
+			var beforeLocal map[string][]byte
+			if local != "" {
+				beforeLocal = commandTree(t, local)
+			}
+			command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
+			command.Dir, command.Env = filepath.Join(root, "reports"), environment
+			command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
+			var stderr bytes.Buffer
+			command.Stderr = &stderr
+			output, err := command.Output()
+			var result scaffoldPlanDocument
+			if err != nil || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "success" || result.Payload.Completeness != "non_exact" || result.Payload.PlanDigest == "" || len(result.Payload.WriteSet) == 0 {
+				t.Fatalf("compiled query preview: %v\n%s\n%s", err, output, &stderr)
+			}
+			if bytes.Contains(output, []byte("PRIVATE_")) || bytes.Contains(output, []byte(root)) || bytes.Contains(output, []byte(workRoot)) || local != "" && bytes.Contains(output, []byte(local)) {
+				t.Fatal("compiled preview disclosed private inputs")
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) || !reflect.DeepEqual(beforeWorkspace, commandTree(t, workRoot)) || local != "" && !reflect.DeepEqual(beforeLocal, commandTree(t, local)) {
+				t.Fatal("compiled query preview changed authored inputs")
+			}
+			assertNoCommandTransactions(t, root)
+		})
 	}
-	module, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil || !bytes.Contains(module, []byte(previewDependencyModule+" v1.1.0")) {
-		t.Fatalf("missing exact seed requirement: %v", err)
-	}
-	writeCommandFile(t, filepath.Join(root, "go.mod"), strings.Replace(string(module), previewDependencyModule+" v1.1.0", previewDependencyModule+" v1", 1))
-	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [remote.echo/v1]\nconfig:\n  "+previewDependencyModule+"/remote.New: {endpoint: PRIVATE_ENDPOINT}\n")
-	workRoot := t.TempDir()
-	writeCommandFile(t, filepath.Join(workRoot, "go.work"), "go 1.26\nuse "+strconv.Quote(filepath.ToSlash(root))+"\n")
-	environment = append(environment, "GOWORK="+filepath.Join(workRoot, "go.work"))
-	options.Environment = environment
-	selected, err := gocommand.Output(t.Context(), options, "list", "-m", "-mod=readonly", "-f", "{{.Version}}", previewDependencyModule)
-	if err != nil || strings.TrimSpace(string(selected)) != "v1.1.0" {
-		t.Fatalf("original version query = %q, %v", selected, err)
-	}
-	before, beforeWorkspace := commandTree(t, root), commandTree(t, workRoot)
-	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
-	command.Dir, command.Env = filepath.Join(root, "reports"), environment
-	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.Output()
-	var result scaffoldPlanDocument
-	if err != nil || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "success" || result.Payload.Completeness != "non_exact" || result.Payload.PlanDigest == "" || len(result.Payload.WriteSet) == 0 {
-		t.Fatalf("compiled query preview: %v\n%s\n%s", err, output, &stderr)
-	}
-	if bytes.Contains(output, []byte("PRIVATE_")) || bytes.Contains(output, []byte(root)) || bytes.Contains(output, []byte(workRoot)) {
-		t.Fatal("compiled preview disclosed private inputs")
-	}
-	if !reflect.DeepEqual(before, commandTree(t, root)) || !reflect.DeepEqual(beforeWorkspace, commandTree(t, workRoot)) {
-		t.Fatal("compiled query preview changed authored inputs")
-	}
-	assertNoCommandTransactions(t, root)
 }
 
 func TestRunChangePlanRejectsPreexistingSourceTampering(t *testing.T) {

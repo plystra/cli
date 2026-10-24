@@ -31,17 +31,7 @@ func TestCreatePreservesModuleVersionQueries(t *testing.T) {
 			write(t, owner, "go.mod", "module "+modulePath+"\n\ngo 1.26\nrequire example.com/query v1\nreplace example.com/local => ../local\n")
 			write(t, filepath.Join(base, "local"), "go.mod", "module example.com/local\n\ngo 1.26\n")
 			write(t, base, "go.work", "go 1.26\n"+uses)
-			proxy := t.TempDir()
-			write(t, proxy, "example.com/query/@v/list", "v1.0.0\nv1.1.0\n")
-			for _, version := range []string{"v1.0.0", "v1.1.0"} {
-				write(t, proxy, "example.com/query/@v/"+version+".mod", "module example.com/query\n\ngo 1.26\n")
-				write(t, proxy, "example.com/query/@v/"+version+".info", `{"Version":"`+version+`","Time":"2026-01-01T00:00:00Z"}`)
-			}
-			proxyPath := filepath.ToSlash(proxy)
-			if runtime.GOOS == "windows" {
-				proxyPath = "/" + proxyPath
-			}
-			env := environment("GOWORK="+filepath.Join(base, "go.work"), "GOENV=off", "GOFLAGS=-modcacherw", "GOTOOLCHAIN=local", "GOPROXY="+(&url.URL{Scheme: "file", Path: proxyPath}).String(), "GONOPROXY=none", "GOSUMDB=off", "GOMODCACHE="+t.TempDir())
+			env := environment("GOWORK="+filepath.Join(base, "go.work"), "GOENV=off", "GOFLAGS=-modcacherw", "GOTOOLCHAIN=local", "GOPROXY="+versionQueryProxy(t, "example.com/query"), "GONOPROXY=none", "GOSUMDB=off", "GOMODCACHE="+t.TempDir())
 			arguments := []string{"list", "-m", "-mod=readonly", "-f", "{{.Version}}", "example.com/query"}
 			original, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: env}, arguments...)
 			if err != nil || strings.TrimSpace(string(original)) != "v1.1.0" {
@@ -88,6 +78,21 @@ func TestCreatePreservesModuleVersionQueries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func versionQueryProxy(t *testing.T, modulePath string) string {
+	t.Helper()
+	proxy := t.TempDir()
+	write(t, proxy, modulePath+"/@v/list", "v1.0.0\nv1.1.0\n")
+	for _, version := range []string{"v1.0.0", "v1.1.0"} {
+		write(t, proxy, modulePath+"/@v/"+version+".mod", "module "+modulePath+"\n\ngo 1.26\n")
+		write(t, proxy, modulePath+"/@v/"+version+".info", `{"Version":"`+version+`","Time":"2026-01-01T00:00:00Z"}`)
+	}
+	proxyPath := filepath.ToSlash(proxy)
+	if runtime.GOOS == "windows" {
+		proxyPath = "/" + proxyPath
+	}
+	return (&url.URL{Scheme: "file", Path: proxyPath}).String()
 }
 
 func TestCreateCapturesProjectReplacementsBeforeWorkspaceResolution(t *testing.T) {
