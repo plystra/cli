@@ -357,7 +357,7 @@ func main() {
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download"
  requestedList := mode == "information-identity-after-list"
- requestedGraph := mode == "information-identity-after-graph"
+ requestedGraph := mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
  firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
@@ -645,6 +645,15 @@ func TestBuiltCLIChangePlanRejectsChangedGraphInformation(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRejectsChangedGraphSource(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"source-identity-after-graph", "workspace-source-identity-after-graph", "source-manifest-identity-after-graph", "workspace-source-manifest-identity-after-graph"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
@@ -692,7 +701,7 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	workspaceRoot, initialLocal := "", ""
 	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
 		workspaceRoot = t.TempDir()
-		if workspaceMode == "information-identity-after-graph" {
+		if strings.HasSuffix(workspaceMode, "-after-graph") {
 			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_WORKSPACE=1")
 		}
 		work := filepath.Join(workspaceRoot, "go.work")
@@ -739,6 +748,9 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	if strings.Contains(mode, "source-identity") {
 		path = filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "remote", "implementation.go")
 	}
+	if strings.Contains(mode, "source-manifest-identity") {
+		path = filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "go.mod")
+	}
 	if transitive {
 		path = filepath.Join(cache, "cache", "download", filepath.FromSlash(transitivePath), "@v", "v1.0.0.mod")
 	}
@@ -754,7 +766,7 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	}
 	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
 	command.Dir, command.Env = root, environment
-	if transitive || prepared || mode == "information-identity-after-graph" {
+	if transitive || prepared || strings.HasSuffix(mode, "-after-graph") {
 		command.Dir = filepath.Join(root, "reports")
 	}
 	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)

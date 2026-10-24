@@ -24,6 +24,18 @@ func retainWarmPreparedSources(ctx context.Context, root string, group []Module,
 	if err != nil {
 		return err
 	}
+	return retainWarmSourceBundle(ctx, cache, group, checksums, inputs, retain)
+}
+
+func retainWarmSourceBundle(ctx context.Context, cache string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	version := sourceVersion(group[0])
+	archive, manifest := checksums.archives[version], checksums.manifests[version]
+	if !validSourceChecksum(archive) || !validSourceChecksum(manifest) {
+		return inputs.recheck()
+	}
 	path, pathErr := module.EscapePath(version.Path)
 	value, versionErr := module.EscapeVersion(version.Version)
 	if pathErr != nil || versionErr != nil {

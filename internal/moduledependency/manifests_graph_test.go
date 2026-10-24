@@ -61,7 +61,24 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 		informationOnly                 bool
 		informationMode                 string
 		memberPath                      string
+		wantSources                     []module.Version
+		sourceMode                      string
 	}{
+		{name: "sources-pruned", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1, b1}, wantSources: []module.Version{a1, b1}},
+		{name: "sources-legacy", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.16", b1), node(b1, "1.17", c1)}, want: []module.Version{a1, b1, c1}, wantSources: []module.Version{a1, b1, c1}},
+		{name: "sources-workspace-upgrade", workspace: true, roots: []module.Version{a1, d1}, memberRoots: []module.Version{a3}, modules: []graphModule{node(d1, "1.17", a2), node(a3, "1.17", c1)}, want: []module.Version{a1, d1, a3, c1}, wantSources: []module.Version{a3, d1, c1}},
+		{name: "sources-readonly-rejection", fail: true, roots: []module.Version{a1, b1}, modules: []graphModule{node(b1, "1.17", a2), node(a2, "1.17", z1)}, want: []module.Version{a1, b1, a2}, wantSources: []module.Version{a2, b1}},
+		{name: "sources-replacement", roots: []module.Version{a1}, replacements: []string{a1.Path + " => " + c1.String(), a1.String() + " => " + d1.String()}, modules: []graphModule{node(d1, "1.17", b1)}, want: []module.Version{d1, b1}, wantSources: []module.Version{d1, b1}},
+		{name: "sources-versioned-main-target", workspace: true, memberPath: b1.Path, roots: []module.Version{a1}, replacements: []string{a1.String() + " => " + b1.String()}, want: []module.Version{b1}, wantSources: []module.Version{b1}},
+		{name: "sources-local", roots: []module.Version{a1}, replacements: []string{a1.String() + " => ../local"}, local: "module " + a1.Path + "\ngo 1.17\nrequire " + b1.Path + " " + b1.Version + "\n", want: []module.Version{b1}, wantSources: []module.Version{b1}},
+		{name: "sources-concurrent-replacements", roots: []module.Version{a1}, replacements: []string{x1.String() + " => " + b1.String(), b1.String() + " => " + c1.String()}, modules: []graphModule{node(a1, "1.17", x1, b1)}, want: []module.Version{a1, b1}, wantSources: []module.Version{a1, b1, c1}},
+		{name: "sources-shared-target", roots: []module.Version{a1}, replacements: []string{x1.String() + " => " + b1.String(), z1.String() + " => " + b1.String()}, modules: []graphModule{node(a1, "1.17", x1, z1)}, want: []module.Version{a1, b1}, wantSources: []module.Version{a1, b1}},
+		{name: "sources-unrecorded-selected-manifest", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, unrecorded: []module.Version{b1}, want: []module.Version{a1}, wantSources: []module.Version{a1}},
+		{name: "sources-cold-frontier", roots: []module.Version{a1}, cold: []module.Version{a1}, wantSources: []module.Version{}},
+		{name: "sources-only-callback", informationOnly: true, roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, wantSources: []module.Version{a1, b1}},
+		{name: "sources-rejected", fail: true, sourceMode: "reject", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1}, wantSources: []module.Version{a1}},
+		{name: "sources-cancelled", fail: true, sourceMode: "cancel", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1}, wantSources: []module.Version{a1}},
+		{name: "sources-changed-sums", fail: true, sourceMode: "go.sum", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1}, wantSources: []module.Version{a1}},
 		{name: "information-known-go", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1, b1}, wantInformation: []module.Version{a1, b1}},
 		{name: "information-legacy", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.16", b1), node(b1, "1.17", c1)}, want: []module.Version{a1, b1, c1}, wantInformation: []module.Version{a1, b1, c1}},
 		{name: "information-workspace", workspace: true, roots: []module.Version{a1, d1}, modules: []graphModule{node(a1, "1.17", b1), node(d1, "1.17", b2)}, want: []module.Version{a1, d1, b2}, wantInformation: []module.Version{a1, d1, b2}},
@@ -328,6 +345,52 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 					return nil
 				}
 			}
+			var sources []module.Version
+			if test.wantSources != nil {
+				options.RetainSelectedSources = func(group []moduledependency.Module) error {
+					if commands := string(readFile(t, trace)); strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
+						t.Fatalf("source capture followed Go consumption: %s", commands)
+					}
+					var metadata []projectstage.MetadataInput
+					var trees []projectstage.Source
+					for _, source := range group {
+						version := module.Version{Path: source.Path(), Version: source.SelectedVersion()}
+						if replacement, ok := source.Replacement(); ok {
+							version = module.Version{Path: replacement.Path(), Version: replacement.Version()}
+						}
+						if source.Workspace() || source.Checksum() != facts[version].Sum || source.GoModChecksum() != facts[version].GoModSum || source.GoModFile() != facts[version].GoMod || source.SourceDirectory() != facts[version].Dir || len(source.ProjectGoMod()) != 0 {
+							t.Fatal("source capture lost effective provenance or parsed its manifest")
+						}
+						if len(trees) == 0 {
+							if slices.Contains(sources, version) {
+								t.Fatal("shared effective source captured more than once")
+							}
+							sources = append(sources, version)
+						}
+						metadata = append(metadata, projectstage.MetadataInput{Path: source.GoModFile(), GoModChecksum: source.GoModChecksum()}, projectstage.MetadataInput{
+							Path: strings.TrimSuffix(source.GoModFile(), ".mod") + ".ziphash", Expected: []byte(source.Checksum()),
+						})
+						trees = append(trees, projectstage.Source{Directory: source.SourceDirectory(), Module: version, Checksum: source.Checksum()})
+					}
+					if err := stage.RetainMetadata(ctx, metadata); err != nil {
+						return err
+					}
+					if err := stage.RetainSources(ctx, trees); err != nil {
+						return err
+					}
+					switch test.sourceMode {
+					case "reject":
+						return rejected
+					case "cancel":
+						cancel()
+					case "go.sum":
+						path := filepath.Join(stage.Root(), "go.sum")
+						writeFile(t, path, string(readFile(t, path))+"\n")
+						return rejected
+					}
+					return nil
+				}
+			}
 			index, err := moduledependency.Discover(ctx, locate(t, start), options)
 			if (err != nil) != test.fail {
 				t.Fatalf("unexpected Go listing result: %v", err)
@@ -358,6 +421,20 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 				if !errors.Is(err, wantError) || test.informationMode == "go.sum" && !errors.Is(err, moduledependency.ErrConcurrentChange) || strings.Contains(string(readFile(t, trace)), "list ") {
 					t.Fatalf("failed information capture reached Go: %v", err)
 				}
+			}
+			if test.sourceMode != "" {
+				wantError := rejected
+				if test.sourceMode == "cancel" {
+					wantError = context.Canceled
+				}
+				if !errors.Is(err, wantError) || test.sourceMode == "go.sum" && !errors.Is(err, moduledependency.ErrConcurrentChange) || strings.Contains(string(readFile(t, trace)), "list ") {
+					t.Fatalf("failed source capture reached Go: %v", err)
+				}
+			}
+			module.Sort(sources)
+			module.Sort(test.wantSources)
+			if !slices.Equal(sources, test.wantSources) {
+				t.Fatalf("wrong selected source set: got %v, want %v", sources, test.wantSources)
 			}
 			var wantInformation []string
 			for _, mod := range test.wantInformation {
@@ -392,6 +469,41 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 			writeFile(t, facts[unused].GoMod, "another unrelated manifest\n")
 			if err := inputs.Recheck(t.Context()); err != nil {
 				t.Fatal("unrelated manifest invalidated retained graph evidence")
+			}
+			if test.wantSources != nil {
+				writeFile(t, filepath.Join(facts[unused].Dir, "unrelated.go"), "package unrelated\n")
+				if err := inputs.Recheck(t.Context()); err != nil {
+					t.Fatal("unselected source invalidated retained evidence")
+				}
+				if len(sources) != 0 {
+					path := filepath.Join(facts[sources[0]].Dir, "go.mod")
+					data := readFile(t, path)
+					info, err := os.Stat(path)
+					if err != nil || !os.SameFile(info, info) {
+						t.Fatal("cannot initialize source identity")
+					}
+					if err := os.Rename(path, path+".prior"); err != nil {
+						t.Fatal(err)
+					}
+					writeFile(t, path, string(data))
+					if err := os.Chmod(path, info.Mode()); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+						t.Fatal(err)
+					}
+					replacement, err := os.Stat(path)
+					if err != nil || os.SameFile(info, replacement) {
+						t.Fatal("source identity fixture failed")
+					}
+					if err := os.Remove(path + ".prior"); err != nil {
+						t.Fatal(err)
+					}
+					if err := inputs.Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+						t.Fatalf("source identity survived cleanup: %v", err)
+					}
+				}
+				return
 			}
 			if test.wantInformation != nil {
 				writeFile(t, strings.TrimSuffix(facts[unused].GoMod, ".mod")+".info", "unrelated information")

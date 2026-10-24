@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,97 @@ func retainWarmBundle(t *testing.T, stage *projectstage.Stage, ctx context.Conte
 		return err
 	}
 	return stage.RetainSources(ctx, trees)
+}
+
+func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
+	for _, workspace := range []bool{false, true} {
+		for _, mode := range []string{"success", "offline", "legacy", "missing-archive", "partial", "missing-tree", "missing-manifest", "missing-checksum-file", "archive-only", "manifest-only", "poisoned-source", "poisoned-manifest", "poisoned-checksum", "unsafe-checksum"} {
+			t.Run(fmt.Sprintf("workspace=%t/%s", workspace, mode), func(t *testing.T) {
+				t.Parallel()
+				fixture := warmPreparation(t, workspace, mode == "legacy")
+				project := filepath.Join(fixture.app, "go.mod")
+				writeFile(t, project, string(readFile(t, project))+"require "+warmRequestedModule+" v1.0.0\n")
+				prefix := strings.TrimSuffix(fixture.downloaded.GoMod, ".mod")
+				switch mode {
+				case "missing-archive", "missing-manifest", "missing-checksum-file":
+					suffix := map[string]string{"missing-archive": ".zip", "missing-manifest": ".mod", "missing-checksum-file": ".ziphash"}[mode]
+					if err := os.Remove(prefix + suffix); err != nil {
+						t.Fatal(err)
+					}
+				case "partial":
+					writeFile(t, prefix+".partial", "incomplete\n")
+				case "missing-tree":
+					if err := os.RemoveAll(fixture.downloaded.Dir); err != nil {
+						t.Fatal(err)
+					}
+				case "archive-only":
+					writeFile(t, fixture.authority, warmSourceModule+" v1.0.0 "+fixture.downloaded.Sum+"\n")
+				case "manifest-only":
+					writeFile(t, fixture.authority, warmSourceModule+" v1.0.0/go.mod "+fixture.downloaded.GoModSum+"\n")
+				case "poisoned-source", "poisoned-manifest":
+					path := filepath.Join(fixture.downloaded.Dir, "smtp", "plugin.yaml")
+					if mode == "poisoned-manifest" {
+						path = filepath.Join(fixture.downloaded.Dir, "go.mod")
+					}
+					if err := os.Chmod(path, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					writeFile(t, path, "changed source\n")
+				case "poisoned-checksum":
+					writeFile(t, prefix+".ziphash", "h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=")
+				case "unsafe-checksum":
+					if err := os.Remove(prefix + ".ziphash"); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(prefix+".ziphash", 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				original := readFile(t, fixture.authority)
+				stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: fixture.app, Environment: fixture.environment})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = stage.Close() })
+				command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
+				calls := 0
+				_, err = moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{
+					Environment: environment, GoCommand: command, Offline: mode == "offline",
+					RetainSelectedSources: func(sources []moduledependency.Module) error {
+						calls++
+						if commands := string(readFile(t, trace)); strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
+							t.Fatal("selected warm source was captured after consumption")
+						}
+						if len(sources) != 1 || len(sources[0].ProjectGoMod()) != 0 {
+							t.Fatal("early source callback parsed extracted declarations")
+						}
+						return retainWarmBundle(t, stage, t.Context(), sources)
+					},
+				})
+				wantCalls := 1
+				if mode == "partial" || mode == "missing-tree" || mode == "missing-manifest" || mode == "missing-checksum-file" || mode == "archive-only" || mode == "manifest-only" || mode == "unsafe-checksum" {
+					wantCalls = 0
+				}
+				wantError := strings.HasPrefix(mode, "poisoned-") || mode == "unsafe-checksum" || mode == "archive-only" && !workspace
+				if calls != wantCalls || (err != nil) != wantError {
+					t.Fatalf("selected warm capture: calls=%d, want=%d, error=%v", calls, wantCalls, err)
+				}
+				if strings.HasPrefix(mode, "poisoned-") || mode == "unsafe-checksum" {
+					if strings.Contains(string(readFile(t, trace)), "list ") {
+						t.Fatal("unsafe warm source reached Go listing")
+					}
+				}
+				if !bytes.Equal(original, readFile(t, fixture.authority)) {
+					t.Fatal("discovery changed original checksum authority")
+				}
+				if mode == "legacy" {
+					if _, err := os.Stat(filepath.Join(fixture.downloaded.Dir, "go.mod")); !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("capture synthesized a legacy source manifest")
+					}
+				}
+			})
+		}
+	}
 }
 
 func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {

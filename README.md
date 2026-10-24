@@ -905,6 +905,16 @@ The queried filenames provide raw private evidence without parsing their JSON
 or claiming checksum authority. Missing files may materialize normally; an
 uncertain graph introduces no provisional information set. Cold reads, proxy
 metadata, and earlier authored-query normalization remain outside this boundary.
+The same complete selection also retains eligible warm source bundles before
+listing or extracted-manifest validation. Each effective version requires
+separate original archive and manifest checksum authority, an extracted tree,
+regular cache `.mod` and `.ziphash` files, and no `.partial` marker. Shared
+replacement destinations are captured once, without parsing extracted
+declarations; local sources use their existing staged evidence. Missing archive
+files do not prevent capture of an otherwise complete tree. Later discovery
+rechecks the same baseline, and retention failures prevent listing. Incomplete
+selection, missing authority or components, and cold acquisition still do not
+establish capture before first use.
 Source and dependency previews additionally retain versioned module source
 trees after module selection and before declaration discovery or candidate
 builds. This includes ordinary and transitive modules, versioned replacements,

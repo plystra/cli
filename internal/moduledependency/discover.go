@@ -72,6 +72,11 @@ type Options struct {
 	// before graph listing, independently of manifest Go-version shortcuts.
 	// These files have no independent Go checksum authority.
 	RetainModuleInformation func([]string) error
+	// RetainSelectedSources captures eligible warm source bundles for a
+	// completely inferred selected graph before listing or source validation.
+	// Bundles require independent original archive and manifest checksums;
+	// their extracted manifests have not been parsed or recognized as Projects.
+	RetainSelectedSources func([]Module) error
 }
 
 // Replacement records the selected replacement provenance reported by Go.
@@ -242,7 +247,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if err != nil {
 		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 	}
-	if options.RetainRootManifests != nil || options.RetainModuleInformation != nil {
+	if options.RetainRootManifests != nil || options.RetainModuleInformation != nil || options.RetainSelectedSources != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
 				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)

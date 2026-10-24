@@ -35,6 +35,8 @@ type manifestGraph struct {
 	toolchain         string
 	retain            func([]RootManifest) error
 	retainInformation func([]string) error
+	retainSources     func([]Module) error
+	archives          map[module.Version]string
 	retained          map[string]bool
 	parsed            map[string]*modfile.File
 	goVersions        map[module.Version]bool
@@ -197,6 +199,9 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 		if err := graph.retainSelectedInformation(ctx, selectedModules); err != nil {
 			return err
 		}
+		if err := graph.retainSelectedSources(ctx, selectedModules); err != nil {
+			return err
+		}
 		var candidates []module.Version
 		possibleVersions := map[module.Version]bool{}
 		for _, mod := range selectedModules {
@@ -236,6 +241,41 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 		}
 	}
 	return graph.inputs.recheck()
+}
+
+func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected []module.Version) error {
+	if graph.retainSources == nil {
+		return nil
+	}
+	groups := map[module.Version][]Module{}
+	var versions []module.Version
+	for _, mod := range selected {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		effective, err := graph.effectiveVersion(mod)
+		if err != nil {
+			return err
+		}
+		if effective.Version == "" {
+			continue // Local sources were already captured with the Project.
+		}
+		source := Module{path: mod.Path, selectedVersion: mod.Version}
+		if effective != mod {
+			source.replacement = Replacement{path: effective.Path, version: effective.Version}
+		}
+		if _, exists := groups[effective]; !exists {
+			versions = append(versions, effective)
+		}
+		groups[effective] = append(groups[effective], source)
+	}
+	checksums := preparationChecksums{archives: graph.archives, manifests: graph.checksums}
+	for _, effective := range versions {
+		if err := retainWarmSourceBundle(ctx, graph.cache, groups[effective], checksums, graph.inputs, graph.retainSources); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (graph *manifestGraph) initialized() bool {

@@ -20,6 +20,7 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	}
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
+		RetainSelectedSources:   func(sources []moduledependency.Module) error { return retainSources(ctx, stage, sources) },
 		RetainModuleInformation: func(paths []string) error { return retainInformation(ctx, stage, paths) },
 		RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))

@@ -66,6 +66,13 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 	if err != nil {
 		return err
 	}
+	var archives map[module.Version]string
+	if options.RetainSelectedSources != nil {
+		archives, err = rootChecksums(primary, memberSums, false)
+		if err != nil {
+			return err
+		}
+	}
 	excluded := map[module.Version]bool{}
 	for _, parsed := range manifests {
 		for _, exclusion := range parsed.Exclude {
@@ -134,7 +141,8 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		checksums: checksums, excluded: excluded, cache: selected.GOMODCACHE,
 		toolchain: selected.GOVERSION, retain: options.RetainRootManifests,
 		retainInformation: options.RetainModuleInformation,
-		retained:          map[string]bool{}, parsed: map[string]*modfile.File{},
+		retainSources:     options.RetainSelectedSources, archives: archives,
+		retained: map[string]bool{}, parsed: map[string]*modfile.File{},
 	}
 	for _, manifest := range retained {
 		graph.retained[manifest.Path] = true
