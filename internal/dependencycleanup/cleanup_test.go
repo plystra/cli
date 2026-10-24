@@ -418,7 +418,7 @@ func TestOwnershipGuardRejectsEditsBeforeNormalization(t *testing.T) {
 
 func TestOwnershipSnapshotSupportsForkAndLegacyModules(t *testing.T) {
 	t.Parallel()
-	for _, scenario := range []string{"fork", "legacy-support"} {
+	for _, scenario := range []string{"fork", "legacy-support", "legacy-workspace", "legacy-workspace-override"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			proxy := t.TempDir()
@@ -432,12 +432,25 @@ func TestOwnershipSnapshotSupportsForkAndLegacyModules(t *testing.T) {
 				})
 			} else {
 				writeModuleZip(t, proxy, "example.com/original", "v1.0.0", map[string]string{"types.go": "package original\ntype Value struct{}\n"})
+				if strings.HasPrefix(scenario, "legacy-workspace") {
+					writeModuleZip(t, proxy, "example.com/fork", "v1.0.0", map[string]string{"types.go": "package original\ntype Value struct{}\n"})
+				}
+				if scenario == "legacy-workspace-override" {
+					mod += "replace example.com/original v1.0.0 => example.com/module-fork v1.0.0\n"
+					writeModuleZip(t, proxy, "example.com/module-fork", "v1.0.0", map[string]string{"types.go": "package original\ntype Value struct{}\n"})
+				}
 				writeFile(t, filepath.Join(root, "resource.go"), "package app\nimport \"example.com/original\"\n//plystra:resource app.cache/v1\ntype Resource interface { Read() original.Value }\n")
 			}
 			writeFile(t, filepath.Join(root, "go.mod"), mod)
 			writeFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 			environment := providerEnvironment(t, proxy)
 			runGo(t, root, environment, "mod", "download", "all")
+			if strings.HasPrefix(scenario, "legacy-workspace") {
+				work := filepath.Join(root, "go.work")
+				writeFile(t, work, "go 1.26\nuse .\nreplace example.com/original v1.0.0 => example.com/fork v1.0.0\n")
+				environment = append(environment, "GOWORK="+work)
+				runGo(t, root, environment, "mod", "download", "all")
+			}
 			modBefore := readFile(t, filepath.Join(root, "go.mod"))
 			sumBefore := readFile(t, filepath.Join(root, "go.sum"))
 			options := applicationresolve.Options{Start: root, Environment: environment}
@@ -462,13 +475,13 @@ func TestOwnershipSnapshotSupportsForkAndLegacyModules(t *testing.T) {
 			if !exists {
 				t.Fatal("fixture dependency missing")
 			}
-			if scenario == "legacy-support" {
+			if scenario != "fork" {
 				if _, err := os.Stat(filepath.Join(dependency.Root(), "go.mod")); !errors.Is(err, os.ErrNotExist) {
 					t.Fatalf("legacy source acquired a go.mod: %v", err)
 				}
 			}
 			name := filepath.Join(dependency.Root(), "api", "resource.go")
-			if scenario == "legacy-support" {
+			if scenario != "fork" {
 				name = filepath.Join(dependency.Root(), "types.go")
 			}
 			info, err := os.Stat(name)

@@ -28,14 +28,15 @@ var ErrOwnershipSnapshot = errors.New("captured declaration ownership sources ch
 // eligible declaration membership. It is independent of subsequent module
 // selection, and never reinterprets old evidence through new dependencies.
 type OwnershipSnapshot struct {
-	application string
-	options     Options
-	sources     []moduleSource
-	active      map[string]bool
-	packages    map[string]listedPackage
-	files       map[string]ownershipFile
-	directories map[string]fs.FileInfo
-	modules     map[string][]byte
+	application  string
+	options      Options
+	dependencies moduledependency.Index
+	sources      []moduleSource
+	active       map[string]bool
+	packages     map[string]listedPackage
+	files        map[string]ownershipFile
+	directories  map[string]fs.FileInfo
+	modules      map[string][]byte
 }
 
 func (OwnershipSnapshot) String() string                   { return "<private-ownership-snapshot>" }
@@ -52,7 +53,7 @@ type ownershipFile struct {
 // file evidence. Membership probes share ordinary reserved/nested exclusions.
 func (d Discovery) CaptureOwnershipSources(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options) (OwnershipSnapshot, error) {
 	options.Environment = append([]string(nil), options.Environment...)
-	s := OwnershipSnapshot{application: application.ModulePath(), options: options,
+	s := OwnershipSnapshot{application: application.ModulePath(), options: options, dependencies: dependencies,
 		active: make(map[string]bool), packages: make(map[string]listedPackage), files: make(map[string]ownershipFile), directories: make(map[string]fs.FileInfo), modules: make(map[string][]byte)}
 	s.sources = []moduleSource{{path: application.ModulePath(), root: application.Path(), local: true}}
 	for _, dependency := range dependencies.Projects() {
@@ -353,6 +354,31 @@ func (s OwnershipSnapshot) selectSources(ctx context.Context, root string, direc
 				return nil, err
 			}
 			paths = append(paths, name)
+		}
+		// A workspace may override the application's replacement directives.
+		// Reproduce only its captured effective sources in this private graph.
+		for _, dependency := range s.dependencies.Modules() {
+			var target, targetVersion string
+			if dependency.Workspace() {
+				target = dependency.Root()
+			} else if replacement, exists := dependency.Replacement(); exists {
+				target, targetVersion = replacement.Path(), replacement.Version()
+				if replacement.Local() {
+					target = dependency.Root()
+				}
+			} else {
+				continue
+			}
+			for _, replacement := range append([]*modfile.Replace(nil), file.Replace...) {
+				if replacement.Old.Path == dependency.Path() {
+					if err := file.DropReplace(replacement.Old.Path, replacement.Old.Version); err != nil {
+						return nil, err
+					}
+				}
+			}
+			if err := file.AddReplace(dependency.Path(), "", target, targetVersion); err != nil {
+				return nil, err
+			}
 		}
 		data, err = file.Format()
 		if err != nil {
