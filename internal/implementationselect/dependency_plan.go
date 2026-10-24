@@ -163,8 +163,25 @@ func dependencyOwnershipRemovals(previous, current applicationresolve.SelectionI
 		retained[owner] = true
 	}
 	oldOwners := make(map[constructorsymbol.Symbol]bool)
-	for _, choice := range old.Manifest().ImplementationChoices() {
-		oldOwners[choice.Constructor()] = true
+	if previous.Module().Path() != "" {
+		for _, choice := range old.Manifest().ImplementationChoices() {
+			oldOwners[choice.Constructor()] = true
+		}
+	} else {
+		// Without old discovery, only exact effective choices with literal
+		// current-project provenance prove old ownership. New declarations or
+		// derived identities cannot supply the missing historical evidence.
+		literal := make(map[applicationmeta.ImplementationChoice]bool)
+		for _, layer := range current.CurrentLayers() {
+			for _, choice := range layer.ImplementationChoices() {
+				literal[choice] = true
+			}
+		}
+		for _, choice := range before.Manifest().ImplementationChoices() {
+			if literal[choice] {
+				oldOwners[choice.Constructor()] = true
+			}
+		}
 	}
 	// Partial old closure evidence proves only the owners it positively found.
 	owners, _ = previous.CandidateOwners(old)
@@ -180,8 +197,22 @@ func dependencyOwnershipRemovals(previous, current applicationresolve.SelectionI
 	}
 	oldInstances := make(map[string]applicationmeta.ResourceInstance)
 	finalInstances := make(map[string]applicationmeta.ResourceInstance)
-	for _, instance := range old.Manifest().ResourceInstances() {
-		oldInstances[instance.Name()] = instance
+	if previous.Module().Path() != "" {
+		for _, instance := range old.Manifest().ResourceInstances() {
+			oldInstances[instance.Name()] = instance
+		}
+	} else {
+		literal := make(map[[2]string]bool)
+		for _, layer := range current.CurrentLayers() {
+			for _, instance := range layer.ResourceInstances() {
+				literal[[2]string{instance.Name(), instance.Source()}] = true
+			}
+		}
+		for _, instance := range before.Manifest().ResourceInstances() {
+			if literal[[2]string{instance.Name(), instance.Source()}] {
+				oldInstances[instance.Name()] = instance
+			}
+		}
 	}
 	for _, instance := range final.Manifest().ResourceInstances() {
 		finalInstances[instance.Name()] = instance

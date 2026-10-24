@@ -131,8 +131,11 @@ func SelectionChangesIdentity(manifest Manifest, roots []InterfaceRootEdit, sele
 }
 
 // EditSelectionConfiguration encodes only the complete candidate document.
+// Empty identity edits allow dependency-only cleanup, typed fields, or a no-op;
+// the caller still proves ownership and validates the complete final candidate.
 func EditSelectionConfiguration(data []byte, edit SelectionConfigurationEdit, overlay bool) ([]byte, bool, error) {
-	if validateSelectionChanges(edit.Roots, edit.Selections, edit.Resources) != nil || len(edit.Values) > 0 && validateConfigurationEdits(edit.Values) != nil {
+	hasSelections := len(edit.Roots)+len(edit.Selections)+len(edit.Resources) > 0
+	if hasSelections && validateSelectionChanges(edit.Roots, edit.Selections, edit.Resources) != nil || len(edit.Values) > 0 && validateConfigurationEdits(edit.Values) != nil {
 		return nil, false, ErrEditConfiguration
 	}
 	configurations, bindings, err := selectionRemovals(edit.Configurations, edit.Bindings)

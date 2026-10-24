@@ -24,7 +24,9 @@ const dependencyOperation = `{"kind":"dependency","action":"update","module":"ex
 
 type dependencyFixtureOptions struct {
 	fields, parameters, providerFields, providerParameters string
-	document, mode, alternateFields                        string
+	document, mode, alternateFields, dependencyManifest    string
+	overlay                                                string
+	onlyService, onlyAlternate                             bool
 }
 
 // Every version is independently discovered through the public boundary. No
@@ -33,6 +35,12 @@ func dependencyInputs(t *testing.T, fixture dependencyFixtureOptions) applicatio
 	t.Helper()
 	root := t.TempDir()
 	writeImplementationFile(t, filepath.Join(root, "go.mod"), "module "+dependencyModule+"\n\ngo 1.26\n")
+	if fixture.dependencyManifest != "" {
+		writeImplementationFile(t, filepath.Join(root, "go.mod"), "module "+dependencyModule+"\n\ngo 1.26\nrequire example.com/template v0.0.0\nreplace example.com/template => ./template\n")
+		writeImplementationFile(t, filepath.Join(root, "template/go.mod"), "module example.com/template\n\ngo 1.26\n")
+		writeImplementationFile(t, filepath.Join(root, "template/template.go"), "package template\n")
+		writeImplementationFile(t, filepath.Join(root, "template/plystra.yaml"), fixture.dependencyManifest)
+	}
 	writeImplementationFile(t, filepath.Join(root, "base/plystra.yaml"), "{}\n")
 	for _, contract := range []struct{ name, id, method string }{{"entry", "app.main/v1", "Run"}, {"companion", "app.aux/v1", "Copy"}} {
 		writeImplementationFile(t, filepath.Join(root, contract.name, "interface.go"), fmt.Sprintf(`package %s
@@ -47,6 +55,12 @@ type Response struct{}
 		writeImplementationFile(t, filepath.Join(root, resource.name, "resource.go"), "package "+resource.name+"\n//plystra:resource "+resource.id+"\ntype Resource interface { Value() string }\n")
 	}
 	for _, name := range []string{"service", "alternate"} {
+		if name == "alternate" && fixture.onlyService {
+			continue
+		}
+		if name == "service" && fixture.onlyAlternate {
+			continue
+		}
 		parameters, fields := fixture.parameters, fixture.fields
 		if name == "alternate" {
 			parameters, fields = "", `Name string `+"`yaml:\"name\"`"
@@ -112,7 +126,11 @@ func (*value) Value() string { return "" }
 	case "environment":
 		options.EnvironmentName, selected = "test", "plystra.test.yaml"
 		writeImplementationFile(t, filepath.Join(root, "plystra.yaml"), fixture.document)
-		writeImplementationFile(t, filepath.Join(root, selected), "# Sparse overlay.\n{}\n")
+		overlay := fixture.overlay
+		if overlay == "" {
+			overlay = "# Sparse overlay.\n{}\n"
+		}
+		writeImplementationFile(t, filepath.Join(root, selected), overlay)
 	case "replacement":
 		options.ConfigurationPath, selected = "deploy/app.yaml", "deploy/app.yaml"
 		writeImplementationFile(t, filepath.Join(root, "plystra.yaml"), "interfaces: {require: [unknown.root/v1]}\n")
@@ -240,7 +258,7 @@ func TestPreviewDependencyConfigurationsExactParameterChanges(t *testing.T) {
 			fixture := oldFixture
 			fixture.parameters = test.parameters
 			current := dependencyInputs(t, fixture)
-			plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, dependencyRequest(t, dependencyOperation, dependencySelection(dependencyOwner)))
+			plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, dependencyRequest(t, dependencyOperation))
 			if test.name == "changed-contract" {
 				if err == nil {
 					t.Fatal("retargeted a retained wrong-contract binding")
@@ -254,7 +272,7 @@ func TestPreviewDependencyConfigurationsExactParameterChanges(t *testing.T) {
 				t.Fatalf("parameter cleanup count = %d", got)
 			}
 			if test.removed {
-				if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, dependencyRequest(t, dependencyOperation, dependencySelection(dependencyOwner))); err == nil {
+				if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, dependencyRequest(t, dependencyOperation)); err == nil {
 					t.Fatal("unknown old parameter established cleanup")
 				}
 			}
@@ -268,7 +286,6 @@ func TestPreviewDependencyConfigurationsSameSymbolResourceSchemaAndParameters(t 
 	old := dependencyInputs(t, dependencyFixtureOptions{document: document, providerParameters: "upstream db.Resource", providerFields: "Name string `yaml:\"name\"`"})
 	current := dependencyInputs(t, dependencyFixtureOptions{document: document, providerFields: "Name string `yaml:\"name\" plystra:\"required\"`"})
 	request := dependencyRequest(t, dependencyOperation,
-		`{"kind":"resource_selection","action":"set","instance":"primary","provider":"`+dependencyModule+`/provider.New"}`,
 		`{"kind":"configuration","action":"set","owner":"primary","path":"name","value":"PRIVATE_NEW"}`)
 	plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
 	if err != nil {
@@ -349,7 +366,7 @@ func TestPreviewDependencyConfigurationsResourceRemovalKeepsIncomingBindings(t *
 	if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, dependencyRequest(t, dependencyOperation, remove)); err == nil {
 		t.Fatal("removed or retargeted surviving incoming binding")
 	} else if !errors.Is(err, constructorgraph.ErrInvalidResourceBinding) {
-		t.Logf("final dangling binding rejected: %v", err)
+		t.Fatalf("unexpected final dangling-binding error: %v", err)
 	}
 	plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, dependencyRequest(t, dependencyOperation, remove, dependencySelection(dependencyOtherOwner)))
 	if err != nil {
@@ -413,5 +430,117 @@ func TestPreviewDependencyConfigurationsUnknownClosureCannotProveNewReachability
 				t.Fatalf("newly reachable fields = %d, want %d (incomplete old closure: %v)", got, want, incomplete)
 			}
 		})
+	}
+}
+
+func TestPreviewDependencyConfigurationsUsesOldAutomaticOwnershipOnly(t *testing.T) {
+	t.Parallel()
+	document := "interfaces: {require: [app.main/v1]}\nconfig: {" + dependencyOwner + ": {name: PRIVATE_OLD}}\n"
+	fixture := dependencyFixtureOptions{fields: "Name string `yaml:\"name\"`", document: document, onlyService: true}
+	old := dependencyInputs(t, fixture)
+	fixture.onlyService = false
+	current := dependencyInputs(t, fixture)
+	request := dependencyRequest(t, dependencyOperation, dependencySelection(dependencyOtherOwner))
+	plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ConfigurationImpact().DerivedOperations()) != 1 {
+		t.Fatalf("old automatic owner lost its proof across versions: %s", plan.ConfigurationImpact().CanonicalJSON())
+	}
+	if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, request); err == nil {
+		t.Fatal("new declarations were treated as proof of old automatic ownership")
+	}
+}
+
+func TestPreviewDependencyConfigurationsProviderReplacementUsesOldParameters(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			document := "resources:\n  instances: {primary: {use: " + dependencyModule + "/provider.New, config: {name: PRIVATE_OLD}}, database: {use: " + dependencyModule + "/leaf.New}}\n  bind:\n    instances:\n      primary: {upstream: missing}\n"
+			fixture := dependencyFixtureOptions{document: document, mode: mode, providerParameters: "upstream db.Resource", providerFields: "Name string `yaml:\"name\"`"}
+			old, current := dependencyInputs(t, fixture), dependencyInputs(t, fixture)
+			request := dependencyRequest(t, dependencyOperation,
+				`{"kind":"resource_selection","action":"set","instance":"primary","provider":"`+dependencyModule+`/leaf.New"}`,
+				`{"kind":"configuration","action":"set","owner":"primary","path":"name","value":"PRIVATE_NEW"}`)
+			plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			impact := plan.ConfigurationImpact()
+			want := 2
+			if mode == "environment" {
+				want = 1 // Root Config is suppressed by the provider boundary.
+			}
+			if len(impact.NewlyUnownedPaths()) != 2 || len(impact.DerivedOperations()) != want || bytes.Contains(plan.Updated(), []byte("PRIVATE_OLD")) {
+				t.Fatalf("provider replacement impact = %s", impact.CanonicalJSON())
+			}
+			if mode == "environment" && !bytes.Contains(plan.Updated(), []byte("$remove: true")) {
+				t.Fatal("inherited obsolete binding did not receive an exact tombstone")
+			}
+			if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, request); err == nil {
+				t.Fatal("provider replacement guessed obsolete parameters without old declarations")
+			}
+		})
+	}
+}
+
+func TestPreviewDependencyConfigurationsDependencyManifestCannotProveOldOwnership(t *testing.T) {
+	t.Parallel()
+	template := "interfaces: {use: {app.main/v1: " + dependencyOwner + "}}\nresources: {instances: {ghost: {use: " + dependencyModule + "/provider.New}}}\n"
+	for _, consumer := range []string{"implementation", "instance"} {
+		t.Run(consumer, func(t *testing.T) {
+			document := "interfaces: {require: [app.main/v1]}\nconfig: {" + dependencyOwner + ": {name: PRIVATE_UNPROVEN}}\n"
+			operations := []string{dependencyOperation, dependencySelection(dependencyOtherOwner)}
+			if consumer == "instance" {
+				document = "resources: {bind: {instances: {ghost: {upstream: missing}}}}\n"
+				operations = []string{dependencyOperation, `{"kind":"resource_selection","action":"remove","instance":"ghost"}`}
+			}
+			current := dependencyInputs(t, dependencyFixtureOptions{document: document, fields: "Name string `yaml:\"name\"`", dependencyManifest: template})
+			plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, dependencyRequest(t, operations...))
+			if err == nil {
+				t.Fatalf("a dependency's template content proved old %s ownership: %s", consumer, plan.ConfigurationImpact().CanonicalJSON())
+			}
+		})
+	}
+}
+
+func TestPreviewDependencyConfigurationsExcludedLiteralIsNotOldOwner(t *testing.T) {
+	t.Parallel()
+	for _, consumer := range []string{"implementation", "instance"} {
+		t.Run(consumer, func(t *testing.T) {
+			document := dependencyDocument() + "config: {" + dependencyOwner + ": {name: PRIVATE_UNPROVEN}}\n"
+			overlay := "interfaces: {use: {app.main/v1: {$remove: true}}}\n"
+			operations := []string{dependencyOperation, dependencySelection(dependencyOtherOwner)}
+			if consumer == "instance" {
+				document = "resources:\n  instances: {ghost: {use: " + dependencyModule + "/provider.New}}\n  bind: {instances: {ghost: {upstream: missing}}}\n"
+				overlay = "resources: {instances: {ghost: {$remove: true}}}\n"
+				operations = []string{dependencyOperation, `{"kind":"resource_selection","action":"remove","instance":"ghost"}`}
+			}
+			current := dependencyInputs(t, dependencyFixtureOptions{document: document, fields: "Name string `yaml:\"name\"`", mode: "environment", overlay: overlay})
+			if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, dependencyRequest(t, operations...)); err == nil {
+				t.Fatalf("an excluded lower-layer %s proved old ownership", consumer)
+			}
+		})
+	}
+}
+
+func TestPreviewDependencyConfigurationsDependencyOnlyCleansLostAutomaticOwner(t *testing.T) {
+	t.Parallel()
+	document := "interfaces: {require: [app.main/v1]}\nconfig: {" + dependencyOwner + ": {name: PRIVATE_OLD}}\n"
+	fixture := dependencyFixtureOptions{fields: "Name string `yaml:\"name\"`", document: document, onlyService: true}
+	old := dependencyInputs(t, fixture)
+	fixture.onlyService, fixture.onlyAlternate = false, true
+	current := dependencyInputs(t, fixture)
+	request := dependencyRequest(t, dependencyOperation)
+	plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Changed() || bytes.Contains(plan.Updated(), []byte(dependencyOwner)) || len(plan.ConfigurationImpact().DerivedOperations()) != 1 {
+		t.Fatalf("dependency-only automatic cleanup = %s", plan.ConfigurationImpact().CanonicalJSON())
+	}
+	if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, request); err == nil {
+		t.Fatal("unknown old automatic owner authorized dependency-only cleanup")
 	}
 }
