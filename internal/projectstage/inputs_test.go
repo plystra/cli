@@ -326,3 +326,60 @@ func TestInputsAndFileImagesArePrivate(t *testing.T) {
 		}
 	}
 }
+
+func nestedPrivateWrappers[T any](value T) map[string]any {
+	return map[string]any{
+		"concrete":        struct{ private T }{value},
+		"interface":       struct{ private any }{value},
+		"pointer":         struct{ private *T }{&value},
+		"array":           struct{ private [1]T }{[1]T{value}},
+		"slice":           struct{ private []T }{[]T{value}},
+		"map":             struct{ private map[string]T }{map[string]T{"capture": value}},
+		"interface-array": struct{ private [1]any }{[1]any{value}},
+		"interface-slice": struct{ private []any }{[]any{value}},
+		"interface-map":   struct{ private map[string]any }{map[string]any{"capture": value}},
+		"nested":          struct{ private []map[string][1]any }{[]map[string][1]any{{"capture": {value}}}},
+	}
+}
+
+func TestInputsAndFileImagesNestedFormattingIsPrivate(t *testing.T) {
+	root, parent := fixture(t)
+	const secret = "PRIVATE_NESTED_CAPTURE_VALUE"
+	write(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n// "+secret+"\n")
+	write(t, root, "private.txt", secret)
+	stage := capturedStage(t, root, parent)
+	inputs := stage.Inputs()
+	image, err := inputs.ProjectFile(t.Context(), "private.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(secret))
+	private := []string{
+		"PRIVATE_",
+		"80 82 73 86 65 84 69 95",
+		"0x50, 0x52, 0x49, 0x56, 0x41, 0x54, 0x45, 0x5f",
+		"505249564154455f",
+		root, stage.Root(), fmt.Sprintf("%x", sum),
+		strings.Trim(fmt.Sprint(sum), "[]"),
+	}
+	for name, wrappers := range map[string]map[string]any{
+		"inputs":       nestedPrivateWrappers(inputs),
+		"file-image":   nestedPrivateWrappers(image),
+		"zero-inputs":  nestedPrivateWrappers(projectstage.Inputs{}),
+		"absent-image": nestedPrivateWrappers(projectstage.FileImage{}),
+	} {
+		for wrapper, value := range wrappers {
+			t.Run(name+"/"+wrapper, func(t *testing.T) {
+				for _, format := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%d", "%f", "%t", "%w"} {
+					rendered := fmt.Sprintf(format, value)
+					for _, marker := range private {
+						if strings.Contains(rendered, marker) {
+							t.Errorf("nested %s exposes private input (matched %q)", format, marker)
+							break
+						}
+					}
+				}
+			})
+		}
+	}
+}

@@ -20,6 +20,12 @@ var errPrivateInput = errors.New("private Project staging inputs cannot be seria
 // snapshot. It owns no open handles and remains usable after Stage.Close.
 // Its zero value is invalid; it confers no lock or installation authority.
 type Inputs struct {
+	// fmt skips methods on unexported wrapper fields. Its invalid-verb fallback
+	// also dereferences a single struct pointer; two levels keep contents opaque.
+	state **inputState
+}
+
+type inputState struct {
 	project  string
 	trees    []inputTree
 	metadata []fileSnapshot
@@ -43,9 +49,12 @@ func (Inputs) MarshalYAML() (any, error)        { return nil, errPrivateInput }
 // FileImage is an exact private original file preimage. The zero value means
 // absence. Data returns an independent copy, including for repeated calls.
 type FileImage struct {
-	exists bool
-	data   []byte
-	mode   os.FileMode
+	state **fileImageState
+}
+
+type fileImageState struct {
+	data []byte
+	mode os.FileMode
 }
 
 func (FileImage) String() string                   { return "<private-project-file>" }
@@ -55,9 +64,35 @@ func (f FileImage) LogValue() slog.Value           { return slog.StringValue(f.S
 func (FileImage) MarshalJSON() ([]byte, error)     { return nil, errPrivateInput }
 func (FileImage) MarshalText() ([]byte, error)     { return nil, errPrivateInput }
 func (FileImage) MarshalYAML() (any, error)        { return nil, errPrivateInput }
-func (f FileImage) Exists() bool                   { return f.exists }
-func (f FileImage) Data() []byte                   { return append([]byte(nil), f.data...) }
-func (f FileImage) Mode() os.FileMode              { return f.mode }
+func (f FileImage) Exists() bool                   { return f.captured() != nil }
+func (f FileImage) Data() []byte {
+	state := f.captured()
+	if state == nil {
+		return nil
+	}
+	return append([]byte(nil), state.data...)
+}
+func (f FileImage) Mode() os.FileMode {
+	state := f.captured()
+	if state == nil {
+		return 0
+	}
+	return state.mode
+}
+
+func (f FileImage) captured() *fileImageState {
+	if f.state == nil {
+		return nil
+	}
+	return *f.state
+}
+
+func (i Inputs) captured() *inputState {
+	if i.state == nil {
+		return nil
+	}
+	return *i.state
+}
 
 // Inputs returns immutable original-side evidence, independently of the Stage's
 // temporary files and lifetime. A Stage not successfully created returns zero.
@@ -69,29 +104,30 @@ func (s *Stage) Inputs() Inputs {
 }
 
 func (s *Stage) captureInputs() Inputs {
-	result := Inputs{project: s.project, metadata: append([]fileSnapshot(nil), s.metadata...),
+	state := &inputState{project: s.project, metadata: append([]fileSnapshot(nil), s.metadata...),
 		aliases: append([]directorySnapshot(nil), s.aliases...), paths: append([]pathSnapshot(nil), s.paths...)}
-	for index := range result.metadata {
-		result.metadata[index].data = append([]byte(nil), result.metadata[index].data...)
+	for index := range state.metadata {
+		state.metadata[index].data = append([]byte(nil), state.metadata[index].data...)
 	}
 	for _, tree := range s.trees {
-		result.trees = append(result.trees, inputTree{source: tree.source, entries: maps.Clone(tree.entries)})
+		state.trees = append(state.trees, inputTree{source: tree.source, entries: maps.Clone(tree.entries)})
 	}
-	return result
+	return Inputs{state: &state}
 }
 
 // Recheck rejects original byte, mode, identity, alias and membership drift.
 // It does not inspect the temporary candidate or establish a mutation lock.
 func (i Inputs) Recheck(ctx context.Context) error {
-	if ctx == nil || ctx.Err() != nil || i.project == "" || len(i.trees) == 0 {
+	state := i.captured()
+	if ctx == nil || ctx.Err() != nil || state == nil || state.project == "" || len(state.trees) == 0 {
 		return ErrConcurrentChange
 	}
-	for _, file := range i.metadata {
+	for _, file := range state.metadata {
 		if ctx.Err() != nil || file.recheck() != nil {
 			return ErrConcurrentChange
 		}
 	}
-	for _, alias := range i.aliases {
+	for _, alias := range state.aliases {
 		if ctx.Err() != nil {
 			return ErrConcurrentChange
 		}
@@ -104,14 +140,14 @@ func (i Inputs) Recheck(ctx context.Context) error {
 			return ErrConcurrentChange
 		}
 	}
-	for _, path := range i.paths {
+	for _, path := range state.paths {
 		current, err := os.Lstat(path.path)
 		if ctx.Err() != nil || err != nil && !errors.Is(err, os.ErrNotExist) || !sameFile(path.info, current) {
 			return ErrConcurrentChange
 		}
 	}
 	var used budget
-	for _, before := range i.trees {
+	for _, before := range state.trees {
 		after, err := captureTree(ctx, before.source, "", nil, &used)
 		if err != nil || !sameTree(treeSnapshot{entries: before.entries}, after) {
 			return ErrConcurrentChange
@@ -139,14 +175,15 @@ func projectFilePath(path string) bool {
 // inventory, never the relocated candidate. Missing paths must still be absent;
 // present paths must retain their captured bytes, identity and mode.
 func (i Inputs) ProjectFile(ctx context.Context, path string) (FileImage, error) {
-	if ctx == nil || ctx.Err() != nil || i.project == "" || !projectFilePath(path) {
+	state := i.captured()
+	if ctx == nil || ctx.Err() != nil || state == nil || state.project == "" || !projectFilePath(path) {
 		return FileImage{}, ErrConcurrentChange
 	}
-	for _, tree := range i.trees {
-		if !within(tree.source, i.project) {
+	for _, tree := range state.trees {
+		if !within(tree.source, state.project) {
 			continue
 		}
-		relative, err := filepath.Rel(tree.source, filepath.Join(i.project, filepath.FromSlash(path)))
+		relative, err := filepath.Rel(tree.source, filepath.Join(state.project, filepath.FromSlash(path)))
 		if err != nil || !filepath.IsLocal(relative) {
 			return FileImage{}, ErrConcurrentChange
 		}
@@ -186,7 +223,8 @@ func (t inputTree) file(ctx context.Context, path string) (FileImage, error) {
 		!sameFile(before.info, after) || sha256.Sum256(data) != before.digest || t.checkPath(ctx, root, path) != nil {
 		return FileImage{}, ErrConcurrentChange
 	}
-	return FileImage{exists: true, data: data, mode: before.info.Mode()}, nil
+	state := &fileImageState{data: data, mode: before.info.Mode()}
+	return FileImage{state: &state}, nil
 }
 
 func (t inputTree) checkPath(ctx context.Context, root *os.Root, path string) error {

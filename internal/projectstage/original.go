@@ -76,7 +76,10 @@ func originalReplacementToken(data []byte, replacement *modfile.Replace) (replac
 // baseline yields the exact authored bytes, including formatting and spelling.
 // Other Project-relative slash paths yield a defensive copy without rewriting.
 func (s *Stage) OriginalProjectBytes(path string, stagedData []byte) ([]byte, error) {
-	if s == nil || s.inputs.project == "" || !projectFilePath(path) || len(stagedData) > MaximumFileBytes {
+	if s == nil || !projectFilePath(path) || len(stagedData) > MaximumFileBytes {
+		return nil, ErrStage
+	}
+	if inputs := s.inputs.captured(); inputs == nil || inputs.project == "" {
 		return nil, ErrStage
 	}
 	if path != "go.mod" && path != "vendor/modules.txt" {
