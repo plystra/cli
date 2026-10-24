@@ -72,12 +72,14 @@ type Options struct {
 	// before graph listing, independently of manifest Go-version shortcuts.
 	// These files have no independent Go checksum authority.
 	RetainModuleInformation func([]string) error
-	// RetainSelectedSources captures eligible warm source bundles before
+	// RetainSelectedSources captures warm and newly acquired source bundles before
 	// extracted-manifest validation. A completely inferred selected graph is
 	// captured before listing; otherwise actual Go-selected sources are captured
 	// after listing, before the CLI reads their extracted manifests.
-	// Bundles require independent original archive and manifest checksums;
-	// their extracted manifests have not been parsed or recognized as Projects.
+	// Warm bundles require independent original archive and manifest checksums.
+	// Missing sources are acquired under the original checksum authorities and
+	// retained before CLI validation or the next acquisition. Their extracted
+	// manifests have not been parsed or recognized as Projects.
 	RetainSelectedSources func([]Module) error
 }
 
@@ -257,6 +259,9 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		}
 		options.RetainSelectedSources = retainSelectedSourcesOnce(options.RetainSelectedSources)
 	}
+	if options.RetainModuleInformation != nil {
+		options.RetainModuleInformation = retainModuleInformationOnce(inputs, options.RetainModuleInformation)
+	}
 	if options.RetainRootManifests != nil || options.RetainModuleInformation != nil || options.RetainSelectedSources != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
@@ -329,7 +334,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 			return Index{}, errors.Join(ErrDiscover, err)
 		}
 	}
-	if err := resolveMissingSources(ctx, application.Path(), application.ModulePath(), before, modules, options, outputLimit); err != nil {
+	if err := resolveMissingSources(ctx, application.Path(), application.ModulePath(), before, modules, options, outputLimit, inputs, workspace); err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
 	if options.RequireSourceChecksums || workspace != nil {
@@ -579,88 +584,84 @@ type downloadedModule struct {
 	GoMod    string `json:"GoMod"`
 	Checksum string `json:"Sum"`
 	GoModSum string `json:"GoModSum"`
+	Error    string `json:"Error"`
 }
 
-func resolveMissingSources(ctx context.Context, applicationRoot, applicationModulePath string, expectedGoMod fileSnapshot, modules []Module, options Options, outputLimit int) error {
-	missing := false
-	for _, dependency := range modules {
-		if dependency.root == "" {
-			missing = true
-			break
+func resolveMissingSources(ctx context.Context, applicationRoot, applicationModulePath string, expectedGoMod fileSnapshot, modules []Module, options Options, outputLimit int, inputs preparationInputs, workspace *preparationWorkspace) (resultErr error) {
+	indices := map[module.Version][]int{}
+	var versions []module.Version
+	for index, dependency := range modules {
+		if dependency.root != "" {
+			continue
 		}
+		version := sourceVersion(dependency)
+		if version.Path == "" || version.Version == "" {
+			return fmt.Errorf("%w: local source for module %q is unavailable", ErrModuleUnavailable, dependency.path)
+		}
+		if _, exists := indices[version]; !exists {
+			versions = append(versions, version)
+		}
+		indices[version] = append(indices[version], index)
 	}
-	if !missing {
+	if len(versions) == 0 {
 		return nil
 	}
 	if options.Offline {
-		for _, dependency := range modules {
-			if dependency.root == "" {
-				sourcePath := dependency.sourcePath
-				version := dependency.selectedVersion
-				if replacement, exists := dependency.Replacement(); exists && !replacement.Local() {
-					sourcePath = replacement.Path()
-					version = replacement.Version()
-				}
-				return fmt.Errorf("%w: selected source %s@%s for module %q is not available locally", ErrModuleUnavailable, sourcePath, version, dependency.path)
-			}
-		}
+		version := versions[0]
+		return fmt.Errorf("%w: selected source %s for module %q is not available locally", ErrModuleUnavailable, version.String(), modules[indices[version][0]].path)
 	}
 
 	downloadRoot, err := os.MkdirTemp("", "plystra-module-download-")
 	if err != nil {
 		return fmt.Errorf("%w: create isolated download directory: %v", ErrModuleUnavailable, err)
 	}
-	defer os.RemoveAll(downloadRoot)
+	temporaryRoot := downloadRoot
+	defer func() { resultErr = errors.Join(resultErr, inputs.recheck(), os.RemoveAll(temporaryRoot)) }()
 
-	environment := environmentWith(options.Environment, "GOWORK", "off")
-	for index := range modules {
-		if modules[index].root != "" {
-			continue
-		}
-		queryPath := modules[index].sourcePath
-		queryVersion := modules[index].selectedVersion
-		if replacement, exists := modules[index].Replacement(); exists {
-			if replacement.Local() {
-				return fmt.Errorf("%w: local replacement source for module %q is unavailable", ErrModuleUnavailable, modules[index].path)
-			}
-			queryPath = replacement.Path()
-			queryVersion = replacement.Version()
-		}
-		query := queryPath + "@" + queryVersion
-		output, err := gocommand.Output(ctx, gocommand.Options{
-			Command:     options.GoCommand,
-			Directory:   downloadRoot,
-			Environment: environment,
-			OutputLimit: outputLimit,
-		}, "mod", "download", "-json", query)
-		if err != nil {
-			return fmt.Errorf("%w: download selected source for module %q: %w", ErrModuleUnavailable, modules[index].path, err)
-		}
-		var downloaded downloadedModule
-		decoder := json.NewDecoder(bytes.NewReader(output))
-		if err := decoder.Decode(&downloaded); err != nil {
-			return fmt.Errorf("%w: decode downloaded source for module %q: %v", ErrInvalidOutput, modules[index].path, err)
-		}
-		if err := ensureJSONEnd(decoder); err != nil {
-			return fmt.Errorf("%w: downloaded source for module %q: %v", ErrInvalidOutput, modules[index].path, err)
-		}
-		if downloaded.Path != queryPath || downloaded.Version != queryVersion {
-			return fmt.Errorf("%w: downloaded source for module %q returned %s@%s, expected %s", ErrInvalidOutput, modules[index].path, downloaded.Path, downloaded.Version, query)
-		}
-		if modules[index].checksum != "" && modules[index].checksum != downloaded.Checksum ||
-			modules[index].goModChecksum != "" && modules[index].goModChecksum != downloaded.GoModSum {
-			return errors.Join(ErrSourceIntegrity, ErrConcurrentChange)
-		}
-		root, goModData, err := validateModuleRoot(modules[index].path, downloaded.Dir, downloaded.GoMod, queryPath, false)
+	environment := preparationEnvironment(options)
+	if workspace == nil {
+		sums, err := inputs.read(filepath.Join(applicationRoot, "go.sum"), true)
 		if err != nil {
 			return err
 		}
-		modules[index].root = root
-		modules[index].sourceDirectory = downloaded.Dir
-		modules[index].goMod = goModData
-		modules[index].checksum = downloaded.Checksum
-		modules[index].goModChecksum = downloaded.GoModSum
-		modules[index].goModFile = downloaded.GoMod
+		if err := os.WriteFile(filepath.Join(downloadRoot, "go.mod"), []byte("module plystra-module-download\n"), 0o600); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(downloadRoot, "go.sum"), sums.data, 0o600); err != nil {
+			return err
+		}
+	} else {
+		work, err := workspace.write(filepath.Join(downloadRoot, "checksums"), nil, false)
+		if err != nil {
+			return err
+		}
+		downloadRoot = filepath.Join(filepath.Dir(work), "member-0")
+		environment = environmentWith(environment, "GOWORK", work)
+	}
+	options.OutputLimit = outputLimit
+	if callback := options.RetainModuleInformation; callback != nil {
+		options.RetainModuleInformation = func(paths []string) error {
+			return errors.Join(callback(paths), ctx.Err(), inputs.recheck())
+		}
+	}
+	retain := func(sources []Module) error {
+		var err error
+		if callback := options.RetainSelectedSources; callback != nil {
+			err = callback(sources)
+		}
+		return errors.Join(err, ctx.Err(), inputs.recheck())
+	}
+	for _, version := range versions {
+		group := make([]Module, len(indices[version]))
+		for index, original := range indices[version] {
+			group[index] = modules[original]
+		}
+		if err := downloadPreparedSources(ctx, downloadRoot, group, nil, options, environment, retain); err != nil {
+			return err
+		}
+		for index, original := range indices[version] {
+			modules[original] = group[index]
+		}
 	}
 
 	// Downloads run outside the Project directory. Recheck the Project module
@@ -679,18 +680,6 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		)
 	}
 	return nil
-}
-
-func ensureJSONEnd(decoder *json.Decoder) error {
-	var extra any
-	err := decoder.Decode(&extra)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return errors.New("go returned more than one JSON document")
 }
 
 func environmentWith(environment []string, key, value string) []string {
@@ -767,8 +756,10 @@ func validateModuleRoot(modulePath, directory, goModPath, expectedSourcePath str
 }
 
 type fileSnapshot struct {
-	info fs.FileInfo
-	data []byte
+	info       fs.FileInfo
+	data       []byte
+	parent     string
+	parentInfo fs.FileInfo
 }
 
 func readGoMod(name string) (fileSnapshot, error) {

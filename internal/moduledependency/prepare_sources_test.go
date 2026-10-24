@@ -88,12 +88,13 @@ func retainWarmBundle(t *testing.T, stage *projectstage.Stage, ctx context.Conte
 		metadata = append(metadata, projectstage.MetadataInput{Path: source.GoModFile(), GoModChecksum: source.GoModChecksum()}, projectstage.MetadataInput{
 			Path: strings.TrimSuffix(source.GoModFile(), ".mod") + ".ziphash", Expected: []byte(source.Checksum()),
 		})
-		trees = append(trees, projectstage.Source{Directory: source.SourceDirectory(), Module: module.Version{Path: warmSourceModule, Version: "v1.0.0"}, Checksum: source.Checksum()})
+		version := module.Version{Path: source.Path(), Version: source.SelectedVersion()}
+		if replacement, ok := source.Replacement(); ok {
+			version = module.Version{Path: replacement.Path(), Version: replacement.Version()}
+		}
+		trees = append(trees, projectstage.Source{Directory: source.SourceDirectory(), Module: version, Checksum: source.Checksum()})
 	}
-	if err := stage.RetainMetadata(ctx, metadata); err != nil {
-		return err
-	}
-	return stage.RetainSources(ctx, trees)
+	return stage.RetainSources(ctx, trees, metadata...)
 }
 
 func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
@@ -147,15 +148,14 @@ func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = stage.Close() })
 				command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
-				calls, listedCalls := 0, 0
+				calls, listedCalls, acquiredCalls := 0, 0, 0
 				_, err = moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{
 					Environment: environment, GoCommand: command, Offline: mode == "offline",
 					RetainSelectedSources: func(sources []moduledependency.Module) error {
-						if commands := string(readFile(t, trace)); strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
+						if commands := string(readFile(t, trace)); strings.Contains(commands, "download ") {
+							acquiredCalls++
+						} else if strings.Contains(commands, "list ") {
 							listedCalls++
-							if strings.Contains(commands, "download ") {
-								t.Fatal("listed source was captured after acquisition")
-							}
 						} else {
 							calls++
 						}
@@ -183,6 +183,13 @@ func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 				}
 				if listedCalls != wantListed {
 					t.Fatalf("listed source capture: calls=%d, want=%d", listedCalls, wantListed)
+				}
+				wantAcquired := 0
+				if mode == "missing-tree" || mode == "partial" || mode == "missing-checksum-file" || mode == "manifest-only" && !workspace {
+					wantAcquired = 1
+				}
+				if acquiredCalls != wantAcquired {
+					t.Fatalf("acquired source capture: calls=%d, want=%d", acquiredCalls, wantAcquired)
 				}
 				if strings.HasPrefix(mode, "poisoned-") || mode == "unsafe-checksum" {
 					if strings.Contains(string(readFile(t, trace)), "list ") {

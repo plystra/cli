@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -159,7 +160,7 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		}
 		// Retaining a completed source before another Go process starts keeps
 		// later acquisition failures from discarding or refreshing its evidence.
-		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment); err != nil {
+		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment, nil); err != nil {
 			return err
 		}
 		if err := retain(group); err != nil {
@@ -169,7 +170,7 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 	return nil
 }
 
-func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string) (resultErr error) {
+func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error) (resultErr error) {
 	queries := map[module.Version][]int{}
 	var arguments []string
 	var versions []module.Version
@@ -196,6 +197,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	if err != nil {
 		return errors.Join(ErrModuleUnavailable, err)
 	}
+	acquired := append([]Module(nil), result...)
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	for {
 		var downloaded downloadedModule
@@ -206,22 +208,44 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		}
 		version := module.Version{Path: downloaded.Path, Version: downloaded.Version}
 		indices, exists := queries[version]
-		if !exists || !filepath.IsAbs(downloaded.Dir) || !validSourceChecksum(downloaded.Checksum) || !validSourceChecksum(downloaded.GoModSum) || checksums[version] != "" && checksums[version] != downloaded.Checksum {
+		if !exists || downloaded.Error != "" || !filepath.IsAbs(downloaded.Dir) || !filepath.IsAbs(downloaded.GoMod) || !validSourceChecksum(downloaded.Checksum) || !validSourceChecksum(downloaded.GoModSum) || checksums[version] != "" && checksums[version] != downloaded.Checksum {
 			return ErrSourceIntegrity
 		}
-		canonical, manifest, err := validateModuleRoot(version.Path, downloaded.Dir, downloaded.GoMod, version.Path, false)
+		canonical, err := filepath.EvalSymlinks(filepath.Clean(downloaded.Dir))
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %w: resolve source for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, version.Path, err)
 		}
 		for _, index := range indices {
-			result[index].root, result[index].goMod, result[index].goModChecksum = canonical, append([]byte(nil), manifest...), downloaded.GoModSum
-			result[index].sourceDirectory, result[index].checksum = downloaded.Dir, downloaded.Checksum
-			result[index].goModFile = downloaded.GoMod
+			if result[index].checksum != "" && result[index].checksum != downloaded.Checksum || result[index].goModChecksum != "" && result[index].goModChecksum != downloaded.GoModSum {
+				return errors.Join(ErrSourceIntegrity, ErrConcurrentChange)
+			}
+			acquired[index].root, acquired[index].goMod, acquired[index].goModChecksum = canonical, nil, downloaded.GoModSum
+			acquired[index].sourceDirectory, acquired[index].checksum = downloaded.Dir, downloaded.Checksum
+			acquired[index].goModFile = downloaded.GoMod
 		}
 		delete(queries, version)
 	}
 	if len(queries) != 0 {
 		return ErrInvalidOutput
 	}
+	// Decode the entire acquisition before retaining it, but do not read an
+	// extracted manifest until its source evidence has been retained.
+	if retain != nil {
+		if err := retain(append([]Module(nil), acquired...)); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	for index, dependency := range acquired {
+		version := sourceVersion(dependency)
+		canonical, manifest, err := validateModuleRoot(dependency.path, dependency.sourceDirectory, dependency.goModFile, version.Path, false)
+		if err != nil {
+			return err
+		}
+		acquired[index].root, acquired[index].goMod = canonical, manifest
+	}
+	copy(result, acquired)
 	return nil
 }

@@ -41,6 +41,16 @@ func (inputs preparationInputs) recheck() error {
 		if err != nil || (before.info != nil || after.info != nil) && !sameSnapshot(before, after) {
 			return ErrConcurrentChange
 		}
+		if before.parentInfo != nil {
+			parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+			if err != nil || parent != before.parent {
+				return ErrConcurrentChange
+			}
+			info, err := os.Lstat(parent)
+			if err != nil || !os.SameFile(before.parentInfo, info) || before.parentInfo.Mode() != info.Mode() {
+				return ErrConcurrentChange
+			}
+		}
 	}
 	return nil
 }
@@ -350,7 +360,7 @@ func (workspace *preparationWorkspace) resolveChecksums(ctx context.Context, mod
 	if err != nil {
 		return err
 	}
-	if err := downloadPreparedSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work)); err != nil {
+	if err := downloadPreparedSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work), nil); err != nil {
 		return err
 	}
 	for index, source := range sources {

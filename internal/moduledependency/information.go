@@ -9,6 +9,49 @@ import (
 	"golang.org/x/mod/module"
 )
 
+func retainModuleInformationOnce(inputs preparationInputs, retain func([]string) error) func([]string) error {
+	retained := map[string]bool{}
+	return func(paths []string) (resultErr error) {
+		// Keep independent path and file evidence when a caller installs only the
+		// information hook and there is no source-bundle recheck.
+		defer func() { resultErr = errors.Join(resultErr, inputs.recheck()) }()
+		var pending []string
+		seen := map[string]bool{}
+		for _, path := range paths {
+			if !retained[path] && !seen[path] {
+				pending = append(pending, path)
+				seen[path] = true
+			}
+		}
+		if len(pending) == 0 {
+			return nil
+		}
+		for _, path := range pending {
+			parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+			if err != nil {
+				return ErrConcurrentChange
+			}
+			info, err := os.Lstat(parent)
+			if err != nil || !info.IsDir() || !os.SameFile(info, info) {
+				return ErrConcurrentChange
+			}
+			snapshot, err := inputs.read(path, false)
+			if err != nil {
+				return err
+			}
+			snapshot.parent, snapshot.parentInfo = parent, info
+			inputs[path] = snapshot
+		}
+		if err := retain(append([]string(nil), pending...)); err != nil {
+			return err
+		}
+		for _, path := range pending {
+			retained[path] = true
+		}
+		return nil
+	}
+}
+
 func preparationInformationPaths(ctx context.Context, root string, versions []module.Version, options Options, environment []string) ([]string, error) {
 	if options.RetainModuleInformation == nil || len(versions) == 0 {
 		return nil, nil

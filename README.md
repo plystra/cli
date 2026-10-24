@@ -927,8 +927,21 @@ their original evidence. Go-reported source paths remain intact. Rejection,
 cancellation, or changed original metadata stops discovery, and later manifest
 or checksum failure preserves retained inputs through stage cleanup. Invalid or
 incomplete JSON selections introduce no post-list captures. This closes the
-warm-source boundary before the CLI's first extracted-manifest read, while
-cold acquisition and complete capture before Go's own reads remain unfinished.
+warm-source boundary before the CLI's first extracted-manifest read.
+Missing-source discovery downloads each distinct effective version under frozen
+original checksum files, preserving separate workspace primary and member
+authorities without reapplying replacements. Complete download output and both
+earlier nonempty checksum fields are checked before retention. Newly acquired
+sources are retained before CLI extracted-manifest validation and before the
+next acquisition, with shared logical identities captured together. Rejection,
+cancellation, or changed original metadata prevents further acquisition, and
+later validation or download failures preserve completed source evidence through
+stage cleanup. Related source metadata and trees share complete before/after
+input rechecks. Information paths captured earlier in the same discovery reuse
+their original evidence, with independent raw file and resolved parent-directory
+identity rechecks even when only the information callback is installed. Go can
+read source files during download; complete capture before Go's first cold or
+proxy reads remains unfinished.
 Source and dependency previews additionally retain versioned module source
 trees after module selection and before declaration discovery or candidate
 builds. This includes ordinary and transitive modules, versioned replacements,

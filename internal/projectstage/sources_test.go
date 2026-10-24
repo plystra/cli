@@ -176,6 +176,89 @@ func sourceInput(t *testing.T, root string) projectstage.Source {
 	return projectstage.Source{Directory: root, Module: version, Checksum: checksum}
 }
 
+func TestRetainSourcesIncludesRelatedMetadata(t *testing.T) {
+	for _, mode := range []string{"source-identity", "metadata-identity", "prior-source-drift", "prior-metadata-drift", "bad-archive", "bad-metadata"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			root, parent := fixture(t)
+			stage := capturedStage(t, root, parent)
+			earlier := stage.Inputs()
+			source, metadata := t.TempDir(), t.TempDir()
+			write(t, source, "value.go", "package dependency\nconst Value = 1\n")
+			input := sourceInput(t, source)
+			write(t, metadata, "v1.0.0.ziphash", input.Checksum)
+			path := filepath.Join(metadata, "v1.0.0.ziphash")
+			file := projectstage.MetadataInput{Path: path, Expected: []byte(input.Checksum)}
+			if mode == "bad-archive" {
+				input.Checksum = "h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+			} else if mode == "bad-metadata" {
+				file.Expected = []byte("conflicting checksum")
+			}
+			err := stage.RetainSources(t.Context(), []projectstage.Source{input, input}, file, file)
+			if mode == "bad-metadata" {
+				if !errors.Is(err, projectstage.ErrStage) || !errors.Is(err, projectstage.ErrSourceIntegrity) {
+					t.Fatalf("conflicting metadata was accepted: %v", err)
+				}
+				return
+			}
+			if mode == "bad-archive" {
+				if !errors.Is(err, projectstage.ErrSourceIntegrity) {
+					t.Fatalf("conflicting archive was accepted: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			inputs := stage.Inputs()
+			if strings.Contains(mode, "source-") {
+				path = filepath.Join(source, "value.go")
+			}
+			if strings.HasPrefix(mode, "prior-") {
+				write(t, filepath.Dir(path), filepath.Base(path), "changed earlier evidence\n")
+				next := t.TempDir()
+				write(t, next, "new.ziphash", "new metadata")
+				if err := stage.RetainSources(t.Context(), nil, projectstage.MetadataInput{Path: filepath.Join(next, "new.ziphash")}); !errors.Is(err, projectstage.ErrConcurrentChange) {
+					t.Fatalf("combined capture refreshed earlier inputs: %v", err)
+				}
+				return
+			}
+			if err := stage.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := inputs.Recheck(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(path)
+			if err != nil || !os.SameFile(info, info) {
+				t.Fatal("missing input identity", err)
+			}
+			if err := os.Rename(path, filepath.Join(t.TempDir(), "prior")); err != nil {
+				t.Fatal(err)
+			}
+			write(t, filepath.Dir(path), filepath.Base(path), string(data))
+			if err := os.Chmod(path, info.Mode()); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+				t.Fatal(err)
+			}
+			current, err := os.Stat(path)
+			if err != nil || os.SameFile(info, current) {
+				t.Fatal("fixture did not replace input identity")
+			}
+			if err := inputs.Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+				t.Fatalf("combined capture lost evidence after cleanup: %v", err)
+			}
+			if err := earlier.Recheck(t.Context()); err != nil {
+				t.Fatal("combined capture changed an earlier immutable input value", err)
+			}
+		})
+	}
+}
+
 func TestRetainedSourcesValidateCompleteArchiveInventory(t *testing.T) {
 	for _, mode := range []string{"ordinary", "legacy", "vcs"} {
 		t.Run(mode, func(t *testing.T) {

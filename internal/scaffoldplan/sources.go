@@ -91,10 +91,7 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 		sources = append(sources, projectstage.Source{Directory: filepath.Clean(dependency.SourceDirectory()),
 			Module: module.Version{Path: path, Version: version}, Checksum: dependency.Checksum()})
 	}
-	if err := stage.RetainMetadata(ctx, metadata); err != nil {
-		return errors.Join(moduledependency.ErrSourceIntegrity, err)
-	}
-	return stage.RetainSources(ctx, sources)
+	return stage.RetainSources(ctx, sources, metadata...)
 }
 
 func retainInformation(ctx context.Context, stage *projectstage.Stage, paths []string) error {

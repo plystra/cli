@@ -613,7 +613,7 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list", "transitive-manifest-identity-after-list", "workspace-transitive-manifest-identity-after-list", "prepared-manifest-identity-after-download", "workspace-prepared-manifest-identity-after-download"} {
 		t.Run(mode, func(t *testing.T) {
-			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
 		})
 	}
 }
@@ -622,7 +622,7 @@ func TestBuiltCLIChangePlanRejectsChangedPreparedSource(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-source-identity-after-download", "workspace-prepared-source-identity-after-download"} {
 		t.Run(mode, func(t *testing.T) {
-			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
 		})
 	}
 }
@@ -631,7 +631,7 @@ func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {
 		t.Run(mode, func(t *testing.T) {
-			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
 		})
 	}
 }
@@ -640,7 +640,7 @@ func TestBuiltCLIChangePlanRejectsChangedGraphInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"information-identity-after-graph", "workspace-information-identity-after-graph"} {
 		t.Run(mode, func(t *testing.T) {
-			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
 		})
 	}
 }
@@ -649,7 +649,7 @@ func TestBuiltCLIChangePlanRejectsChangedGraphSource(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"source-identity-after-graph", "workspace-source-identity-after-graph", "source-manifest-identity-after-graph", "workspace-source-manifest-identity-after-graph"} {
 		t.Run(mode, func(t *testing.T) {
-			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
 		})
 	}
 }
@@ -658,7 +658,25 @@ func TestBuiltCLIChangePlanRejectsChangedListedSource(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"workspace-cold-graph-source-identity-after-download", "workspace-cold-graph-source-manifest-identity-after-download", "cold-graph-duplicate-sum-source-identity-after-download", "cold-graph-duplicate-sum-source-manifest-identity-after-download"} {
 		t.Run(mode, func(t *testing.T) {
-			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
+func TestBuiltCLIChangePlanRejectsChangedAcquiredSource(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"cold-source-transitive-source-identity-after-download", "cold-source-transitive-source-manifest-identity-after-download", "workspace-cold-source-transitive-source-identity-after-download", "workspace-cold-source-transitive-source-manifest-identity-after-download"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
+func TestBuiltCLIChangePlanRetainsUnchangedAcquiredSource(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"cold-source-transitive-unchanged", "workspace-cold-source-transitive-unchanged"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
 		})
 	}
 }
@@ -674,10 +692,12 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 	return binary
 }
 
-func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode string) {
+func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
 	coldGraph := strings.Contains(mode, "cold-graph-")
 	mode = strings.ReplaceAll(mode, "cold-graph-", "")
+	coldSource := strings.Contains(mode, "cold-source-")
+	mode = strings.ReplaceAll(mode, "cold-source-", "")
 	duplicateSum := strings.Contains(mode, "duplicate-sum-")
 	mode = strings.ReplaceAll(mode, "duplicate-sum-", "")
 	prepared := strings.Contains(mode, "prepared-")
@@ -722,6 +742,12 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 		}
 		seedPreviewTransitiveManifest(t, root, environment, transitivePath)
 	}
+	if coldSource {
+		if !transitive {
+			t.Fatal("cold acquisition race requires a later selected source")
+		}
+		environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_QUERY="+transitivePath+"@v1.0.0")
+	}
 	workspaceRoot, initialLocal := "", ""
 	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
 		workspaceRoot = t.TempDir()
@@ -757,6 +783,17 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 			t.Fatal(err)
 		}
 	}
+	if coldSource {
+		for _, modulePath := range []string{previewDependencyModule, transitivePath} {
+			path := filepath.Join(cache, filepath.FromSlash(modulePath+"@v1.0.0"))
+			if !strings.HasPrefix(path, filepath.Clean(cache)+string(filepath.Separator)) {
+				t.Fatal("cold source escaped isolated cache")
+			}
+			if err := os.RemoveAll(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	wrapper := sourcePreparationGoWrapper(t)
 	goName := "go"
 	if runtime.GOOS == "windows" {
@@ -780,7 +817,7 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	if strings.Contains(mode, "source-manifest-identity") {
 		path = filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "go.mod")
 	}
-	if transitive {
+	if transitive && !coldSource {
 		path = filepath.Join(cache, "cache", "download", filepath.FromSlash(transitivePath), "@v", "v1.0.0.mod")
 	}
 	marker := filepath.Join(t.TempDir(), "manifest-changed")
@@ -807,12 +844,26 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	output, err := command.Output()
 	var exited *exec.ExitError
 	var result scaffoldPlanDocument
-	if data, err := os.ReadFile(marker); err != nil || string(data) != "manifest changed after Go output\n" {
-		t.Fatalf("compiled CLI did not exercise cache-input race: %v", err)
-	}
 	decodeErr := json.Unmarshal(output, &result)
-	if !errors.As(err, &exited) || exited.ExitCode() != 3 || stderr.Len() != 0 || decodeErr != nil || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
-		t.Fatalf("compiled CLI accepted cache-input drift: error=%v, decode=%v, status=%q, plan-present=%t, stderr-bytes=%d", err, decodeErr, result.Status, result.Payload.PlanDigest != "", stderr.Len())
+	if mode == "unchanged" {
+		if err != nil || stderr.Len() != 0 || decodeErr != nil || result.Status != "success" || result.Payload.Completeness != "non_exact" || result.Payload.PlanDigest == "" {
+			t.Fatalf("compiled cold acquisition preview failed: error=%v, decode=%v, status=%q, stderr-bytes=%d", err, decodeErr, result.Status, stderr.Len())
+		}
+		if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("unchanged acquisition changed cache input")
+		}
+		for _, path := range []string{filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "remote", "implementation.go"), filepath.Join(cache, filepath.FromSlash(transitivePath+"@v1.0.0"), "go.mod")} {
+			if _, err := os.Stat(path); err != nil {
+				t.Fatal("cold acquisition did not materialize selected source", err)
+			}
+		}
+	} else {
+		if data, err := os.ReadFile(marker); err != nil || string(data) != "manifest changed after Go output\n" {
+			t.Fatalf("compiled CLI did not exercise cache-input race: %v", err)
+		}
+		if !errors.As(err, &exited) || exited.ExitCode() != 3 || stderr.Len() != 0 || decodeErr != nil || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
+			t.Fatalf("compiled CLI accepted cache-input drift: error=%v, decode=%v, status=%q, plan-present=%t, stderr-bytes=%d", err, decodeErr, result.Status, result.Payload.PlanDigest != "", stderr.Len())
+		}
 	}
 	for _, private := range []string{cache, root, workspaceRoot, initialLocal, "changed after verified Go output"} {
 		if private == "" {

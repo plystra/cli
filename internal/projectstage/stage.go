@@ -31,7 +31,7 @@ const (
 
 var (
 	ErrStage            = errors.New("capture private Project stage")
-	ErrConcurrentChange = errors.New("Project staging input changed")
+	ErrConcurrentChange = errors.New("project staging input changed")
 )
 
 // Event identifies an effect that occurred during Create without exposing paths

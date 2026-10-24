@@ -28,7 +28,9 @@ type Source struct {
 // independently resolved h1 checksums. Previously captured roots are never
 // refreshed or discarded, including after a dependency is removed.
 // Inputs obtained earlier remain immutable; obtain Inputs again after success.
-func (s *Stage) RetainSources(ctx context.Context, sources []Source) (resultErr error) {
+// Optional metadata shares the operation's complete before/after rechecks,
+// avoiding repeated scans of earlier sources between related captures.
+func (s *Stage) RetainSources(ctx context.Context, sources []Source, metadata ...MetadataInput) (resultErr error) {
 	defer func() {
 		if resultErr != nil {
 			resultErr = errors.Join(ErrSourceIntegrity, resultErr)
@@ -36,6 +38,11 @@ func (s *Stage) RetainSources(ctx context.Context, sources []Source) (resultErr 
 	}()
 	if err := s.Recheck(ctx); err != nil {
 		return err
+	}
+	if len(metadata) != 0 {
+		if err := s.retainMetadata(ctx, metadata); err != nil {
+			return err
+		}
 	}
 	sources = slices.Clone(sources)
 	slices.SortFunc(sources, func(a, b Source) int { return strings.Compare(a.Directory, b.Directory) })

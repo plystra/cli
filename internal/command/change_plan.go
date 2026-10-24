@@ -303,15 +303,6 @@ func parseChangePlanArguments(arguments []string) (changePlanArguments, bool) {
 	return result, requestSet
 }
 
-func changePlanFormatIntent(arguments []string) commandFormat {
-	for index := 0; index+1 < len(arguments); index++ {
-		if arguments[index] == "--format" && arguments[index+1] == string(commandFormatJSON) {
-			return commandFormatJSON
-		}
-	}
-	return commandFormatHuman
-}
-
 func readChangeRequest(base, path string) ([]byte, error) {
 	if path == "-" {
 		limited := io.LimitReader(os.Stdin, changerequest.MaximumRequestBytes+1)

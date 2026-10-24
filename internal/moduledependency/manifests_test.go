@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,14 +160,131 @@ func runRootManifestsHelper() int {
 	}
 	command := exec.Command(os.Getenv("PLYSTRA_MODULE_REAL_GO"), os.Args[1:]...)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	mode := os.Getenv("PLYSTRA_MODULE_DOWNLOAD_OUTPUT")
+	var downloaded bytes.Buffer
+	if mode != "" && len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download" {
+		command.Stdout = &downloaded
+	}
+	var listed bytes.Buffer
+	listChecksum := os.Getenv("PLYSTRA_MODULE_LIST_CHECKSUM")
+	if listChecksum != "" && len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m" {
+		command.Stdout = &listed
+	}
 	if err := command.Run(); err != nil {
 		if exited, ok := err.(*exec.ExitError); ok {
 			return exited.ExitCode()
 		}
 		return 11
 	}
-	if path := os.Getenv("PLYSTRA_MODULE_METADATA_PATH"); path != "" && len(os.Args) > 1 && os.Args[1] == "list" {
-		if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "create" {
+	if command.Stdout == &downloaded {
+		data := downloaded.Bytes()
+		switch mode {
+		case "trailing-json":
+			data = append(data, '{')
+		case "duplicate":
+			data = append(data, data...)
+		case "omitted":
+			data = nil
+		case "unexpected":
+			data = append(data, []byte(`{"Path":"example.com/unrequested","Version":"v1.0.0"}`)...)
+		case "archive-mismatch", "manifest-mismatch", "download-error", "directory-removed":
+			var record map[string]any
+			if err := json.Unmarshal(data, &record); err != nil {
+				return 23
+			}
+			field := "Sum"
+			if mode == "manifest-mismatch" {
+				field = "GoModSum"
+			}
+			if mode == "download-error" {
+				record["Error"] = "source acquisition failed"
+			} else if mode == "directory-removed" {
+				directory, ok := record["Dir"].(string)
+				relative, err := filepath.Rel(os.Getenv("GOMODCACHE"), directory)
+				if !ok || err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+					return 24
+				}
+				if err := os.RemoveAll(directory); err != nil {
+					return 25
+				}
+			} else {
+				record[field] = "h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+			}
+			var err error
+			data, err = json.Marshal(record)
+			if err != nil {
+				return 26
+			}
+		}
+		if _, err := os.Stdout.Write(data); err != nil {
+			return 22
+		}
+	}
+	if command.Stdout == &listed {
+		decoder := json.NewDecoder(&listed)
+		for {
+			var record map[string]any
+			if err := decoder.Decode(&record); errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				return 27
+			}
+			if record["Path"] == warmRequestedModule {
+				field := "Sum"
+				if mode == "manifest-mismatch" {
+					field = "GoModSum"
+				}
+				if replacement, ok := record["Replace"].(map[string]any); ok {
+					replacement[field] = listChecksum
+				} else {
+					record[field] = listChecksum
+				}
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(record); err != nil {
+				return 28
+			}
+		}
+	}
+	metadataPhase := os.Getenv("PLYSTRA_MODULE_METADATA_PHASE")
+	metadataRead := len(os.Args) > 1 && os.Args[1] == "list" && metadataPhase != "download" || len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download" && metadataPhase == "download"
+	if path := os.Getenv("PLYSTRA_MODULE_METADATA_PATH"); path != "" && metadataRead {
+		if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "delete" {
+			if err := os.Remove(path); err != nil {
+				return 29
+			}
+		} else if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "parent-identity" {
+			parent := filepath.Dir(path)
+			relative, err := filepath.Rel(os.Getenv("GOMODCACHE"), parent)
+			if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+				return 30
+			}
+			before, err := os.Stat(path)
+			info, statErr := os.Stat(parent)
+			if err != nil || statErr != nil || !os.SameFile(before, before) || !os.SameFile(info, info) {
+				return 31
+			}
+			prior, err := os.MkdirTemp(filepath.Dir(parent), "prior-information-")
+			if err != nil || os.Remove(prior) != nil || os.Rename(parent, prior) != nil || os.Mkdir(parent, info.Mode()) != nil {
+				return 32
+			}
+			entries, err := os.ReadDir(prior)
+			if err != nil {
+				return 33
+			}
+			for _, entry := range entries {
+				if err := os.Rename(filepath.Join(prior, entry.Name()), filepath.Join(parent, entry.Name())); err != nil {
+					return 34
+				}
+			}
+			if os.Remove(prior) != nil || os.Chtimes(parent, info.ModTime(), info.ModTime()) != nil {
+				return 35
+			}
+			after, err := os.Stat(path)
+			current, statErr := os.Stat(parent)
+			if err != nil || statErr != nil || !os.SameFile(before, after) || os.SameFile(info, current) {
+				return 36
+			}
+		} else if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "create" {
 			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 				return 13
 			}

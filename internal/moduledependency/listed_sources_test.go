@@ -95,14 +95,18 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
 				rejected := errors.New("listed source rejected")
-				calls := 0
+				calls, acquiredCalls := 0, 0
 				index, err := moduledependency.Discover(ctx, locate(t, stage.Root()), moduledependency.Options{
 					Environment: environment, GoCommand: command, RequireSourceChecksums: true,
 					RetainSelectedSources: func(sources []moduledependency.Module) error {
-						calls++
 						commands := string(readFile(t, trace))
-						if !strings.Contains(commands, "list -m ") || strings.Contains(commands, "mod download ") {
+						if !strings.Contains(commands, "list -m ") {
 							t.Fatal("source retention did not precede post-list acquisition")
+						}
+						if strings.Contains(commands, "mod download ") {
+							acquiredCalls++
+						} else {
+							calls++
 						}
 						want := 1
 						if mode == "shared-source" {
@@ -165,6 +169,13 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 				if calls != wantCalls {
 					t.Fatalf("listed source calls=%d, want=%d; error=%v", calls, wantCalls, err)
 				}
+				wantAcquired := 0
+				if mode == "manifest-only" && !workspace {
+					wantAcquired = 1
+				}
+				if acquiredCalls != wantAcquired {
+					t.Fatalf("acquired source calls=%d, want=%d; error=%v", acquiredCalls, wantAcquired, err)
+				}
 				switch mode {
 				case "rejected", "rejected-and-changed-sums", "unparsed-manifest":
 					if !errors.Is(err, rejected) || mode == "rejected-and-changed-sums" && !errors.Is(err, moduledependency.ErrConcurrentChange) {
@@ -206,7 +217,7 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 				if !bytes.Equal([]byte(sums), readFile(t, fixture.authority)) {
 					t.Fatal("discovery modified authored checksum authority")
 				}
-				if wantCalls == 0 || mode == "unparsed-manifest" {
+				if wantCalls+wantAcquired == 0 || mode == "unparsed-manifest" {
 					return
 				}
 				inputs := stage.Inputs()

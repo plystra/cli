@@ -23,6 +23,13 @@ func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error
 	if err := s.Recheck(ctx); err != nil {
 		return err
 	}
+	if err := s.retainMetadata(ctx, files); err != nil {
+		return err
+	}
+	return s.Recheck(ctx)
+}
+
+func (s *Stage) retainMetadata(ctx context.Context, files []MetadataInput) error {
 	if len(files) > MaximumEntries {
 		return ErrStage
 	}
@@ -70,7 +77,7 @@ func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error
 		s.metadata = append(s.metadata, file)
 	}
 	s.inputs = s.captureInputs()
-	return s.Recheck(ctx)
+	return nil
 }
 
 func (input MetadataInput) matches(data []byte) bool {
