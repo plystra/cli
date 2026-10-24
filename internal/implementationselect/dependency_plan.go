@@ -79,14 +79,14 @@ func PreviewDependencyConfigurations(ctx context.Context, previous, current appl
 	original := current.SelectedSnapshot().Data()
 	before, err := current.ComposeSelectionCandidate(original)
 	if err != nil {
-		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+		return PlanResult{}, fmt.Errorf("%w: compose current selection identities: %w", ErrSelect, err)
 	}
 	old := before
 	oldLayers := current.CurrentLayers()
 	if previous.Module().Path() != "" {
 		old, err = previous.ComposeSelectionCandidate(previous.SelectedSnapshot().Data())
 		if err != nil {
-			return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+			return PlanResult{}, fmt.Errorf("%w: compose previous selection identities: %w", ErrSelect, err)
 		}
 		oldLayers = previous.CurrentLayers()
 	}
@@ -104,7 +104,7 @@ func PreviewDependencyConfigurations(ctx context.Context, previous, current appl
 	}
 	edit.Configurations, edit.Bindings, err = dependencyOwnershipRemovals(previous, current, old, before, identities, edit.Resources)
 	if err != nil {
-		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+		return PlanResult{}, fmt.Errorf("%w: derive dependency ownership removals: %w", ErrSelect, err)
 	}
 	overlay := current.ConfigurationSelection().Mode() == "environment"
 	if overlay {
@@ -124,16 +124,16 @@ func PreviewDependencyConfigurations(ctx context.Context, previous, current appl
 	}
 	candidate, err := current.ComposeCandidate(updated)
 	if err != nil {
-		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+		return PlanResult{}, fmt.Errorf("%w: compose cleaned dependency candidate: %w", ErrSelect, err)
 	}
 	if err := current.ValidateCandidate(candidate); err != nil {
-		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+		return PlanResult{}, fmt.Errorf("%w: validate cleaned dependency candidate: %w", ErrSelect, err)
 	}
 	input := authoredResourceConfigurationImpact(oldLayers, candidate.CurrentLayers(), current.ConfigurationSelection().Path())
 	input = authoredImplementationConfigurationImpact(oldLayers, candidate.CurrentLayers(), input)
 	input.NewlyRequiredFields, err = dependencyRequiredFields(previous, current, old, candidate)
 	if err != nil {
-		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
+		return PlanResult{}, fmt.Errorf("%w: inspect dependency required fields: %w", ErrSelect, err)
 	}
 	impact, err := configurationimpact.CompareBindings(old.Manifest().ResourceBindings(), candidate.Manifest().ResourceBindings(), input)
 	if err != nil {
@@ -147,7 +147,7 @@ func PreviewDependencyConfigurations(ctx context.Context, previous, current appl
 	}
 	result, err := selectionPlanResult(current, "", "dependency_configuration", constructorsymbol.Symbol{}, updated, impact)
 	if err != nil {
-		return PlanResult{}, err
+		return PlanResult{}, fmt.Errorf("project dependency plan: %w", err)
 	}
 	result.writeRequired = writeRequired
 	return result, nil

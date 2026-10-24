@@ -422,10 +422,12 @@ the default `false`; an effective CORS object must still contain origins.
 
 Remove a whole `config.<constructor-symbol>` entry only with `{$remove: true}`.
 Null, sequences, malformed markers, and markers with sibling fields are invalid
-at that boundary. An empty mapping remains configuration, not removal. The
-constructor still needs a discovered compiled Config schema, and its exclusion
-survives absent or changed lower configuration without activating it. Inspection
-retains the removal owner and suppressed field sources. Generated runtime
+at that boundary. An empty mapping remains configuration, not removal. A whole
+exclusion survives absent lower configuration or an unavailable old Config schema
+without activating its constructor. Known-schema lower objects still receive
+typed validation; an excluded unavailable-schema object contributes only
+value-free owner provenance. Inspection retains the removal owner and suppressed
+sources. Generated runtime
 loading strips whole-entry markers before construction; removing required
 configuration can still fail validation before any constructor runs.
 
@@ -1211,7 +1213,13 @@ plystra update github.com/acme/email@v1.5.0
 
 Omit the version query to request Go's normal upgrade selection for that module. `plystra update` never performs an implicit whole-graph upgrade.
 
-`plystra add` validates one module query, resolves it through ordinary Go tooling, and records the selected module as a direct requirement. `plystra remove` requires a module already selected in `go.mod`, uses ordinary Go tooling to remove it, and fails if regeneration or tidy would select it again. `plystra update` also requires an existing selection, preserves a direct requirement as direct, and verifies that the module remains selected. All three commands recompute discovery and the root selected current-Project model, regenerate, tidy, and validate the complete Project. They do not activate ordinary dependencies or rewrite authored YAML except for deterministic ownership cleanup: when a changed dependency removes a Resource constructor parameter, the selected layer removes only that obsolete binding leaf. Instances, surviving bindings, Interface selections, and unrelated YAML remain unchanged; overlay leaves receive sparse tombstones, local leaves are deleted, and the CLI never guesses a replacement provider or retargets an incompatible binding. A dependency change that invalidates the current Project's selected model fails and rolls the transaction back. A failed Go command, resolution, composition, generation, tidy, dependency postcondition, or validation step restores `go.mod`, `go.sum`, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
+`plystra add` validates one module query, resolves it through ordinary Go tooling, and records the selected module as a direct requirement. `plystra remove` requires a module already selected in `go.mod`, uses ordinary Go tooling to remove it, and fails if regeneration or tidy would select it again. `plystra update` also requires an existing selection, preserves a direct requirement as direct, and verifies that the module remains selected. All three commands capture old declarations before module resolution, compare old and final ownership through the shared planner, regenerate, tidy, and validate the selected current-Project model. Ambient PLYSTRA_ENV or PLYSTRA_CONFIG selects one environment or replacement document; explicit selector flags are not installed on dependency commands. The selected layer removes configuration whose last proven owner disappears and exact binding parameters declared by an old consumer but absent from its replacement. Unknown old declarations prove neither automatic ownership nor obsolete parameters; a never-declared binding remains an error. Instances, surviving bindings, Interface selections, and unrelated YAML remain unchanged; overlay leaves receive sparse tombstones, local leaves are deleted, and the CLI never guesses a replacement provider or retargets an incompatible binding. A dependency change that invalidates the current Project's selected model fails and rolls the transaction back. A failed Go command, resolution, composition, generation, tidy, dependency postcondition, or validation step restores `go.mod`, `go.sum`, generated artifacts, and every other transaction-owned file without overwriting a concurrent user edit. The Go Module proxy and cache remain ordinary Go-tool boundaries; the CLI never copies or modifies dependency source.
+
+An environment overlay can retain a whole-constructor removal after the
+dependency stops declaring that constructor's Config schema. The obsolete root
+object then contributes only value-free owner provenance. Lower objects with
+known schemas still receive ordinary typed validation before removal, and
+standalone unknown objects remain invalid.
 
 Malformed `add` and `update` queries emit
 `PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID` and
