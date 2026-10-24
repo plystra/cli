@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/changerequest"
+	"github.com/plystra/cli/internal/projectstage"
 	"github.com/plystra/cli/internal/scaffoldplan"
 	"go.yaml.in/yaml/v3"
 )
@@ -212,6 +214,46 @@ func TestScaffoldPreviewFailureDoesNotReturnUsableCapture(t *testing.T) {
 	}
 	if (scaffoldplan.Capture{}).Recheck(t.Context()) == nil {
 		t.Fatal("zero capture accepted")
+	}
+}
+
+func TestScaffoldPreviewRetainsExternalGoEnvironment(t *testing.T) {
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
+	settings, parent := t.TempDir(), t.TempDir()
+	path := filepath.Join(settings, "env")
+	writeCommandFile(t, path, "GOFLAGS=-tags=PRIVATE_GOENV_CAPTURE\n")
+	environment := implementationSelectionCommandEnvironment(map[string]string{"GOENV": path})
+	filtered := environment[:0]
+	for _, entry := range environment {
+		name, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(name, "GOFLAGS") {
+			filtered = append(filtered, entry)
+		}
+	}
+	request, err := changerequest.Parse([]byte(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := commandTree(t, root)
+	planned, err := scaffoldplan.Preview(t.Context(), scaffoldplan.Options{Start: root, TemporaryParent: parent, Environment: filtered}, request)
+	if err != nil || !planned.Capture().Valid() {
+		t.Fatalf("external GOENV preview failed: %v", err)
+	}
+	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+		t.Fatal("preview retained temporary files")
+	}
+	if err := planned.Capture().Recheck(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertCandidateCaptureRedaction(t, planned, settings)
+	assertCandidateCaptureRedaction(t, planned.Capture(), settings)
+	writeCommandFile(t, path, "GOFLAGS=-tags=PRIVATE_GOENV_CHANGED\n")
+	if err := planned.Capture().Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+		t.Fatalf("retained capture accepted changed external GOENV: %v", err)
+	}
+	if !reflect.DeepEqual(before, commandTree(t, root)) || string(readCommandFile(t, settings, "env")) != "GOFLAGS=-tags=PRIVATE_GOENV_CHANGED\n" {
+		t.Fatal("preview changed original inputs or overwrote external editing")
 	}
 }
 

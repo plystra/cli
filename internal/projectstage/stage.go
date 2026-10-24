@@ -77,6 +77,7 @@ type Stage struct {
 	paths         []pathSnapshot
 	stagedPaths   []pathSnapshot
 	workspaceBase string
+	goEnvironment *fileSnapshot
 	closed        bool
 }
 
@@ -102,18 +103,19 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	if environment == nil {
 		environment = os.Environ()
 	}
-	output, started, err := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: project.Path(), Environment: environment, OutputLimit: maximumMetadataBytes}, "env", "-json", "GOWORK", "GOFLAGS")
+	environment = slices.Clone(environment)
+	output, started, err := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: project.Path(), Environment: environment, OutputLimit: maximumMetadataBytes}, "env", "-json", "GOWORK", "GOFLAGS", "GOENV")
 	if started && options.Observe != nil {
 		options.Observe(GoEnvironmentStarted)
 	}
 	if err != nil {
 		return nil, ErrStage
 	}
-	var settings struct{ GOWORK, GOFLAGS string }
+	var settings goEnvironment
 	if json.Unmarshal(output, &settings) != nil || unsafeGoFlags(settings.GOFLAGS) {
 		return nil, ErrStage
 	}
-	s := &Stage{project: project.Path(), environment: append([]string(nil), environment...), projectImages: map[string]relocationImage{}}
+	s := &Stage{project: project.Path(), environment: environment, projectImages: map[string]relocationImage{}}
 	defer func() {
 		if resultErr != nil {
 			s.inputs = Inputs{}
@@ -125,6 +127,9 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	modules, workspace, err := s.captureModuleInputs(ctx, project.Path(), settings.GOWORK)
 	if err != nil {
 		return nil, ErrStage
+	}
+	if err := s.captureGoEnvironment(ctx, options.GoCommand, settings); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStage, err)
 	}
 	var vendorSource string
 	if workspace != nil {
@@ -225,6 +230,9 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 		}
 	}
 	s.environment = replaceEnvironment(s.environment, "GOWORK", selectedWorkspace)
+	if err := s.stageGoEnvironment(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrStage, err)
+	}
 	s.inputs = s.captureInputs()
 	if err := s.Recheck(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStage, err)
@@ -262,6 +270,9 @@ func (s *Stage) Recheck(ctx context.Context) error {
 		if err != nil || !info.Mode().IsRegular() {
 			return ErrConcurrentChange
 		}
+	}
+	if s.goEnvironment != nil && s.goEnvironment.recheck() != nil {
+		return ErrConcurrentChange
 	}
 	return s.inputs.Recheck(ctx)
 }

@@ -294,19 +294,26 @@ func TestBuiltCLIChangePlanScaffoldsFromStdinReadOnly(t *testing.T) {
 	writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
 	before := commandTree(t, root)
 	request, _ := json.Marshal(map[string]any{"schema": "plystra.change/v1", "operations": scaffoldCommandOperations()})
-	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
-	command.Dir, command.Env = filepath.Join(root, "reports"), implementationSelectionCommandEnvironment(map[string]string{"PLYSTRA_ENV": "production"})
-	command.Stdin = bytes.NewReader(request)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	output, err := command.Output()
-	var result scaffoldPlanDocument
-	if err != nil || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "success" || !reflect.DeepEqual(result.Payload.Verification, []string{"plystra", "check", "--env", "production"}) {
-		t.Fatalf("compiled stdin preview: %v\n%s\n%s", err, output, &stderr)
-	}
-	assertChangePlanImpactArrays(t, result.Payload.ConfigurationImpact)
-	if !reflect.DeepEqual(before, commandTree(t, root)) {
-		t.Fatal("compiled stdin preview modified the Project")
+	settings := filepath.Join(t.TempDir(), "env")
+	writeCommandFile(t, settings, "GOPRIVATE=PRIVATE_GOENV_VALUE\n")
+	for _, source := range []string{"off", settings} {
+		command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
+		command.Dir, command.Env = filepath.Join(root, "reports"), implementationSelectionCommandEnvironment(map[string]string{"PLYSTRA_ENV": "production", "GOENV": source})
+		command.Stdin = bytes.NewReader(request)
+		var stderr bytes.Buffer
+		command.Stderr = &stderr
+		output, err := command.Output()
+		var result scaffoldPlanDocument
+		if err != nil || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "success" || !reflect.DeepEqual(result.Payload.Verification, []string{"plystra", "check", "--env", "production"}) {
+			t.Fatalf("compiled stdin preview: %v\n%s\n%s", err, output, &stderr)
+		}
+		if bytes.Contains(output, []byte(settings)) || bytes.Contains(output, []byte("PRIVATE_")) {
+			t.Fatal("compiled stdin preview exposed external GOENV input")
+		}
+		assertChangePlanImpactArrays(t, result.Payload.ConfigurationImpact)
+		if !reflect.DeepEqual(before, commandTree(t, root)) {
+			t.Fatal("compiled stdin preview modified the Project")
+		}
 	}
 	assertNoCommandTransactions(t, root)
 }

@@ -192,7 +192,7 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		}
 		return value
 	}
-	goEnvironment := effect("candidate-go-environment", commandschema.EffectTrustedCodeExecution, "inspect_go_selection", []string{"go", "env", "-json", "GOWORK", "GOFLAGS"})
+	goEnvironment := effect("candidate-go-environment", commandschema.EffectTrustedCodeExecution, "inspect_go_selection", []string{"go", "env", "-json", "GOWORK", "GOFLAGS", "GOENV"})
 	temporaryTree := effect("candidate-stage", commandschema.EffectTemporaryFile, "private_candidate_stage", []string{"plystra", "change", "plan", "--request", "-"})
 	accounting.Unverified = append(accounting.Unverified,
 		effect("candidate-cache", commandschema.EffectCacheMaterialization, "candidate_tool_cache_unknown", []string{"go", "env", "GOCACHE", "GOMODCACHE"}),

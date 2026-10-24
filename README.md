@@ -844,11 +844,18 @@ Relative replacements retain Go's logical workspace-member paths even when
 directory aliases resolve to different physical copy roots.
 Private byte, path-identity, mode, directory-membership, and path-alias evidence
 is rechecked against the original inputs; none is a public plan identity.
+The Go-selected `GOENV` file is retained as private input, including its absence
+and missing parent paths. Selection is rechecked after capture; later changes
+invalidate both live-stage checks and retained inputs after cleanup. `GOENV=off`
+adds no file input, and the caller's environment is copied before Go selection.
+Absolute and Project-relative settings paths are supported. Candidate tooling
+reads an owner-private frozen copy outside the module trees, preserving the
+selected settings even if the original changes; drift still rejects the plan.
 Destination writes and cleanup use opened directory roots. Copies are bounded
 to 1,024 module roots and directory-alias inputs, 65,536 entries, 64 MiB per
 file, and 512 MiB of tree contents. Main-module, workspace, and vendor metadata
-parsed for relocation have individual 1 MiB limits; non-main dependency
-manifests remain uninterpreted source inputs.
+parsed for relocation and the selected `GOENV` file have individual 1 MiB
+limits; non-main dependency manifests remain uninterpreted source inputs.
 Included symbolic and nonregular entries, source-nested temporary parents, and
 alternate `-modfile` or `-overlay` inputs fail closed. This is filesystem
 isolation, not a sandbox for trusted native code. Public source and dependency

@@ -16,12 +16,12 @@ import (
 
 func TestMain(main *testing.M) {
 	if mode := os.Getenv("PLYSTRA_PROJECTSTAGE_HELPER"); mode != "" {
-		if !slices.Equal(os.Args[1:], []string{"env", "-json", "GOWORK", "GOFLAGS"}) {
+		if !slices.Equal(os.Args[1:], []string{"env", "-json", "GOWORK", "GOFLAGS", "GOENV"}) {
 			os.Exit(3)
 		}
 		switch mode {
 		case "valid":
-			_, _ = fmt.Fprintln(os.Stdout, `{"GOWORK":"off","GOFLAGS":""}`)
+			_, _ = fmt.Fprintln(os.Stdout, `{"GOWORK":"off","GOFLAGS":"","GOENV":""}`)
 		case "failure":
 			os.Exit(4)
 		case "invalid-json":
@@ -29,7 +29,7 @@ func TestMain(main *testing.M) {
 		case "oversized":
 			_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", (1<<20)+1))
 		case "unsafe-flags":
-			_, _ = fmt.Fprintln(os.Stdout, `{"GOWORK":"off","GOFLAGS":"-overlay=private.json"}`)
+			_, _ = fmt.Fprintln(os.Stdout, `{"GOWORK":"off","GOFLAGS":"-overlay=private.json","GOENV":""}`)
 		default:
 			os.Exit(3)
 		}
