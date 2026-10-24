@@ -4,16 +4,91 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/privatefile"
 	"github.com/plystra/cli/internal/projectstage"
+	"golang.org/x/mod/modfile"
 )
+
+func TestCreatePreservesModuleVersionQueries(t *testing.T) {
+	for _, member := range []bool{false, true} {
+		t.Run(fmt.Sprint(member), func(t *testing.T) {
+			root, parent := fixture(t)
+			base := filepath.Dir(root)
+			owner, modulePath, uses := root, "example.com/app", "use ./app\n"
+			if member {
+				owner, modulePath = filepath.Join(base, "member"), "example.com/member"
+				uses = "use (\n ./app\n ./member\n)\n"
+			}
+			write(t, owner, "go.mod", "module "+modulePath+"\n\ngo 1.26\nrequire example.com/query v1\nreplace example.com/local => ../local\n")
+			write(t, filepath.Join(base, "local"), "go.mod", "module example.com/local\n\ngo 1.26\n")
+			write(t, base, "go.work", "go 1.26\n"+uses)
+			proxy := t.TempDir()
+			write(t, proxy, "example.com/query/@v/list", "v1.0.0\nv1.1.0\n")
+			for _, version := range []string{"v1.0.0", "v1.1.0"} {
+				write(t, proxy, "example.com/query/@v/"+version+".mod", "module example.com/query\n\ngo 1.26\n")
+				write(t, proxy, "example.com/query/@v/"+version+".info", `{"Version":"`+version+`","Time":"2026-01-01T00:00:00Z"}`)
+			}
+			proxyPath := filepath.ToSlash(proxy)
+			if runtime.GOOS == "windows" {
+				proxyPath = "/" + proxyPath
+			}
+			env := environment("GOWORK="+filepath.Join(base, "go.work"), "GOENV=off", "GOFLAGS=-modcacherw", "GOTOOLCHAIN=local", "GOPROXY="+(&url.URL{Scheme: "file", Path: proxyPath}).String(), "GONOPROXY=none", "GOSUMDB=off", "GOMODCACHE="+t.TempDir())
+			arguments := []string{"list", "-m", "-mod=readonly", "-f", "{{.Version}}", "example.com/query"}
+			original, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: env}, arguments...)
+			if err != nil || strings.TrimSpace(string(original)) != "v1.1.0" {
+				t.Fatalf("original version query = %q, %v", original, err)
+			}
+			before, beforeOwner, beforeLocal := tree(t, root), tree(t, owner), tree(t, filepath.Join(base, "local"))
+			work, err := os.ReadFile(filepath.Join(base, "go.work"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			stage := capturedStage(t, root, parent, env...)
+			selected, err := gocommand.Output(t.Context(), gocommand.Options{Directory: stage.Root(), Environment: stage.Environment()}, arguments...)
+			if err != nil || string(selected) != string(original) {
+				t.Fatalf("staging changed version selection: original %q, staged %q, %v", original, selected, err)
+			}
+			stagedOwner := stage.Root()
+			if member {
+				output, err := gocommand.Output(t.Context(), gocommand.Options{Directory: stage.Root(), Environment: stage.Environment()}, "list", "-m", "-f", "{{.Dir}}", modulePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stagedOwner = strings.TrimSpace(string(output))
+			}
+			data, err := os.ReadFile(filepath.Join(stagedOwner, "go.mod"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			module, err := modfile.Parse("go.mod", data, nil)
+			if err != nil || len(module.Replace) != 1 {
+				t.Fatalf("staged replacements: %v", err)
+			}
+			expected := strings.Replace(beforeOwner["go.mod"], "../local", modfile.AutoQuote(module.Replace[0].New.Path), 1)
+			if string(data) != expected {
+				t.Fatalf("relocation changed non-path bytes: %q", data)
+			}
+			if !reflect.DeepEqual(before, tree(t, root)) || !reflect.DeepEqual(beforeOwner, tree(t, owner)) || !reflect.DeepEqual(beforeLocal, tree(t, filepath.Join(base, "local"))) {
+				t.Fatal("staging changed authored module inputs")
+			}
+			if after, err := os.ReadFile(filepath.Join(base, "go.work")); err != nil || string(after) != string(work) {
+				t.Fatal("staging changed the original workfile")
+			}
+			if err := stage.Recheck(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestCreateCapturesProjectReplacementsBeforeWorkspaceResolution(t *testing.T) {
 	root, parent := fixture(t)

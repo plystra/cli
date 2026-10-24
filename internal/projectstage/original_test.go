@@ -19,7 +19,7 @@ func replacementFixture(t *testing.T) (string, string, string, string) {
 	write(t, filepath.Join(filepath.Dir(root), "dependency"), "go.mod", "module example.com/dependency\n\ngo 1.26\n")
 	write(t, filepath.Join(filepath.Dir(root), "dependency"), "value.go", "package dependency\nconst Value = 1\n")
 	// Deliberately retain an authored quote, redundant path component, CRLF,
-	// comments, and spacing that modfile.Format changes during relocation.
+	// comments, and spacing that modfile.Format would change during relocation.
 	module := "module example.com/app\r\n\r\ngo 1.26\r\n\r\nrequire example.com/dependency v1.0.0\r\n\r\n// authored target\r\nreplace example.com/dependency => \".././dependency\" // keep spelling\r\n"
 	vendor := "# example.com/dependency v1.0.0 => .././dependency\r\n## explicit; go 1.26\r\nexample.com/dependency\r\n# example.com/dependency => .././dependency\r\n"
 	write(t, root, "go.mod", module)
@@ -35,6 +35,37 @@ func readStage(t *testing.T, stage *projectstage.Stage, name string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestCreateRelocatesOnlyModuleReplacementTokens(t *testing.T) {
+	root, parent := fixture(t)
+	base := filepath.Dir(root)
+	write(t, filepath.Join(base, "first local"), "go.mod", "module example.com/one\n\ngo 1.26\n")
+	write(t, filepath.Join(base, "second"), "go.mod", "module example.com/two\n\ngo 1.26\n")
+	original := "module  \"example.com/app\"\r\n\r\ngo 1.26\r\nrequire example.com/query v1\r\nexclude example.com/excluded v1\r\n// caf\u00e9; ../second is only comment text\r\nreplace (\r\n  \"example.com/one\"  => \".././first local\" // keep target spelling\r\n  example.com/two v1 => ../second\r\n  example.com/remote v1 => example.com/upstream v1.2\r\n)\r\n"
+	write(t, root, "go.mod", original)
+	stage := capturedStage(t, root, parent, "GOWORK=off", "GOENV=off", "GOPROXY=off", "GOSUMDB=off")
+	data := readStage(t, stage, "go.mod")
+	module, err := modfile.Parse("go.mod", data, nil)
+	if err != nil || len(module.Replace) != 3 {
+		t.Fatalf("staged replacements: %v", err)
+	}
+	expected := strings.Replace(original, `".././first local"`, modfile.AutoQuote(module.Replace[0].New.Path), 1)
+	expected = strings.Replace(expected, "=> ../second\r\n", "=> "+modfile.AutoQuote(module.Replace[1].New.Path)+"\r\n", 1)
+	if string(data) != expected {
+		t.Fatalf("staged bytes outside local targets changed: %q", data)
+	}
+	final := append(data, []byte("// real candidate edit\r\n")...)
+	restored, err := stage.OriginalProjectBytes("go.mod", final)
+	if err != nil || string(restored) != original+"// real candidate edit\r\n" {
+		t.Fatalf("reverse relocation changed candidate bytes: %q, %v", restored, err)
+	}
+	if authored, err := os.ReadFile(filepath.Join(root, "go.mod")); err != nil || string(authored) != original {
+		t.Fatal("relocation changed authored module bytes")
+	}
+	if err := stage.Recheck(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestOriginalProjectBytesAndPreimagesPreserveAuthoredModuleAndVendor(t *testing.T) {

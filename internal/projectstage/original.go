@@ -138,11 +138,15 @@ func (s *Stage) originalModule(data []byte) ([]byte, error) {
 		token.text = selected.originalToken
 		edits = append(edits, token)
 	}
+	return rewriteReplacementTokens(data, edits)
+}
+
+func rewriteReplacementTokens(data []byte, edits []replacementToken) ([]byte, error) {
 	slices.SortFunc(edits, func(a, b replacementToken) int { return a.start - b.start })
 	var result []byte
 	offset := 0
 	for _, edit := range edits {
-		if edit.start < offset {
+		if edit.start < offset || edit.end < edit.start || edit.end > len(data) {
 			return nil, ErrStage
 		}
 		result = append(result, data[offset:edit.start]...)

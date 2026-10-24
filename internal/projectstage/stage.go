@@ -550,7 +550,7 @@ func (s *Stage) relocateModule(root string) error {
 	if err != nil {
 		return err
 	}
-	changed := false
+	var edits []replacementToken
 	var relocations []replacementRelocation
 	for _, replacement := range module.Replace {
 		if replacement.New.Version != "" {
@@ -570,13 +570,13 @@ func (s *Stage) relocateModule(root string) error {
 			return err
 		}
 		relocations = append(relocations, replacementRelocation{owner: root, module: replacement.Old.Path, version: replacement.Old.Version, original: replacement.New.Path, originalToken: token.text, workspaceOriginal: s.workspaceVendorPath(logical, replacement.New.Path), mapped: mapped})
-		if err := relocateReplacement(replacement, mapped); err != nil {
-			return err
-		}
-		changed = true
+		token.text = modfile.AutoQuote(mapped)
+		edits = append(edits, token)
 	}
-	if changed {
-		data, err = module.Format()
+	if len(edits) != 0 {
+		// Formatting the parsed file also canonicalizes version queries such as
+		// v1 to v1.0.0, changing the versions that Go selects from this stage.
+		data, err = rewriteReplacementTokens(originalData, edits)
 		if err != nil {
 			return err
 		}

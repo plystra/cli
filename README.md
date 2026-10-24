@@ -842,6 +842,10 @@ entries. Local module replacements and the selected workspace are relocated
 with version overrides and module/workspace vendor inventories preserved.
 Relative replacements retain Go's logical workspace-member paths even when
 directory aliases resolve to different physical copy roots.
+Relocating current-Project and workspace-member `go.mod` files changes only
+local replacement target tokens. Other bytes, including version-query spellings,
+comments, quoting, and line endings, remain intact so Go selects the same versions
+as in the authored modules.
 Private byte, path-identity, mode, directory-membership, and path-alias evidence
 is rechecked against the original inputs; none is a public plan identity.
 The Go-selected `GOENV` file is retained as private input, including its absence
