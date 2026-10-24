@@ -36,13 +36,30 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		}
 		manifests, primary = []*modfile.File{parsed}, sums.data
 	} else {
-		if err := workspace.validateRootManifestReplacements(); err != nil {
-			return err
-		}
 		primary = workspace.sum
 		for _, member := range workspace.members {
 			manifests = append(manifests, member.mod)
 			memberSums = append(memberSums, member.sum)
+		}
+	}
+	for index := range manifests {
+		owner := root
+		if workspace != nil {
+			owner = workspace.members[index].root
+		}
+		original, exists := inputs[filepath.Join(owner, "go.mod")]
+		if !exists {
+			return ErrInvalidGoMod
+		}
+		// A prefix such as v1 is a Go query, not the v1.0.0 identity produced
+		// by nil-fixer parsing. No early cache identity is established here.
+		if _, err := modfile.Parse("go.mod", original.data, exactManifestVersion); err != nil {
+			return nil
+		}
+	}
+	if workspace != nil {
+		if err := workspace.validateRootManifestReplacements(); err != nil {
+			return err
 		}
 	}
 	checksums, err := rootManifestChecksums(primary, memberSums)
@@ -78,14 +95,11 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 			versions = append(versions, version)
 		}
 	}
-	if len(versions) == 0 {
-		return nil
-	}
-	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: options.Environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE")
+	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: options.Environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE", "GOVERSION")
 	if err != nil {
 		return err
 	}
-	var selected struct{ GOMODCACHE string }
+	var selected struct{ GOMODCACHE, GOVERSION string }
 	if json.Unmarshal(output, &selected) != nil || !filepath.IsAbs(selected.GOMODCACHE) {
 		return ErrInvalidOutput
 	}
@@ -112,7 +126,19 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 			return err
 		}
 	}
-	return inputs.recheck()
+	if err := inputs.recheck(); err != nil {
+		return err
+	}
+	graph := manifestGraph{
+		root: root, mains: manifests, workspace: workspace, inputs: inputs,
+		checksums: checksums, excluded: excluded, cache: selected.GOMODCACHE,
+		toolchain: selected.GOVERSION, retain: options.RetainRootManifests,
+		retained: map[string]bool{}, parsed: map[string]*modfile.File{},
+	}
+	for _, manifest := range retained {
+		graph.retained[manifest.Path] = true
+	}
+	return graph.capture(ctx)
 }
 
 func rootManifestChecksums(primary []byte, members [][]byte) (map[module.Version]string, error) {
@@ -160,9 +186,14 @@ func rootManifestReplacement(version module.Version, replacements []*modfile.Rep
 
 func (workspace *preparationWorkspace) rootManifestVersion(version module.Version) (module.Version, error) {
 	if replacement := rootManifestReplacement(version, workspace.work.Replace); replacement != nil {
-		return replacement.New, nil
+		selected := replacement.New
+		if selected.Version == "" && !filepath.IsAbs(selected.Path) {
+			selected.Path = filepath.Join(filepath.Dir(workspace.path), selected.Path)
+		}
+		return selected, nil
 	}
 	var selected module.Version
+	var selectedRoot string
 	found := false
 	for _, member := range workspace.members {
 		replacement := rootManifestReplacement(version, member.mod.Replace)
@@ -176,8 +207,12 @@ func (workspace *preparationWorkspace) rootManifestVersion(version module.Versio
 			return module.Version{}, ErrInvalidGoMod
 		}
 		selected, found = next, true
+		selectedRoot = member.root
 	}
 	if found {
+		if selected.Version == "" && !filepath.IsAbs(selected.Path) {
+			selected.Path = filepath.Join(selectedRoot, selected.Path)
+		}
 		return selected, nil
 	}
 	return version, nil

@@ -260,10 +260,10 @@ func testRootManifestRetentionAcrossMVSAndCleanup(t *testing.T, workspace bool) 
 	}})
 	if workspace {
 		selected, ok := index.ByPath(first)
-		if err != nil || !ok || selected.SelectedVersion() != "v1.1.0" || len(retained) != 2 {
+		if err != nil || !ok || selected.SelectedVersion() != "v1.1.0" || len(retained) != 3 {
 			t.Fatalf("workspace MVS result or retained roots: %v, %v, %v", err, index.Modules(), retained)
 		}
-	} else if !errors.Is(err, moduledependency.ErrDiscover) || !strings.Contains(err.Error(), "updates to go.mod needed") || len(index.Modules()) != 0 || len(retained) != 2 {
+	} else if !errors.Is(err, moduledependency.ErrDiscover) || !strings.Contains(err.Error(), "updates to go.mod needed") || len(index.Modules()) != 0 || len(retained) != 3 {
 		t.Fatalf("unexpected readonly MVS result or retained roots: %v, %v, %v", err, index.Modules(), retained)
 	}
 	found := false

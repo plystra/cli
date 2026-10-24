@@ -405,13 +405,21 @@ func TestScaffoldPreviewRejectsChangedChecksumReferenceBeforeRetention(t *testin
 
 func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T) {
 	command := sourcePreparationGoWrapper(t)
-	for _, mode := range []string{"unchanged", "existing", "removal", "prepared", "workspace", "replacement", "existing-identity", "removal-identity", "replacement-identity", "workspace-identity", "workspace-unchanged", "workspace-removal-identity", "workspace-replacement-identity"} {
+	for _, mode := range []string{"unchanged", "existing", "removal", "prepared", "workspace", "replacement", "existing-identity", "removal-identity", "replacement-identity", "workspace-identity", "workspace-unchanged", "workspace-removal-identity", "workspace-replacement-identity", "transitive-identity", "workspace-transitive-identity", "transitive-unchanged", "workspace-transitive-unchanged"} {
 		t.Run(mode, func(t *testing.T) {
 			identity := strings.HasSuffix(mode, "-identity")
 			mode = strings.TrimSuffix(mode, "-identity")
 			workspace := mode == "workspace" || strings.HasPrefix(mode, "workspace-")
 			mode = strings.TrimPrefix(mode, "workspace-")
-			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
+			transitive := strings.HasPrefix(mode, "transitive")
+			unchanged := mode == "unchanged" || mode == "transitive-unchanged"
+			const transitivePath = "example.com/preview/transitive"
+			modules := []commandProxyModule{previewDependency(t, "v1.0.0", false)}
+			if transitive {
+				modules[0].goMod = "module " + previewDependencyModule + "\ngo 1.26\nrequire " + transitivePath + " v1.0.0\n"
+				modules = append(modules, commandProxyModule{path: transitivePath, version: "v1.0.0", ordinary: true})
+			}
+			proxy := writeCommandDependencyProxy(t, modules)
 			environment := previewDependencyEnvironment(t, proxy)
 			root := writeImplementationSelectionCommandProject(t)
 			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
@@ -426,6 +434,9 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "get", required+"@v1.0.0"); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if transitive {
+				seedPreviewTransitiveManifest(t, root, environment, transitivePath)
 			}
 			if workspace {
 				work := filepath.Join(t.TempDir(), "go.work")
@@ -442,11 +453,14 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 				t.Fatal("missing isolated source cache")
 			}
 			path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
+			if transitive {
+				path = filepath.Join(cache, "cache", "download", filepath.FromSlash(transitivePath), "@v", "v1.0.0.mod")
+			}
 			marker := filepath.Join(t.TempDir(), "manifest-changed")
 			race := "manifest-after-list"
 			if mode == "prepared" || mode == "workspace" {
 				race = "manifest-after-download"
-			} else if mode == "unchanged" {
+			} else if unchanged {
 				race = "unchanged"
 			}
 			if identity {
@@ -467,7 +481,7 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 			planned, err := scaffoldplan.Preview(t.Context(), scaffoldplan.Options{
 				Start: root, Environment: environment, GoCommand: command, TemporaryParent: parent,
 			}, request)
-			if mode == "unchanged" {
+			if unchanged {
 				if err != nil || !planned.Capture().Valid() || planned.FinalModelDigest() == "" {
 					t.Fatalf("unchanged module manifest rejected: %v", err)
 				}
@@ -500,7 +514,7 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
-	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list"} {
+	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list", "transitive-manifest-identity-after-list", "workspace-transitive-manifest-identity-after-list"} {
 		t.Run(mode, func(t *testing.T) {
 			testBuiltCLIChangePlanRejectsChangedModuleManifest(t, binary, mode)
 		})
@@ -509,11 +523,25 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 
 func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mode string) {
 	t.Helper()
-	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
+	transitive := strings.Contains(mode, "transitive-")
+	mode = strings.ReplaceAll(mode, "transitive-", "")
+	const transitivePath = "example.com/preview/transitive"
+	modules := []commandProxyModule{previewDependency(t, "v1.0.0", false)}
+	if transitive {
+		modules[0].goMod = "module " + previewDependencyModule + "\ngo 1.26\nrequire " + transitivePath + " v1.0.0\n"
+		modules = append(modules, commandProxyModule{path: transitivePath, version: "v1.0.0", ordinary: true})
+	}
+	proxy := writeCommandDependencyProxy(t, modules)
 	environment := previewDependencyEnvironment(t, proxy)
 	root := writeImplementationSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 	seedPreviewDependency(t, root, environment, "v1.0.0")
+	if transitive {
+		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "get", previewDependencyModule+"@v1.0.0"); err != nil {
+			t.Fatal(err)
+		}
+		seedPreviewTransitiveManifest(t, root, environment, transitivePath)
+	}
 	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
 		work := filepath.Join(t.TempDir(), "go.work")
 		writeCommandFile(t, work, "go 1.26\nuse "+fmt.Sprintf("%q\n", filepath.ToSlash(root)))
@@ -543,11 +571,17 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 		}
 	}
 	path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
+	if transitive {
+		path = filepath.Join(cache, "cache", "download", filepath.FromSlash(transitivePath), "@v", "v1.0.0.mod")
+	}
 	marker := filepath.Join(t.TempDir(), "manifest-changed")
 	environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+mode)
 	before := commandTree(t, root)
 	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
 	command.Dir, command.Env = root, environment
+	if transitive {
+		command.Dir = filepath.Join(root, "reports")
+	}
 	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
@@ -567,4 +601,22 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 		t.Fatal("compiled CLI changed the authored Project")
 	}
 	assertNoCommandTransactions(t, root)
+}
+
+func seedPreviewTransitiveManifest(t *testing.T, root string, environment []string, path string) {
+	t.Helper()
+	options := gocommand.Options{Directory: root, Environment: environment}
+	output, err := gocommand.Output(t.Context(), options, "mod", "download", "-json", path+"@v1.0.0")
+	var downloaded struct{ Sum, GoModSum string }
+	if err != nil || json.Unmarshal(output, &downloaded) != nil || downloaded.Sum == "" || downloaded.GoModSum == "" {
+		t.Fatalf("prepare transitive checksum authority: %v", err)
+	}
+	sums, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCommandFile(t, filepath.Join(root, "go.sum"), string(sums)+path+" v1.0.0 "+downloaded.Sum+"\n"+path+" v1.0.0/go.mod "+downloaded.GoModSum+"\n")
+	if err := gocommand.Run(t.Context(), options, "mod", "edit", "-droprequire="+path); err != nil {
+		t.Fatal(err)
+	}
 }

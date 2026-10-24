@@ -1,0 +1,420 @@
+package moduledependency
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"go/version"
+	"io"
+	"os"
+	"path/filepath"
+
+	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
+	"golang.org/x/mod/sumdb/dirhash"
+)
+
+type manifestPruning uint8
+
+const (
+	manifestPruned manifestPruning = iota
+	manifestUnpruned
+	manifestWorkspace
+)
+
+type manifestGraph struct {
+	root       string
+	mains      []*modfile.File
+	workspace  *preparationWorkspace
+	inputs     preparationInputs
+	checksums  map[module.Version]string
+	excluded   map[module.Version]bool
+	cache      string
+	toolchain  string
+	retain     func([]RootManifest) error
+	retained   map[string]bool
+	parsed     map[string]*modfile.File
+	goVersions map[module.Version]bool
+	bytes      int64
+}
+
+func (graph *manifestGraph) capture(ctx context.Context) error {
+	if !graph.initialized() {
+		return nil // Inference requires a known toolchain and valid initialization.
+	}
+	graph.goVersions = map[module.Version]bool{}
+	type load struct {
+		module.Version
+		pruning manifestPruning
+	}
+	var queue []load
+	seen := map[load]bool{}
+	enqueue := func(mod module.Version, pruning manifestPruning) error {
+		if mod.Path == "go" || mod.Path == "toolchain" || mod.Version == "none" {
+			return nil
+		}
+		key := load{mod, pruning}
+		if seen[key] {
+			return nil
+		}
+		if len(seen) >= 65_536 {
+			return ErrInvalidOutput
+		}
+		seen[key] = true
+		queue = append(queue, key)
+		return nil
+	}
+	mainPaths := map[string]bool{}
+	selected := map[string]string{}
+	for _, main := range graph.mains {
+		mainPaths[main.Module.Mod.Path] = true
+		selected[main.Module.Mod.Path] = ""
+	}
+	selectVersion := func(mod module.Version) {
+		if mainPaths[mod.Path] || mod.Path == "go" || mod.Path == "toolchain" {
+			return
+		}
+		if previous, exists := selected[mod.Path]; !exists || semver.Compare(mod.Version, previous) > 0 {
+			selected[mod.Path] = mod.Version
+		}
+	}
+	if graph.workspace != nil {
+		for _, main := range graph.mains {
+			if err := enqueue(main.Module.Mod, manifestWorkspace); err != nil {
+				return err
+			}
+		}
+	} else {
+		for _, required := range graph.mains[0].Require {
+			if !graph.excluded[required.Mod] {
+				selectVersion(required.Mod)
+				if err := enqueue(required.Mod, pruningForManifest(graph.mains[0])); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	complete := true
+	requirements := map[module.Version][]module.Version{}
+	loadQueue := func() error {
+		for len(queue) != 0 {
+			batch := queue
+			queue = nil
+			mods := make([]module.Version, len(batch))
+			for index, current := range batch {
+				mods[index] = current.Version
+			}
+			if err := graph.retainBatch(ctx, mods); err != nil {
+				return err
+			}
+			for _, current := range batch {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				parsed, available, err := graph.read(ctx, current.Version, false)
+				if err != nil {
+					return err
+				}
+				if !available {
+					complete = false
+					continue
+				}
+				nextPruning := pruningForManifest(parsed)
+				if current.pruning == manifestUnpruned {
+					nextPruning = manifestUnpruned
+				}
+				var required []module.Version
+				for _, dependency := range parsed.Require {
+					if graph.excluded[dependency.Mod] {
+						continue
+					}
+					required = append(required, dependency.Mod)
+					selectVersion(dependency.Mod)
+					if current.pruning != manifestPruned || pruningForManifest(parsed) == manifestUnpruned {
+						if err := enqueue(dependency.Mod, nextPruning); err != nil {
+							return err
+						}
+					}
+				}
+				requirements[current.Version] = required
+			}
+		}
+		return nil
+	}
+	if err := loadQueue(); err != nil {
+		return err
+	}
+	if graph.workspace != nil {
+		tracked, expanded := map[string]bool{}, map[module.Version]bool{}
+		for path := range mainPaths {
+			tracked[path] = true
+		}
+		for complete {
+			needed := map[module.Version]bool{}
+			for path := range tracked {
+				mod := module.Version{Path: path, Version: selected[path]}
+				if !expanded[mod] {
+					needed[mod] = true
+					continue
+				}
+				for _, required := range requirements[mod] {
+					selection := module.Version{Path: required.Path, Version: selected[required.Path]}
+					if (mainPaths[selection.Path] || semver.Compare(selection.Version, required.Version) > 0) && !expanded[selection] {
+						needed[selection] = true
+					}
+				}
+			}
+			if len(needed) == 0 {
+				break
+			}
+			var ordered []module.Version
+			for mod := range needed {
+				ordered = append(ordered, mod)
+			}
+			module.Sort(ordered)
+			for _, mod := range ordered {
+				if err := enqueue(mod, manifestWorkspace); err != nil {
+					return err
+				}
+				expanded[mod], tracked[mod.Path] = true, true
+			}
+			if err := loadQueue(); err != nil {
+				return err
+			}
+		}
+	}
+	if complete {
+		var candidates []module.Version
+		possibleVersions := map[module.Version]bool{}
+		for path := range selected {
+			mod := module.Version{Path: path, Version: selected[path]}
+			if mainPaths[path] || graph.goVersions[mod] {
+				continue
+			}
+			effective, err := graph.effectiveVersion(mod)
+			if err != nil {
+				return err
+			}
+			candidates = append(candidates, mod)
+			possibleVersions[effective] = true
+		}
+		module.Sort(candidates)
+		var demanded []module.Version
+		for _, mod := range candidates {
+			effective, err := graph.effectiveVersion(mod)
+			if err != nil {
+				return err
+			}
+			// Concurrent info filling can learn this logical module's Go version
+			// through another replacement and skip its own replacement summary.
+			if effective != mod && possibleVersions[mod] {
+				continue
+			}
+			demanded = append(demanded, mod)
+		}
+		if err := graph.retainBatch(ctx, demanded); err != nil {
+			return err
+		}
+		for _, mod := range demanded {
+			// Module information reads selected manifests even when their graph
+			// requirements were pruned. It does not traverse those requirements.
+			if _, _, err := graph.read(ctx, mod, true); err != nil {
+				return err
+			}
+		}
+	}
+	return graph.inputs.recheck()
+}
+
+func (graph *manifestGraph) initialized() bool {
+	if !version.IsValid(graph.toolchain) {
+		return false
+	}
+	if graph.workspace != nil && (len(graph.workspace.work.Godebug) != 0 || graph.workspace.work.Go != nil && version.Compare("go"+graph.workspace.work.Go.Version, graph.toolchain) > 0) {
+		return false
+	}
+	paths := map[string]bool{}
+	for _, main := range graph.mains {
+		if main.Module == nil || main.Module.Mod.Path == "go" || main.Module.Mod.Path == "toolchain" || module.CheckImportPath(main.Module.Mod.Path) != nil || paths[main.Module.Mod.Path] || graph.workspace == nil && len(main.Godebug) != 0 {
+			return false
+		}
+		for _, tool := range main.Tool {
+			if module.CheckImportPath(tool.Path) != nil {
+				return false
+			}
+		}
+		paths[main.Module.Mod.Path] = true
+		if main.Go != nil {
+			goVersion := "go" + main.Go.Version
+			if version.Compare(goVersion, graph.toolchain) > 0 {
+				return false
+			}
+			if graph.workspace != nil && version.Compare(goVersion, "go1.21") >= 0 && (graph.workspace.work.Go == nil || version.Compare(goVersion, "go"+graph.workspace.work.Go.Version) > 0) {
+				return false
+			}
+		}
+	}
+	if graph.workspace == nil {
+		requiredPaths := map[string]bool{}
+		for _, required := range graph.mains[0].Require {
+			if graph.excluded[required.Mod] {
+				continue
+			}
+			if paths[required.Mod.Path] || requiredPaths[required.Mod.Path] {
+				return false
+			}
+			requiredPaths[required.Mod.Path] = true
+		}
+	}
+	return true
+}
+
+func exactManifestVersion(path, value string) (string, error) {
+	_, pathMajor, ok := module.SplitPathVersion(path)
+	if !ok || module.CanonicalVersion(value) != value || module.CheckPathMajor(value, pathMajor) != nil {
+		return "", ErrInvalidGoMod
+	}
+	return value, nil
+}
+
+func pruningForManifest(parsed *modfile.File) manifestPruning {
+	if parsed.Go == nil || version.Compare("go"+parsed.Go.Version, "go1.17") < 0 {
+		return manifestUnpruned
+	}
+	return manifestPruned
+}
+
+func (graph *manifestGraph) effectiveVersion(mod module.Version) (module.Version, error) {
+	if graph.workspace != nil {
+		return graph.workspace.rootManifestVersion(mod)
+	}
+	if replacement := rootManifestReplacement(mod, graph.mains[0].Replace); replacement != nil {
+		effective := replacement.New
+		if effective.Version == "" && !filepath.IsAbs(effective.Path) {
+			effective.Path = filepath.Join(graph.root, effective.Path)
+		}
+		return effective, nil
+	}
+	return mod, nil
+}
+
+func (graph *manifestGraph) manifestPath(effective module.Version) (string, error) {
+	if effective.Version == "" {
+		return filepath.Join(effective.Path, "go.mod"), nil
+	}
+	escaped, pathErr := module.EscapePath(effective.Path)
+	value, versionErr := module.EscapeVersion(effective.Version)
+	if pathErr != nil || versionErr != nil {
+		return "", ErrInvalidGoMod
+	}
+	return filepath.Join(graph.cache, "cache", "download", filepath.FromSlash(escaped), "@v", value+".mod"), nil
+}
+
+func (graph *manifestGraph) retainBatch(ctx context.Context, mods []module.Version) error {
+	var manifests []RootManifest
+	seen := map[string]bool{}
+	for _, mod := range mods {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if graph.workspace != nil && mod.Version == "" {
+			continue
+		}
+		effective, err := graph.effectiveVersion(mod)
+		if err != nil {
+			return err
+		}
+		if effective.Version == "" || !validSourceChecksum(graph.checksums[effective]) {
+			continue
+		}
+		path, err := graph.manifestPath(effective)
+		if err != nil {
+			return err
+		}
+		if graph.retained[path] || seen[path] {
+			continue
+		}
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		seen[path] = true
+		manifests = append(manifests, RootManifest{Path: path, Checksum: graph.checksums[effective]})
+	}
+	if len(manifests) != 0 {
+		if err := graph.retain(manifests); err != nil {
+			return err
+		}
+		for _, manifest := range manifests {
+			graph.retained[manifest.Path] = true
+		}
+	}
+	return graph.inputs.recheck()
+}
+
+func (graph *manifestGraph) read(ctx context.Context, mod module.Version, infoOnly bool) (*modfile.File, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	if mod.Version == "" && graph.workspace != nil {
+		for _, main := range graph.mains {
+			if main.Module.Mod.Path == mod.Path {
+				return main, true, nil
+			}
+		}
+	}
+	effective, err := graph.effectiveVersion(mod)
+	if err != nil {
+		return nil, false, err
+	}
+	path, err := graph.manifestPath(effective)
+	if err != nil {
+		return nil, false, err
+	}
+	if effective.Version != "" && !graph.retained[path] {
+		return nil, false, nil
+	}
+	parsed, summarized := graph.parsed[path]
+	if infoOnly && summarized {
+		return nil, true, nil
+	}
+	if parsed == nil {
+		snapshot, err := graph.inputs.read(path, false)
+		if err != nil {
+			return nil, false, err
+		}
+		graph.bytes += int64(len(snapshot.data))
+		if graph.bytes > 512<<20 {
+			return nil, false, ErrInvalidOutput
+		}
+		if effective.Version != "" {
+			checksum, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(snapshot.data)), nil
+			})
+			if err != nil || checksum != graph.checksums[effective] {
+				return nil, false, ErrSourceIntegrity
+			}
+		}
+		if infoOnly {
+			graph.parsed[path] = nil
+			return nil, true, nil // Go ignores summary syntax and identity errors here.
+		}
+		parsed, err = modfile.ParseLax("go.mod", snapshot.data, nil)
+		if err != nil {
+			return nil, false, ErrInvalidGoMod
+		}
+		graph.parsed[path] = parsed
+	}
+	if parsed.Go != nil {
+		graph.goVersions[effective] = true
+	}
+	if effective.Version != "" && (parsed.Module == nil || parsed.Module.Mod.Path != mod.Path && parsed.Module.Mod.Path != effective.Path) {
+		return nil, false, ErrInvalidGoMod
+	}
+	if parsed.Go != nil && version.Compare("go"+parsed.Go.Version, graph.toolchain) > 0 {
+		return nil, false, nil
+	}
+	return parsed, true, nil
+}

@@ -851,6 +851,10 @@ adds no file input, and the caller's environment is copied before Go selection.
 Absolute and Project-relative settings paths are supported. Candidate tooling
 reads an owner-private frozen copy outside the module trees, preserving the
 selected settings even if the original changes; drift still rejects the plan.
+Early cache retention requires exact canonical version spellings in the original
+main and member manifests, including replacement versions. Query spellings such
+as `v1` skip that phase before normalized replacement checks, leaving selection
+to Go. Workfile versions retain Go's own workfile parsing behavior.
 Before graph listing, previews retain already-cached root dependency manifests
 whose effective versions have original Project or workspace manifest checksums.
 Every workspace member's raw requirements participate, including different
@@ -865,9 +869,22 @@ files fail even when another file supplies a primary match. The cache path uses
 the same offline settings as resolution. Capture neither downloads missing
 manifests nor prefetches archives. Workfile, member manifest, and checksum inputs
 remain guarded through capture and listing, including absent sums. Retained
-evidence survives MVS selection, failed resolution, and stage cleanup. This early
-boundary does not cover transitive or intermediate graph inputs or manifests
-without recorded checksums.
+evidence survives MVS selection, failed resolution, and stage cleanup.
+For known toolchains and supported initialization metadata, a bounded walk also
+retains warm checksummed transitive and intermediate graph manifests, preserving
+Go's pruning and workspace upgrade phases. Already-demanded frontiers and the
+selected information set are each retained in a batch before metadata reads.
+Selected module-information reads
+retain only their own manifests, without traversing their requirements or
+applying graph-only syntax and module-identity validation. Known Go-version
+shortcuts and concurrent replacement aliases can suppress these reads.
+An unavailable or unrecorded graph summary stops subsequent selection-dependent
+inference; already-demanded branches remain captured. Unknown toolchains,
+uncertain initialization, and order-dependent replacement information reads add
+no inferred inputs. This is a retained subset, not complete resolution capture:
+cold and unrecorded manifests and ambiguous information reads remain outside
+the early boundary. Traversal permits at most 65,536 graph states and 512 MiB of
+manifest bytes, in addition to the shared staging bounds.
 Source and dependency previews additionally retain versioned module source
 trees after module selection and before declaration discovery or candidate
 builds. This includes ordinary and transitive modules, versioned replacements,
