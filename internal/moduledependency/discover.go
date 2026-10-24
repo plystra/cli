@@ -57,6 +57,9 @@ type Options struct {
 	// RequireSourceChecksums binds every versioned source to its effective
 	// module's archive checksum, using Project go.sum or ordinary Go download
 	// verification in an isolated module. It never hashes the extracted tree.
+	// Workspace discovery always normalizes complete checksum fields under
+	// workspace authority; this flag additionally requires recorded full sums
+	// when offline.
 	RequireSourceChecksums bool
 }
 
@@ -187,7 +190,7 @@ func (i Index) ByPath(modulePath string) (Module, bool) {
 // Discover asks standard Go tooling for the complete effective module graph,
 // validates every selected source root, and recognizes dependency Projects by
 // root plystra.yaml. It writes neither Project files nor dependency sources.
-func Discover(ctx context.Context, application modulelocate.Module, options Options) (Index, error) {
+func Discover(ctx context.Context, application modulelocate.Module, options Options) (result Index, resultErr error) {
 	if application.Path() == "" || application.ModulePath() == "" {
 		return Index{}, fmt.Errorf("%w: application module is empty", ErrDiscover)
 	}
@@ -216,6 +219,28 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		environment = environmentWith(environment, "GOSUMDB", "off")
 		environment = environmentWith(environment, "GOTOOLCHAIN", "local")
 	}
+	inputs := preparationInputs{goModPath: before}
+	workspace, err := capturePreparationWorkspace(ctx, application.Path(), options, inputs)
+	if err != nil {
+		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
+	}
+	if workspace != nil {
+		root, err := os.MkdirTemp("", "plystra-workspace-discovery-")
+		if err != nil {
+			return Index{}, errors.Join(ErrDiscover, err)
+		}
+		defer func() {
+			if err := errors.Join(inputs.recheck(), os.RemoveAll(root)); err != nil {
+				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, err)
+			}
+		}()
+		work, err := workspace.writeDiscovery(root)
+		if err != nil {
+			return Index{}, errors.Join(ErrDiscover, err)
+		}
+		environment = environmentWith(environment, "GOWORK", work)
+	}
+	options.Environment = environment
 	output, err := gocommand.Output(ctx, gocommand.Options{
 		Command:     options.GoCommand,
 		Directory:   application.Path(),
@@ -249,9 +274,9 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if err := resolveMissingSources(ctx, application.Path(), application.ModulePath(), before, modules, options, outputLimit); err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
-	if options.RequireSourceChecksums {
+	if options.RequireSourceChecksums || workspace != nil {
 		options.Environment = environment
-		if err := resolveSourceChecksums(ctx, application.Path(), before, modules, options, outputLimit); err != nil {
+		if err := resolveSourceChecksums(ctx, application.Path(), before, modules, options, outputLimit, workspace); err != nil {
 			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 		}
 	}

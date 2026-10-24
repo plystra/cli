@@ -202,6 +202,7 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	environmentStarted, treeCreated := false, false
 	stage, err := projectstage.Create(ctx, projectstage.Options{
 		Start: options.Start, Environment: options.Environment, GoCommand: options.GoCommand, TemporaryParent: options.TemporaryParent,
+		IncludeProjectReplacements: len(dependencies) != 0,
 		Observe: func(event projectstage.Event) {
 			switch event {
 			case projectstage.GoEnvironmentStarted:

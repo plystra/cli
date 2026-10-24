@@ -867,17 +867,27 @@ verification in an isolated module retaining those recorded sums. Missing or
 inconsistent evidence fails explicitly, and offline discovery never fills
 missing evidence. Checksum resolution leaves Project module files unchanged;
 source-integrity failures cannot be ignored when removing an old dependency.
-Single-module dependency previews prepare explicitly requested canonical versions
-before `go get`: exact effective source archives are materialized in an isolated
-module retaining Project checksums, then captured before package resolution.
+Dependency previews prepare explicitly requested canonical versions before
+`go get`: exact effective source archives are materialized in an isolated module
+retaining Project checksums, then captured before package resolution.
 An exact old-version replacement takes priority over a wildcard replacement;
-local replacements use their existing staged input evidence. Mutable queries
-retain ordinary Go semantics and are not resolved by this preparation step.
+local replacements use their staged input evidence, including current-Project
+replacements shadowed by the workspace but used during initial module resolution.
+Workspace previews also let Go select the exact targets' workspace replacements
+in metadata-only roots, then prepare and capture those effective sources. Each
+member's `go.sum` and the selected workfile's `.sum` retain their separate roles
+and row ordering; Go's primary workspace checksum precedence is preserved.
+Post-selection source verification uses the same original checksum authorities;
+read-only discovery gives Go a private workfile copy so checksum housekeeping
+cannot modify the selected workspace. Preparation snapshots the workfile, member
+manifests, and present or absent sums before downloads and rechecks them after
+source retention. Mutable queries retain ordinary Go semantics and are not
+resolved by this preparation step.
 Unrelated cache entries are excluded; retained-input rechecks never download or
 repair modules. These read-only roots share the staging tree's cumulative
-bounds. Complete capture before first use, including workspace, mutable-query,
-transitive, and intermediate resolution sources, complete module-resolution
-metadata, and native permission capture remain unfinished; previews remain
+bounds. Complete capture before first use, including workspace MVS upgrades,
+mutable-query, transitive, and intermediate resolution sources, complete
+module-resolution metadata, and native permission capture remain unfinished; previews remain
 `non_exact`.
 Destination writes and cleanup use opened directory roots. Copies are bounded
 to 1,024 module roots and directory-alias inputs, 65,536 entries, 64 MiB per

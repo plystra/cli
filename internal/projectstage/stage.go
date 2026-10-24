@@ -51,6 +51,10 @@ type Options struct {
 	TemporaryParent string
 	GoCommand       string
 	Environment     []string
+	// IncludeProjectReplacements captures the current module's local
+	// replacements even when workspace selection shadows them. Go get starts
+	// in single-module mode before loading workspace packages.
+	IncludeProjectReplacements bool
 	// Observe is called synchronously, at most once per event. Go process
 	// startup is reported after the invocation returns; tree creation is
 	// reported before copying any captured input.
@@ -125,7 +129,7 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 			}
 		}
 	}()
-	modules, workspace, err := s.captureModuleInputs(ctx, project.Path(), settings.GOWORK)
+	modules, workspace, err := s.captureModuleInputs(ctx, project.Path(), settings.GOWORK, options.IncludeProjectReplacements)
 	if err != nil {
 		return nil, ErrStage
 	}
@@ -396,7 +400,7 @@ func (f fileSnapshot) recheck() error {
 	return nil
 }
 
-func (s *Stage) captureModuleInputs(ctx context.Context, project, work string) ([]string, *modfile.WorkFile, error) {
+func (s *Stage) captureModuleInputs(ctx context.Context, project, work string, includeProjectReplacements bool) ([]string, *modfile.WorkFile, error) {
 	if _, err := s.captureDirectory(project, "."); err != nil {
 		return nil, nil, err
 	}
@@ -494,7 +498,7 @@ func (s *Stage) captureModuleInputs(ctx context.Context, project, work string) (
 	for _, root := range mainRoots {
 		module := mainFiles[root]
 		for _, replacement := range module.Replace {
-			if replacement.New.Version == "" && !workspaceOverrides(workspace, replacement) && !workspaceModules[replacement.Old.Path] {
+			if replacement.New.Version == "" && (includeProjectReplacements && root == project || !workspaceOverrides(workspace, replacement) && !workspaceModules[replacement.Old.Path]) {
 				dependency, err := s.captureDirectory(s.mainRoots[root], replacement.New.Path)
 				if err != nil {
 					return nil, nil, err

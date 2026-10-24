@@ -15,6 +15,45 @@ import (
 	"github.com/plystra/cli/internal/projectstage"
 )
 
+func TestCreateCapturesProjectReplacementsBeforeWorkspaceResolution(t *testing.T) {
+	root, parent := fixture(t)
+	base := filepath.Dir(root)
+	local := filepath.Join(base, "local")
+	write(t, local, "go.mod", "module example.com/dependency\n\ngo 1.26\n")
+	write(t, local, "value.go", "package dependency\nconst Value = 1\n")
+	write(t, root, "go.mod", "module example.com/app\n\ngo 1.26\nrequire example.com/dependency v1.0.0\nreplace example.com/dependency => ../local\n")
+	write(t, base, "go.work", "go 1.26\nuse ./app\nreplace example.com/dependency => example.com/workspace-replacement v1.0.0\n")
+	before := tree(t, root)
+	stage, err := projectstage.Create(t.Context(), projectstage.Options{
+		Start: root, TemporaryParent: parent, Environment: environment("GOWORK=" + filepath.Join(base, "go.work")), IncludeProjectReplacements: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stage.Close()
+	initialEnvironment := stage.Environment()
+	for index, entry := range initialEnvironment {
+		if strings.HasPrefix(entry, "GOWORK=") {
+			initialEnvironment[index] = "GOWORK=off"
+		}
+	}
+	output, err := gocommand.Output(t.Context(), gocommand.Options{Directory: stage.Root(), Environment: initialEnvironment}, "list", "-mod=readonly", "-f", "{{.Dir}}", "example.com/dependency")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := strings.TrimSpace(string(output))
+	if selected == local || !strings.HasPrefix(selected, parent+string(filepath.Separator)) {
+		t.Fatalf("single-module source escaped capture: %q", selected)
+	}
+	if !reflect.DeepEqual(before, tree(t, root)) {
+		t.Fatal("capturing the initial source changed the Project")
+	}
+	write(t, local, "value.go", "package dependency\nconst Value = 2\n")
+	if err := stage.Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+		t.Fatalf("initial source drift was not retained: %v", err)
+	}
+}
+
 func TestCreateCopiesWorkingTreeAndDetectsDrift(t *testing.T) {
 	root, parent := fixture(t)
 	write(t, root, "assets/message.txt", "PRIVATE_ASSET")

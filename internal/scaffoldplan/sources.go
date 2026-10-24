@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/projectlocate"
@@ -30,20 +29,17 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 	if len(versions) == 0 {
 		return stage.Recheck(ctx)
 	}
-	for _, entry := range stage.Environment() {
-		if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOWORK") && value != "off" {
-			return stage.Recheck(ctx) // Workspace source preparation remains separate.
-		}
-	}
 	project, err := projectlocate.Find(stage.Root())
 	if err != nil {
 		return err
 	}
-	dependencies, err := moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment()})
+	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment()}, func(dependencies []moduledependency.Module) error {
+		return retainSources(ctx, stage, dependencies)
+	})
 	if err != nil {
 		return errors.Join(moduledependency.ErrSourceIntegrity, err)
 	}
-	return retainSources(ctx, stage, dependencies)
+	return stage.Recheck(ctx)
 }
 
 func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies []moduledependency.Module) error {

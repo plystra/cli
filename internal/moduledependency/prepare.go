@@ -16,53 +16,49 @@ import (
 )
 
 // PrepareSources materializes explicitly requested canonical versions without
-// loading their packages or changing Project metadata. The caller must capture
-// returned trees before executing resolution. Local replacements are omitted;
-// their original sources must already be captured. This single-module boundary
-// does not resolve mutable queries, workspaces, or transitive selections.
-func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options) (result []Module, resultErr error) {
-	if ctx == nil || application.Path() == "" || len(requested) > 1_024 {
-		return nil, ErrInvalidOutput
+// loading their packages or changing Project metadata. Retain captures each
+// phase's sources before resolution; metadata remains guarded through the last
+// callback. Local sources must already be captured. Mutable queries and
+// transitive selections remain outside this boundary.
+func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func([]Module) error) (resultErr error) {
+	if ctx == nil || application.Path() == "" || len(requested) > 1_024 || retain == nil {
+		return ErrInvalidOutput
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return err
 	}
+	if options.Environment == nil {
+		options.Environment = os.Environ()
+	}
+	options.Environment = append([]string{}, options.Environment...)
+	inputs := preparationInputs{}
+	defer func() { resultErr = errors.Join(resultErr, inputs.recheck()) }()
 	goModPath, sumPath := filepath.Join(application.Path(), "go.mod"), filepath.Join(application.Path(), "go.sum")
-	before, err := readGoMod(goModPath)
+	before, err := inputs.read(goModPath, false)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	sums, err := optionalGoSum(sumPath)
+	sums, err := inputs.read(sumPath, true)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer func() {
-		after, err := readGoMod(goModPath)
-		if err != nil || !sameSnapshot(before, after) {
-			resultErr = errors.Join(resultErr, ErrConcurrentChange)
-		}
-		after, err = optionalGoSum(sumPath)
-		if err != nil || (sums.info != nil || after.info != nil) && !sameSnapshot(sums, after) {
-			resultErr = errors.Join(resultErr, ErrConcurrentChange)
-		}
-		if resultErr != nil {
-			result = nil
-		}
-	}()
 	parsed, err := modfile.Parse("go.mod", before.data, nil)
 	if err != nil {
-		return nil, ErrInvalidGoMod
+		return ErrInvalidGoMod
 	}
 	checksums, err := sourceChecksums(sums.data)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	queries := map[module.Version][]int{}
+	workspace, err := capturePreparationWorkspace(ctx, application.Path(), options, inputs)
+	if err != nil {
+		return err
+	}
 	seen := map[string]bool{}
-	var arguments []string
+	var sources []Module
 	for _, version := range requested {
 		if version.Version == "" || module.Check(version.Path, version.Version) != nil || module.CanonicalVersion(version.Version) != version.Version || seen[version.Path] {
-			return nil, ErrInvalidOutput
+			return ErrInvalidOutput
 		}
 		seen[version.Path] = true
 		effective := version
@@ -79,32 +75,39 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 			effective = replacement.New
 		}
 		if options.Offline && checksums[effective] == "" {
-			return nil, ErrSourceIntegrity
+			return ErrSourceIntegrity
 		}
 		dependency := Module{path: version.Path, selectedVersion: version.Version, sourcePath: effective.Path}
 		if replacement != nil {
 			dependency.replacement = Replacement{path: effective.Path, version: effective.Version}
 		}
-		if _, exists := queries[effective]; !exists {
-			arguments = append(arguments, effective.String())
-		}
-		queries[effective] = append(queries[effective], len(result))
-		result = append(result, dependency)
-	}
-	if len(arguments) == 0 {
-		return result, nil
+		sources = append(sources, dependency)
 	}
 	root, err := os.MkdirTemp("", "plystra-source-preparation-")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(root)) }()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module plystra-source-preparation\n"), 0o600); err != nil {
-		return nil, err
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(root, "go.sum"), sums.data, 0o600); err != nil {
-		return nil, err
+		return err
 	}
+	environment := preparationEnvironment(options)
+	if err := downloadPreparedSources(ctx, root, sources, checksums, options, environment); err != nil {
+		return err
+	}
+	if err := retain(sources); err != nil {
+		return err
+	}
+	if workspace != nil {
+		return workspace.prepare(ctx, root, requested, options, environment, retain)
+	}
+	return nil
+}
+
+func preparationEnvironment(options Options) []string {
 	environment := environmentWith(options.Environment, "GOWORK", "off")
 	if options.Offline {
 		environment = environmentWith(environment, "GOPROXY", "off")
@@ -112,9 +115,25 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 		environment = environmentWith(environment, "GOSUMDB", "off")
 		environment = environmentWith(environment, "GOTOOLCHAIN", "local")
 	}
+	return environment
+}
+
+func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string) error {
+	queries := map[module.Version][]int{}
+	var arguments []string
+	for index, dependency := range result {
+		version := sourceVersion(dependency)
+		if _, exists := queries[version]; !exists {
+			arguments = append(arguments, version.String())
+		}
+		queries[version] = append(queries[version], index)
+	}
+	if len(arguments) == 0 {
+		return nil
+	}
 	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
 	if err != nil {
-		return nil, errors.Join(ErrModuleUnavailable, err)
+		return errors.Join(ErrModuleUnavailable, err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	for {
@@ -122,16 +141,16 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 		if err := decoder.Decode(&downloaded); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return nil, ErrInvalidOutput
+			return ErrInvalidOutput
 		}
 		version := module.Version{Path: downloaded.Path, Version: downloaded.Version}
 		indices, exists := queries[version]
 		if !exists || !filepath.IsAbs(downloaded.Dir) || !validSourceChecksum(downloaded.Checksum) || checksums[version] != "" && checksums[version] != downloaded.Checksum {
-			return nil, ErrSourceIntegrity
+			return ErrSourceIntegrity
 		}
 		canonical, manifest, err := validateModuleRoot(version.Path, downloaded.Dir, downloaded.GoMod, version.Path, false)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, index := range indices {
 			result[index].root, result[index].goMod, result[index].goModChecksum = canonical, append([]byte(nil), manifest...), downloaded.GoModSum
@@ -140,7 +159,7 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 		delete(queries, version)
 	}
 	if len(queries) != 0 {
-		return nil, ErrInvalidOutput
+		return ErrInvalidOutput
 	}
-	return result, nil
+	return nil
 }

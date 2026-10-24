@@ -132,7 +132,7 @@ func TestRunChangePlanRejectsPreexistingSourceTampering(t *testing.T) {
 
 func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 	command := sourcePreparationGoWrapper(t)
-	for _, mode := range []string{"cold", "added", "updated", "replacement"} {
+	for _, mode := range []string{"cold", "added", "updated", "replacement", "workspace-cold", "workspace", "workspace-replacement", "workspace-module-replacement", "workspace-initial-replacement", "workspace-initial-local"} {
 		t.Run(mode, func(t *testing.T) {
 			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false), previewDependency(t, "v1.1.0", false)})
 			environment := previewDependencyEnvironment(t, proxy)
@@ -146,13 +146,53 @@ func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 				action, version = "update", "v1.1.0"
 			}
 			effectiveVersion := version
+			initialLocal := ""
 			if mode == "replacement" {
 				effectiveVersion = "v1.1.0"
 				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+previewDependencyModule+"="+previewDependencyModule+"@"+effectiveVersion); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if mode != "cold" {
+			if strings.HasPrefix(mode, "workspace") {
+				workspace := t.TempDir()
+				support := filepath.Join(workspace, "support")
+				manifest := "module example.com/workspace-support\n\ngo 1.26\n"
+				work := "go 1.26\nuse (\n" + fmt.Sprintf("%q\n%q\n", filepath.ToSlash(root), filepath.ToSlash(support)) + ")\n"
+				if strings.HasSuffix(mode, "replacement") || mode == "workspace-initial-local" {
+					effectiveVersion = "v1.1.0"
+					replacement := "replace " + previewDependencyModule + " => " + previewDependencyModule + "@" + effectiveVersion + "\n"
+					replacement = strings.ReplaceAll(replacement, "@", " ")
+					if mode == "workspace-module-replacement" {
+						manifest += replacement
+					} else {
+						work += replacement
+					}
+				}
+				writeCommandFile(t, filepath.Join(support, "go.mod"), manifest)
+				writeCommandFile(t, filepath.Join(support, "support.go"), "package support\n")
+				path := filepath.Join(workspace, "go.work")
+				writeCommandFile(t, path, work)
+				if mode == "workspace-initial-local" {
+					initialLocal = filepath.Join(workspace, "initial")
+					writeCommandFile(t, filepath.Join(initialLocal, "go.mod"), "module "+previewDependencyModule+"\n\ngo 1.26\n")
+					writeCommandFile(t, filepath.Join(initialLocal, "plystra.yaml"), "{}\n")
+					for name, content := range previewDependency(t, "v1.0.0", false).sources {
+						writeCommandFile(t, filepath.Join(initialLocal, filepath.FromSlash(name)), content)
+					}
+					if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+previewDependencyModule+"="+filepath.ToSlash(initialLocal)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for index, entry := range environment {
+					if name, _, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOWORK") {
+						environment[index] = name + "=" + path
+					}
+				}
+			}
+			if mode == "workspace-initial-replacement" {
+				effectiveVersion = version
+			}
+			if !strings.HasSuffix(mode, "cold") {
 				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "download", previewDependencyModule+"@"+effectiveVersion); err != nil {
 					t.Fatal(err)
 				}
@@ -167,6 +207,9 @@ func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 				t.Fatal("missing isolated source cache")
 			}
 			path := filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@"+effectiveVersion), "remote", "implementation.go")
+			if initialLocal != "" {
+				path = filepath.Join(initialLocal, "remote", "implementation.go")
+			}
 			marker := filepath.Join(t.TempDir(), "get-started")
 			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+mode, "PLYSTRA_SOURCE_PREPARATION_BACKUP="+filepath.Join(cache, "source-before-get.go"))
 			request, err := changerequest.Parse([]byte(fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":%q,"module":%q}]}`, action, previewDependencyModule+"@"+version)))
@@ -178,7 +221,7 @@ func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 			if markerBytes, markerErr := os.ReadFile(marker); markerErr != nil || string(markerBytes) != "source present before get\nget completed\n" {
 				t.Fatalf("exact target was not available before get: %v, preview=%v", markerErr, err)
 			}
-			if mode == "cold" {
+			if strings.HasSuffix(mode, "cold") {
 				if err != nil || !planned.Capture().Valid() {
 					t.Fatalf("cold prepared target rejected: %v", err)
 				}
@@ -223,7 +266,8 @@ func main() {
   info, err := os.Stat(path); check(err)
   if !os.SameFile(info, info) { os.Exit(10) }
   check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("source present before get\n"), 0600))
-  if os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE") != "cold" {
+  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
+  if mode != "cold" && mode != "workspace-cold" {
    backup = os.Getenv("PLYSTRA_SOURCE_PREPARATION_BACKUP")
    check(os.Rename(path, backup))
    check(os.WriteFile(path, data, info.Mode().Perm()))

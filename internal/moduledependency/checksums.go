@@ -67,7 +67,7 @@ func optionalGoSum(path string) (fileSnapshot, error) {
 	return readGoMod(path)
 }
 
-func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod fileSnapshot, modules []Module, options Options, outputLimit int) (resultErr error) {
+func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod fileSnapshot, modules []Module, options Options, outputLimit int, workspace *preparationWorkspace) (resultErr error) {
 	sumPath := filepath.Join(applicationRoot, "go.sum")
 	before, err := optionalGoSum(sumPath)
 	if err != nil {
@@ -83,6 +83,9 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 			resultErr = errors.Join(resultErr, ErrConcurrentChange)
 		}
 	}()
+	if workspace != nil {
+		return workspace.resolveChecksums(ctx, modules, options)
+	}
 	checksums, err := sourceChecksums(before.data)
 	if err != nil {
 		return fmt.Errorf("%w: invalid source checksum inputs", ErrInvalidOutput)

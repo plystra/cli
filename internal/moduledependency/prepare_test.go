@@ -60,7 +60,11 @@ func TestPrepareSourcesMaterializesExactEffectiveVersions(t *testing.T) {
 				}
 			}
 			before, beforeErr := os.ReadFile(filepath.Join(app, "go.sum"))
-			prepared, err := moduledependency.PrepareSources(t.Context(), locate(t, app), requested, moduledependency.Options{Environment: env, Offline: strings.HasPrefix(mode, "offline")})
+			var prepared []moduledependency.Module
+			err := moduledependency.PrepareSources(t.Context(), locate(t, app), requested, moduledependency.Options{Environment: env, Offline: strings.HasPrefix(mode, "offline")}, func(sources []moduledependency.Module) error {
+				prepared = append(prepared, sources...)
+				return nil
+			})
 			if mode == "offline-missing-sum" || strings.HasSuffix(mode, "checksum-conflict") {
 				if err == nil || len(prepared) != 0 {
 					t.Fatalf("untrusted checksum evidence accepted: %v", err)
