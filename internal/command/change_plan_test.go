@@ -42,7 +42,15 @@ config:
 	var result struct {
 		Status  string `json:"status"`
 		Payload struct {
-			WriteSet     []struct{ Path string }         `json:"write_set"`
+			ReadSet []struct {
+				BeforeExists *bool `json:"before_exists"`
+				AfterExists  *bool `json:"after_exists"`
+			} `json:"read_set"`
+			WriteSet []struct {
+				Path         string
+				BeforeExists *bool `json:"before_exists"`
+				AfterExists  *bool `json:"after_exists"`
+			} `json:"write_set"`
 			Operations   []struct{ Kind, Action string } `json:"operations"`
 			Verification []string                        `json:"verification"`
 		} `json:"payload"`
@@ -52,6 +60,18 @@ config:
 	}
 	if !reflect.DeepEqual(result.Payload.Verification, []string{"plystra", "check", "--env", "production"}) {
 		t.Fatalf("built CLI verification changed argument order: %q", result.Payload.Verification)
+	}
+	if len(result.Payload.ReadSet) != 2 {
+		t.Fatalf("missing selected input membership: %s", output)
+	}
+	for _, input := range result.Payload.ReadSet {
+		if input.BeforeExists == nil || !*input.BeforeExists || input.AfterExists != nil {
+			t.Fatalf("invalid input existence: %s", output)
+		}
+	}
+	write := result.Payload.WriteSet[0]
+	if write.BeforeExists == nil || !*write.BeforeExists || write.AfterExists == nil || !*write.AfterExists {
+		t.Fatalf("configuration update lost existence: %s", output)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(before, after) {
 		t.Fatal("built CLI preview changed Project files")

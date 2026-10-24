@@ -31,10 +31,14 @@ type ChangePlanSnapshotInput struct {
 	SelectedDigest    string
 }
 
-// ChangePlanPathInput is one public-safe read or write-set identity.
+// ChangePlanPathInput is one public-safe read or write-set identity. Existence
+// is independent of an optional public digest; a private present file can omit
+// its digest without asserting absence. AfterExists applies only to writes.
 type ChangePlanPathInput struct {
 	Path         string
 	Kind         string
+	BeforeExists bool
+	AfterExists  bool
 	BeforeDigest string
 	AfterDigest  string
 }
@@ -110,6 +114,8 @@ type changePlanSnapshotDocument struct {
 type changePlanPathDocument struct {
 	Path         string `json:"path"`
 	Kind         string `json:"kind"`
+	BeforeExists bool   `json:"before_exists"`
+	AfterExists  *bool  `json:"after_exists,omitempty"`
 	BeforeDigest string `json:"before_digest,omitempty"`
 	AfterDigest  string `json:"after_digest,omitempty"`
 }
@@ -246,8 +252,8 @@ func (ChangePlan) commandPayload()                                   {}
 func (p ChangePlan) document() changePlanDocument {
 	return changePlanDocument{
 		Schema: ChangePlanSchemaV1, RequestDigest: p.requestDigest, PlanDigest: p.planDigest,
-		InputSnapshot: snapshotDocument(p.inputSnapshot), ReadSet: pathDocuments(p.readSet),
-		WriteSet: pathDocuments(p.writeSet), Operations: operationDocuments(p.operations),
+		InputSnapshot: snapshotDocument(p.inputSnapshot), ReadSet: pathDocuments(p.readSet, false),
+		WriteSet: pathDocuments(p.writeSet, true), Operations: operationDocuments(p.operations),
 		ConfigurationScope: scopeDocument(p.configurationScope), ConfigurationImpact: impactDocument(p.impact),
 		EffectRequirements: effectDocuments(p.effectRequirements), Effects: effectsDocumentFrom(p.effects), FinalModelDigest: p.finalModelDigest,
 		Verification: append([]string(nil), p.verification...), Completeness: p.completeness,
@@ -309,10 +315,10 @@ func validateChangePlanInput(input ChangePlanInput) error {
 	if derived > 1024 {
 		return errors.New("operations must contain at most 1024 derived entries")
 	}
-	if err := validatePathSet("read_set", input.ReadSet, false); err != nil {
+	if err := validatePathSet("read_set", input.ReadSet, false, input.Completeness == "exact"); err != nil {
 		return err
 	}
-	if err := validatePathSet("write_set", input.WriteSet, true); err != nil {
+	if err := validatePathSet("write_set", input.WriteSet, true, input.Completeness == "exact"); err != nil {
 		return err
 	}
 	if input.Completeness != "exact" && input.Completeness != "non_exact" {
@@ -348,7 +354,7 @@ func validOperation(value ChangePlanOperationInput) bool {
 	return true
 }
 
-func validatePathSet(name string, values []ChangePlanPathInput, writes bool) error {
+func validatePathSet(name string, values []ChangePlanPathInput, writes, exact bool) error {
 	if !writes && len(values) == 0 {
 		return fmt.Errorf("%s must contain between 1 and 4096 entries", name)
 	}
@@ -360,19 +366,25 @@ func validatePathSet(name string, values []ChangePlanPathInput, writes bool) err
 		if !validPlanRelativePath(value.Path) || value.Kind == "" || len(value.Kind) > 128 || strings.ContainsRune(value.Kind, '\x00') {
 			return fmt.Errorf("%s[%d] is invalid", name, index)
 		}
+		if value.BeforeDigest != "" && (!value.BeforeExists || !validDigest(value.BeforeDigest)) {
+			return fmt.Errorf("%s[%d].before_digest is invalid", name, index)
+		}
+		if exact && value.BeforeExists && value.BeforeDigest == "" {
+			return fmt.Errorf("%s[%d].before_digest is required for an exact plan", name, index)
+		}
 		if writes {
-			if value.BeforeDigest != "" && !validDigest(value.BeforeDigest) {
-				return fmt.Errorf("%s[%d].before_digest is invalid", name, index)
+			if !value.BeforeExists && !value.AfterExists {
+				return fmt.Errorf("%s[%d] cannot write an absent path to absence", name, index)
 			}
-			if !validDigest(value.AfterDigest) {
+			if value.AfterDigest != "" && (!value.AfterExists || !validDigest(value.AfterDigest)) {
 				return fmt.Errorf("%s[%d].after_digest is invalid", name, index)
 			}
-		} else {
-			if !validDigest(value.BeforeDigest) {
-				return fmt.Errorf("%s[%d].before_digest is invalid", name, index)
+			if exact && value.AfterExists && value.AfterDigest == "" {
+				return fmt.Errorf("%s[%d].after_digest is required for an exact plan", name, index)
 			}
-			if value.AfterDigest != "" {
-				return fmt.Errorf("%s[%d] cannot contain after_digest", name, index)
+		} else {
+			if value.AfterExists || value.AfterDigest != "" {
+				return fmt.Errorf("%s[%d] cannot contain an after state", name, index)
 			}
 		}
 		if _, exists := seen[value.Path]; exists {
@@ -410,10 +422,14 @@ func operationKey(value ChangePlanOperationInput) string {
 func snapshotDocument(value ChangePlanSnapshotInput) changePlanSnapshotDocument {
 	return changePlanSnapshotDocument{ModulePath: value.ModulePath, ConfigurationMode: value.ConfigurationMode, ConfigurationPath: value.ConfigurationPath, Environment: value.Environment, RootDigest: value.RootDigest, SelectedDigest: value.SelectedDigest}
 }
-func pathDocuments(values []ChangePlanPathInput) []changePlanPathDocument {
+func pathDocuments(values []ChangePlanPathInput, writes bool) []changePlanPathDocument {
 	result := make([]changePlanPathDocument, len(values))
 	for index, value := range values {
-		result[index] = changePlanPathDocument{Path: value.Path, Kind: value.Kind, BeforeDigest: value.BeforeDigest, AfterDigest: value.AfterDigest}
+		result[index] = changePlanPathDocument{Path: value.Path, Kind: value.Kind, BeforeExists: value.BeforeExists, BeforeDigest: value.BeforeDigest, AfterDigest: value.AfterDigest}
+		if writes {
+			after := value.AfterExists
+			result[index].AfterExists = &after
+		}
 	}
 	return result
 }
