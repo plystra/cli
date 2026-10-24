@@ -99,6 +99,13 @@ func formatRunError(ctx context.Context, arguments []string, output []byte, err 
 // Output invokes the Go tool and returns bounded stdout. Failure diagnostics
 // combine bounded stdout and stderr after removing private paths and URLs.
 func Output(ctx context.Context, options Options, arguments ...string) ([]byte, error) {
+	output, _, err := OutputObserved(ctx, options, arguments...)
+	return output, err
+}
+
+// OutputObserved returns the same bounded output and sanitized diagnostics as
+// Output, plus whether the process started, even when it subsequently failed.
+func OutputObserved(ctx context.Context, options Options, arguments ...string) ([]byte, bool, error) {
 	limit := options.OutputLimit
 	if limit <= 0 {
 		limit = defaultOutputLimit
@@ -108,25 +115,29 @@ func Output(ctx context.Context, options Options, arguments ...string) ([]byte, 
 	process := commandContext(ctx, options, arguments...)
 	process.Stdout = stdout
 	process.Stderr = stderr
-	err := process.Run()
+	err := process.Start()
+	started := err == nil
+	if started {
+		err = process.Wait()
+	}
 	operation := "go " + strings.Join(arguments, " ")
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, fmt.Errorf("%s: %w", operation, ctxErr)
+		return nil, started, fmt.Errorf("%s: %w", operation, ctxErr)
 	}
 	if stdout.exceeded {
-		return nil, fmt.Errorf("%w: %s: limit %d bytes", ErrOutputTooLarge, operation, limit)
+		return nil, started, fmt.Errorf("%w: %s: limit %d bytes", ErrOutputTooLarge, operation, limit)
 	}
 	if err != nil {
 		message := SanitizeOutput(string(bytes.Join([][]byte{stdout.bytes(), stderr.bytes()}, []byte("\n"))), options.Directory)
 		if message == "" {
-			return nil, fmt.Errorf("%w: %s", ErrRun, operation)
+			return nil, started, fmt.Errorf("%w: %s", ErrRun, operation)
 		}
 		if stderr.exceeded || len(message) > maximumErrorOutput {
 			message = message[:min(len(message), maximumErrorOutput)] + "..."
 		}
-		return nil, fmt.Errorf("%w: %s: %s", ErrRun, operation, message)
+		return nil, started, fmt.Errorf("%w: %s: %s", ErrRun, operation, message)
 	}
-	return stdout.bytes(), nil
+	return stdout.bytes(), started, nil
 }
 
 func commandContext(ctx context.Context, options Options, arguments ...string) *exec.Cmd {

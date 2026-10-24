@@ -34,6 +34,15 @@ var (
 	ErrConcurrentChange = errors.New("Project staging input changed")
 )
 
+// Event identifies an effect that occurred during Create without exposing paths
+// or captured data. A later failure or cleanup does not undo the observation.
+type Event uint8
+
+const (
+	GoEnvironmentStarted Event = iota + 1
+	TemporaryTreeCreated
+)
+
 // Options preserves the selected Go workspace and ordinary local replacements.
 // Alternate module files and source overlays need their own relocation contract
 // and are rejected rather than silently reading live external inputs.
@@ -42,6 +51,10 @@ type Options struct {
 	TemporaryParent string
 	GoCommand       string
 	Environment     []string
+	// Observe is called synchronously, at most once per event. Go process
+	// startup is reported after the invocation returns; tree creation is
+	// reported before copying any captured input.
+	Observe func(Event)
 }
 
 // Stage owns only its independently allocated temporary tree. Captured file
@@ -86,7 +99,10 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	if environment == nil {
 		environment = os.Environ()
 	}
-	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: project.Path(), Environment: environment, OutputLimit: maximumMetadataBytes}, "env", "-json", "GOWORK", "GOFLAGS")
+	output, started, err := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: project.Path(), Environment: environment, OutputLimit: maximumMetadataBytes}, "env", "-json", "GOWORK", "GOFLAGS")
+	if started && options.Observe != nil {
+		options.Observe(GoEnvironmentStarted)
+	}
 	if err != nil {
 		return nil, ErrStage
 	}
@@ -146,6 +162,9 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 		return nil, ErrStage
 	}
 	s.temporary = filepath.Join(parent, temporaryName)
+	if options.Observe != nil {
+		options.Observe(TemporaryTreeCreated)
+	}
 	s.identity, err = s.parent.Lstat(filepath.Base(s.temporary))
 	if err != nil || !s.identity.IsDir() {
 		return nil, ErrStage
