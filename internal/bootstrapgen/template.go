@@ -119,6 +119,32 @@ func composeRuntimeConfigurations(layers []*yaml.Node, inventory map[string]runt
 			}
 			continue
 		}
+		// An exact overlay exclusion can outlive its constructor schema. Known
+		// schemas above still validate every lower layer before applying removals.
+		removed := false
+		for index, node := range objects[symbol] {
+			if node == nil { continue }
+			if index == 0 {
+				// A suppressed root object still follows complete-document syntax.
+				stack := []*yaml.Node{node}
+				for len(stack) > 0 {
+					last := len(stack) - 1
+					child := stack[last]
+					stack = stack[:last]
+					if runtimeRemovalMapping(child) {
+						return nil, runtimeConfigurationError("removal markers are valid only in environment overlays")
+					}
+					stack = append(stack, child.Content...)
+				}
+			}
+			fields, err := runtimeMapping(node, "constructor Config", nil)
+			if err != nil { return nil, err }
+			removed = runtimeRemovalMapping(node)
+			if fields["$remove"] != nil && (!removed || index == 0) {
+				return nil, runtimeConfigurationError("constructor Config removal requires an exact overlay tombstone")
+			}
+		}
+		if removed { continue }
 		if visible || validRuntimeConstructorSymbol(symbol) { return nil, runtimeConfigurationError("config for %s has no schema in the constructor inventory", symbol) }
 		var composed *yaml.Node
 		for _, node := range objects[symbol] {

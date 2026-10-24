@@ -458,11 +458,11 @@ func (s SelectionInputs) validateCandidateConfiguration(composition applicationm
 
 func (s SelectionInputs) candidateSourceContext(composition applicationmeta.Composition) (applicationinput.SourceContext, error) {
 	var paths []string
-	for _, layer := range composition.CurrentLayers() {
-		decisions, err := applicationmeta.ConfigurationDecisions(layer, s.schemaLookup)
-		if err != nil {
-			return applicationinput.SourceContext{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
-		}
+	layers, err := composition.CurrentLayerDecisions(s.schemaLookup)
+	if err != nil {
+		return applicationinput.SourceContext{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
+	}
+	for _, decisions := range layers {
 		for _, decision := range decisions {
 			if decision.ResolutionRelevant() {
 				paths = append(paths, decision.Path())

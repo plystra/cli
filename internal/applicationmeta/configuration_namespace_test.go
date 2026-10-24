@@ -11,7 +11,7 @@ import (
 	"github.com/plystra/cli/internal/implementationinventory"
 )
 
-func TestConstructorConfigurationRejectsResourceProviderNamespace(t *testing.T) {
+func TestConstructorConfigurationDoesNotBorrowResourceProviderNamespace(t *testing.T) {
 	t.Parallel()
 	lookup := resourceLookup(t, "Value string; Token configuration.Secret")
 	for _, entry := range []string{"{}", "{value: PRIVATE_VALUE, token: {env: PRIVATE_SECRET}}", "{$remove: true}", "{value: {$remove: true}}"} {
@@ -57,7 +57,14 @@ func TestConstructorConfigurationRejectsResourceProviderNamespace(t *testing.T) 
 					}
 				}
 				_, err = applicationmeta.ConfigurationDecisions(manifest, lookup)
-				assertSchemaError(err)
+				wholeExclusion := mode == "environment" && entry == "{$remove: true}"
+				if wholeExclusion {
+					if err != nil {
+						t.Fatal("whole-owner exclusion required a schema", err)
+					}
+				} else {
+					assertSchemaError(err)
+				}
 				switch mode {
 				case "environment":
 					_, err = applicationmeta.ApplyOverlay(composeManifest(t, "{}"), manifest, lookup)
@@ -67,7 +74,15 @@ func TestConstructorConfigurationRejectsResourceProviderNamespace(t *testing.T) 
 				default:
 					_, err = applicationmeta.Compose(nil, manifest, lookup)
 				}
-				assertSchemaError(err)
+				if wholeExclusion || mode == "removed lower" {
+					// No Implementation schema exists here. An exact exclusion
+					// suppresses the path without borrowing Resource type information.
+					if err != nil {
+						t.Fatal("whole-owner exclusion borrowed the other namespace", err)
+					}
+				} else {
+					assertSchemaError(err)
+				}
 				if !bytes.Equal(data, original) {
 					t.Fatal("namespace validation changed authored bytes")
 				}
