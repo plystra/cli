@@ -73,7 +73,7 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 		{name: "sources-local", roots: []module.Version{a1}, replacements: []string{a1.String() + " => ../local"}, local: "module " + a1.Path + "\ngo 1.17\nrequire " + b1.Path + " " + b1.Version + "\n", want: []module.Version{b1}, wantSources: []module.Version{b1}},
 		{name: "sources-concurrent-replacements", roots: []module.Version{a1}, replacements: []string{x1.String() + " => " + b1.String(), b1.String() + " => " + c1.String()}, modules: []graphModule{node(a1, "1.17", x1, b1)}, want: []module.Version{a1, b1}, wantSources: []module.Version{a1, b1, c1}},
 		{name: "sources-shared-target", roots: []module.Version{a1}, replacements: []string{x1.String() + " => " + b1.String(), z1.String() + " => " + b1.String()}, modules: []graphModule{node(a1, "1.17", x1, z1)}, want: []module.Version{a1, b1}, wantSources: []module.Version{a1, b1}},
-		{name: "sources-unrecorded-selected-manifest", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, unrecorded: []module.Version{b1}, want: []module.Version{a1}, wantSources: []module.Version{a1}},
+		{name: "sources-unrecorded-selected-manifest", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, unrecorded: []module.Version{b1}, want: []module.Version{a1}, wantSources: []module.Version{a1, b1}},
 		{name: "sources-cold-frontier", roots: []module.Version{a1}, cold: []module.Version{a1}, wantSources: []module.Version{}},
 		{name: "sources-only-callback", informationOnly: true, roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, wantSources: []module.Version{a1, b1}},
 		{name: "sources-rejected", fail: true, sourceMode: "reject", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1}, wantSources: []module.Version{a1}},
@@ -357,7 +357,16 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 						if replacement, ok := source.Replacement(); ok {
 							version = module.Version{Path: replacement.Path(), Version: replacement.Version()}
 						}
-						if source.Workspace() || source.Checksum() != facts[version].Sum || source.GoModChecksum() != facts[version].GoModSum || source.GoModFile() != facts[version].GoMod || source.SourceDirectory() != facts[version].Dir || len(source.ProjectGoMod()) != 0 {
+						wantManifest := facts[version].GoModSum
+						if slices.Contains(test.unrecorded, version) {
+							if early && !source.IncompleteSourceMetadata() {
+								t.Fatal("unrecorded manifest checksum authorized complete metadata")
+							}
+							if source.IncompleteSourceMetadata() {
+								wantManifest = ""
+							}
+						}
+						if source.Workspace() || source.Checksum() != facts[version].Sum || source.GoModChecksum() != wantManifest || source.GoModFile() != facts[version].GoMod || source.SourceDirectory() != facts[version].Dir || len(source.ProjectGoMod()) != 0 {
 							t.Fatal("source capture lost effective provenance or parsed its manifest")
 						}
 						if early && len(trees) == 0 {
@@ -366,7 +375,10 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 							}
 							sources = append(sources, version)
 						}
-						metadata = append(metadata, projectstage.MetadataInput{Path: source.GoModFile(), GoModChecksum: source.GoModChecksum()}, projectstage.MetadataInput{
+						if source.GoModChecksum() != "" {
+							metadata = append(metadata, projectstage.MetadataInput{Path: source.GoModFile(), GoModChecksum: source.GoModChecksum()})
+						}
+						metadata = append(metadata, projectstage.MetadataInput{
 							Path: strings.TrimSuffix(source.GoModFile(), ".mod") + ".ziphash", Expected: []byte(source.Checksum()),
 						})
 						trees = append(trees, projectstage.Source{Directory: source.SourceDirectory(), Module: version, Checksum: source.Checksum()})

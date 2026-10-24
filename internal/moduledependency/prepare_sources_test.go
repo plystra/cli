@@ -85,9 +85,21 @@ func retainWarmBundle(t *testing.T, stage *projectstage.Stage, ctx context.Conte
 	var metadata []projectstage.MetadataInput
 	var trees []projectstage.Source
 	for _, source := range sources {
-		metadata = append(metadata, projectstage.MetadataInput{Path: source.GoModFile(), GoModChecksum: source.GoModChecksum()}, projectstage.MetadataInput{
+		for _, input := range []projectstage.MetadataInput{{Path: source.GoModFile(), GoModChecksum: source.GoModChecksum()}, {
 			Path: strings.TrimSuffix(source.GoModFile(), ".mod") + ".ziphash", Expected: []byte(source.Checksum()),
-		})
+		}} {
+			if input.Path == source.GoModFile() && input.GoModChecksum == "" {
+				continue
+			}
+			if source.IncompleteSourceMetadata() {
+				if _, err := os.Lstat(input.Path); errors.Is(err, os.ErrNotExist) {
+					continue
+				} else if err != nil {
+					return err
+				}
+			}
+			metadata = append(metadata, input)
+		}
 		version := module.Version{Path: source.Path(), Version: source.SelectedVersion()}
 		if replacement, ok := source.Replacement(); ok {
 			version = module.Version{Path: replacement.Path(), Version: replacement.Version()}
@@ -170,7 +182,7 @@ func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 					},
 				})
 				wantCalls := 1
-				if mode == "partial" || mode == "missing-tree" || mode == "missing-manifest" || mode == "missing-checksum-file" || mode == "archive-only" || mode == "manifest-only" || mode == "unsafe-checksum" {
+				if mode == "partial" || mode == "missing-tree" || mode == "missing-manifest" || mode == "archive-only" || mode == "manifest-only" || mode == "unsafe-checksum" {
 					wantCalls = 0
 				}
 				wantError := strings.HasPrefix(mode, "poisoned-") || mode == "unsafe-checksum" || mode == "archive-only" && !workspace
@@ -178,7 +190,7 @@ func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 					t.Fatalf("selected warm capture: calls=%d, want=%d, error=%v", calls, wantCalls, err)
 				}
 				wantListed := 0
-				if mode == "missing-manifest" {
+				if mode == "missing-manifest" || mode == "missing-checksum-file" || mode == "archive-only" && workspace {
 					wantListed = 1
 				}
 				if listedCalls != wantListed {
@@ -265,7 +277,14 @@ func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {
 					if len(sources) != 1 || calls == 1 && len(sources[0].ProjectGoMod()) != 0 || calls == 1 && strings.Contains(string(readFile(t, trace)), "mod download -json "+warmSourceModule+"@") {
 						t.Fatal("workspace source was not retained before acquisition")
 					}
-					if sources[0].Checksum() != fixture.downloaded.Sum || sources[0].GoModChecksum() != fixture.downloaded.GoModSum {
+					wantManifest := fixture.downloaded.GoModSum
+					if kind == "manifest" && mode == "member-conflict" {
+						wantManifest = ""
+						if !sources[0].IncompleteSourceMetadata() {
+							t.Fatal("conflicting manifest authority authorized complete metadata")
+						}
+					}
+					if sources[0].Checksum() != fixture.downloaded.Sum || sources[0].GoModChecksum() != wantManifest {
 						return rejected
 					}
 					return nil
@@ -280,7 +299,11 @@ func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {
 						t.Fatalf("primary checksum authority lost: %v, calls=%d", err, calls)
 					}
 				case "member-conflict":
-					if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 0 {
+					wantCalls := 0
+					if kind == "manifest" {
+						wantCalls = 1
+					}
+					if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != wantCalls {
 						t.Fatalf("conflicting members supplied warm authority: %v, calls=%d", err, calls)
 					}
 				case "malformed-member":
@@ -474,17 +497,18 @@ func TestPrepareSourcesRetainsWarmBundlesBeforeDownloads(t *testing.T) {
 				defer cancel()
 				rejected := errors.New("warm bundle rejected")
 				calls := 0
-				wantEarly := mode != "partial" && !strings.HasPrefix(mode, "missing-") && mode != "archive-only" && mode != "manifest-only"
-				if phase == "workspace" && mode == "missing-manifest" {
-					wantEarly = true // Metadata-only selection materializes the manifest before acquisition.
-				}
-				wantSelection := phase == "workspace" && wantEarly && mode != "missing-manifest"
+				wantEarly := mode != "partial" && mode != "missing-tree" && mode != "manifest-only"
+				wantSelection := phase == "workspace" && wantEarly
 				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command, Offline: mode == "offline"}, func(sources []moduledependency.Module) error {
 					if len(sources) == 0 {
 						return nil
 					}
 					calls++
-					if len(sources) != len(requested) || sources[0].SourceDirectory() != fixture.downloaded.Dir || sources[0].GoModFile() != fixture.downloaded.GoMod || sources[0].Checksum() != fixture.downloaded.Sum || sources[0].GoModChecksum() != fixture.downloaded.GoModSum {
+					wantManifest := fixture.downloaded.GoModSum
+					if mode == "archive-only" && sources[0].IncompleteSourceMetadata() {
+						wantManifest = ""
+					}
+					if len(sources) != len(requested) || sources[0].SourceDirectory() != fixture.downloaded.Dir || sources[0].GoModFile() != fixture.downloaded.GoMod || sources[0].Checksum() != fixture.downloaded.Sum || sources[0].GoModChecksum() != wantManifest {
 						t.Fatalf("warm source authority or identity changed: %v", sources)
 					}
 					if calls == 1 && wantEarly && strings.Contains(string(readFile(t, trace)), "mod download -json "+warmSourceModule+"@v1.0.0") {

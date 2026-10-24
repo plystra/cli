@@ -40,16 +40,18 @@ func originalSourceChecksums(root string, workspace *preparationWorkspace, input
 
 func retainSelectedSourcesOnce(retain func([]Module) error) func([]Module) error {
 	type key struct {
-		version                             module.Version
-		path, selected, directory, manifest string
+		version                                                      module.Version
+		path, selected, directory, manifest, archiveSum, manifestSum string
 	}
 	retained := map[key]bool{}
 	return func(sources []Module) error {
 		keys := make([]key, len(sources))
+		metadataComplete := make([]bool, len(sources))
 		complete := true
 		for index, source := range sources {
-			keys[index] = key{sourceVersion(source), source.path, source.selectedVersion, source.sourceDirectory, source.goModFile}
-			complete = complete && retained[keys[index]]
+			keys[index] = key{sourceVersion(source), source.path, source.selectedVersion, source.sourceDirectory, source.goModFile, source.checksum, source.goModChecksum}
+			metadataComplete[index] = !source.incompleteSourceMetadata
+			complete = complete && metadataComplete[index] && retained[keys[index]]
 		}
 		if complete {
 			return nil
@@ -57,14 +59,16 @@ func retainSelectedSourcesOnce(retain func([]Module) error) func([]Module) error
 		if err := retain(sources); err != nil {
 			return err
 		}
-		for _, key := range keys {
-			retained[key] = true
+		for index, key := range keys {
+			if metadataComplete[index] {
+				retained[key] = true
+			}
 		}
 		return nil
 	}
 }
 
-func retainListedSources(ctx context.Context, sources []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error) error {
+func retainListedSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, inputs preparationInputs, retain func([]Module) error) error {
 	type key struct {
 		version             module.Version
 		directory, manifest string
@@ -73,7 +77,7 @@ func retainListedSources(ctx context.Context, sources []Module, checksums prepar
 	var groups [][]Module
 	for _, source := range sources {
 		version := sourceVersion(source)
-		if version.Version == "" || source.sourceDirectory == "" || source.goModFile == "" {
+		if version.Version == "" || !validSourceChecksum(checksums.archives[version]) {
 			continue
 		}
 		identity := key{version, source.sourceDirectory, source.goModFile}
@@ -85,8 +89,29 @@ func retainListedSources(ctx context.Context, sources []Module, checksums prepar
 		}
 		groups[index] = append(groups[index], source)
 	}
+	var cache string
 	for _, group := range groups {
-		if err := retainWarmSourceAt(ctx, group[0].sourceDirectory, group[0].goModFile, group, checksums, inputs, retain); err != nil {
+		directory, manifest := group[0].sourceDirectory, group[0].goModFile
+		if directory == "" || manifest == "" {
+			if cache == "" {
+				var err error
+				cache, err = preparationModuleCache(ctx, root, options, options.Environment)
+				if err != nil {
+					return err
+				}
+			}
+			cachedDirectory, cachedManifest, err := cachedSourcePaths(cache, sourceVersion(group[0]))
+			if err != nil {
+				return err
+			}
+			if directory == "" {
+				directory = cachedDirectory
+			}
+			if manifest == "" {
+				manifest = cachedManifest
+			}
+		}
+		if err := retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain); err != nil {
 			return err
 		}
 	}
@@ -95,8 +120,7 @@ func retainListedSources(ctx context.Context, sources []Module, checksums prepar
 
 func retainWarmPreparedSources(ctx context.Context, root string, group []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
 	version := sourceVersion(group[0])
-	archive, manifest := checksums.archives[version], checksums.manifests[version]
-	if !validSourceChecksum(archive) || !validSourceChecksum(manifest) {
+	if !validSourceChecksum(checksums.archives[version]) {
 		return inputs.recheck()
 	}
 	cache, err := preparationModuleCache(ctx, root, options, environment)
@@ -107,15 +131,22 @@ func retainWarmPreparedSources(ctx context.Context, root string, group []Module,
 }
 
 func retainWarmSourceBundle(ctx context.Context, cache string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error) error {
-	version := sourceVersion(group[0])
+	directory, manifest, err := cachedSourcePaths(cache, sourceVersion(group[0]))
+	if err != nil {
+		return err
+	}
+	return retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain)
+}
+
+func cachedSourcePaths(cache string, version module.Version) (string, string, error) {
 	path, pathErr := module.EscapePath(version.Path)
 	value, versionErr := module.EscapeVersion(version.Version)
 	if pathErr != nil || versionErr != nil {
-		return ErrInvalidOutput
+		return "", "", ErrInvalidOutput
 	}
 	directory := filepath.Join(cache, filepath.FromSlash(path)+"@"+value)
 	manifest := filepath.Join(cache, "cache", "download", filepath.FromSlash(path), "@v", value+".mod")
-	return retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain)
+	return directory, manifest, nil
 }
 
 func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error) error {
@@ -124,7 +155,7 @@ func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, gro
 	}
 	version := sourceVersion(group[0])
 	archive, manifest := checksums.archives[version], checksums.manifests[version]
-	if !validSourceChecksum(archive) || !validSourceChecksum(manifest) || !strings.HasSuffix(manifestPath, ".mod") {
+	if !validSourceChecksum(archive) || !strings.HasSuffix(manifestPath, ".mod") {
 		return inputs.recheck()
 	}
 	info, err := os.Stat(directory)
@@ -140,10 +171,11 @@ func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, gro
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	incomplete := !validSourceChecksum(manifest)
 	for _, suffix := range []string{".mod", ".ziphash"} {
 		info, err := os.Lstat(metadata + suffix)
 		if errors.Is(err, os.ErrNotExist) {
-			return inputs.recheck()
+			incomplete = true
 		} else if err != nil {
 			return err
 		} else if !info.Mode().IsRegular() {
@@ -159,6 +191,7 @@ func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, gro
 		warm[index].root, warm[index].sourceDirectory = canonical, directory
 		warm[index].goModFile, warm[index].goModChecksum = metadata+".mod", manifest
 		warm[index].checksum = archive
+		warm[index].incompleteSourceMetadata = incomplete
 	}
 	if err := retain(warm); err != nil {
 		return err

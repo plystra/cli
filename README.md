@@ -907,13 +907,16 @@ uncertain graph introduces no provisional information set. Cold reads, proxy
 metadata, and earlier authored-query normalization remain outside this boundary.
 The same complete selection also retains eligible warm source bundles before
 listing or extracted-manifest validation. Each effective version requires
-separate original archive and manifest checksum authority, an extracted tree,
-regular cache `.mod` and `.ziphash` files, and no `.partial` marker. Shared
-replacement destinations are captured once, without parsing extracted
+original archive checksum authority, an extracted tree, and no `.partial`
+marker. Missing cache `.mod`, `.ziphash`, or original manifest authority does
+not exclude an independently authenticated tree. Available `.ziphash` evidence
+is checked against the archive checksum; a present `.mod` additionally requires
+its separate original manifest checksum. Shared replacement destinations are
+captured once, without parsing extracted
 declarations; local sources use their existing staged evidence. Missing archive
 files do not prevent capture of an otherwise complete tree. Later discovery
 rechecks the same baseline, and retention failures prevent listing. Incomplete
-selection, missing authority or components, and cold acquisition still do not
+selection, missing archive authority or trees, and cold acquisition still do not
 establish capture before first use.
 After Go returns a complete valid module list, discovery also retains eligible
 actual selected warm bundles before the CLI parses any versioned extracted
@@ -922,9 +925,12 @@ not be inferred before listing. Archive and manifest authority comes from
 checksum files frozen before listing, with separate workspace primary and
 member precedence; newly materialized or reported sums cannot authorize this
 capture. Shared effective sources retain their logical provenance together,
-and already-retained selections with identical source and manifest paths reuse
-their original evidence. Go-reported source paths remain intact. Rejection,
-cancellation, or changed original metadata stops discovery, and later manifest
+and complete already-retained bundles reuse their original evidence. Incomplete
+bundles are revisited so materialized metadata can join the same immutable
+evidence. Missing reported source or manifest paths are derived from the exact
+effective identity under the consuming Go environment; present Go-reported paths
+remain intact. Rejection, cancellation, or changed original metadata stops
+discovery, and later manifest
 or checksum failure preserves retained inputs through stage cleanup. Invalid or
 incomplete JSON selections introduce no post-list captures. This closes the
 warm-source boundary before the CLI's first extracted-manifest read.
@@ -1005,15 +1011,17 @@ uncertainty. Complete interrupted-acquisition readsets and capture before Go's
 first cold reads remain unfinished.
 Cache selection uses each synthetic preparation phase's directory and environment
 so an unused authored toolchain suggestion cannot redirect the probe.
-Before each exact acquisition, preparation also retains an eligible warm complete
-source bundle under independently recorded original archive and manifest `h1:`
-checksums. The extracted tree, regular cache `.mod` and `.ziphash` files, and
-absence of Go's `.partial` marker establish eligibility; cache files and source
-bytes never supply their own expected checksums. Missing components or authority
-decline this optional early capture. The retention callback receives source
-provenance and both checksums before any extracted manifest is parsed, and later
-successful acquisition revalidates the same evidence without refreshing its
-baseline. Retained warm bundles survive an acquisition failure and stage cleanup.
+Before each exact acquisition, preparation also retains an eligible warm source
+tree under its independently recorded original archive `h1:` checksum. Missing
+cache `.mod`, `.ziphash`, or original manifest checksum does not prevent this
+capture. Missing trees, unavailable original archive authority, and `.partial`
+extraction markers still make a source ineligible. Present metadata must be
+regular; available authorized metadata is captured independently, without treating absence as an immutable
+input or using cache bytes as their own authority. The callback marks incomplete
+metadata explicitly and receives provenance before extracted-manifest parsing.
+Successful acquisition still requires complete metadata and revalidates the
+same evidence without refreshing its baseline. Retained warm trees survive
+acquisition failure, callback rejection or cancellation, and stage cleanup.
 Before metadata-only workspace selection, preparation also retains eligible warm
 bundles whose effective source is fixed across every possible selected version.
 A versioned wildcard replacement establishes the fallback, and every exact rule
@@ -1066,9 +1074,10 @@ or advances to workspace selection.
 The workspace phase independently verifies its original checksum authorities
 even when it selects a source already acquired by the single-module phase.
 This does not capture every input partially consumed by a failed acquisition.
-Each retained or prepared versioned source also retains Go's exact selected
-cache module manifest (`.mod`) and its sibling archive checksum reference
-(`.ziphash`), plus a present sibling module-information file (`.info`). These
+Each successfully acquired or fully discovered versioned source also retains
+Go's exact selected cache module manifest (`.mod`) and its sibling archive
+checksum reference (`.ziphash`), plus a present sibling module-information file
+(`.info`). These
 regular files retain bytes, identity, mode, and parent-path
 provenance across later phases and temporary cleanup; later removal from the
 selected graph does not discard their evidence. Repeated capture never refreshes

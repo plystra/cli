@@ -81,7 +81,9 @@ type Options struct {
 	// extracted-manifest validation. A completely inferred selected graph is
 	// captured before listing; otherwise actual Go-selected sources are captured
 	// after listing, before the CLI reads their extracted manifests.
-	// Warm bundles require independent original archive and manifest checksums.
+	// Warm trees require an independent original archive checksum. Their cache
+	// metadata may be incomplete; callbacks retain available authorized metadata
+	// independently and must not require missing files before acquisition.
 	// Missing sources are acquired under the original checksum authorities and
 	// retained before CLI validation or the next acquisition. Their extracted
 	// manifests have not been parsed or recognized as Projects.
@@ -123,6 +125,8 @@ type Module struct {
 	project         bool
 	goMod           []byte
 	replacement     Replacement
+
+	incompleteSourceMetadata bool
 }
 
 // Path returns the required module path.
@@ -147,9 +151,16 @@ func (m Module) Checksum() string { return m.checksum }
 // Otherwise it is empty when Go does not report one for the source.
 func (m Module) GoModChecksum() string { return m.goModChecksum }
 
-// GoModFile returns the exact module manifest path reported by Go. Versioned
-// modules use a cache manifest independently of their extracted source tree.
+// GoModFile returns the exact module manifest path reported by Go or inferred
+// from an exact effective identity for an interim source-retention callback.
+// Versioned modules use a cache manifest independently of their source tree.
 func (m Module) GoModFile() string { return m.goModFile }
+
+// IncompleteSourceMetadata reports an interim source-retention callback whose
+// archive-authorized tree lacks complete original cache-manifest authority or
+// metadata files. Retain available authorized metadata independently. Completed
+// acquisition callbacks and final snapshots require complete source evidence.
+func (m Module) IncompleteSourceMetadata() bool { return m.incompleteSourceMetadata }
 
 // Root returns the canonical absolute source root. This CLI-only path is not
 // generation-extension input or generated manifest data.
@@ -325,7 +336,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
 	if options.RetainSelectedSources != nil {
-		if err := retainListedSources(ctx, modules, sourceChecksums, inputs, options.RetainSelectedSources); err != nil {
+		if err := retainListedSources(ctx, application.Path(), modules, sourceChecksums, options, inputs, options.RetainSelectedSources); err != nil {
 			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 		}
 	}

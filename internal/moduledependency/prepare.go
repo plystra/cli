@@ -241,6 +241,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 			acquired[index].root, acquired[index].goMod, acquired[index].goModChecksum = canonical, nil, downloaded.GoModSum
 			acquired[index].sourceDirectory, acquired[index].checksum = downloaded.Dir, downloaded.Checksum
 			acquired[index].goModFile = downloaded.GoMod
+			acquired[index].incompleteSourceMetadata = false
 		}
 		delete(queries, version)
 	}

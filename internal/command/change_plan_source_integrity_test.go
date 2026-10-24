@@ -355,7 +355,7 @@ func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9)
 func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
- requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download"
+ requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download" || mode == "ziphash-removed-after-download"
  requestedList := mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
  requestedGraph := mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
  firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
@@ -426,7 +426,7 @@ func main() {
     if !os.SameFile(info, info) { os.Exit(10) }
     backup = path + ".prior"
     check(os.Rename(path, backup))
-    if mode != "information-removed-after-download" {
+    if mode != "information-removed-after-download" && mode != "ziphash-removed-after-download" {
      check(os.WriteFile(path, data, info.Mode().Perm()))
      check(os.Chtimes(path, info.ModTime(), info.ModTime()))
      current, statErr := os.Stat(path); check(statErr)
@@ -640,6 +640,21 @@ func TestBuiltCLIChangePlanPreparedWorkspaceSelectedGraph(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRetainsWarmTreesWithoutMetadata(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{
+		"missing-manifest-prepared-source-identity-after-download",
+		"missing-ziphash-prepared-source-manifest-identity-after-download",
+		"archive-only-workspace-prepared-source-identity-after-download",
+		"missing-ziphash-prepared-unchanged",
+		"missing-ziphash-prepared-ziphash-removed-after-download",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {
@@ -707,6 +722,13 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 
 func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
+	missingMetadata := ""
+	for _, prefix := range []string{"missing-manifest-", "missing-ziphash-", "archive-only-"} {
+		if remaining, matches := strings.CutPrefix(mode, prefix); matches {
+			missingMetadata, mode = prefix, remaining
+			break
+		}
+	}
 	selectedGraph := strings.Contains(mode, "selected-graph-")
 	mode = strings.ReplaceAll(mode, "selected-graph-", "")
 	coldGraph := strings.Contains(mode, "cold-graph-")
@@ -797,6 +819,29 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	if cache == "" {
 		t.Fatal("missing isolated source cache")
 	}
+	switch missingMetadata {
+	case "missing-manifest-", "missing-ziphash-":
+		suffix := ".mod"
+		if missingMetadata == "missing-ziphash-" {
+			suffix = ".ziphash"
+		}
+		if err := os.Remove(filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0"+suffix)); err != nil {
+			t.Fatal(err)
+		}
+	case "archive-only-":
+		path := filepath.Join(root, "go.sum")
+		sums, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var retained []string
+		for _, row := range strings.Split(string(sums), "\n") {
+			if !strings.HasPrefix(row, previewDependencyModule+" v1.0.0/go.mod ") {
+				retained = append(retained, row)
+			}
+		}
+		writeCommandFile(t, path, strings.Join(retained, "\n"))
+	}
 	if coldGraph {
 		if err := os.Remove(filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")); err != nil {
 			t.Fatal(err)
@@ -829,6 +874,8 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
 	if strings.Contains(mode, "information-") {
 		path = strings.TrimSuffix(path, ".mod") + ".info"
+	} else if strings.Contains(mode, "ziphash-") {
+		path = strings.TrimSuffix(path, ".mod") + ".ziphash"
 	}
 	if strings.Contains(mode, "source-identity") {
 		path = filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "remote", "implementation.go")

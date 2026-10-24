@@ -61,8 +61,19 @@ func TestPrepareSourcesMaterializesExactEffectiveVersions(t *testing.T) {
 			}
 			before, beforeErr := os.ReadFile(filepath.Join(app, "go.sum"))
 			var prepared []moduledependency.Module
+			early := 0
 			err := moduledependency.PrepareSources(t.Context(), locate(t, app), requested, moduledependency.Options{Environment: env, Offline: strings.HasPrefix(mode, "offline")}, func(sources []moduledependency.Module) error {
-				prepared = append(prepared, sources...)
+				for _, source := range sources {
+					if source.IncompleteSourceMetadata() {
+						early++
+						expected, err := dirhash.HashDir(source.SourceDirectory(), path+"@"+version, dirhash.Hash1)
+						if err != nil || source.Checksum() != expected {
+							return moduledependency.ErrSourceIntegrity
+						}
+					} else {
+						prepared = append(prepared, source)
+					}
+				}
 				return nil
 			})
 			if mode == "offline-missing-sum" || strings.HasSuffix(mode, "checksum-conflict") {
@@ -76,6 +87,9 @@ func TestPrepareSourcesMaterializesExactEffectiveVersions(t *testing.T) {
 			} else {
 				if err != nil || len(prepared) != len(requested) {
 					t.Fatalf("prepare sources: %v, modules=%v", err, prepared)
+				}
+				if (mode == "warm" || mode == "offline") && early != 1 {
+					t.Fatal("archive-only source was not authenticated before acquisition")
 				}
 				for index, dependency := range prepared {
 					expected, err := dirhash.HashDir(dependency.SourceDirectory(), path+"@"+version, dirhash.Hash1)

@@ -117,7 +117,11 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 						}
 						for _, source := range sources {
 							replacement, ok := source.Replacement()
-							if !ok || replacement.Path() != warmSourceModule || replacement.Version() != "v1.0.0" || source.SourceDirectory() != fixture.downloaded.Dir || source.Root() != canonicalPath(t, fixture.downloaded.Dir) || source.GoModFile() != fixture.downloaded.GoMod || source.Checksum() != fixture.downloaded.Sum || source.GoModChecksum() != fixture.downloaded.GoModSum || source.Workspace() || len(source.ProjectGoMod()) != 0 {
+							wantManifest := fixture.downloaded.GoModSum
+							if mode == "archive-only" {
+								wantManifest = ""
+							}
+							if !ok || replacement.Path() != warmSourceModule || replacement.Version() != "v1.0.0" || source.SourceDirectory() != fixture.downloaded.Dir || source.Root() != canonicalPath(t, fixture.downloaded.Dir) || source.GoModFile() != fixture.downloaded.GoMod || source.Checksum() != fixture.downloaded.Sum || source.GoModChecksum() != wantManifest || source.Workspace() || len(source.ProjectGoMod()) != 0 {
 								t.Fatal("listed source lost original authority or unparsed selection provenance")
 							}
 						}
@@ -157,7 +161,7 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 					},
 				})
 				wantCalls := 1
-				if mode == "archive-only" || mode == "manifest-only" {
+				if mode == "manifest-only" || mode == "archive-only" && !workspace {
 					wantCalls = 0
 				}
 				if mode == "trailing-json" || mode == "duplicate-main" || mode == "listed-error" {
@@ -198,8 +202,8 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 						t.Fatalf("post-list checksum failure lost: %v", err)
 					}
 				case "archive-only", "manifest-only":
-					// Ordinary discovery may still obtain missing authority later;
-					// it cannot retroactively authorize this early capture.
+					// Manifest-only authority cannot authorize a source tree;
+					// archive-only authority does not authorize the cache manifest.
 				default:
 					if err != nil {
 						t.Fatal(err)

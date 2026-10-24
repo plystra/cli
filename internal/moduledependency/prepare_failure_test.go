@@ -544,10 +544,13 @@ func TestPrepareSourcesReverifiesSharedSourceUnderWorkspaceAuthority(t *testing.
 		if len(sources) != 1 || sources[0].Checksum() != downloaded.Sum {
 			t.Fatalf("original authority source not retained: %v", sources)
 		}
+		if sources[0].IncompleteSourceMetadata() != (calls == 1) {
+			t.Fatal("original phase did not separate early tree and complete acquisition evidence")
+		}
 		return nil
 	})
 	commands := string(readFile(t, trace))
-	if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 1 || strings.Count(commands, "mod download -json "+preparedReplacement+"@v1.1.0") != 2 {
+	if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 2 || strings.Count(commands, "mod download -json "+preparedReplacement+"@v1.1.0") != 2 {
 		t.Fatalf("workspace authority skipped after original acquisition: %v, callbacks=%d, %s", err, calls, commands)
 	}
 }

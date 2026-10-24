@@ -76,12 +76,24 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 		}
 		escaped, err := module.EscapeVersion(version)
 		manifest := dependency.GoModFile()
-		if err != nil || !filepath.IsAbs(manifest) || filepath.Base(manifest) != escaped+".mod" || dependency.GoModChecksum() == "" {
+		if err != nil || !filepath.IsAbs(manifest) || filepath.Base(manifest) != escaped+".mod" || !dependency.IncompleteSourceMetadata() && dependency.GoModChecksum() == "" {
 			return moduledependency.ErrSourceIntegrity
 		}
-		metadata = append(metadata, projectstage.MetadataInput{Path: manifest, GoModChecksum: dependency.GoModChecksum()}, projectstage.MetadataInput{
+		for _, input := range []projectstage.MetadataInput{{Path: manifest, GoModChecksum: dependency.GoModChecksum()}, {
 			Path: strings.TrimSuffix(manifest, ".mod") + ".ziphash", Expected: []byte(dependency.Checksum()),
-		})
+		}} {
+			if input.Path == manifest && input.GoModChecksum == "" {
+				continue // Archive authority does not authenticate the cache manifest.
+			}
+			if dependency.IncompleteSourceMetadata() {
+				if _, err := os.Lstat(input.Path); errors.Is(err, os.ErrNotExist) {
+					continue
+				} else if err != nil {
+					return errors.Join(moduledependency.ErrSourceIntegrity, err)
+				}
+			}
+			metadata = append(metadata, input)
+		}
 		information := strings.TrimSuffix(manifest, ".mod") + ".info"
 		if _, err := os.Lstat(information); err == nil {
 			metadata = append(metadata, projectstage.MetadataInput{Path: information})
