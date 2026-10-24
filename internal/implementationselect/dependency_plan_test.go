@@ -25,6 +25,7 @@ const dependencyOperation = `{"kind":"dependency","action":"update","module":"ex
 type dependencyFixtureOptions struct {
 	fields, parameters, providerFields, providerParameters string
 	document, mode, alternateFields                        string
+	onlyService                                            bool
 }
 
 // Every version is independently discovered through the public boundary. No
@@ -47,6 +48,9 @@ type Response struct{}
 		writeImplementationFile(t, filepath.Join(root, resource.name, "resource.go"), "package "+resource.name+"\n//plystra:resource "+resource.id+"\ntype Resource interface { Value() string }\n")
 	}
 	for _, name := range []string{"service", "alternate"} {
+		if name == "alternate" && fixture.onlyService {
+			continue
+		}
 		parameters, fields := fixture.parameters, fixture.fields
 		if name == "alternate" {
 			parameters, fields = "", `Name string `+"`yaml:\"name\"`"
@@ -411,6 +415,58 @@ func TestPreviewDependencyConfigurationsUnknownClosureCannotProveNewReachability
 			}
 			if got := len(plan.ConfigurationImpact().NewlyRequiredFields()); got != want {
 				t.Fatalf("newly reachable fields = %d, want %d (incomplete old closure: %v)", got, want, incomplete)
+			}
+		})
+	}
+}
+
+func TestPreviewDependencyConfigurationsUsesOldAutomaticOwnershipOnly(t *testing.T) {
+	t.Parallel()
+	document := "interfaces: {require: [app.main/v1]}\nconfig: {" + dependencyOwner + ": {name: PRIVATE_OLD}}\n"
+	fixture := dependencyFixtureOptions{fields: "Name string `yaml:\"name\"`", document: document, onlyService: true}
+	old := dependencyInputs(t, fixture)
+	fixture.onlyService = false
+	current := dependencyInputs(t, fixture)
+	request := dependencyRequest(t, dependencyOperation, dependencySelection(dependencyOtherOwner))
+	plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ConfigurationImpact().DerivedOperations()) != 1 {
+		t.Fatalf("old automatic owner lost its proof across versions: %s", plan.ConfigurationImpact().CanonicalJSON())
+	}
+	if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, request); err == nil {
+		t.Fatal("new declarations were treated as proof of old automatic ownership")
+	}
+}
+
+func TestPreviewDependencyConfigurationsProviderReplacementUsesOldParameters(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			document := "resources:\n  instances: {primary: {use: " + dependencyModule + "/provider.New, config: {name: PRIVATE_OLD}}, database: {use: " + dependencyModule + "/leaf.New}}\n  bind:\n    instances:\n      primary: {upstream: missing}\n"
+			fixture := dependencyFixtureOptions{document: document, mode: mode, providerParameters: "upstream db.Resource", providerFields: "Name string `yaml:\"name\"`"}
+			old, current := dependencyInputs(t, fixture), dependencyInputs(t, fixture)
+			request := dependencyRequest(t, dependencyOperation,
+				`{"kind":"resource_selection","action":"set","instance":"primary","provider":"`+dependencyModule+`/leaf.New"}`,
+				`{"kind":"configuration","action":"set","owner":"primary","path":"name","value":"PRIVATE_NEW"}`)
+			plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			impact := plan.ConfigurationImpact()
+			want := 2
+			if mode == "environment" {
+				want = 1 // Root Config is suppressed by the provider boundary.
+			}
+			if len(impact.NewlyUnownedPaths()) != 2 || len(impact.DerivedOperations()) != want || bytes.Contains(plan.Updated(), []byte("PRIVATE_OLD")) {
+				t.Fatalf("provider replacement impact = %s", impact.CanonicalJSON())
+			}
+			if mode == "environment" && !bytes.Contains(plan.Updated(), []byte("$remove: true")) {
+				t.Fatal("inherited obsolete binding did not receive an exact tombstone")
+			}
+			if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, request); err == nil {
+				t.Fatal("provider replacement guessed obsolete parameters without old declarations")
 			}
 		})
 	}
