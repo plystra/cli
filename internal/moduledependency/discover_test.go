@@ -658,6 +658,9 @@ func TestDiscoverRejectsUnsafeDependencyProjectMarker(t *testing.T) {
 }
 
 func runHelper(mode string) int {
+	if mode == "root-manifests" {
+		return runRootManifestsHelper()
+	}
 	if mode == "checksum-facts" {
 		return runChecksumFactsHelper()
 	}
@@ -814,7 +817,7 @@ func writeModule(t *testing.T, root, modulePath string) {
 	writeFile(t, filepath.Join(root, "go.mod"), "module "+modulePath+"\n\ngo 1.26\n")
 }
 
-func writeModuleProxy(t *testing.T, root, modulePath, version string) string {
+func writeModuleProxy(t *testing.T, root, modulePath, version string, manifests ...string) string {
 	t.Helper()
 	escapedPath, err := module.EscapePath(modulePath)
 	if err != nil {
@@ -832,6 +835,9 @@ func writeModuleProxy(t *testing.T, root, modulePath, version string) string {
 	writeFile(t, filepath.Join(versionRoot, "list"), version+"\n")
 	writeFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Sprintf("{\"Version\":%q,\"Time\":\"2026-07-17T00:00:00Z\"}\n", version))
 	goMod := []byte("module " + modulePath + "\n\ngo 1.26\n")
+	if len(manifests) != 0 {
+		goMod = []byte(manifests[0])
+	}
 	writeFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), string(goMod))
 
 	archiveFile, err := os.Create(filepath.Join(versionRoot, escapedVersion+".zip"))

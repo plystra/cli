@@ -19,6 +19,13 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	}
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
+		RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+			inputs := make([]projectstage.MetadataInput, len(manifests))
+			for index, manifest := range manifests {
+				inputs[index] = projectstage.MetadataInput{Path: manifest.Path, GoModChecksum: manifest.Checksum}
+			}
+			return stage.RetainMetadata(ctx, inputs)
+		},
 	})
 	if err != nil {
 		return errors.Join(moduledependency.ErrSourceIntegrity, err)

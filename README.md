@@ -851,6 +851,17 @@ adds no file input, and the caller's environment is copied before Go selection.
 Absolute and Project-relative settings paths are supported. Candidate tooling
 reads an owner-private frozen copy outside the module trees, preserving the
 selected settings even if the original changes; drift still rejects the plan.
+Before single-module graph listing, previews retain already-cached root
+dependency manifests whose effective versions have original Project `go.sum`
+manifest checksums. Exact replacements take precedence over wildcard
+replacements; excluded requirements and local replacements do not introduce
+cache inputs. Capture uses the first applicable `h1:` row, ignoring Go's
+historical empty-manifest sentinel, and obtains the cache path under the same
+offline settings as resolution. It neither downloads missing manifests nor
+prefetches archives. Module and checksum inputs remain guarded through capture
+and listing, and retained evidence survives failed resolution and stage cleanup.
+This early boundary does not cover workspace graph inputs or manifests without
+recorded checksums.
 Source and dependency previews additionally retain versioned module source
 trees after module selection and before declaration discovery or candidate
 builds. This includes ordinary and transitive modules, versioned replacements,
@@ -899,8 +910,8 @@ manifest checksum with a conflicting result. Unrelated files in the same cache
 directory remain outside the read set. These metadata files have individual
 1 MiB limits and share the
 cumulative entry and content bounds with source trees. This does not establish
-capture before the first metadata read or cover every intermediate resolution
-version.
+complete capture before the first metadata read or cover every intermediate
+resolution version.
 Unrelated cache entries are excluded; retained-input rechecks never download or
 repair modules. These read-only roots share the staging tree's cumulative
 bounds. Complete capture before first use, including workspace MVS upgrades,

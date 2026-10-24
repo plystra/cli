@@ -278,7 +278,7 @@ func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9)
 func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download"
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list"
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -315,16 +315,26 @@ func main() {
  }
  afterList := len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m"
  afterDownload := len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download"
- if err == nil && (mode == "manifest-after-list" && afterList || mode == "manifest-after-download" && afterDownload) {
+ if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list") && afterList || mode == "manifest-after-download" && afterDownload) {
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
   _, pathErr := os.Stat(path)
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) && pathErr == nil {
    data, readErr := os.ReadFile(path); check(readErr)
    info, statErr := os.Stat(path); check(statErr)
-   check(os.Chmod(path, 0600))
-   check(os.WriteFile(path, append(data, []byte("\n// changed after verified Go output\n")...), 0600))
-   check(os.Chmod(path, info.Mode()))
+   if mode == "manifest-identity-after-list" {
+    if !os.SameFile(info, info) { os.Exit(10) }
+    backup = path + ".prior"
+    check(os.Rename(path, backup))
+    check(os.WriteFile(path, data, info.Mode().Perm()))
+    check(os.Chtimes(path, info.ModTime(), info.ModTime()))
+    current, statErr := os.Stat(path); check(statErr)
+    if os.SameFile(info, current) { os.Exit(10) }
+   } else {
+    check(os.Chmod(path, 0600))
+    check(os.WriteFile(path, append(data, []byte("\n// changed after verified Go output\n")...), 0600))
+    check(os.Chmod(path, info.Mode()))
+   }
    check(os.WriteFile(marker, []byte("manifest changed after Go output\n"), 0600))
   } else if markerErr != nil && !os.IsNotExist(markerErr) { check(markerErr) }
  }
@@ -395,8 +405,10 @@ func TestScaffoldPreviewRejectsChangedChecksumReferenceBeforeRetention(t *testin
 
 func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T) {
 	command := sourcePreparationGoWrapper(t)
-	for _, mode := range []string{"unchanged", "existing", "removal", "prepared", "workspace", "replacement"} {
+	for _, mode := range []string{"unchanged", "existing", "removal", "prepared", "workspace", "replacement", "existing-identity", "removal-identity", "replacement-identity"} {
 		t.Run(mode, func(t *testing.T) {
+			identity := strings.HasSuffix(mode, "-identity")
+			mode = strings.TrimSuffix(mode, "-identity")
 			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
 			environment := previewDependencyEnvironment(t, proxy)
 			root := writeImplementationSelectionCommandProject(t)
@@ -434,6 +446,9 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 				race = "manifest-after-download"
 			} else if mode == "unchanged" {
 				race = "unchanged"
+			}
+			if identity {
+				race = "manifest-identity-after-list"
 			}
 			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+race)
 			data := []byte(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
@@ -477,6 +492,21 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 }
 
 func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "plystra.exe")
+	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-o", binary, "./cmd/plystra")
+	build.Dir, build.Env = commandRepositoryRoot(t), commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanRejectsChangedModuleManifest(t, binary, mode)
+		})
+	}
+}
+
+func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mode string) {
+	t.Helper()
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
 	environment := previewDependencyEnvironment(t, proxy)
 	root := writeImplementationSelectionCommandProject(t)
@@ -490,12 +520,6 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 	}
 	if cache == "" {
 		t.Fatal("missing isolated source cache")
-	}
-	binary := filepath.Join(t.TempDir(), "plystra.exe")
-	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-o", binary, "./cmd/plystra")
-	build.Dir, build.Env = commandRepositoryRoot(t), commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
 	wrapper := sourcePreparationGoWrapper(t)
 	goName := "go"
@@ -512,7 +536,7 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 	}
 	path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
 	marker := filepath.Join(t.TempDir(), "manifest-changed")
-	environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE=manifest-after-list")
+	environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+mode)
 	before := commandTree(t, root)
 	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
 	command.Dir, command.Env = root, environment

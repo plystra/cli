@@ -61,6 +61,9 @@ type Options struct {
 	// workspace authority; this flag additionally requires recorded full sums
 	// when offline.
 	RequireSourceChecksums bool
+	// RetainRootManifests captures existing checksummed root manifests before
+	// single-module graph resolution. It does not prepare sources or downloads.
+	RetainRootManifests func([]RootManifest) error
 }
 
 // Replacement records the selected replacement provenance reported by Go.
@@ -226,9 +229,20 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		environment = environmentWith(environment, "GOTOOLCHAIN", "local")
 	}
 	inputs := preparationInputs{goModPath: before}
+	options.Environment = environment
 	workspace, err := capturePreparationWorkspace(ctx, application.Path(), options, inputs)
 	if err != nil {
 		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
+	}
+	if workspace == nil && options.RetainRootManifests != nil {
+		defer func() {
+			if err := inputs.recheck(); err != nil {
+				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)
+			}
+		}()
+		if err := retainRootManifests(ctx, application.Path(), before, options, inputs); err != nil {
+			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
+		}
 	}
 	if workspace != nil {
 		root, err := os.MkdirTemp("", "plystra-workspace-discovery-")
