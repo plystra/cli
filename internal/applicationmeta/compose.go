@@ -180,12 +180,18 @@ func compose(current Manifest, schemas SchemaLookup, identitiesOnly bool) (Compo
 	active := make(map[string]Provenance)
 	effective := Manifest{startupTimeout: DefaultStartupTimeout}
 	var corsSources httpCORSCompositionSources
-	apply := func(layer Manifest, environmentOverlay bool) error {
+	layers := manifestLayers(current)
+	apply := func(index int, layer Manifest, environmentOverlay bool) error {
 		layer = bindResourceProviders(layer, effective)
-		decisions, err := ConfigurationDecisions(layer, schemas)
+		filtered, excluded, err := excludeUnavailableConfigurations(layer, layers[index+1:], schemas)
 		if err != nil {
 			return err
 		}
+		decisions, err := ConfigurationDecisions(filtered, schemas)
+		if err != nil {
+			return err
+		}
+		decisions = append(decisions, excluded...)
 		currentLayers = append(currentLayers, layer)
 		clearReplacedResourceSources(active, effective, layer)
 		for _, decision := range decisions {
@@ -195,13 +201,13 @@ func compose(current Manifest, schemas SchemaLookup, identitiesOnly bool) (Compo
 			}
 		}
 		corsSources.apply(layer, current.modulePath, environmentOverlay)
-		effective, err = applyManifestLayer(effective, layer, schemas)
+		effective, err = applyManifestLayer(effective, filtered, schemas)
 		return err
 	}
-	for index, layer := range manifestLayers(current) {
+	for index, layer := range layers {
 		// ApplyOverlay retains the selected base followed by its overlay layers.
 		// A replacement document is the base, regardless of its filename.
-		if err := apply(layer, index > 0); err != nil {
+		if err := apply(index, layer, index > 0); err != nil {
 			return Composition{}, fmt.Errorf("%w: %w", ErrCompose, err)
 		}
 	}

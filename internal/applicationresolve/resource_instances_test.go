@@ -121,10 +121,16 @@ func TestResolveResourceProviderCannotOwnOrdinaryConfiguration(t *testing.T) {
 				}
 				writeFile(t, filepath.Join(root, path), document)
 				before := snapshotTree(t, root)
-				_, err := applicationresolve.Resolve(t.Context(), options)
+				result, err := applicationresolve.Resolve(t.Context(), options)
 				if value == "{$remove: true}" && mode != "environment" {
 					if !errors.Is(err, applicationmeta.ErrInvalidManifest) {
 						t.Fatalf("root or replacement Resource tombstone was not rejected as invalid metadata: %v", err)
+					}
+				} else if value == "{$remove: true}" {
+					// The tombstone excludes an unavailable Implementation Config;
+					// it does not establish a Resource provider's ordinary ownership.
+					if err != nil || len(result.Composition().Manifest().Configurations()) != 0 {
+						t.Fatalf("whole-owner exclusion borrowed a Resource schema: %v", err)
 					}
 				} else if !errors.Is(err, applicationmeta.ErrConfigurationSchema) || strings.Contains(err.Error(), "PRIVATE_INVALID_OWNER") {
 					t.Fatalf("Resource provider accepted under ordinary config: %v", err)

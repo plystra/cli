@@ -357,6 +357,10 @@ func sortedInterfaceRemovals(values map[interfaceid.Identifier]interfaceRemoval)
 }
 
 func overlayConstructorConfigurations(base, overlay Manifest, schemas SchemaLookup) ([]ConstructorConfiguration, []constructorConfigurationRemoval, error) {
+	base, _, err := excludeUnavailableConfigurations(base, []Manifest{overlay}, schemas)
+	if err != nil {
+		return nil, nil, err
+	}
 	lower, err := manifestConfigDecisions(base, schemas)
 	if err != nil {
 		return nil, nil, err

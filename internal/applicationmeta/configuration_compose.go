@@ -58,9 +58,8 @@ func manifestConfigDecisions(manifest Manifest, schemas SchemaLookup) ([]constru
 	}
 	for _, removal := range manifest.removedConfigurations {
 		removal.declarationSource = completeConfigurationDeclarationSource(manifest, removal.declarationSource)
-		if _, exists := schemas(ConfigurationNamespaceImplementation, removal.constructor); !exists {
-			return nil, newConstructorConfigurationSchemaError(removal.constructor, removal.source, removal.declarationSource)
-		}
+		// A whole-owner tombstone is exact exclusion intent even after its
+		// constructor's Config schema disappears from the selected module graph.
 		decision := newConstructorConfigDecision(removal.constructor, nil, constructorConfigRemoval, "", nil, removal.source)
 		decision.declarationSource = removal.declarationSource
 		result = append(result, decision)

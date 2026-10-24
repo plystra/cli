@@ -266,11 +266,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	// decision paths available to source validation without inferring ownership
 	// from dependency state or an earlier generated manifest.
 	selectedLayer := applicationmeta.WithRootMetadata(currentLayers[len(currentLayers)-1], selectedManifest)
-	baseLayer := rootManifest
-	if selector.mode == configurationModeExplicit {
-		baseLayer = selectedManifest
-	}
-	currentProjectPaths, err := currentProjectConfigurationPaths(baseLayer, selectedLayer, selector.mode == configurationModeEnvironment, schemaLookup)
+	currentProjectPaths, err := currentProjectConfigurationPaths(composition, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: selected configuration provenance: %w", ErrResolve, err)
 	}
@@ -334,7 +330,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
-	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, rootManifest, baseLayer, selectedLayer, schemaLookup)
+	configurationEvidence, err := resolutionEvidenceConfigurationInput(selector, composition, schemaLookup)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: construct resolution evidence: %w", ErrResolve, err)
 	}
@@ -387,24 +383,13 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 	return result, nil
 }
 
-func currentProjectConfigurationPaths(base, selected applicationmeta.Manifest, environment bool, schemas applicationmeta.SchemaLookup) ([]string, error) {
-	paths := make([]string, 0)
-	for _, layer := range []applicationmeta.Manifest{base} {
-		decisions, err := applicationmeta.ConfigurationDecisions(layer, schemas)
-		if err != nil {
-			return nil, err
-		}
-		for _, decision := range decisions {
-			if decision.ResolutionRelevant() {
-				paths = append(paths, decision.Path())
-			}
-		}
+func currentProjectConfigurationPaths(composition applicationmeta.Composition, schemas applicationmeta.SchemaLookup) ([]string, error) {
+	layers, err := composition.CurrentLayerDecisions(schemas)
+	if err != nil {
+		return nil, err
 	}
-	if environment {
-		decisions, err := applicationmeta.ConfigurationDecisions(selected, schemas)
-		if err != nil {
-			return nil, err
-		}
+	var paths []string
+	for _, decisions := range layers {
 		for _, decision := range decisions {
 			if decision.ResolutionRelevant() {
 				paths = append(paths, decision.Path())
@@ -499,35 +484,27 @@ func resolutionEvidencePluginCandidates(inventory plugininventory.Index) []resol
 func resolutionEvidenceConfigurationInput(
 	selector configurationSelector,
 	composition applicationmeta.Composition,
-	root applicationmeta.Manifest,
-	maintained applicationmeta.Manifest,
-	selected applicationmeta.Manifest,
 	schemas applicationmeta.SchemaLookup,
 ) (resolutionevidence.ConfigurationInput, error) {
-	currentDecisions := func(manifest applicationmeta.Manifest) ([]applicationmeta.ConfigurationDecision, error) {
-		decisions, err := applicationmeta.ConfigurationDecisions(manifest, schemas)
-		if err != nil {
-			return nil, err
-		}
-		return decisions, nil
-	}
-
-	base, err := currentDecisions(maintained)
+	decisions, err := composition.CurrentLayerDecisions(schemas)
 	if err != nil {
 		return resolutionevidence.ConfigurationInput{}, err
 	}
+	if len(decisions) == 0 {
+		return resolutionevidence.ConfigurationInput{}, fmt.Errorf("current-project configuration layers are absent")
+	}
+	base := decisions[0]
 	layers := make([]resolutionevidence.ConfigurationLayerInput, 0, 2)
 	switch selector.mode {
 	case configurationModeDefault:
 		layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: base})
 	case configurationModeEnvironment:
-		overlay, err := currentDecisions(selected)
-		if err != nil {
-			return resolutionevidence.ConfigurationInput{}, err
+		if len(decisions) != 2 {
+			return resolutionevidence.ConfigurationInput{}, fmt.Errorf("environment configuration layers are incomplete")
 		}
 		layers = append(layers,
 			resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerRoot, Decisions: base},
-			resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerEnvironment, Decisions: overlay},
+			resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerEnvironment, Decisions: decisions[1]},
 		)
 	case configurationModeExplicit:
 		layers = append(layers, resolutionevidence.ConfigurationLayerInput{Owner: resolutionevidence.ConfigurationOwnerExplicit, Decisions: base})
