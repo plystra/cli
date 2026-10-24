@@ -8,9 +8,11 @@ import (
 )
 
 type replacementRelocation struct {
+	owner             string
 	module            string
 	version           string
 	original          string
+	originalToken     string
 	workspaceOriginal string
 	mapped            string
 	workspace         bool
@@ -27,6 +29,10 @@ func (s *Stage) relocateVendor(path string, relocations []replacementRelocation,
 		return ErrStage
 	}
 	data, err := s.files.ReadFile(path)
+	if err != nil {
+		return ErrStage
+	}
+	projectPath, err := filepath.Rel(s.temporary, filepath.Join(s.root, "vendor", "modules.txt"))
 	if err != nil {
 		return ErrStage
 	}
@@ -67,6 +73,9 @@ func (s *Stage) relocateVendor(path string, relocations []replacementRelocation,
 			lines[index] = prefix + " => " + relocations[best].mapped + ending
 			changed = true
 		}
+	}
+	if !workspace && path == projectPath {
+		s.projectImages["vendor/modules.txt"] = relocationImage{original: data, baseline: []byte(strings.Join(lines, "\n"))}
 	}
 	if !changed {
 		return nil
