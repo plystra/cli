@@ -334,6 +334,20 @@ func DiscoverExactInterfaces(ctx context.Context, selection ExactInterfacePackag
 // through one shared eligible-package scan. Go tooling selects source files and
 // supplies compiled type information before any declaration kind is exposed.
 func DiscoverApplication(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options) (Discovery, error) {
+	return discoverApplication(ctx, application, dependencies, options, false)
+}
+
+// DiscoverContracts loads only packages containing active Interface or Resource
+// contract directives. Implementation-only and provider-only candidates are
+// excluded before export compilation, so their pending imports need not resolve yet.
+// Contract packages and their dependencies still use complete Go-selected source
+// and ordinary type checking; no source overlays or substitute types are used.
+// The returned Discovery has no Implementation or Resource provider inventory.
+func DiscoverContracts(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options) (Discovery, error) {
+	return discoverApplication(ctx, application, dependencies, options, true)
+}
+
+func discoverApplication(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options, contractsOnly bool) (Discovery, error) {
 	options = withOfflineGoEnvironment(options)
 	if ctx == nil {
 		return Discovery{}, fmt.Errorf("%w: context is nil", ErrDiscover)
@@ -363,7 +377,7 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 
 	var candidates []packageCandidate
 	for _, source := range sources {
-		found, err := probeModule(source, application.ModulePath())
+		found, err := probeModule(source, application.ModulePath(), contractsOnly)
 		if err != nil {
 			return Discovery{}, fmt.Errorf("%w: inspect %s: %w", ErrDiscover, source.label(), err)
 		}
@@ -380,13 +394,16 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 	if err != nil {
 		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
-	resourceContracts := make([]resourceproviderinventory.ContractInput, len(resourceInventory.resources))
-	for n, resource := range resourceInventory.resources {
-		resourceContracts[n] = resourceproviderinventory.ContractInput{ID: resource.ID(), PackagePath: resource.PackagePath()}
-	}
-	providers, err := resourceproviderinventory.Build(found.resourceProviders, resourceContracts, found.importer)
-	if err != nil {
-		return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	var providers resourceproviderinventory.Index
+	if !contractsOnly {
+		resourceContracts := make([]resourceproviderinventory.ContractInput, len(resourceInventory.resources))
+		for n, resource := range resourceInventory.resources {
+			resourceContracts[n] = resourceproviderinventory.ContractInput{ID: resource.ID(), PackagePath: resource.PackagePath()}
+		}
+		providers, err = resourceproviderinventory.Build(found.resourceProviders, resourceContracts, found.importer)
+		if err != nil {
+			return Discovery{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+		}
 	}
 	sortDiscoveredInterfaces(interfaces)
 	visibleIDs := make(map[string]struct{}, len(interfaces))
@@ -404,6 +421,9 @@ func DiscoverApplication(ctx context.Context, application modulelocate.Module, d
 		}
 		interfaces[index].deprecation = deprecation
 		interfaces[index].hasDeprecation = present
+	}
+	if contractsOnly {
+		return Discovery{interfaces: Index{interfaces: interfaces}, resources: resourceInventory}, nil
 	}
 	canonicalInterfaces := make([]implementationinventory.InterfaceInput, len(interfaces))
 	for index, discovered := range interfaces {
@@ -490,17 +510,52 @@ func loadCandidatesAt(ctx context.Context, candidates []packageCandidate, option
 	if limit <= 0 {
 		limit = defaultOutputLimit
 	}
+	commandOptions := gocommand.Options{
+		Command:     options.GoCommand,
+		Directory:   directory,
+		Environment: append([]string(nil), options.Environment...),
+		OutputLimit: limit,
+	}
+	if candidates[0].contractsOnly {
+		// Lexical candidates can contain only inactive contract directives. Ask
+		// Go to select source files without compiling pending constructors.
+		arguments := append([]string{"list", "-json", "-e", "-mod=readonly", "-export=false"}, flags...)
+		for _, candidate := range candidates {
+			arguments = append(arguments, candidate.importPath)
+		}
+		output, err := gocommand.Output(ctx, commandOptions, arguments...)
+		if err != nil {
+			return loadedInventory{}, fmt.Errorf("select contract Go sources: %w", err)
+		}
+		listed, _, err := decodePackages(output)
+		if err != nil {
+			return loadedInventory{}, err
+		}
+		active := make([]packageCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			loaded, exists := listed[candidate.importPath]
+			if !exists {
+				return loadedInventory{}, fmt.Errorf("%w: Go omitted candidate package %q", ErrInvalidOutput, candidate.importPath)
+			}
+			declarations, err := parseDeclarations(candidate, loaded)
+			if err != nil {
+				return loadedInventory{}, fmt.Errorf("package %s: %w", candidate.importPath, err)
+			}
+			if len(declarations.interfaces) != 0 || len(declarations.resources) != 0 {
+				active = append(active, candidate)
+			}
+		}
+		candidates = active
+		if len(candidates) == 0 {
+			return loadedInventory{}, nil
+		}
+	}
 	arguments := []string{"list", "-deps", "-export", "-json", "-e", "-mod=readonly"}
 	arguments = append(arguments, flags...)
 	for _, candidate := range candidates {
 		arguments = append(arguments, candidate.importPath)
 	}
-	output, err := gocommand.Output(ctx, gocommand.Options{
-		Command:     options.GoCommand,
-		Directory:   directory,
-		Environment: append([]string(nil), options.Environment...),
-		OutputLimit: limit,
-	}, arguments...)
+	output, err := gocommand.Output(ctx, commandOptions, arguments...)
 	if err != nil {
 		return loadedInventory{}, fmt.Errorf("load eligible Go packages: %w", err)
 	}
@@ -756,12 +811,13 @@ func (s moduleSource) label() string {
 }
 
 type packageCandidate struct {
-	source     moduleSource
-	importPath string
-	directory  string
+	source        moduleSource
+	importPath    string
+	directory     string
+	contractsOnly bool
 }
 
-func probeModule(source moduleSource, applicationPath string) ([]packageCandidate, error) {
+func probeModule(source moduleSource, applicationPath string, contractsOnly bool) ([]packageCandidate, error) {
 	root, err := resolveModuleSourceRoot(source)
 	if err != nil {
 		return nil, err
@@ -801,7 +857,11 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 		if err != nil {
 			return err
 		}
-		if hasDeclarationDirectiveComment(current, data) {
+		hasDirective := hasDeclarationDirectiveComment
+		if contractsOnly {
+			hasDirective = hasContractDirectiveComment
+		}
+		if hasDirective(current, data) {
 			packageDirectories[filepath.Dir(current)] = struct{}{}
 		}
 		return nil
@@ -833,9 +893,10 @@ func probeModule(source moduleSource, applicationPath string) ([]packageCandidat
 			continue
 		}
 		candidates = append(candidates, packageCandidate{
-			source:     source,
-			importPath: importPath,
-			directory:  directory,
+			source:        source,
+			importPath:    importPath,
+			directory:     directory,
+			contractsOnly: contractsOnly,
 		})
 	}
 	return candidates, nil
@@ -981,6 +1042,13 @@ func hasDeclarationDirectiveComment(filename string, source []byte) bool {
 	)
 }
 
+func hasContractDirectiveComment(filename string, source []byte) bool {
+	return hasDirectiveComment(filename, source,
+		"//plystra:interface", "/*plystra:interface",
+		"//plystra:resource", "/*plystra:resource",
+	)
+}
+
 func hasDirectiveComment(filename string, source []byte, prefixes ...string) bool {
 	files := token.NewFileSet()
 	file := files.AddFile(filename, -1, len(source))
@@ -1086,7 +1154,7 @@ func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packag
 			return packageDeclarations{}, fmt.Errorf("read selected Go source %s: %w", fileName, err)
 		}
 		hasInterface := hasInterfaceDirectiveComment(fileName, data)
-		hasImplementation := hasImplementationDirectiveComment(fileName, data)
+		hasImplementation := !candidate.contractsOnly && hasImplementationDirectiveComment(fileName, data)
 		hasResource := hasDirectiveComment(fileName, data, "//plystra:resource", "/*plystra:resource")
 		if !hasInterface && !hasImplementation && !hasResource {
 			continue
@@ -1096,7 +1164,7 @@ func parseDeclarations(candidate packageCandidate, loaded listedPackage) (packag
 			return packageDeclarations{}, fmt.Errorf("%w: package %q source %q escapes its module root", ErrInvalidOutput, candidate.importPath, fileName)
 		}
 		sourcePath := filepath.ToSlash(relativePath)
-		if hasDirectiveComment(fileName, data, "//plystra:implements-resource", "/*plystra:implements-resource") {
+		if !candidate.contractsOnly && hasDirectiveComment(fileName, data, "//plystra:implements-resource", "/*plystra:implements-resource") {
 			parsed, err := resourceproviderdecl.ParseFile(sourcePath, data)
 			if err != nil {
 				position := resourceproviderdecl.Position{Path: sourcePath}
