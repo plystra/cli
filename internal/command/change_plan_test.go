@@ -188,11 +188,7 @@ func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.
 	if !reflect.DeepEqual(payload.Verification, []string{"plystra", "check"}) {
 		t.Fatalf("verification is not executable in its emitted order: %q", payload.Verification)
 	}
-	for _, name := range []string{"newly_required_fields", "retained_owners", "newly_unowned_paths", "derived_operations", "unresolved_decisions"} {
-		if string(payload.ConfigurationImpact[name]) == "null" {
-			t.Fatalf("configuration_impact.%s is null", name)
-		}
-	}
+	assertChangePlanImpactArrays(t, payload.ConfigurationImpact)
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
 		t.Fatalf("change plan mutated the Project:\nbefore: %#v\nafter: %#v", before, after)
 	}
@@ -206,6 +202,16 @@ func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.
 	}
 	if err := json.Unmarshal([]byte(secondStdout), &second); err != nil || string(second.Payload) != string(first.Payload) {
 		t.Fatalf("repeat payload = %s, want %s; err=%v", second.Payload, first.Payload, err)
+	}
+}
+
+func assertChangePlanImpactArrays(t *testing.T, impact map[string]json.RawMessage) {
+	t.Helper()
+	for _, name := range []string{"newly_required_fields", "retained_owners", "newly_unowned_paths", "derived_operations", "unresolved_decisions"} {
+		var values []json.RawMessage
+		if err := json.Unmarshal(impact[name], &values); err != nil || values == nil {
+			t.Fatalf("configuration_impact.%s must be an array: %s (%v)", name, impact[name], err)
+		}
 	}
 }
 

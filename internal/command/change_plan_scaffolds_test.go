@@ -33,7 +33,8 @@ type scaffoldPlanDocument struct {
 			BeforeDigest string `json:"before_digest"`
 			AfterDigest  string `json:"after_digest"`
 		} `json:"write_set"`
-		Verification []string
+		Verification        []string
+		ConfigurationImpact map[string]json.RawMessage `json:"configuration_impact"`
 	}
 }
 
@@ -102,6 +103,7 @@ var _ contract.Interface = (*implementation.Service)(nil)
 				if result.Status != "success" || result.Payload.Completeness != "non_exact" || !strings.HasPrefix(result.Payload.FinalModelDigest, "sha256:") || len(result.Payload.Operations) != 4 {
 					t.Fatalf("incomplete scaffold plan: %s", stdout)
 				}
+				assertChangePlanImpactArrays(t, result.Payload.ConfigurationImpact)
 				wantVerification := append([]string{"plystra", "check"}, expectedSelector...)
 				if !reflect.DeepEqual(result.Payload.Verification, wantVerification) {
 					t.Fatalf("lost selected verification: %s", stdout)
@@ -302,6 +304,7 @@ func TestBuiltCLIChangePlanScaffoldsFromStdinReadOnly(t *testing.T) {
 	if err != nil || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "success" || !reflect.DeepEqual(result.Payload.Verification, []string{"plystra", "check", "--env", "production"}) {
 		t.Fatalf("compiled stdin preview: %v\n%s\n%s", err, output, &stderr)
 	}
+	assertChangePlanImpactArrays(t, result.Payload.ConfigurationImpact)
 	if !reflect.DeepEqual(before, commandTree(t, root)) {
 		t.Fatal("compiled stdin preview modified the Project")
 	}
@@ -321,6 +324,7 @@ func runScaffoldPlan(t *testing.T, root string, operations []map[string]any) (sc
 	if code != 0 || stderr != "" || json.Unmarshal([]byte(stdout), &result) != nil || result.Status != "success" {
 		t.Fatalf("scaffold preview: exit=%d\n%s\n%s", code, stdout, stderr)
 	}
+	assertChangePlanImpactArrays(t, result.Payload.ConfigurationImpact)
 	if !reflect.DeepEqual(before, commandTree(t, root)) {
 		t.Fatal("scaffold preview modified the Project")
 	}

@@ -70,6 +70,7 @@ var _ contract.Interface = (*candidate.Service)(nil)
 		if result.Status != "success" || result.Payload.Completeness != "non_exact" || !strings.HasPrefix(result.Payload.FinalModelDigest, "sha256:") {
 			t.Fatalf("incomplete dependency preview: %s", stdout)
 		}
+		assertChangePlanImpactArrays(t, result.Payload.ConfigurationImpact)
 		for _, name := range []string{"go.mod", "go.sum", "candidate/implementation.go", "plystra.yaml", "dist/runtime-baseline.json"} {
 			found := false
 			for _, path := range result.Payload.WriteSet {
@@ -140,8 +141,9 @@ func TestRunChangePlanDependencyOnlyUsesSelectedConfiguration(t *testing.T) {
 				var result struct {
 					Status  string
 					Payload struct {
-						Operations   []struct{ Kind, Action, Module string }
-						Verification []string
+						Operations          []struct{ Kind, Action, Module string }
+						Verification        []string
+						ConfigurationImpact map[string]json.RawMessage `json:"configuration_impact"`
 					}
 				}
 				if err := json.Unmarshal([]byte(stdout), &result); err != nil {
@@ -150,6 +152,7 @@ func TestRunChangePlanDependencyOnlyUsesSelectedConfiguration(t *testing.T) {
 				if result.Status != "success" || len(result.Payload.Operations) != 1 || result.Payload.Operations[0].Module != query || result.Payload.Operations[0].Action != action {
 					t.Fatalf("dependency identity not bound: %s", stdout)
 				}
+				assertChangePlanImpactArrays(t, result.Payload.ConfigurationImpact)
 				if !reflect.DeepEqual(result.Payload.Verification, append([]string{"plystra", "check"}, wantSelector...)) {
 					t.Fatalf("lost selected verification: %s", stdout)
 				}
