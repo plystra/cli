@@ -10,9 +10,11 @@ import (
 	"io/fs"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/configurationimpact"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/modulepath"
 )
 
@@ -55,6 +57,7 @@ type ChangePlanOperationInput struct {
 	Semantics   string
 	Contract    string
 	Package     string
+	Module      string
 	Interface   string
 	Root        string
 	Constructor string
@@ -133,6 +136,7 @@ type changePlanOperationDocument struct {
 	Semantics   string `json:"semantics,omitempty"`
 	Contract    string `json:"contract,omitempty"`
 	Package     string `json:"package,omitempty"`
+	Module      string `json:"module,omitempty"`
 	Interface   string `json:"interface,omitempty"`
 	Root        string `json:"root,omitempty"`
 	Constructor string `json:"constructor,omitempty"`
@@ -361,6 +365,25 @@ func validOperation(value ChangePlanOperationInput) bool {
 	} else if value.Contract != "" || value.Package != "" {
 		return false
 	}
+	if value.Kind == "dependency" {
+		if !utf8.ValidString(value.Module) || value.Interface != "" || value.Root != "" || value.Constructor != "" || value.Instance != "" || value.Provider != "" || value.Owner != "" || value.Path != "" || value.Derived {
+			return false
+		}
+		var err error
+		switch value.Action {
+		case "add", "update":
+			_, _, err = moduleargument.ParseQuery(value.Module)
+		case "remove":
+			_, err = moduleargument.ParsePath(value.Module)
+		default:
+			return false
+		}
+		if err != nil {
+			return false
+		}
+	} else if value.Module != "" {
+		return false
+	}
 	if value.Kind == "interface_create" || value.Kind == "implementation_create" {
 		if value.Interface != "" || value.Root != "" || value.Constructor != "" || value.Instance != "" || value.Provider != "" || value.Owner != "" || value.Path != "" {
 			return false
@@ -378,7 +401,7 @@ func validOperation(value ChangePlanOperationInput) bool {
 	} else if value.Root != "" {
 		return false
 	}
-	for _, field := range []string{value.Name, value.Semantics, value.Contract, value.Package, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path} {
+	for _, field := range []string{value.Name, value.Semantics, value.Contract, value.Package, value.Module, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path} {
 		if len(field) > 4096 || strings.ContainsRune(field, '\x00') {
 			return false
 		}
@@ -448,7 +471,7 @@ func sortChangePlan(p *ChangePlan) {
 }
 
 func operationKey(value ChangePlanOperationInput) string {
-	return strings.Join([]string{value.Kind, value.Action, value.Name, value.Semantics, value.Contract, value.Package, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path, fmt.Sprint(value.Derived)}, "\x00")
+	return strings.Join([]string{value.Kind, value.Action, value.Name, value.Semantics, value.Contract, value.Package, value.Module, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path, fmt.Sprint(value.Derived)}, "\x00")
 }
 
 func snapshotDocument(value ChangePlanSnapshotInput) changePlanSnapshotDocument {
@@ -468,7 +491,7 @@ func pathDocuments(values []ChangePlanPathInput, writes bool) []changePlanPathDo
 func operationDocuments(values []ChangePlanOperationInput) []changePlanOperationDocument {
 	result := make([]changePlanOperationDocument, len(values))
 	for index, value := range values {
-		result[index] = changePlanOperationDocument{Kind: value.Kind, Action: value.Action, Name: value.Name, Semantics: value.Semantics, Contract: value.Contract, Package: value.Package, Interface: value.Interface, Root: value.Root, Constructor: value.Constructor, Instance: value.Instance, Provider: value.Provider, Owner: value.Owner, Path: value.Path, Derived: value.Derived}
+		result[index] = changePlanOperationDocument{Kind: value.Kind, Action: value.Action, Name: value.Name, Semantics: value.Semantics, Contract: value.Contract, Package: value.Package, Module: value.Module, Interface: value.Interface, Root: value.Root, Constructor: value.Constructor, Instance: value.Instance, Provider: value.Provider, Owner: value.Owner, Path: value.Path, Derived: value.Derived}
 	}
 	return result
 }
