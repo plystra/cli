@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -31,6 +32,9 @@ import (
 
 var ErrPreview = errors.New("preview staged candidate")
 
+// ErrPrivateResult rejects implicit serialization of a private staged plan.
+var ErrPrivateResult = errors.New("private scaffold plan cannot be serialized")
+
 type Options struct {
 	Start, ConfigurationPath, EnvironmentName string
 	GoCommand, TemporaryParent                string
@@ -40,6 +44,12 @@ type Options struct {
 // Result retains public-safe projections and private captured configuration.
 // It confers no installation authority. Effects remain available on failure.
 type Result struct {
+	// fmt can bypass methods on unexported wrapper fields. Two pointer levels
+	// prevent its recursive fallback from reaching private nested inputs.
+	state **resultState
+}
+
+type resultState struct {
 	inputs         applicationresolve.SelectionInputs
 	updated        []byte
 	impact         configurationimpact.Impact
@@ -52,23 +62,71 @@ type Result struct {
 	selectedDigest string
 }
 
-func (Result) String() string                                    { return "<private-scaffold-plan>" }
-func (r Result) GoString() string                                { return r.String() }
-func (r Result) Format(state fmt.State, _ rune)                  { _, _ = state.Write([]byte(r.String())) }
-func (r Result) Inputs() applicationresolve.SelectionInputs      { return r.inputs }
-func (r Result) Updated() []byte                                 { return append([]byte(nil), r.updated...) }
-func (r Result) ConfigurationImpact() configurationimpact.Impact { return r.impact }
-func (r Result) Capture() Capture                                { return r.capture }
+func (Result) String() string                   { return "<private-scaffold-plan>" }
+func (r Result) GoString() string               { return r.String() }
+func (r Result) Format(state fmt.State, _ rune) { _, _ = state.Write([]byte(r.String())) }
+func (r Result) LogValue() slog.Value           { return slog.StringValue(r.String()) }
+func (Result) MarshalJSON() ([]byte, error)     { return nil, ErrPrivateResult }
+func (Result) MarshalText() ([]byte, error)     { return nil, ErrPrivateResult }
+func (Result) MarshalYAML() (any, error)        { return nil, ErrPrivateResult }
+
+func (r Result) stored() *resultState {
+	if r.state == nil {
+		return nil
+	}
+	return *r.state
+}
+
+func (r Result) Inputs() applicationresolve.SelectionInputs {
+	if state := r.stored(); state != nil {
+		return state.inputs
+	}
+	return applicationresolve.SelectionInputs{}
+}
+func (r Result) Updated() []byte {
+	if state := r.stored(); state != nil {
+		return append([]byte(nil), state.updated...)
+	}
+	return nil
+}
+func (r Result) ConfigurationImpact() configurationimpact.Impact {
+	if state := r.stored(); state != nil {
+		return state.impact
+	}
+	return configurationimpact.Impact{}
+}
+func (r Result) Capture() Capture {
+	if state := r.stored(); state != nil {
+		return state.capture
+	}
+	return Capture{}
+}
 func (r Result) WriteSet() []commandschema.ChangePlanPathInput {
-	return r.capture.writeSet()
+	return r.Capture().writeSet()
 }
 func (r Result) ReadSet() []commandschema.ChangePlanPathInput {
-	return append([]commandschema.ChangePlanPathInput(nil), r.reads...)
+	if state := r.stored(); state != nil {
+		return append([]commandschema.ChangePlanPathInput(nil), state.reads...)
+	}
+	return nil
 }
-func (r Result) Effects() commandschema.Effects { return r.effects }
-func (r Result) FinalModelDigest() string       { return r.model }
+func (r Result) Effects() commandschema.Effects {
+	if state := r.stored(); state != nil {
+		return state.effects
+	}
+	return commandschema.Effects{}
+}
+func (r Result) FinalModelDigest() string {
+	if state := r.stored(); state != nil {
+		return state.model
+	}
+	return ""
+}
 func (r Result) OriginalConfigurationDigests() (string, string) {
-	return r.rootDigest, r.selectedDigest
+	if state := r.stored(); state != nil {
+		return state.rootDigest, state.selectedDigest
+	}
+	return "", ""
 }
 
 // Preview never installs candidate files into an authored Project. Every
@@ -112,14 +170,16 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	case applicationgen.ConfigurationModeExplicit:
 		options.ConfigurationPath = target.Selection().Path()
 	}
+	state := &resultState{}
+	result = Result{state: &state}
 	accounting := commandschema.EffectsInput{}
 	defer func() {
-		result.effects, err = commandschema.NewEffects(accounting)
+		state.effects, err = commandschema.NewEffects(accounting)
 		if err != nil {
 			resultErr = errors.Join(resultErr, ErrPreview, err)
 		}
 		if resultErr != nil {
-			result.capture, result.model = Capture{}, ""
+			state.capture, state.model = Capture{}, ""
 		}
 	}()
 	effect := func(id string, class commandschema.EffectClass, reason string, verification []string) commandschema.Effect {
@@ -166,7 +226,7 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	}
 	defer func() {
 		if closeErr := stage.Close(); closeErr != nil {
-			result.model = ""
+			state.model = ""
 			resultErr = errors.Join(resultErr, ErrPreview, closeErr)
 		}
 	}()
@@ -210,12 +270,12 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		}
 		var planned implementationselect.PlanResult
 		if len(dependencies) != 0 {
-			result.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+			state.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
 				Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 				GoCommand: options.GoCommand, Environment: stage.Environment(),
 			})
 			if err == nil {
-				planned, err = implementationselect.PreviewDependencyConfigurations(ctx, previous, result.inputs, request)
+				planned, err = implementationselect.PreviewDependencyConfigurations(ctx, previous, state.inputs, request)
 			}
 			if err != nil {
 				return errors.Join(ErrPreview, err)
@@ -231,38 +291,38 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 			}
 		}
 		if len(dependencies) != 0 || len(remaining) != 0 {
-			result.inputs, result.updated, result.impact, result.forceWrite = planned.Inputs(), planned.Updated(), planned.ConfigurationImpact(), planned.Changed()
-			if result.forceWrite {
-				if err := atomicfs.WriteFiles(stage.Root(), []atomicfs.Write{{Path: result.inputs.ConfigurationSelection().Path(), Data: result.updated, ExpectedData: planned.Original(), OwnerPrivate: true}}, func(string) error { return stage.Recheck(ctx) }); err != nil {
+			state.inputs, state.updated, state.impact, state.forceWrite = planned.Inputs(), planned.Updated(), planned.ConfigurationImpact(), planned.Changed()
+			if state.forceWrite {
+				if err := atomicfs.WriteFiles(stage.Root(), []atomicfs.Write{{Path: state.inputs.ConfigurationSelection().Path(), Data: state.updated, ExpectedData: planned.Original(), OwnerPrivate: true}}, func(string) error { return stage.Recheck(ctx) }); err != nil {
 					return errors.Join(ErrPreview, err)
 				}
 			}
 		} else {
-			result.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+			state.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
 				Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 				GoCommand: options.GoCommand, Environment: stage.Environment(),
 			})
 			if err != nil {
 				return errors.Join(ErrPreview, err)
 			}
-			result.updated = result.inputs.SelectedSnapshot().Data()
-			result.impact, err = configurationimpact.New(configurationimpact.Input{})
+			state.updated = state.inputs.SelectedSnapshot().Data()
+			state.impact, err = configurationimpact.New(configurationimpact.Input{})
 			if err != nil {
 				return errors.Join(ErrPreview, err)
 			}
 		}
 		if len(dependencies) == 0 || previous.Module().Path() != "" {
-			original := result.inputs
+			original := state.inputs
 			if len(dependencies) != 0 {
 				original = previous
 			}
-			result.rootDigest, result.selectedDigest, _, err = original.ConfigurationLayerDigests(original.SelectedSnapshot().Data())
+			state.rootDigest, state.selectedDigest, _, err = original.ConfigurationLayerDigests(original.SelectedSnapshot().Data())
 		} else {
 			// Without an old schema no old field is proven public. Hash only the
 			// value-free fallback instead of reinterpreting old private data as public.
-			result.rootDigest, err = applicationmeta.ConfigurationLayerDigest(result.inputs.RootManifest(), nil)
+			state.rootDigest, err = applicationmeta.ConfigurationLayerDigest(state.inputs.RootManifest(), nil)
 			if err == nil {
-				result.selectedDigest, err = applicationmeta.ConfigurationLayerDigest(result.inputs.SelectedManifest(), nil)
+				state.selectedDigest, err = applicationmeta.ConfigurationLayerDigest(state.inputs.SelectedManifest(), nil)
 			}
 		}
 		if err != nil {
@@ -318,7 +378,7 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	}
 	for _, name := range []string{"go.mod", "go.sum", generatedfiles.ManifestPath, generatedfiles.ApplicationManifestPath, runtimebaseline.Path} {
 		_, exists := baseline[name]
-		result.reads = append(result.reads, commandschema.ChangePlanPathInput{Path: name, Kind: pathKind(name), BeforeExists: exists})
+		state.reads = append(state.reads, commandschema.ChangePlanPathInput{Path: name, Kind: pathKind(name), BeforeExists: exists})
 	}
 	data, err := os.ReadFile(filepath.Join(stage.Root(), generatedfiles.ApplicationManifestPath))
 	if err != nil {
@@ -328,14 +388,14 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	if err != nil {
 		return result, errors.Join(ErrPreview, err)
 	}
-	result.model = provenance.ApplicationModelDigest()
-	result.capture, err = captureCandidate(ctx, stage, request, baseline, final, result.inputs.ConfigurationSelection(), result.forceWrite, result.model)
+	state.model = provenance.ApplicationModelDigest()
+	state.capture, err = captureCandidate(ctx, stage, request, baseline, final, state.inputs.ConfigurationSelection(), state.forceWrite, state.model)
 	if err != nil {
-		result.model = ""
+		state.model = ""
 		return result, errors.Join(ErrPreview, err)
 	}
 	if err := stage.Recheck(ctx); err != nil {
-		result.model = ""
+		state.model = ""
 		return result, errors.Join(ErrPreview, err)
 	}
 	return result, nil
