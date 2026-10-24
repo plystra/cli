@@ -65,6 +65,11 @@ type Options struct {
 	// graph resolution, and requested effective manifests before preparation
 	// downloads or workspace selection. It does not initiate downloads.
 	RetainRootManifests func([]RootManifest) error
+	// RetainModuleInformation captures present cache .info files before and
+	// after exact preparation downloads, including failed downloads, and
+	// before workspace selection for inferable requested effective versions.
+	// These files have no independent Go checksum authority.
+	RetainModuleInformation func([]string) error
 }
 
 // Replacement records the selected replacement provenance reported by Go.

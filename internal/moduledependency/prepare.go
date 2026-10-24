@@ -133,6 +133,11 @@ func preparationEnvironment(options Options) []string {
 }
 
 func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
+	if callback := options.RetainModuleInformation; callback != nil {
+		options.RetainModuleInformation = func(paths []string) error {
+			return errors.Join(callback(paths), inputs.recheck())
+		}
+	}
 	if len(sources) == 0 {
 		return retain(sources)
 	}
@@ -164,19 +169,29 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 	return nil
 }
 
-func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string) error {
+func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string) (resultErr error) {
 	queries := map[module.Version][]int{}
 	var arguments []string
+	var versions []module.Version
 	for index, dependency := range result {
 		version := sourceVersion(dependency)
 		if _, exists := queries[version]; !exists {
 			arguments = append(arguments, version.String())
+			versions = append(versions, version)
 		}
 		queries[version] = append(queries[version], index)
 	}
 	if len(arguments) == 0 {
 		return nil
 	}
+	information, err := preparationInformationPaths(ctx, root, versions, options, environment)
+	if err != nil {
+		return err
+	}
+	if err := retainModuleInformation(ctx, information, options); err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, retainModuleInformation(ctx, information, options)) }()
 	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
 	if err != nil {
 		return errors.Join(ErrModuleUnavailable, err)

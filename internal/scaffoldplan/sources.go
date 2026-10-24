@@ -3,6 +3,7 @@ package scaffoldplan
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -19,6 +20,7 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	}
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
+		RetainModuleInformation: func(paths []string) error { return retainInformation(ctx, stage, paths) },
 		RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))
 			for index, manifest := range manifests {
@@ -42,6 +44,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 		return err
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
+		RetainModuleInformation: func(paths []string) error { return retainInformation(ctx, stage, paths) },
 		RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))
 			for index, manifest := range manifests {
@@ -78,6 +81,12 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 		metadata = append(metadata, projectstage.MetadataInput{Path: manifest, GoModChecksum: dependency.GoModChecksum()}, projectstage.MetadataInput{
 			Path: strings.TrimSuffix(manifest, ".mod") + ".ziphash", Expected: []byte(dependency.Checksum()),
 		})
+		information := strings.TrimSuffix(manifest, ".mod") + ".info"
+		if _, err := os.Lstat(information); err == nil {
+			metadata = append(metadata, projectstage.MetadataInput{Path: information})
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return errors.Join(moduledependency.ErrSourceIntegrity, err)
+		}
 		sources = append(sources, projectstage.Source{Directory: filepath.Clean(dependency.SourceDirectory()),
 			Module: module.Version{Path: path, Version: version}, Checksum: dependency.Checksum()})
 	}
@@ -85,4 +94,12 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 		return errors.Join(moduledependency.ErrSourceIntegrity, err)
 	}
 	return stage.RetainSources(ctx, sources)
+}
+
+func retainInformation(ctx context.Context, stage *projectstage.Stage, paths []string) error {
+	metadata := make([]projectstage.MetadataInput, len(paths))
+	for index, path := range paths {
+		metadata[index] = projectstage.MetadataInput{Path: path}
+	}
+	return stage.RetainMetadata(ctx, metadata)
 }

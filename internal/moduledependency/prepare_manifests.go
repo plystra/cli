@@ -3,6 +3,7 @@ package moduledependency
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 
 	"github.com/plystra/cli/internal/gocommand"
@@ -10,8 +11,8 @@ import (
 	"golang.org/x/mod/module"
 )
 
-func (workspace *preparationWorkspace) retainPreparationManifests(ctx context.Context, root string, requested []module.Version, options Options, environment []string, inputs preparationInputs) error {
-	if options.RetainRootManifests == nil || len(requested) == 0 {
+func (workspace *preparationWorkspace) retainPreparationMetadata(ctx context.Context, root string, requested []module.Version, options Options, environment []string, inputs preparationInputs) error {
+	if options.RetainRootManifests == nil && options.RetainModuleInformation == nil || len(requested) == 0 {
 		return nil
 	}
 	var memberSums [][]byte
@@ -48,6 +49,16 @@ func (workspace *preparationWorkspace) retainPreparationManifests(ctx context.Co
 			return err
 		}
 		versions = append(versions, effective)
+	}
+	information, err := preparationInformationPaths(ctx, root, versions, options, environment)
+	if err != nil {
+		return err
+	}
+	if err := errors.Join(retainModuleInformation(ctx, information, options), inputs.recheck()); err != nil {
+		return err
+	}
+	if options.RetainRootManifests == nil {
+		return nil
 	}
 	return retainPreparationManifests(ctx, root, versions, checksums, options, environment, inputs)
 }

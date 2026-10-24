@@ -947,6 +947,17 @@ decline this optional early capture. The retention callback receives source
 provenance and both checksums before any extracted manifest is parsed, and later
 successful acquisition revalidates the same evidence without refreshing its
 baseline. Retained warm bundles survive an acquisition failure and stage cleanup.
+Preparation independently retains existing cache module-information (`.info`)
+files before each exact download, even without original checksums, an extracted
+tree, or a complete archive. Inferable workspace-effective requested versions
+also retain present information files before metadata-only selection. Missing
+files are allowed to materialize normally; after a download returns, including
+failure, preparation retains any present information files and rechecks earlier
+evidence. These raw private snapshots have no Go `h1:` checksum authority.
+Repeated capture never adopts a changed identity, including an identical-byte
+replacement performed by Go for noncanonical cached JSON. Complete capture of
+information created or consumed during workspace selection and cold reads
+remains unfinished.
 Within each preparation phase, distinct effective sources are acquired in
 first-request order. Each verified acquisition is retained before the next Go
 download starts, including every logical target sharing that source. A later
@@ -957,7 +968,8 @@ even when it selects a source already acquired by the single-module phase.
 This does not capture every input partially consumed by a failed acquisition.
 Each retained or prepared versioned source also retains Go's exact selected
 cache module manifest (`.mod`) and its sibling archive checksum reference
-(`.ziphash`). These regular files retain bytes, identity, mode, and parent-path
+(`.ziphash`), plus a present sibling module-information file (`.info`). These
+regular files retain bytes, identity, mode, and parent-path
 provenance across later phases and temporary cleanup; later removal from the
 selected graph does not discard their evidence. Repeated capture never refreshes
 an earlier baseline. The captured checksum-reference bytes must match the

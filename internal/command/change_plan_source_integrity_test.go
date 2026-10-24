@@ -355,8 +355,9 @@ func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9)
 func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
- requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download"
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload
+ requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download"
+ requestedList := mode == "information-identity-after-list"
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -400,22 +401,31 @@ func main() {
   }
   afterDownload = afterDownload && matched
  }
- if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list") && afterList || (mode == "manifest-after-download" || requestedDownload) && afterDownload) {
-  if requestedDownload && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
+ if requestedList {
+  matched := false
+  for _, argument := range os.Args[1:] {
+   if argument + "@v1.0.0" == os.Getenv("PLYSTRA_SOURCE_PREPARATION_QUERY") { matched = true }
+  }
+  afterList = afterList && matched
+ }
+ if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list" || requestedList) && afterList || (mode == "manifest-after-download" || requestedDownload) && afterDownload) {
+  if (requestedDownload || requestedList) && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
   _, pathErr := os.Stat(path)
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) && pathErr == nil {
    data, readErr := os.ReadFile(path); check(readErr)
    info, statErr := os.Stat(path); check(statErr)
-   if mode == "manifest-identity-after-list" || requestedDownload {
+   if mode == "manifest-identity-after-list" || requestedDownload || requestedList {
     if !os.SameFile(info, info) { os.Exit(10) }
     backup = path + ".prior"
     check(os.Rename(path, backup))
-    check(os.WriteFile(path, data, info.Mode().Perm()))
-    check(os.Chtimes(path, info.ModTime(), info.ModTime()))
-    current, statErr := os.Stat(path); check(statErr)
-    if os.SameFile(info, current) { os.Exit(10) }
+    if mode != "information-removed-after-download" {
+     check(os.WriteFile(path, data, info.Mode().Perm()))
+     check(os.Chtimes(path, info.ModTime(), info.ModTime()))
+     current, statErr := os.Stat(path); check(statErr)
+     if os.SameFile(info, current) { os.Exit(10) }
+    }
    } else {
     check(os.Chmod(path, 0600))
     check(os.WriteFile(path, append(data, []byte("\n// changed after verified Go output\n")...), 0600))
@@ -611,6 +621,15 @@ func TestBuiltCLIChangePlanRejectsChangedPreparedSource(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
@@ -696,6 +715,9 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 		}
 	}
 	path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
+	if strings.Contains(mode, "information-") {
+		path = strings.TrimSuffix(path, ".mod") + ".info"
+	}
 	if strings.Contains(mode, "source-identity") {
 		path = filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "remote", "implementation.go")
 	}
