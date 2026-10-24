@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(main *testing.M) {
@@ -37,6 +38,12 @@ func TestMain(main *testing.M) {
 		_, _ = fmt.Fprintln(os.Stderr, "go: reading https://person:secret@example.com/private?token=secret: denied")
 		_, _ = fmt.Fprintln(os.Stderr, strings.Repeat(mustGetwd()+" ", 300))
 		os.Exit(4)
+	case "wait":
+		if err := os.WriteFile(os.Getenv("READY_FILE"), []byte("ready"), 0o600); err != nil {
+			os.Exit(3)
+		}
+		time.Sleep(time.Minute)
+		os.Exit(0)
 	case "gowork":
 		got, exists := os.LookupEnv("GOWORK")
 		want := os.Getenv("EXPECTED_GOWORK")
@@ -312,6 +319,107 @@ func TestOutputReportsRedactedFailure(t *testing.T) {
 	}, "list", "-m")
 	if !errors.Is(err, ErrRun) || output != nil || strings.Contains(err.Error(), directory) || strings.Contains(err.Error(), "person:secret") || !strings.Contains(err.Error(), "<redacted-url>") {
 		t.Fatalf("Output = %q, %v", output, err)
+	}
+}
+
+func TestOutputObservedReportsWhetherProcessStarted(t *testing.T) {
+	t.Parallel()
+
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name      string
+		helper    string
+		missing   bool
+		cancelled bool
+		badDir    bool
+		started   bool
+		output    string
+		wantErr   error
+	}{
+		{name: "success", helper: "output", started: true, output: "{\"Path\":\"example.com/plugin\"}\n"},
+		{name: "nonzero exit", helper: "failure", started: true, wantErr: ErrRun},
+		{name: "output limit", helper: "oversized", started: true, wantErr: ErrOutputTooLarge},
+		{name: "missing executable", missing: true, wantErr: ErrRun},
+		{name: "missing directory", helper: "output", badDir: true, wantErr: ErrRun},
+		{name: "cancelled before startup", helper: "output", cancelled: true, wantErr: context.Canceled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			options := Options{
+				Command:     command,
+				Directory:   t.TempDir(),
+				Environment: append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER="+test.helper),
+				OutputLimit: 1024,
+			}
+			if test.missing {
+				options.Command = filepath.Join(options.Directory, "missing-go")
+			}
+			if test.badDir {
+				options.Directory = filepath.Join(options.Directory, "missing")
+			}
+			if test.cancelled {
+				cancel()
+			}
+			output, started, err := OutputObserved(ctx, options, "list", "-m", "example.com/plugin")
+			if started != test.started || !errors.Is(err, test.wantErr) || string(output) != test.output {
+				t.Fatalf("OutputObserved = %q, %t, %v; want %q, %t, %v", output, started, err, test.output, test.started, test.wantErr)
+			}
+			if err != nil && output != nil {
+				t.Fatalf("failure returned output: %q", output)
+			}
+		})
+	}
+}
+
+func TestOutputObservedRetainsStartupOnCancellation(t *testing.T) {
+	t.Parallel()
+
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	ready := filepath.Join(directory, "ready")
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	type result struct {
+		output  []byte
+		started bool
+		err     error
+	}
+	finished := make(chan result, 1)
+	go func() {
+		output, started, err := OutputObserved(ctx, Options{
+			Command:     command,
+			Directory:   directory,
+			Environment: append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=wait", "READY_FILE="+ready),
+		}, "env")
+		finished <- result{output, started, err}
+	}()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal(err)
+		}
+		select {
+		case got := <-finished:
+			t.Fatalf("process ended before cancellation: %+v", got)
+		case <-ctx.Done():
+			t.Fatal("process did not signal readiness before deadline")
+		case <-ticker.C:
+		}
+	}
+	cancel()
+	got := <-finished
+	if !got.started || !errors.Is(got.err, context.Canceled) || got.output != nil {
+		t.Fatalf("cancelled OutputObserved = %q, %t, %v", got.output, got.started, got.err)
 	}
 }
 
