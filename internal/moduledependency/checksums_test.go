@@ -134,7 +134,7 @@ func TestDiscoverSourceChecksumsAcceptUnchangedAbsentGoSum(t *testing.T) {
 }
 
 func TestDiscoverRequiresCompleteManifestChecksumEvidence(t *testing.T) {
-	for _, fact := range []string{"missing-list", "offline-missing-list", "malformed-list", "missing-download", "changed-download", "preparation-missing-download"} {
+	for _, fact := range []string{"missing-list", "offline-missing-list", "malformed-list", "missing-download", "changed-download", "preparation-missing-download", "preparation-missing-download-cold"} {
 		t.Run(fact, func(t *testing.T) {
 			t.Parallel()
 			const path, version = "example.com/Source/Dependency", "v1.2.3"
@@ -162,20 +162,36 @@ func TestDiscoverRequiresCompleteManifestChecksumEvidence(t *testing.T) {
 				writeFile(t, filepath.Join(app, "go.sum"), strings.Join(lines, "\n")+"\n")
 			}
 			before := readFile(t, filepath.Join(app, "go.sum"))
+			if fact == "preparation-missing-download-cold" {
+				relative, err := filepath.Rel(environmentValue(t, env, "GOMODCACHE"), original.SourceDirectory())
+				if err != nil || relative == "." || !filepath.IsLocal(relative) {
+					t.Fatal("source is outside the fixture module cache")
+				}
+				if err := os.RemoveAll(original.SourceDirectory()); err != nil {
+					t.Fatal(err)
+				}
+			}
 			realGo, err := exec.LookPath("go")
 			if err != nil {
 				t.Fatal(err)
 			}
 			env = append(env, "PLYSTRA_MODULE_DEPENDENCY_HELPER=checksum-facts", "PLYSTRA_MODULE_REAL_GO="+realGo, "PLYSTRA_MODULE_CHECKSUM_FACT="+fact)
 			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RequireSourceChecksums: true, Offline: fact == "offline-missing-list"}
-			if fact == "preparation-missing-download" {
-				called := false
-				err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: path, Version: version}}, options, func([]moduledependency.Module) error {
-					called = true
+			if strings.HasPrefix(fact, "preparation-missing-download") {
+				warmCalls := 0
+				err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: path, Version: version}}, options, func(sources []moduledependency.Module) error {
+					warmCalls++
+					if len(sources) != 1 || len(sources[0].ProjectGoMod()) != 0 || sources[0].GoModChecksum() != original.GoModChecksum() || sources[0].Checksum() != original.Checksum() {
+						t.Fatal("incomplete acquisition produced a completed or unverified source")
+					}
 					return nil
 				})
-				if !errors.Is(err, moduledependency.ErrSourceIntegrity) || called {
-					t.Fatalf("incomplete preparation checksum accepted: %v, callback=%v", err, called)
+				wantWarm := 1
+				if strings.HasSuffix(fact, "-cold") {
+					wantWarm = 0
+				}
+				if !errors.Is(err, moduledependency.ErrSourceIntegrity) || warmCalls != wantWarm {
+					t.Fatalf("incomplete preparation checksum accepted: %v, warm callbacks=%d", err, warmCalls)
 				}
 			} else {
 				index, err = moduledependency.Discover(t.Context(), locate(t, app), options)
@@ -227,7 +243,7 @@ func runChecksumFactsHelper() int {
 				} else if fact != "changed-download" {
 					delete(result, "GoModSum")
 				}
-			} else if fact == "missing-download" || fact == "preparation-missing-download" {
+			} else if fact == "missing-download" || strings.HasPrefix(fact, "preparation-missing-download") {
 				delete(result, "GoModSum")
 			} else if fact == "changed-download" {
 				result["GoModSum"] = "h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="

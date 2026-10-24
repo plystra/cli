@@ -142,6 +142,10 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 }
 
 func rootManifestChecksums(primary []byte, members [][]byte) (map[module.Version]string, error) {
+	return rootChecksums(primary, members, true)
+}
+
+func rootChecksums(primary []byte, members [][]byte, manifests bool) (map[module.Version]string, error) {
 	checksums := map[module.Version]string{}
 	primaryKeys := map[module.Version]bool{}
 	for index, sums := range append([][]byte{primary}, members...) {
@@ -154,7 +158,7 @@ func rootManifestChecksums(primary []byte, members [][]byte) (map[module.Version
 				return nil, ErrInvalidOutput
 			}
 			// Go ignores the historical empty-manifest hash before checking rows.
-			if !strings.HasSuffix(fields[1], "/go.mod") || !strings.HasPrefix(fields[2], "h1:") || fields[2] == "h1:G7mAYYxgmS0lVkHyy2hEOLQCFB0DlQFTMLWggykrydY=" {
+			if strings.HasSuffix(fields[1], "/go.mod") != manifests || !strings.HasPrefix(fields[2], "h1:") || fields[2] == "h1:G7mAYYxgmS0lVkHyy2hEOLQCFB0DlQFTMLWggykrydY=" {
 				continue
 			}
 			version := module.Version{Path: fields[0], Version: strings.TrimSuffix(fields[1], "/go.mod")}

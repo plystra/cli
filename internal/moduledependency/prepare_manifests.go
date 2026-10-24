@@ -56,19 +56,27 @@ func retainPreparationManifests(ctx context.Context, root string, versions []mod
 	if len(versions) == 0 || len(checksums) == 0 {
 		return inputs.recheck()
 	}
-	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root,
-		Environment: environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE")
+	cache, err := preparationModuleCache(ctx, root, options, environment)
 	if err != nil {
 		return err
 	}
-	var selected struct{ GOMODCACHE string }
-	if json.Unmarshal(output, &selected) != nil || !filepath.IsAbs(selected.GOMODCACHE) {
-		return ErrInvalidOutput
-	}
 	graph := manifestGraph{
 		inputs:    inputs,
-		checksums: checksums, cache: selected.GOMODCACHE,
+		checksums: checksums, cache: cache,
 		retain: options.RetainRootManifests, retained: map[string]bool{},
 	}
 	return graph.retainEffectiveBatch(ctx, versions)
+}
+
+func preparationModuleCache(ctx context.Context, root string, options Options, environment []string) (string, error) {
+	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root,
+		Environment: environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE")
+	if err != nil {
+		return "", err
+	}
+	var selected struct{ GOMODCACHE string }
+	if json.Unmarshal(output, &selected) != nil || !filepath.IsAbs(selected.GOMODCACHE) {
+		return "", ErrInvalidOutput
+	}
+	return selected.GOMODCACHE, nil
 }

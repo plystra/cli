@@ -938,6 +938,15 @@ evidence survives later archive failure and stage cleanup, and callbacks are
 followed by original metadata rechecks before Go proceeds.
 Cache selection uses each synthetic preparation phase's directory and environment
 so an unused authored toolchain suggestion cannot redirect the probe.
+Before each exact acquisition, preparation also retains an eligible warm complete
+source bundle under independently recorded original archive and manifest `h1:`
+checksums. The extracted tree, regular cache `.mod` and `.ziphash` files, and
+absence of Go's `.partial` marker establish eligibility; cache files and source
+bytes never supply their own expected checksums. Missing components or authority
+decline this optional early capture. The retention callback receives source
+provenance and both checksums before any extracted manifest is parsed, and later
+successful acquisition revalidates the same evidence without refreshing its
+baseline. Retained warm bundles survive an acquisition failure and stage cleanup.
 Within each preparation phase, distinct effective sources are acquired in
 first-request order. Each verified acquisition is retained before the next Go
 download starts, including every logical target sharing that source. A later

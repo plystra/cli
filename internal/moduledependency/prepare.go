@@ -17,7 +17,10 @@ import (
 
 // PrepareSources materializes explicitly requested canonical versions without
 // loading their packages or changing Project metadata. Retain captures each
-// completed effective source before the next acquisition or resolution;
+// eligible warm source before acquisition and each completed effective source
+// before the next acquisition or resolution. Early retention provides source
+// provenance and original checksums, not parsed declarations. The same source
+// may be retained again after acquisition to recheck the original evidence;
 // metadata remains guarded through the last callback. Local sources must
 // already be captured. Mutable queries and transitive selections remain outside
 // this boundary.
@@ -48,6 +51,10 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 		return ErrInvalidGoMod
 	}
 	checksums, err := sourceChecksums(sums.data)
+	if err != nil {
+		return err
+	}
+	manifestChecksums, err := rootManifestChecksums(sums.data, nil)
 	if err != nil {
 		return err
 	}
@@ -97,10 +104,6 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 	}
 	environment := preparationEnvironment(options)
 	if options.RetainRootManifests != nil {
-		manifestChecksums, err := rootManifestChecksums(sums.data, nil)
-		if err != nil {
-			return err
-		}
 		versions := make([]module.Version, len(sources))
 		for index, source := range sources {
 			versions[index] = sourceVersion(source)
@@ -109,7 +112,7 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 			return err
 		}
 	}
-	if err := downloadAndRetainSources(ctx, root, sources, checksums, options, environment, retain); err != nil {
+	if err := downloadAndRetainSources(ctx, root, sources, preparationChecksums{archives: checksums, manifests: manifestChecksums}, options, environment, inputs, retain); err != nil {
 		return err
 	}
 	if workspace != nil {
@@ -129,7 +132,7 @@ func preparationEnvironment(options Options) []string {
 	return environment
 }
 
-func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error) error {
+func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
 	if len(sources) == 0 {
 		return retain(sources)
 	}
@@ -146,9 +149,12 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		groups[index] = append(groups[index], source)
 	}
 	for _, group := range groups {
+		if err := retainWarmPreparedSources(ctx, root, group, checksums, options, environment, inputs, retain); err != nil {
+			return err
+		}
 		// Retaining a completed source before another Go process starts keeps
 		// later acquisition failures from discarding or refreshing its evidence.
-		if err := downloadPreparedSources(ctx, root, group, checksums, options, environment); err != nil {
+		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment); err != nil {
 			return err
 		}
 		if err := retain(group); err != nil {

@@ -103,7 +103,11 @@ func TestPrepareSourcesPreservesWorkspaceChecksumAuthorities(t *testing.T) {
 			}
 			var prepared []moduledependency.Module
 			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, Offline: strings.HasPrefix(mode, "offline")}, func(sources []moduledependency.Module) error {
-				prepared = append(prepared, sources...)
+				for _, source := range sources {
+					if len(source.ProjectGoMod()) != 0 {
+						prepared = append(prepared, source)
+					}
+				}
 				return nil
 			})
 			wantFailure := strings.Contains(mode, "conflict") || mode == "malformed-member" || mode == "offline-missing-workspace-sum"

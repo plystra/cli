@@ -311,8 +311,8 @@ func TestPrepareSourcesPreservesWorkspaceAcquisitionFailures(t *testing.T) {
 					t.Fatalf("workspace retention cancellation ignored: %v, %s", err, commands)
 				}
 			case "metadata-change":
-				if !errors.Is(err, moduledependency.ErrConcurrentChange) || !errors.Is(err, moduledependency.ErrModuleUnavailable) || !startedLater || string(readFile(t, paths["member"])) != string(originalMember)+"// concurrent edit\n" {
-					t.Fatalf("metadata drift or later failure lost: %v, %s", err, commands)
+				if !errors.Is(err, moduledependency.ErrConcurrentChange) || errors.Is(err, moduledependency.ErrModuleUnavailable) || startedLater || string(readFile(t, paths["member"])) != string(originalMember)+"// concurrent edit\n" {
+					t.Fatalf("metadata drift did not stop later acquisition: %v, %s", err, commands)
 				}
 			}
 		})

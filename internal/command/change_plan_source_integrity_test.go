@@ -355,7 +355,8 @@ func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9)
 func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && mode != "manifest-identity-after-download"
+ requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download"
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -392,22 +393,22 @@ func main() {
  }
  afterList := len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m"
  afterDownload := len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download"
- if mode == "manifest-identity-after-download" {
+ if requestedDownload {
   matched := false
   for _, argument := range os.Args[1:] {
    if argument == os.Getenv("PLYSTRA_SOURCE_PREPARATION_QUERY") { matched = true }
   }
   afterDownload = afterDownload && matched
  }
- if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list") && afterList || (mode == "manifest-after-download" || mode == "manifest-identity-after-download") && afterDownload) {
-  if mode == "manifest-identity-after-download" && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
+ if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list") && afterList || (mode == "manifest-after-download" || requestedDownload) && afterDownload) {
+  if requestedDownload && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
   _, pathErr := os.Stat(path)
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) && pathErr == nil {
    data, readErr := os.ReadFile(path); check(readErr)
    info, statErr := os.Stat(path); check(statErr)
-   if mode == "manifest-identity-after-list" || mode == "manifest-identity-after-download" {
+   if mode == "manifest-identity-after-list" || requestedDownload {
     if !os.SameFile(info, info) { os.Exit(10) }
     backup = path + ".prior"
     check(os.Rename(path, backup))
@@ -593,20 +594,35 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 }
 
 func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list", "transitive-manifest-identity-after-list", "workspace-transitive-manifest-identity-after-list", "prepared-manifest-identity-after-download", "workspace-prepared-manifest-identity-after-download"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+		})
+	}
+}
+
+func TestBuiltCLIChangePlanRejectsChangedPreparedSource(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"prepared-source-identity-after-download", "workspace-prepared-source-identity-after-download"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+		})
+	}
+}
+
+func buildSourceIntegrityCLI(t *testing.T) string {
+	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
 	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-o", binary, "./cmd/plystra")
 	build.Dir, build.Env = commandRepositoryRoot(t), commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
-	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list", "transitive-manifest-identity-after-list", "workspace-transitive-manifest-identity-after-list", "prepared-manifest-identity-after-download", "workspace-prepared-manifest-identity-after-download"} {
-		t.Run(mode, func(t *testing.T) {
-			testBuiltCLIChangePlanRejectsChangedModuleManifest(t, binary, mode)
-		})
-	}
+	return binary
 }
 
-func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mode string) {
+func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
 	prepared := strings.Contains(mode, "prepared-")
 	mode = strings.ReplaceAll(mode, "prepared-", "")
@@ -680,6 +696,9 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 		}
 	}
 	path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")
+	if strings.Contains(mode, "source-identity") {
+		path = filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "remote", "implementation.go")
+	}
 	if transitive {
 		path = filepath.Join(cache, "cache", "download", filepath.FromSlash(transitivePath), "@v", "v1.0.0.mod")
 	}
@@ -707,11 +726,11 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 	output, err := command.Output()
 	var exited *exec.ExitError
 	var result scaffoldPlanDocument
-	if !errors.As(err, &exited) || exited.ExitCode() != 3 || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
-		t.Fatalf("compiled CLI accepted manifest drift: %v\n%s\n%s", err, output, &stderr)
-	}
 	if data, err := os.ReadFile(marker); err != nil || string(data) != "manifest changed after Go output\n" {
-		t.Fatalf("compiled CLI did not exercise manifest race: %v", err)
+		t.Fatalf("compiled CLI did not exercise cache-input race: %v", err)
+	}
+	if !errors.As(err, &exited) || exited.ExitCode() != 3 || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
+		t.Fatalf("compiled CLI accepted cache-input drift: %v\n%s\n%s", err, output, &stderr)
 	}
 	for _, private := range []string{cache, root, workspaceRoot, initialLocal, "changed after verified Go output"} {
 		if private == "" {
