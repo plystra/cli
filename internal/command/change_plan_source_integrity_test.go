@@ -655,6 +655,19 @@ func TestBuiltCLIChangePlanRetainsWarmTreesWithoutMetadata(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRetainsTreesBeforeChecksumAcquisition(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{
+		"manifest-only-prepared-source-identity-after-download",
+		"no-authority-workspace-prepared-source-manifest-identity-after-download",
+		"no-authority-prepared-unchanged",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {
@@ -723,7 +736,7 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
 	missingMetadata := ""
-	for _, prefix := range []string{"missing-manifest-", "missing-ziphash-", "archive-only-"} {
+	for _, prefix := range []string{"missing-manifest-", "missing-ziphash-", "archive-only-", "manifest-only-", "no-authority-"} {
 		if remaining, matches := strings.CutPrefix(mode, prefix); matches {
 			missingMetadata, mode = prefix, remaining
 			break
@@ -828,7 +841,7 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 		if err := os.Remove(filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0"+suffix)); err != nil {
 			t.Fatal(err)
 		}
-	case "archive-only-":
+	case "archive-only-", "manifest-only-", "no-authority-":
 		path := filepath.Join(root, "go.sum")
 		sums, err := os.ReadFile(path)
 		if err != nil {
@@ -836,7 +849,10 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 		}
 		var retained []string
 		for _, row := range strings.Split(string(sums), "\n") {
-			if !strings.HasPrefix(row, previewDependencyModule+" v1.0.0/go.mod ") {
+			archive := strings.HasPrefix(row, previewDependencyModule+" v1.0.0 ")
+			manifest := strings.HasPrefix(row, previewDependencyModule+" v1.0.0/go.mod ")
+			remove := missingMetadata == "archive-only-" && manifest || missingMetadata == "manifest-only-" && archive || missingMetadata == "no-authority-" && (archive || manifest)
+			if !remove {
 				retained = append(retained, row)
 			}
 		}

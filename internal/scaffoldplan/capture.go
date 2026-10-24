@@ -167,6 +167,9 @@ func (c Capture) writeSet() []commandschema.ChangePlanPathInput {
 }
 
 func captureCandidate(ctx context.Context, stage *projectstage.Stage, request changerequest.Request, before, after map[string]entry, selection applicationresolve.ConfigurationSelection, forceConfiguration bool, model string) (Capture, error) {
+	if err := stage.CheckSources(ctx); err != nil {
+		return Capture{}, errors.Join(ErrPreview, err)
+	}
 	state := &captureState{request: request.CanonicalJSON(), inputs: stage.Inputs(), selection: selection, model: model}
 	result := Capture{state: &state}
 	root, err := os.OpenRoot(stage.Root())

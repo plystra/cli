@@ -1,9 +1,16 @@
 package scaffoldplan
 
 import (
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/plystra/cli/internal/applicationresolve"
+	"github.com/plystra/cli/internal/changerequest"
+	"github.com/plystra/cli/internal/projectstage"
 )
 
 func TestPrivateCaptureNestedFormatting(t *testing.T) {
@@ -31,5 +38,38 @@ func TestPrivateCaptureNestedFormatting(t *testing.T) {
 				t.Fatalf("nested private formatting bypass for %T with %s", value, format)
 			}
 		}
+	}
+}
+
+func TestCandidateCaptureRejectsUnauthenticatedSources(t *testing.T) {
+	root, source := t.TempDir(), t.TempDir()
+	for name, data := range map[string]string{"go.mod": "module example.com/app\ngo 1.26\n", "plystra.yaml": "{}\n"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var environment []string
+	for _, value := range os.Environ() {
+		key, _, _ := strings.Cut(value, "=")
+		if !strings.EqualFold(key, "GOWORK") && !strings.EqualFold(key, "GOENV") {
+			environment = append(environment, value)
+		}
+	}
+	environment = append(environment, "GOWORK=off", "GOENV=off")
+	stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: root, Environment: environment})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stage.Close() })
+	if err := stage.RetainSourceTrees(t.Context(), []string{source}); err != nil {
+		t.Fatal(err)
+	}
+	request, err := changerequest.Parse([]byte(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"records.list","semantics":"query"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured, err := captureCandidate(t.Context(), stage, request, nil, nil, applicationresolve.ConfigurationSelection{}, false, "model")
+	if !errors.Is(err, projectstage.ErrSourceIntegrity) || captured.Valid() {
+		t.Fatalf("pending source evidence became a candidate: %v", err)
 	}
 }

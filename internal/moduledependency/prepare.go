@@ -28,6 +28,9 @@ import (
 // sources are also retained when wildcard and exact replacements fix the same
 // effective source for every possible selected version, or checked cached
 // manifests completely infer the synthetic graph's selected requested sources.
+// RetainSourceTrees additionally preserves existing trees without original
+// archive authority as private pending evidence before exact acquisition;
+// consumers authenticate that same evidence using the completed source callback.
 // Mutable queries and cold resolution reads remain outside this boundary.
 func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func([]Module) error) (resultErr error) {
 	if ctx == nil || application.Path() == "" || len(requested) > 1_024 || retain == nil {
@@ -138,6 +141,11 @@ func preparationEnvironment(options Options) []string {
 }
 
 func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
+	if callback := options.RetainSourceTrees; callback != nil {
+		options.RetainSourceTrees = func(retainCtx context.Context, directories []string) error {
+			return errors.Join(callback(retainCtx, directories), retainCtx.Err(), inputs.recheck())
+		}
+	}
 	if callback := options.RetainModuleInformation; callback != nil {
 		options.RetainModuleInformation = func(retainCtx context.Context, paths []string) error {
 			return errors.Join(callback(retainCtx, paths), inputs.recheck())
@@ -189,6 +197,9 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	}
 	if len(arguments) == 0 {
 		return nil
+	}
+	if err := retainUnverifiedPreparedSources(ctx, root, versions, checksums, options, environment); err != nil {
+		return err
 	}
 	information, err := preparationInformationPaths(ctx, root, versions, options, environment)
 	if err != nil {

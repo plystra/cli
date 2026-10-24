@@ -934,6 +934,18 @@ discovery, and later manifest
 or checksum failure preserves retained inputs through stage cleanup. Invalid or
 incomplete JSON selections introduce no post-list captures. This closes the
 warm-source boundary before the CLI's first extracted-manifest read.
+When an existing extracted tree has no original archive checksum, discovery
+retains its complete inventory, file identities, modes, and content digests as
+private pending evidence after complete module listing. Exact source acquisitions
+also capture such existing trees before starting Go. A `.partial` marker excludes
+the old tree because Go discards it. Pending capture supplies no expected checksum
+and does not authenticate source. The same original snapshot must later match the
+independently resolved Go archive checksum and pass identity rechecks; successful
+preparation and candidate capture reject any tree still pending. Failed acquisition,
+callback rejection, and cancellation preserve the evidence without accepting it.
+This uses ordinary Go checksum and checksum-database policy and keeps complete
+manifest and checksum-reference validation mandatory. Missing trees, cold metadata
+reads, and complete Go resolution readsets remain unfinished.
 Missing-source discovery downloads each distinct effective version under frozen
 original checksum files, preserving separate workspace primary and member
 authorities without reapplying replacements. Complete download output and both

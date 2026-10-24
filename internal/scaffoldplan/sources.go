@@ -20,6 +20,7 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	}
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
+		RetainSourceTrees:       stage.RetainSourceTrees,
 		RetainSelectedSources:   func(sources []moduledependency.Module) error { return retainSources(ctx, stage, sources) },
 		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainInformation(ctx, stage, paths) },
 		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
@@ -33,7 +34,10 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	if err != nil {
 		return errors.Join(moduledependency.ErrSourceIntegrity, err)
 	}
-	return retainSources(ctx, stage, dependencies.Modules())
+	if err := retainSources(ctx, stage, dependencies.Modules()); err != nil {
+		return err
+	}
+	return stage.CheckSources(ctx)
 }
 
 func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, command string, versions []module.Version) error {
@@ -45,6 +49,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 		return err
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
+		RetainSourceTrees:       stage.RetainSourceTrees,
 		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainInformation(ctx, stage, paths) },
 		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))
@@ -59,7 +64,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 	if err != nil {
 		return errors.Join(moduledependency.ErrSourceIntegrity, err)
 	}
-	return stage.Recheck(ctx)
+	return stage.CheckSources(ctx)
 }
 
 func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies []moduledependency.Module) error {

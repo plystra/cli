@@ -77,7 +77,7 @@ func retainListedSources(ctx context.Context, root string, sources []Module, che
 	var groups [][]Module
 	for _, source := range sources {
 		version := sourceVersion(source)
-		if version.Version == "" || !validSourceChecksum(checksums.archives[version]) {
+		if version.Version == "" || !validSourceChecksum(checksums.archives[version]) && options.RetainSourceTrees == nil {
 			continue
 		}
 		identity := key{version, source.sourceDirectory, source.goModFile}
@@ -111,11 +111,68 @@ func retainListedSources(ctx context.Context, root string, sources []Module, che
 				manifest = cachedManifest
 			}
 		}
-		if err := retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain); err != nil {
-			return err
+		if !validSourceChecksum(checksums.archives[sourceVersion(group[0])]) {
+			if err := retainUnverifiedSourceTree(ctx, directory, manifest, options.RetainSourceTrees); err != nil {
+				return err
+			}
+		} else if retain != nil {
+			if err := retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain); err != nil {
+				return err
+			}
 		}
 	}
 	return errors.Join(ctx.Err(), inputs.recheck())
+}
+
+func retainUnverifiedPreparedSources(ctx context.Context, root string, versions []module.Version, checksums map[module.Version]string, options Options, environment []string) error {
+	if options.RetainSourceTrees == nil {
+		return nil
+	}
+	var cache string
+	for _, version := range versions {
+		if validSourceChecksum(checksums[version]) {
+			continue
+		}
+		if cache == "" {
+			var err error
+			cache, err = preparationModuleCache(ctx, root, options, environment)
+			if err != nil {
+				return err
+			}
+		}
+		directory, manifest, err := cachedSourcePaths(cache, version)
+		if err != nil {
+			return err
+		}
+		if err := retainUnverifiedSourceTree(ctx, directory, manifest, options.RetainSourceTrees); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
+}
+
+func retainUnverifiedSourceTree(ctx context.Context, directory, manifest string, retain func(context.Context, []string) error) error {
+	exists, err := existingSourceTree(directory, manifest)
+	if err != nil || !exists {
+		return err
+	}
+	return errors.Join(retain(ctx, []string{directory}), ctx.Err())
+}
+
+func existingSourceTree(directory, manifest string) (bool, error) {
+	info, err := os.Stat(directory)
+	if errors.Is(err, os.ErrNotExist) || err == nil && !info.IsDir() {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	// Go discards partial extractions instead of consuming their old contents.
+	if _, err := os.Stat(strings.TrimSuffix(manifest, ".mod") + ".partial"); err == nil {
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	return true, nil
 }
 
 func retainWarmPreparedSources(ctx context.Context, root string, group []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
@@ -158,19 +215,11 @@ func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, gro
 	if !validSourceChecksum(archive) || !strings.HasSuffix(manifestPath, ".mod") {
 		return inputs.recheck()
 	}
-	info, err := os.Stat(directory)
-	if errors.Is(err, os.ErrNotExist) || err == nil && !info.IsDir() {
-		return inputs.recheck()
-	} else if err != nil {
-		return err
+	exists, err := existingSourceTree(directory, manifestPath)
+	if err != nil || !exists {
+		return errors.Join(err, inputs.recheck())
 	}
 	metadata := strings.TrimSuffix(manifestPath, ".mod")
-	// Go replaces incomplete extractions instead of consuming their files.
-	if _, err := os.Stat(metadata + ".partial"); err == nil {
-		return inputs.recheck()
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
 	incomplete := !validSourceChecksum(manifest)
 	for _, suffix := range []string{".mod", ".ziphash"} {
 		info, err := os.Lstat(metadata + suffix)

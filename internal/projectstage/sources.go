@@ -31,6 +31,36 @@ type Source struct {
 // Optional metadata shares the operation's complete before/after rechecks,
 // avoiding repeated scans of earlier sources between related captures.
 func (s *Stage) RetainSources(ctx context.Context, sources []Source, metadata ...MetadataInput) (resultErr error) {
+	return s.retainSources(ctx, sources, true, metadata...)
+}
+
+// RetainSourceTrees preserves existing complete trees before their independent
+// archive checksums are available. It records only private concurrency evidence,
+// not source authentication. Call RetainSources with independently obtained
+// checksums before accepting those trees as resolved module sources.
+func (s *Stage) RetainSourceTrees(ctx context.Context, directories []string) error {
+	sources := make([]Source, len(directories))
+	for index, directory := range directories {
+		sources[index].Directory = directory
+	}
+	return s.retainSources(ctx, sources, false)
+}
+
+// CheckSources rejects an accepting path that has not authenticated every
+// retained source tree. Pending evidence remains recheckable on failure.
+func (s *Stage) CheckSources(ctx context.Context) error {
+	if err := s.Recheck(ctx); err != nil {
+		return err
+	}
+	for _, tree := range s.sources {
+		if tree.checksum == "" {
+			return ErrSourceIntegrity
+		}
+	}
+	return nil
+}
+
+func (s *Stage) retainSources(ctx context.Context, sources []Source, authenticate bool, metadata ...MetadataInput) (resultErr error) {
 	defer func() {
 		if resultErr != nil {
 			resultErr = errors.Join(ErrSourceIntegrity, resultErr)
@@ -49,11 +79,12 @@ func (s *Stage) RetainSources(ctx context.Context, sources []Source, metadata ..
 	trees := append(slices.Clone(s.trees), s.sources...)
 	used := s.inputBudget()
 	var added []treeSnapshot
+	verified := map[string]Source{}
 	for _, source := range sources {
 		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(source.Checksum, "h1:"))
-		if !filepath.IsAbs(source.Directory) || module.Check(source.Module.Path, source.Module.Version) != nil ||
+		if !filepath.IsAbs(source.Directory) || authenticate && (module.Check(source.Module.Path, source.Module.Version) != nil ||
 			!strings.HasPrefix(source.Checksum, "h1:") || err != nil || len(decoded) != sha256.Size ||
-			base64.StdEncoding.EncodeToString(decoded) != source.Checksum[3:] {
+			base64.StdEncoding.EncodeToString(decoded) != source.Checksum[3:]) {
 			return ErrStage
 		}
 		root, err := s.captureDirectory(s.project, source.Directory)
@@ -71,8 +102,11 @@ func (s *Stage) RetainSources(ctx context.Context, sources []Source, metadata ..
 			}
 		}
 		if captured != nil {
-			if err := captured.checkSource(ctx, source); err != nil {
-				return err
+			if authenticate {
+				if err := captured.checkSource(ctx, source); err != nil {
+					return err
+				}
+				verified[root] = source
 			}
 			continue
 		}
@@ -83,14 +117,21 @@ func (s *Stage) RetainSources(ctx context.Context, sources []Source, metadata ..
 		if err != nil {
 			return err
 		}
-		if err := tree.checkSource(ctx, source); err != nil {
-			return err
+		if authenticate {
+			if err := tree.checkSource(ctx, source); err != nil {
+				return err
+			}
 		}
 		tree.module, tree.checksum = source.Module, source.Checksum
 		added = append(added, tree)
 		trees = append(trees, tree)
 	}
 	s.sources = append(s.sources, added...)
+	for index, tree := range s.sources {
+		if source, exists := verified[tree.source]; exists {
+			s.sources[index].module, s.sources[index].checksum = source.Module, source.Checksum
+		}
+	}
 	s.inputs = s.captureInputs()
 	return s.Recheck(ctx)
 }

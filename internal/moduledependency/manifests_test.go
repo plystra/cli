@@ -253,14 +253,23 @@ func runRootManifestsHelper() int {
 				return 27
 			}
 			if record["Path"] == warmRequestedModule {
-				field := "Sum"
-				if mode == "manifest-mismatch" {
-					field = "GoModSum"
-				}
-				if replacement, ok := record["Replace"].(map[string]any); ok {
-					replacement[field] = listChecksum
+				if listChecksum == "missing-source" {
+					delete(record, "Dir")
+					delete(record, "GoMod")
+					if replacement, ok := record["Replace"].(map[string]any); ok {
+						delete(replacement, "Dir")
+						delete(replacement, "GoMod")
+					}
 				} else {
-					record[field] = listChecksum
+					field := "Sum"
+					if mode == "manifest-mismatch" {
+						field = "GoModSum"
+					}
+					if replacement, ok := record["Replace"].(map[string]any); ok {
+						replacement[field] = listChecksum
+					} else {
+						record[field] = listChecksum
+					}
 				}
 			}
 			if err := json.NewEncoder(os.Stdout).Encode(record); err != nil {
