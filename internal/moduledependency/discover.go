@@ -63,7 +63,9 @@ type Options struct {
 	RequireSourceChecksums bool
 	// RetainRootManifests captures existing checksummed root manifests before
 	// graph resolution, and requested effective manifests before preparation
-	// downloads or workspace selection. It does not initiate downloads.
+	// downloads or workspace selection. Exact preparation also captures present
+	// manifests after each download attempt under the original checksum authority.
+	// It does not initiate downloads or refresh previously retained evidence.
 	RetainRootManifests func([]RootManifest) error
 	// RetainModuleInformation captures present cache .info files before and
 	// after exact preparation downloads, including failed downloads, and
@@ -656,7 +658,7 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		for index, original := range indices[version] {
 			group[index] = modules[original]
 		}
-		if err := downloadPreparedSources(ctx, downloadRoot, group, nil, options, environment, retain); err != nil {
+		if err := downloadPreparedSources(ctx, downloadRoot, group, nil, options, environment, retain, nil); err != nil {
 			return err
 		}
 		for index, original := range indices[version] {

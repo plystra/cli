@@ -73,8 +73,9 @@ func TestPrepareSourcesRetainsWarmRequestedManifestOnFailure(t *testing.T) {
 					if len(manifests) != 1 || manifests[0].Path != path || manifests[0].Checksum != checksum {
 						t.Fatalf("wrong prepared manifest authority: %v", manifests)
 					}
-					if commands := string(readFile(t, trace)); strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
-						t.Fatalf("manifest retention followed its first Go use: %s", commands)
+					commands := string(readFile(t, trace))
+					if calls == 1 && (strings.Contains(commands, "list ") || strings.Contains(commands, "download ")) || calls == 2 && !strings.Contains(commands, "mod download -json "+effective+"@v1.0.0\n") || calls > 2 {
+						t.Fatalf("manifest retention missed its before/after acquisition boundary: %s", commands)
 					}
 					return stage.RetainMetadata(t.Context(), []projectstage.MetadataInput{{Path: path, GoModChecksum: checksum}})
 				},
@@ -84,7 +85,7 @@ func TestPrepareSourcesRetainsWarmRequestedManifestOnFailure(t *testing.T) {
 				}
 				return nil
 			})
-			if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 1 {
+			if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 2 {
 				t.Fatalf("failed acquisition lost its warm manifest: %v, callbacks=%d", err, calls)
 			}
 			inputs := stage.Inputs()
@@ -194,8 +195,9 @@ func TestPrepareSourcesManifestCaptureBoundaries(t *testing.T) {
 			err = moduledependency.PrepareSources(ctx, locate(t, app), requested, moduledependency.Options{Environment: env, GoCommand: command, Offline: mode == "offline",
 				RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
 					calls++
-					if len(manifests) != 1 || manifests[0].Path != path || manifests[0].Checksum != checksum || strings.Contains(string(readFile(t, trace)), "download ") {
-						t.Fatalf("invalid early manifest capture: %v", manifests)
+					postDownload := strings.Contains(string(readFile(t, trace)), "download ")
+					if len(manifests) != 1 || manifests[0].Path != path || manifests[0].Checksum != checksum || postDownload != (calls == 2 || mode == "missing-manifest") {
+						t.Fatalf("invalid before/after manifest capture: %v", manifests)
 					}
 					switch mode {
 					case "callback-error":
@@ -219,11 +221,16 @@ func TestPrepareSourcesManifestCaptureBoundaries(t *testing.T) {
 				return nil
 			})
 			commands := string(readFile(t, trace))
-			wantCapture := mode != "missing-manifest" && mode != "missing-checksum" && mode != "archive-only" && mode != "invalid-request" && mode != "local"
-			if (calls == 1) != wantCapture || calls > 1 {
-				t.Fatalf("manifest callbacks=%d, want capture=%v", calls, wantCapture)
-			}
 			blocked := strings.HasPrefix(mode, "callback-") || strings.HasPrefix(mode, "changed-") || mode == "invalid-request"
+			wantCaptures := 2
+			if mode == "missing-checksum" || mode == "archive-only" || mode == "invalid-request" || mode == "local" {
+				wantCaptures = 0
+			} else if blocked || mode == "missing-manifest" {
+				wantCaptures = 1
+			}
+			if calls != wantCaptures {
+				t.Fatalf("manifest callbacks=%d, want %d", calls, wantCaptures)
+			}
 			if blocked && strings.Contains(commands, "download ") {
 				t.Fatalf("download followed failed capture: %s", commands)
 			}
@@ -326,8 +333,10 @@ func TestPrepareSourcesWorkspaceManifestAuthority(t *testing.T) {
 			err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command,
 				RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
 					calls++
-					if len(manifests) != 1 || manifests[0].Path != path || strings.Contains(string(readFile(t, trace)), "list ") || strings.Contains(string(readFile(t, trace)), "download ") {
-						t.Fatalf("workspace manifest captured after selection or under wrong identity: %v", manifests)
+					commands := string(readFile(t, trace))
+					postDownload := calls == 2 || mode == "query-skip"
+					if len(manifests) != 1 || manifests[0].Path != path || strings.Contains(commands, "download ") != postDownload || !postDownload && strings.Contains(commands, "list ") {
+						t.Fatalf("workspace manifest captured outside its before/after boundary or under wrong identity: %v", manifests)
 					}
 					if manifests[0].Checksum != checksum {
 						return rejected
@@ -340,9 +349,14 @@ func TestPrepareSourcesWorkspaceManifestAuthority(t *testing.T) {
 				}
 				return nil
 			})
-			wantCapture := mode != "member-conflict" && mode != "missing-authority" && mode != "malformed-member" && mode != "workspace-main" && mode != "query-skip"
-			if (calls == 1) != wantCapture || calls > 1 {
-				t.Fatalf("workspace capture count=%d, want capture=%v", calls, wantCapture)
+			wantCaptures := 2
+			if mode == "member-conflict" || mode == "missing-authority" || mode == "malformed-member" || mode == "workspace-main" {
+				wantCaptures = 0
+			} else if mode == "primary-conflict" || mode == "primary-conflict-first" || mode == "query-skip" {
+				wantCaptures = 1
+			}
+			if calls != wantCaptures {
+				t.Fatalf("workspace capture count=%d, want %d", calls, wantCaptures)
 			}
 			switch mode {
 			case "primary-conflict", "primary-conflict-first":

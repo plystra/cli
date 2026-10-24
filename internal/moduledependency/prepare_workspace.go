@@ -360,7 +360,7 @@ func (workspace *preparationWorkspace) resolveChecksums(ctx context.Context, mod
 	if err != nil {
 		return err
 	}
-	if err := downloadPreparedSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work), nil); err != nil {
+	if err := downloadPreparedSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work), nil, nil); err != nil {
 		return err
 	}
 	for index, source := range sources {

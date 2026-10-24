@@ -64,7 +64,7 @@ func (workspace *preparationWorkspace) retainPreparationMetadata(ctx context.Con
 }
 
 func retainPreparationManifests(ctx context.Context, root string, versions []module.Version, checksums map[module.Version]string, options Options, environment []string, inputs preparationInputs) error {
-	if len(versions) == 0 || len(checksums) == 0 {
+	if options.RetainRootManifests == nil || len(versions) == 0 || len(checksums) == 0 {
 		return inputs.recheck()
 	}
 	cache, err := preparationModuleCache(ctx, root, options, environment)
@@ -76,7 +76,7 @@ func retainPreparationManifests(ctx context.Context, root string, versions []mod
 		checksums: checksums, cache: cache,
 		retain: options.RetainRootManifests, retained: map[string]bool{},
 	}
-	return graph.retainEffectiveBatch(ctx, versions)
+	return errors.Join(graph.retainEffectiveBatch(ctx, versions), ctx.Err(), inputs.recheck())
 }
 
 func preparationModuleCache(ctx context.Context, root string, options Options, environment []string) (string, error) {

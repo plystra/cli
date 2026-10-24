@@ -984,6 +984,17 @@ manifest checksums introduce no prefetch. Workspace query spellings decline
 optional inference rather than guessing an exact version. The retained manifest
 evidence survives later archive failure and stage cleanup, and callbacks are
 followed by original metadata rechecks before Go proceeds.
+After each exact preparation download returns, present effective-source cache
+manifests are retained again under that phase's original `/go.mod` checksums,
+including manifests materialized by an unsuccessful acquisition. This happens
+before command-error handling, JSON decoding, source retention, extracted-manifest
+validation, or the next acquisition. Failed command output supplies no authority;
+newly reported sums cannot authorize a previously unrecorded manifest. Repeated
+capture rechecks the original evidence without refreshing it. Download failure,
+retention rejection, callback cancellation, and original metadata drift remain
+joined, and retained evidence survives stage cleanup. A context already cancelled
+before this capture can still prevent retention; complete interrupted-acquisition
+readsets and capture before Go's first cold reads remain unfinished.
 Cache selection uses each synthetic preparation phase's directory and environment
 so an unused authored toolchain suggestion cannot redirect the probe.
 Before each exact acquisition, preparation also retains an eligible warm complete

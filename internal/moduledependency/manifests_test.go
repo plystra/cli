@@ -284,6 +284,10 @@ func runRootManifestsHelper() int {
 			if err != nil || statErr != nil || !os.SameFile(before, after) || os.SameFile(info, current) {
 				return 36
 			}
+		} else if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "poison" {
+			if os.Chmod(path, 0o600) != nil || os.WriteFile(path, []byte("module example.com/poisoned\n"), 0o600) != nil {
+				return 37
+			}
 		} else if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "create" {
 			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 				return 13

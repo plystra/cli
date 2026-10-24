@@ -160,6 +160,8 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		}
 		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment, func(acquired []Module) error {
 			return errors.Join(retain(acquired), ctx.Err(), inputs.recheck())
+		}, func() error {
+			return retainPreparationManifests(ctx, root, []module.Version{sourceVersion(group[0])}, checksums.manifests, options, environment, inputs)
 		}); err != nil {
 			return err
 		}
@@ -167,7 +169,7 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 	return nil
 }
 
-func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error) (resultErr error) {
+func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error, retainMetadata func() error) (resultErr error) {
 	queries := map[module.Version][]int{}
 	var arguments []string
 	var versions []module.Version
@@ -190,9 +192,16 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, retainModuleInformation(ctx, information, options)) }()
-	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
-	if err != nil {
-		return errors.Join(ErrModuleUnavailable, err)
+	output, downloadErr := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
+	var retentionErr error
+	if retainMetadata != nil {
+		retentionErr = retainMetadata()
+	}
+	if downloadErr != nil {
+		return errors.Join(ErrModuleUnavailable, downloadErr, retentionErr)
+	}
+	if retentionErr != nil {
+		return retentionErr
 	}
 	acquired := append([]Module(nil), result...)
 	decoder := json.NewDecoder(bytes.NewReader(output))
