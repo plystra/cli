@@ -361,7 +361,7 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 		WriteSet:            writeSet,
 		Operations:          operations,
 		ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: selection.Mode(), Path: selection.Path(), Environment: selection.Environment()},
-		ConfigurationImpact: planned.ConfigurationImpact(), Effects: effects, FinalModelDigest: planned.CompositionDigest(),
+		ConfigurationImpact: planned.ConfigurationImpact(), EffectRequirements: plannedEffects, Effects: effects, FinalModelDigest: planned.CompositionDigest(),
 		Verification: verification, Completeness: "non_exact",
 	})
 	return payload, effects, err

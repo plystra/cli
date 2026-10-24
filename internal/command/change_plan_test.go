@@ -103,6 +103,7 @@ func TestRunChangePlanVerificationRetainsSelectedConfiguration(t *testing.T) {
 			var result struct {
 				Payload struct {
 					Verification []string
+					Requirements []struct{ Verification []string } `json:"effect_requirements"`
 					Effects      struct {
 						Planned []struct{ Verification []string }
 					}
@@ -112,7 +113,8 @@ func TestRunChangePlanVerificationRetainsSelectedConfiguration(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := append([]string{"plystra", "check"}, test.selector...)
-			if !reflect.DeepEqual(result.Payload.Verification, want) || len(result.Payload.Effects.Planned) != 1 || !reflect.DeepEqual(result.Payload.Effects.Planned[0].Verification, want) {
+			if !reflect.DeepEqual(result.Payload.Verification, want) || len(result.Payload.Effects.Planned) != 1 || !reflect.DeepEqual(result.Payload.Effects.Planned[0].Verification, want) ||
+				len(result.Payload.Requirements) != 1 || !reflect.DeepEqual(result.Payload.Requirements[0].Verification, want) {
 				t.Fatalf("verification lost selected configuration: %s", stdout)
 			}
 			if test.verify {

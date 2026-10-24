@@ -982,6 +982,12 @@ primitive-command lowering, and `--dry-run` remain unavailable. These previews
 are always `non_exact` and cannot authorize apply. Their public read/write and
 snapshot digests are typed semantic identities, not exact file preimages:
 private runtime values and Secret targets do not enter the public plan digest.
+`effect_requirements` is the sorted, unique inventory of stable apply-time
+effects bound by that digest. It is separate from the four `effects` arrays,
+which retain invocation-specific observations without changing plan identity.
+Planning cache/download evidence therefore cannot stale a plan by itself;
+changes to required effects or their verification still change the digest.
+An empty requirement inventory is always emitted as `[]`.
 The plan's `verification` is one ordered command argument vector. Argument
 order and repeated tokens are preserved and bound by the plan digest. The plan
 and its planned-write effects retain the selected `--env` or `--config`,

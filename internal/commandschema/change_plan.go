@@ -72,6 +72,7 @@ type ChangePlanInput struct {
 	Operations          []ChangePlanOperationInput
 	ConfigurationScope  ChangePlanConfigurationScopeInput
 	ConfigurationImpact configurationimpact.Impact
+	EffectRequirements  []Effect
 	Effects             Effects
 	FinalModelDigest    string
 	Verification        []string
@@ -88,6 +89,7 @@ type ChangePlan struct {
 	operations         []ChangePlanOperationInput
 	configurationScope ChangePlanConfigurationScopeInput
 	impact             configurationimpact.Impact
+	effectRequirements []Effect
 	effects            Effects
 	finalModelDigest   string
 	verification       []string
@@ -149,6 +151,7 @@ type changePlanDocument struct {
 	Operations          []changePlanOperationDocument `json:"operations"`
 	ConfigurationScope  changePlanScopeDocument       `json:"configuration_scope"`
 	ConfigurationImpact changePlanImpactDocument      `json:"configuration_impact"`
+	EffectRequirements  []effectDocument              `json:"effect_requirements"`
 	Effects             effectsDocument               `json:"effects"`
 	FinalModelDigest    string                        `json:"final_model_digest"`
 	Verification        []string                      `json:"verification"`
@@ -164,7 +167,7 @@ type changePlanIdentityDocument struct {
 	Operations          []changePlanOperationDocument `json:"operations"`
 	ConfigurationScope  changePlanScopeDocument       `json:"configuration_scope"`
 	ConfigurationImpact changePlanImpactDocument      `json:"configuration_impact"`
-	Effects             effectsDocument               `json:"effects"`
+	EffectRequirements  []effectDocument              `json:"effect_requirements"`
 	FinalModelDigest    string                        `json:"final_model_digest"`
 	Verification        []string                      `json:"verification"`
 	Completeness        string                        `json:"completeness"`
@@ -181,6 +184,10 @@ func NewChangePlan(input ChangePlanInput) (ChangePlan, error) {
 	if !input.Effects.Valid() {
 		return ChangePlan{}, fmt.Errorf("%w: effects are invalid", ErrChangePlanPayload)
 	}
+	requirements, err := normalizeEffectDisposition("required", input.EffectRequirements, make(map[string]string))
+	if err != nil {
+		return ChangePlan{}, fmt.Errorf("%w: effect requirements: %v", ErrChangePlanPayload, err)
+	}
 	result := ChangePlan{
 		requestDigest:      input.RequestDigest,
 		inputSnapshot:      input.InputSnapshot,
@@ -189,6 +196,7 @@ func NewChangePlan(input ChangePlanInput) (ChangePlan, error) {
 		operations:         append([]ChangePlanOperationInput(nil), input.Operations...),
 		configurationScope: input.ConfigurationScope,
 		impact:             input.ConfigurationImpact,
+		effectRequirements: requirements,
 		effects:            input.Effects,
 		finalModelDigest:   input.FinalModelDigest,
 		verification:       append([]string(nil), input.Verification...),
@@ -220,7 +228,7 @@ func (p ChangePlan) Valid() bool {
 		RequestDigest: p.requestDigest, InputSnapshot: p.inputSnapshot,
 		ReadSet: p.readSet, WriteSet: p.writeSet, Operations: p.operations,
 		ConfigurationScope: p.configurationScope, ConfigurationImpact: p.impact,
-		Effects: p.effects, FinalModelDigest: p.finalModelDigest,
+		EffectRequirements: p.effectRequirements, Effects: p.effects, FinalModelDigest: p.finalModelDigest,
 		Verification: p.verification, Completeness: p.completeness,
 	})
 	return err == nil && rebuilt.planDigest == p.planDigest && bytes.Equal(rebuilt.canonicalJSON, p.canonicalJSON)
@@ -230,6 +238,7 @@ func (ChangePlan) Schema() string                                    { return Ch
 func (p ChangePlan) RequestDigest() string                           { return p.requestDigest }
 func (p ChangePlan) PlanDigest() string                              { return p.planDigest }
 func (p ChangePlan) Completeness() string                            { return p.completeness }
+func (p ChangePlan) EffectRequirements() []Effect                    { return cloneEffects(p.effectRequirements) }
 func (p ChangePlan) ConfigurationImpact() configurationimpact.Impact { return p.impact }
 func (p ChangePlan) CanonicalJSON() []byte                           { return append([]byte(nil), p.canonicalJSON...) }
 func (ChangePlan) commandPayload()                                   {}
@@ -240,7 +249,7 @@ func (p ChangePlan) document() changePlanDocument {
 		InputSnapshot: snapshotDocument(p.inputSnapshot), ReadSet: pathDocuments(p.readSet),
 		WriteSet: pathDocuments(p.writeSet), Operations: operationDocuments(p.operations),
 		ConfigurationScope: scopeDocument(p.configurationScope), ConfigurationImpact: impactDocument(p.impact),
-		Effects: effectsDocumentFrom(p.effects), FinalModelDigest: p.finalModelDigest,
+		EffectRequirements: effectDocuments(p.effectRequirements), Effects: effectsDocumentFrom(p.effects), FinalModelDigest: p.finalModelDigest,
 		Verification: append([]string(nil), p.verification...), Completeness: p.completeness,
 	}
 }
@@ -252,7 +261,7 @@ func (p ChangePlan) identityDocument() changePlanIdentityDocument {
 		InputSnapshot: document.InputSnapshot, ReadSet: document.ReadSet,
 		WriteSet: document.WriteSet, Operations: document.Operations,
 		ConfigurationScope: document.ConfigurationScope, ConfigurationImpact: document.ConfigurationImpact,
-		Effects: document.Effects, FinalModelDigest: document.FinalModelDigest,
+		EffectRequirements: document.EffectRequirements, FinalModelDigest: document.FinalModelDigest,
 		Verification: document.Verification, Completeness: document.Completeness,
 	}
 }
