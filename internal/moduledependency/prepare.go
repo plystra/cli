@@ -17,9 +17,10 @@ import (
 
 // PrepareSources materializes explicitly requested canonical versions without
 // loading their packages or changing Project metadata. Retain captures each
-// phase's sources before resolution; metadata remains guarded through the last
-// callback. Local sources must already be captured. Mutable queries and
-// transitive selections remain outside this boundary.
+// completed effective source before the next acquisition or resolution;
+// metadata remains guarded through the last callback. Local sources must
+// already be captured. Mutable queries and transitive selections remain outside
+// this boundary.
 func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func([]Module) error) (resultErr error) {
 	if ctx == nil || application.Path() == "" || len(requested) > 1_024 || retain == nil {
 		return ErrInvalidOutput
@@ -95,10 +96,7 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 		return err
 	}
 	environment := preparationEnvironment(options)
-	if err := downloadPreparedSources(ctx, root, sources, checksums, options, environment); err != nil {
-		return err
-	}
-	if err := retain(sources); err != nil {
+	if err := downloadAndRetainSources(ctx, root, sources, checksums, options, environment, retain); err != nil {
 		return err
 	}
 	if workspace != nil {
@@ -116,6 +114,35 @@ func preparationEnvironment(options Options) []string {
 		environment = environmentWith(environment, "GOTOOLCHAIN", "local")
 	}
 	return environment
+}
+
+func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error) error {
+	if len(sources) == 0 {
+		return retain(sources)
+	}
+	indices := map[module.Version]int{}
+	var groups [][]Module
+	for _, source := range sources {
+		version := sourceVersion(source)
+		index, exists := indices[version]
+		if !exists {
+			index = len(groups)
+			indices[version] = index
+			groups = append(groups, nil)
+		}
+		groups[index] = append(groups[index], source)
+	}
+	for _, group := range groups {
+		// Retaining a completed source before another Go process starts keeps
+		// later acquisition failures from discarding or refreshing its evidence.
+		if err := downloadPreparedSources(ctx, root, group, checksums, options, environment); err != nil {
+			return err
+		}
+		if err := retain(group); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string) error {

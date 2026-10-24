@@ -288,10 +288,7 @@ func (workspace *preparationWorkspace) prepare(ctx context.Context, root string,
 	if err != nil {
 		return err
 	}
-	if err := downloadPreparedSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, nil, options, environmentWith(environment, "GOWORK", work)); err != nil {
-		return err
-	}
-	return retain(sources)
+	return downloadAndRetainSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, nil, options, environmentWith(environment, "GOWORK", work), retain)
 }
 
 func (workspace *preparationWorkspace) recorded(version module.Version) bool {

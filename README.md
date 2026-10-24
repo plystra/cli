@@ -926,6 +926,14 @@ cannot modify the selected workspace. Preparation snapshots the workfile, member
 manifests, and present or absent sums before downloads and rechecks them after
 source retention. Mutable queries retain ordinary Go semantics and are not
 resolved by this preparation step.
+Within each preparation phase, distinct effective sources are acquired in
+first-request order. Each verified acquisition is retained before the next Go
+download starts, including every logical target sharing that source. A later
+download or checksum failure preserves earlier retained evidence while still
+failing preparation. Retention errors or cancellation stop later acquisitions.
+The workspace phase independently verifies its original checksum authorities
+even when it selects a source already acquired by the single-module phase.
+This does not capture every input partially consumed by a failed acquisition.
 Each retained or prepared versioned source also retains Go's exact selected
 cache module manifest (`.mod`) and its sibling archive checksum reference
 (`.ziphash`). These regular files retain bytes, identity, mode, and parent-path
