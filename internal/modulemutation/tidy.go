@@ -44,6 +44,10 @@ type ChangeOptions struct {
 	Environment        []string
 	Arguments          []string
 	DirectRequirements []string
+	// Observe reports whether the initial dependency command started, even if
+	// it failed. It runs once after changed metadata is captured for rollback;
+	// subsequent normalization commands are outside this observation.
+	Observe func(started bool)
 }
 
 // Change runs one explicit Go Module dependency command, then operation with a
@@ -77,7 +81,7 @@ func Change(ctx context.Context, root string, options ChangeOptions, operation f
 		}
 	}()
 
-	changeErr := gocommand.Run(ctx, gocommand.Options{
+	started, changeErr := gocommand.RunObserved(ctx, gocommand.Options{
 		Command:     options.GoCommand,
 		Directory:   root,
 		Environment: options.Environment,
@@ -86,6 +90,9 @@ func Change(ctx context.Context, root string, options ChangeOptions, operation f
 		changeErr = markDirectRequirements(root, options.DirectRequirements)
 	}
 	installed, err = captureModuleFiles(root)
+	if options.Observe != nil {
+		options.Observe(started)
+	}
 	if err != nil {
 		return errors.Join(changeErr, fmt.Errorf("%w: capture changed module metadata: %w", ErrChange, err))
 	}
