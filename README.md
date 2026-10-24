@@ -926,6 +926,18 @@ cannot modify the selected workspace. Preparation snapshots the workfile, member
 manifests, and present or absent sums before downloads and rechecks them after
 source retention. Mutable queries retain ordinary Go semantics and are not
 resolved by this preparation step.
+Preparation also retains already-cached requested-source manifests under original
+`/go.mod` checksum authority before exact downloads, and workspace-effective
+manifests before metadata-only selection. It uses the actual single-module
+download identities and the existing workspace replacement rules. Workspace main
+targets add no cache input; a versioned replacement destination matching a main
+module still denotes a versioned source. Missing cache files and unrecorded
+manifest checksums introduce no prefetch. Workspace query spellings decline
+optional inference rather than guessing an exact version. The retained manifest
+evidence survives later archive failure and stage cleanup, and callbacks are
+followed by original metadata rechecks before Go proceeds.
+Cache selection uses each synthetic preparation phase's directory and environment
+so an unused authored toolchain suggestion cannot redirect the probe.
 Within each preparation phase, distinct effective sources are acquired in
 first-request order. Each verified acquisition is retained before the next Go
 download starts, including every logical target sharing that source. A later

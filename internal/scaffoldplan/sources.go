@@ -41,7 +41,15 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 	if err != nil {
 		return err
 	}
-	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment()}, func(dependencies []moduledependency.Module) error {
+	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
+		RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+			inputs := make([]projectstage.MetadataInput, len(manifests))
+			for index, manifest := range manifests {
+				inputs[index] = projectstage.MetadataInput{Path: manifest.Path, GoModChecksum: manifest.Checksum}
+			}
+			return stage.RetainMetadata(ctx, inputs)
+		},
+	}, func(dependencies []moduledependency.Module) error {
 		return retainSources(ctx, stage, dependencies)
 	})
 	if err != nil {

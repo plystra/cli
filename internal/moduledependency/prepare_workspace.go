@@ -234,12 +234,17 @@ func preparationReplacements(replacements []*modfile.Replace, base string) strin
 	return output.String()
 }
 
-func (workspace *preparationWorkspace) prepare(ctx context.Context, root string, requested []module.Version, options Options, environment []string, retain func([]Module) error) error {
+func (workspace *preparationWorkspace) prepare(ctx context.Context, root string, requested []module.Version, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
 	if len(requested) == 0 {
 		return nil
 	}
 	work, err := workspace.write(filepath.Join(root, "selection"), requested, true)
 	if err != nil {
+		return err
+	}
+	selectionRoot := filepath.Join(filepath.Dir(work), "member-0")
+	environment = environmentWith(environment, "GOWORK", work)
+	if err := workspace.retainPreparationManifests(ctx, selectionRoot, requested, options, environment, inputs); err != nil {
 		return err
 	}
 	var arguments = []string{"list", "-m", "-json"}
@@ -248,7 +253,7 @@ func (workspace *preparationWorkspace) prepare(ctx context.Context, root string,
 		arguments = append(arguments, version.Path)
 		versions[version.Path] = version.Version
 	}
-	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: filepath.Join(filepath.Dir(work), "member-0"), Environment: environmentWith(environment, "GOWORK", work), OutputLimit: options.OutputLimit}, arguments...)
+	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: selectionRoot, Environment: environment, OutputLimit: options.OutputLimit}, arguments...)
 	if err != nil {
 		return errors.Join(ErrModuleUnavailable, err)
 	}

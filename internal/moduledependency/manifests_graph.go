@@ -312,8 +312,7 @@ func (graph *manifestGraph) manifestPath(effective module.Version) (string, erro
 }
 
 func (graph *manifestGraph) retainBatch(ctx context.Context, mods []module.Version) error {
-	var manifests []RootManifest
-	seen := map[string]bool{}
+	var effectiveVersions []module.Version
 	for _, mod := range mods {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -323,6 +322,18 @@ func (graph *manifestGraph) retainBatch(ctx context.Context, mods []module.Versi
 		}
 		effective, err := graph.effectiveVersion(mod)
 		if err != nil {
+			return err
+		}
+		effectiveVersions = append(effectiveVersions, effective)
+	}
+	return graph.retainEffectiveBatch(ctx, effectiveVersions)
+}
+
+func (graph *manifestGraph) retainEffectiveBatch(ctx context.Context, versions []module.Version) error {
+	var manifests []RootManifest
+	seen := map[string]bool{}
+	for _, effective := range versions {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if effective.Version == "" || !validSourceChecksum(graph.checksums[effective]) {

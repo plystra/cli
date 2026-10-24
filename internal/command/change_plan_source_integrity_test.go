@@ -355,7 +355,7 @@ func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9)
 func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list"
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && mode != "manifest-identity-after-download"
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -392,14 +392,22 @@ func main() {
  }
  afterList := len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m"
  afterDownload := len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download"
- if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list") && afterList || mode == "manifest-after-download" && afterDownload) {
+ if mode == "manifest-identity-after-download" {
+  matched := false
+  for _, argument := range os.Args[1:] {
+   if argument == os.Getenv("PLYSTRA_SOURCE_PREPARATION_QUERY") { matched = true }
+  }
+  afterDownload = afterDownload && matched
+ }
+ if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list") && afterList || (mode == "manifest-after-download" || mode == "manifest-identity-after-download") && afterDownload) {
+  if mode == "manifest-identity-after-download" && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
   _, pathErr := os.Stat(path)
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) && pathErr == nil {
    data, readErr := os.ReadFile(path); check(readErr)
    info, statErr := os.Stat(path); check(statErr)
-   if mode == "manifest-identity-after-list" {
+   if mode == "manifest-identity-after-list" || mode == "manifest-identity-after-download" {
     if !os.SameFile(info, info) { os.Exit(10) }
     backup = path + ".prior"
     check(os.Rename(path, backup))
@@ -591,7 +599,7 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
-	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list", "transitive-manifest-identity-after-list", "workspace-transitive-manifest-identity-after-list"} {
+	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list", "transitive-manifest-identity-after-list", "workspace-transitive-manifest-identity-after-list", "prepared-manifest-identity-after-download", "workspace-prepared-manifest-identity-after-download"} {
 		t.Run(mode, func(t *testing.T) {
 			testBuiltCLIChangePlanRejectsChangedModuleManifest(t, binary, mode)
 		})
@@ -600,6 +608,8 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 
 func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mode string) {
 	t.Helper()
+	prepared := strings.Contains(mode, "prepared-")
+	mode = strings.ReplaceAll(mode, "prepared-", "")
 	transitive := strings.Contains(mode, "transitive-")
 	mode = strings.ReplaceAll(mode, "transitive-", "")
 	const transitivePath = "example.com/preview/transitive"
@@ -613,15 +623,37 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 	root := writeImplementationSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 	seedPreviewDependency(t, root, environment, "v1.0.0")
+	if prepared {
+		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-droprequire="+previewDependencyModule); err != nil {
+			t.Fatal(err)
+		}
+		sums, err := os.ReadFile(filepath.Join(root, "go.sum"))
+		if err != nil || !bytes.Contains(sums, []byte(previewDependencyModule+" v1.0.0/go.mod h1:")) {
+			t.Fatalf("prepared fixture lacks original manifest checksum authority: %v", err)
+		}
+		environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_QUERY="+previewDependencyModule+"@v1.0.0")
+	}
 	if transitive {
 		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "get", previewDependencyModule+"@v1.0.0"); err != nil {
 			t.Fatal(err)
 		}
 		seedPreviewTransitiveManifest(t, root, environment, transitivePath)
 	}
+	workspaceRoot, initialLocal := "", ""
 	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
-		work := filepath.Join(t.TempDir(), "go.work")
-		writeCommandFile(t, work, "go 1.26\nuse "+fmt.Sprintf("%q\n", filepath.ToSlash(root)))
+		workspaceRoot = t.TempDir()
+		work := filepath.Join(workspaceRoot, "go.work")
+		workSource := "go 1.26\nuse " + fmt.Sprintf("%q\n", filepath.ToSlash(root))
+		if prepared {
+			initialLocal = t.TempDir()
+			writeCommandFile(t, filepath.Join(initialLocal, "go.mod"), "module "+previewDependencyModule+"\ngo 1.26\n")
+			if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+previewDependencyModule+"="+filepath.ToSlash(initialLocal)); err != nil {
+				t.Fatal(err)
+			}
+			workSource += "replace " + previewDependencyModule + " => " + previewDependencyModule + " v1.0.0\n"
+			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_WORKSPACE=1")
+		}
+		writeCommandFile(t, work, workSource)
 		environment = append(environment, "GOWORK="+work)
 		mode = workspaceMode
 	}
@@ -654,12 +686,22 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 	marker := filepath.Join(t.TempDir(), "manifest-changed")
 	environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+mode)
 	before := commandTree(t, root)
+	var beforeWorkspace, beforeLocal map[string][]byte
+	if workspaceRoot != "" {
+		beforeWorkspace = commandTree(t, workspaceRoot)
+	}
+	if initialLocal != "" {
+		beforeLocal = commandTree(t, initialLocal)
+	}
 	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
 	command.Dir, command.Env = root, environment
-	if transitive {
+	if transitive || prepared {
 		command.Dir = filepath.Join(root, "reports")
 	}
 	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
+	if prepared {
+		command.Stdin = strings.NewReader(fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"add","module":%q}]}`, previewDependencyModule+"@v1.0.0"))
+	}
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()
@@ -671,11 +713,25 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 	if data, err := os.ReadFile(marker); err != nil || string(data) != "manifest changed after Go output\n" {
 		t.Fatalf("compiled CLI did not exercise manifest race: %v", err)
 	}
-	if bytes.Contains(output, []byte(cache)) || bytes.Contains(output, []byte(root)) || bytes.Contains(output, []byte("changed after verified Go output")) {
-		t.Fatal("compiled CLI disclosed private manifest evidence")
+	for _, private := range []string{cache, root, workspaceRoot, initialLocal, "changed after verified Go output"} {
+		if private == "" {
+			continue
+		}
+		for _, spelling := range []string{private, filepath.ToSlash(private)} {
+			encoded, err := json.Marshal(spelling)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(output, encoded[1:len(encoded)-1]) {
+				t.Fatal("compiled CLI disclosed private manifest evidence")
+			}
+		}
 	}
 	if !reflect.DeepEqual(before, commandTree(t, root)) {
 		t.Fatal("compiled CLI changed the authored Project")
+	}
+	if workspaceRoot != "" && !reflect.DeepEqual(beforeWorkspace, commandTree(t, workspaceRoot)) || initialLocal != "" && !reflect.DeepEqual(beforeLocal, commandTree(t, initialLocal)) {
+		t.Fatal("compiled CLI changed the selected workspace or local replacement")
 	}
 	assertNoCommandTransactions(t, root)
 }

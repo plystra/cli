@@ -62,7 +62,8 @@ type Options struct {
 	// when offline.
 	RequireSourceChecksums bool
 	// RetainRootManifests captures existing checksummed root manifests before
-	// graph resolution. It does not prepare sources or downloads.
+	// graph resolution, and requested effective manifests before preparation
+	// downloads or workspace selection. It does not initiate downloads.
 	RetainRootManifests func([]RootManifest) error
 }
 

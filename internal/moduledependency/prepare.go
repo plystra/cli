@@ -96,11 +96,24 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 		return err
 	}
 	environment := preparationEnvironment(options)
+	if options.RetainRootManifests != nil {
+		manifestChecksums, err := rootManifestChecksums(sums.data, nil)
+		if err != nil {
+			return err
+		}
+		versions := make([]module.Version, len(sources))
+		for index, source := range sources {
+			versions[index] = sourceVersion(source)
+		}
+		if err := retainPreparationManifests(ctx, root, versions, manifestChecksums, options, environment, inputs); err != nil {
+			return err
+		}
+	}
 	if err := downloadAndRetainSources(ctx, root, sources, checksums, options, environment, retain); err != nil {
 		return err
 	}
 	if workspace != nil {
-		return workspace.prepare(ctx, root, requested, options, environment, retain)
+		return workspace.prepare(ctx, root, requested, options, environment, inputs, retain)
 	}
 	return nil
 }
