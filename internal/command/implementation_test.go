@@ -10,6 +10,7 @@ import (
 
 	"github.com/plystra/cli/internal/command"
 	"github.com/plystra/cli/internal/diagnosticcode"
+	"github.com/plystra/cli/internal/version"
 )
 
 func TestRunImplementUsesPublicCommandSurface(t *testing.T) {
@@ -17,6 +18,7 @@ func TestRunImplementUsesPublicCommandSurface(t *testing.T) {
 
 	root := t.TempDir()
 	writeImplementationCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/records\n\ngo 1.26\n")
+	prepareImplementationRuntime(t, root)
 	writeImplementationCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeImplementationCommandFile(t, filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go"), `package listv1
 
@@ -40,7 +42,7 @@ type Response struct{}
 		start,
 		append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off"),
 	)
-	if exitCode != 0 || stdout.String() != "created unfinished interface scaffold example.com/acme/records/postgres.New for records.list/v1 at postgres/implementation.go; not activated\n" || stderr.Len() != 0 {
+	if exitCode != 0 || stdout.String() != "created unfinished interface scaffold example.com/acme/records/postgres.New for records.list/v1 at postgres/implementation.go; application regenerated and built\n" || stderr.Len() != 0 {
 		t.Fatalf("implement = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
 	data, err := os.ReadFile(filepath.Join(root, "postgres", "implementation.go"))
@@ -118,10 +120,36 @@ func TestRunImplementClassifiesAuthoringFailuresWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestRunImplementRejectsAmbiguousFinalApplicationWithoutMutation(t *testing.T) {
+	t.Parallel()
+	root := writeImplementationFailureProject(t, false)
+	writeImplementationCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [records.list/v1]\n")
+	writeImplementationCommandFile(t, filepath.Join(root, "existing", "implementation.go"), `package existing
+import (
+ "context"
+ contract "example.com/acme/records/interfaces/records/list/v1"
+)
+type Service struct{}
+//plystra:implements records.list/v1
+func New() (*Service, error) { return &Service{}, nil }
+func (*Service) List(context.Context, contract.Request) (contract.Response, error) { return contract.Response{}, nil }
+`)
+	before := commandTree(t, root)
+	exitCode, stdout, stderr := runCommand(t, []string{"implement", "records.list/v1", "--package", "./second"}, root, commandGoEnvironment())
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "records.list/v1") {
+		t.Fatalf("ambiguous implementation = exit %d stdout %q stderr %q", exitCode, stdout, stderr)
+	}
+	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
+		t.Fatal("rejected ambiguous implementation changed the Project")
+	}
+	assertNoCommandTransactions(t, root)
+}
+
 func writeImplementationFailureProject(t testing.TB, targetExists bool) string {
 	t.Helper()
 	root := t.TempDir()
 	writeImplementationCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/records\n\ngo 1.26\n")
+	prepareImplementationRuntime(t, root)
 	writeImplementationCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeImplementationCommandFile(t, filepath.Join(root, "interfaces", "records", "list", "v1", "interface.go"), `package listv1
 
@@ -146,4 +174,19 @@ func writeImplementationCommandFile(t testing.TB, name, content string) {
 	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func prepareImplementationRuntime(t testing.TB, root string) {
+	t.Helper()
+	modulePath := filepath.Join(root, "go.mod")
+	data, err := os.ReadFile(modulePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeImplementationCommandFile(t, modulePath, string(data)+"\nrequire github.com/plystra/kernel "+version.KernelVersion+"\n")
+	sums, err := os.ReadFile(filepath.Join("..", "..", "go.sum"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeImplementationCommandFile(t, filepath.Join(root, "go.sum"), string(sums))
 }

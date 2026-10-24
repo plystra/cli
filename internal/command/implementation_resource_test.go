@@ -17,6 +17,7 @@ func TestRunImplementScaffoldsUnfinishedResourceWithoutActivation(t *testing.T) 
 
 	root := t.TempDir()
 	writeImplementationCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/acme/storage\n\ngo 1.26\n")
+	prepareImplementationRuntime(t, root)
 	writeImplementationCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
 	writeImplementationCommandFile(t, filepath.Join(root, "contracts", "resource.go"), `package contracts
 
@@ -41,7 +42,7 @@ type Value struct {
 	if exitCode != 0 || stderr.Len() != 0 {
 		t.Fatalf("implement Resource = exit %d, stdout %q, stderr %q", exitCode, stdout.String(), stderr.String())
 	}
-	if want := "created unfinished resource scaffold example.com/acme/storage/provider.New for storage.database/v1 at provider/implementation.go; not activated\n"; stdout.String() != want {
+	if want := "created unfinished resource scaffold example.com/acme/storage/provider.New for storage.database/v1 at provider/implementation.go; application regenerated and built\n"; stdout.String() != want {
 		t.Fatalf("Resource output = %q, want %q", stdout.String(), want)
 	}
 	source, err := os.ReadFile(filepath.Join(root, "provider", "implementation.go"))
@@ -66,8 +67,8 @@ type Value struct {
 			t.Fatalf("Resource scaffold contains forbidden %q:\n%s", forbidden, text)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "generated")); !os.IsNotExist(err) {
-		t.Fatalf("Resource scaffold created generated output: %v", err)
+	if _, err := os.Stat(filepath.Join(root, "generated", "go", "assembly", "interfaces_gen.go")); err != nil {
+		t.Fatalf("Resource scaffold did not refresh generated assembly: %v", err)
 	}
 	writeImplementationCommandFile(t, filepath.Join(root, "provider", "implementation_test.go"), `package provider
 
@@ -86,7 +87,7 @@ func TestUnfinishedProvider(t *testing.T) {
 	new(Provider).Read()
 }
 `)
-	compile := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "./...")
+	compile := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "./provider", "-run", "^TestUnfinishedProvider$", "-count=1")
 	compile.Dir = root
 	compile.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOSUMDB=off")
 	if output, err := compile.CombinedOutput(); err != nil {
