@@ -640,8 +640,8 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		if err != nil {
 			return err
 		}
-		downloadRoot = filepath.Join(filepath.Dir(work), "member-0")
-		environment = environmentWith(environment, "GOWORK", work)
+		downloadRoot = work.members[0].root
+		environment = environmentWith(environment, "GOWORK", work.path)
 	}
 	options.OutputLimit = outputLimit
 	if callback := options.RetainModuleInformation; callback != nil {

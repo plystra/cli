@@ -32,11 +32,13 @@ type manifestGraph struct {
 	checksums         map[module.Version]string
 	excluded          map[module.Version]bool
 	cache             string
+	loadCache         func(context.Context) (string, error)
 	toolchain         string
 	retain            func(context.Context, []RootManifest) error
 	retainInformation func(context.Context, []string) error
 	retainSources     func([]Module) error
 	archives          map[module.Version]string
+	queryPaths        map[string]bool // Nil queries all selected modules; graph traversal remains unfiltered.
 	retained          map[string]bool
 	parsed            map[string]*modfile.File
 	goVersions        map[module.Version]bool
@@ -191,7 +193,7 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 	if complete {
 		var selectedModules []module.Version
 		for path, selectedVersion := range selected {
-			if !mainPaths[path] {
+			if !mainPaths[path] && (graph.queryPaths == nil || graph.queryPaths[path]) {
 				selectedModules = append(selectedModules, module.Version{Path: path, Version: selectedVersion})
 			}
 		}
@@ -261,7 +263,16 @@ func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected 
 			continue // Local sources were already captured with the Project.
 		}
 		source := Module{path: mod.Path, selectedVersion: mod.Version}
-		if effective != mod {
+		replaced := effective != mod
+		if !replaced {
+			if graph.workspace != nil {
+				replaced = rootManifestReplacement(mod, graph.workspace.work.Replace) != nil
+			}
+			for _, main := range graph.mains {
+				replaced = replaced || rootManifestReplacement(mod, main.Replace) != nil
+			}
+		}
+		if replaced {
 			source.replacement = Replacement{path: effective.Path, version: effective.Version}
 		}
 		if _, exists := groups[effective]; !exists {
@@ -271,7 +282,11 @@ func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected 
 	}
 	checksums := preparationChecksums{archives: graph.archives, manifests: graph.checksums}
 	for _, effective := range versions {
-		if err := retainWarmSourceBundle(ctx, graph.cache, groups[effective], checksums, graph.inputs, graph.retainSources); err != nil {
+		cache, err := graph.moduleCache(ctx)
+		if err != nil {
+			return err
+		}
+		if err := retainWarmSourceBundle(ctx, cache, groups[effective], checksums, graph.inputs, graph.retainSources); err != nil {
 			return err
 		}
 	}
@@ -350,7 +365,21 @@ func (graph *manifestGraph) effectiveVersion(mod module.Version) (module.Version
 	return mod, nil
 }
 
-func (graph *manifestGraph) manifestPath(effective module.Version) (string, error) {
+func (graph *manifestGraph) moduleCache(ctx context.Context) (string, error) {
+	if graph.cache == "" {
+		if graph.loadCache == nil {
+			return "", ErrInvalidOutput
+		}
+		cache, err := graph.loadCache(ctx)
+		if err != nil {
+			return "", err
+		}
+		graph.cache = cache
+	}
+	return graph.cache, nil
+}
+
+func (graph *manifestGraph) manifestPath(ctx context.Context, effective module.Version) (string, error) {
 	if effective.Version == "" {
 		return filepath.Join(effective.Path, "go.mod"), nil
 	}
@@ -359,7 +388,11 @@ func (graph *manifestGraph) manifestPath(effective module.Version) (string, erro
 	if pathErr != nil || versionErr != nil {
 		return "", ErrInvalidGoMod
 	}
-	return filepath.Join(graph.cache, "cache", "download", filepath.FromSlash(escaped), "@v", value+".mod"), nil
+	cache, err := graph.moduleCache(ctx)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "cache", "download", filepath.FromSlash(escaped), "@v", value+".mod"), nil
 }
 
 func (graph *manifestGraph) retainBatch(ctx context.Context, mods []module.Version) error {
@@ -390,7 +423,7 @@ func (graph *manifestGraph) retainEffectiveBatch(ctx context.Context, versions [
 		if effective.Version == "" || !validSourceChecksum(graph.checksums[effective]) {
 			continue
 		}
-		path, err := graph.manifestPath(effective)
+		path, err := graph.manifestPath(ctx, effective)
 		if err != nil {
 			return err
 		}
@@ -432,7 +465,7 @@ func (graph *manifestGraph) retainSelectedInformation(ctx context.Context, mods 
 		if effective.Version == "" {
 			continue
 		}
-		path, err := graph.manifestPath(effective)
+		path, err := graph.manifestPath(ctx, effective)
 		if err != nil {
 			return err
 		}
@@ -460,7 +493,7 @@ func (graph *manifestGraph) read(ctx context.Context, mod module.Version, infoOn
 	if err != nil {
 		return nil, false, err
 	}
-	path, err := graph.manifestPath(effective)
+	path, err := graph.manifestPath(ctx, effective)
 	if err != nil {
 		return nil, false, err
 	}

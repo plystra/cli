@@ -156,9 +156,9 @@ func capturePreparationWorkspace(ctx context.Context, root string, options Optio
 // write constructs metadata-only roots. Selection retains original replacement
 // declarations, while downloads receive literal effective identities and only
 // the checksum authorities. No original dependency graph or package is loaded.
-func (workspace *preparationWorkspace) write(root string, requested []module.Version, selection bool) (string, error) {
+func (workspace *preparationWorkspace) write(root string, requested []module.Version, selection bool) (*preparationWorkspace, error) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return "", err
+		return nil, err
 	}
 	goVersion := "1.18"
 	if workspace.work.Go != nil {
@@ -170,8 +170,9 @@ func (workspace *preparationWorkspace) write(root string, requested []module.Ver
 	}
 	work, err := modfile.ParseWork("go.work", []byte(workSource), nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	written := &preparationWorkspace{path: filepath.Join(root, "go.work"), work: work, sum: workspace.sum}
 	mainPaths := map[string]bool{}
 	for _, member := range workspace.members {
 		mainPaths[member.mod.Module.Mod.Path] = true
@@ -179,7 +180,7 @@ func (workspace *preparationWorkspace) write(root string, requested []module.Ver
 	for index, member := range workspace.members {
 		directory := filepath.Join(root, fmt.Sprintf("member-%d", index))
 		if err := os.Mkdir(directory, 0o700); err != nil {
-			return "", err
+			return nil, err
 		}
 		manifestSource := "module " + member.mod.Module.Mod.Path + "\n\ngo 1.18\n"
 		if selection {
@@ -187,14 +188,14 @@ func (workspace *preparationWorkspace) write(root string, requested []module.Ver
 		}
 		manifest, err := modfile.Parse("go.mod", []byte(manifestSource), nil)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if selection {
 			if index == 0 {
 				for _, version := range requested {
 					if !mainPaths[version.Path] {
 						if err := manifest.AddRequire(version.Path, version.Version); err != nil {
-							return "", err
+							return nil, err
 						}
 					}
 				}
@@ -202,26 +203,26 @@ func (workspace *preparationWorkspace) write(root string, requested []module.Ver
 		}
 		data, err := manifest.Format()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		if err := os.WriteFile(filepath.Join(directory, "go.mod"), data, 0o600); err != nil {
-			return "", err
+			return nil, err
 		}
 		if err := os.WriteFile(filepath.Join(directory, "go.sum"), member.sum, 0o600); err != nil {
-			return "", err
+			return nil, err
 		}
 		if err := work.AddUse(filepath.ToSlash(directory), ""); err != nil {
-			return "", err
+			return nil, err
 		}
+		written.members = append(written.members, preparationMember{root: directory, mod: manifest, sum: member.sum})
 	}
-	path := filepath.Join(root, "go.work")
-	if err := os.WriteFile(path, modfile.Format(work.Syntax), 0o600); err != nil {
-		return "", err
+	if err := os.WriteFile(written.path, modfile.Format(work.Syntax), 0o600); err != nil {
+		return nil, err
 	}
-	if err := os.WriteFile(path+".sum", workspace.sum, 0o600); err != nil {
-		return "", err
+	if err := os.WriteFile(written.path+".sum", workspace.sum, 0o600); err != nil {
+		return nil, err
 	}
-	return path, nil
+	return written, nil
 }
 
 func preparationReplacements(replacements []*modfile.Replace, base string) string {
@@ -252,9 +253,9 @@ func (workspace *preparationWorkspace) prepare(ctx context.Context, root string,
 	if err != nil {
 		return err
 	}
-	selectionRoot := filepath.Join(filepath.Dir(work), "member-0")
-	environment = environmentWith(environment, "GOWORK", work)
-	if err := workspace.retainPreparationInputs(ctx, selectionRoot, requested, options, environment, inputs, retain); err != nil {
+	selectionRoot := work.members[0].root
+	environment = environmentWith(environment, "GOWORK", work.path)
+	if err := workspace.retainPreparationInputs(ctx, work, requested, options, environment, inputs, retain); err != nil {
 		return err
 	}
 	var arguments = []string{"list", "-m", "-json"}
@@ -315,7 +316,7 @@ func (workspace *preparationWorkspace) prepare(ctx context.Context, root string,
 	if err != nil {
 		return err
 	}
-	return downloadAndRetainSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, preparationChecksums{archives: archives, manifests: manifests}, options, environmentWith(environment, "GOWORK", work), inputs, retain)
+	return downloadAndRetainSources(ctx, work.members[0].root, sources, preparationChecksums{archives: archives, manifests: manifests}, options, environmentWith(environment, "GOWORK", work.path), inputs, retain)
 }
 
 func (workspace *preparationWorkspace) recorded(version module.Version) bool {
@@ -360,7 +361,7 @@ func (workspace *preparationWorkspace) resolveChecksums(ctx context.Context, mod
 	if err != nil {
 		return err
 	}
-	if err := downloadPreparedSources(ctx, filepath.Join(filepath.Dir(work), "member-0"), sources, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work), nil, nil); err != nil {
+	if err := downloadPreparedSources(ctx, work.members[0].root, sources, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work.path), nil, nil); err != nil {
 		return err
 	}
 	for index, source := range sources {

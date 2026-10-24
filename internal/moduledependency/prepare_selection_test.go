@@ -35,23 +35,20 @@ func TestPrepareSourcesWorkspaceSelectionBoundary(t *testing.T) {
 				work += "replace " + warmRequestedModule + " v1.1.0 => " + warmSourceModule + " v1.0.0\n"
 			case "exact-different":
 				work += "replace " + warmRequestedModule + " v1.1.0 => " + warmSourceModule + " v1.1.0\n"
-				wantBeforeList = 0
 			case "proof-budget":
 				for index := range 256 {
 					work += fmt.Sprintf("replace %s v1.1.%d => %s v1.0.0\n", warmRequestedModule, index, warmSourceModule)
 				}
-				wantBeforeList = 0
 			case "member-exact-same", "member-exact-different":
 				version := "v1.0.0"
 				if mode == "member-exact-different" {
-					version, wantBeforeList = "v1.1.0", 2
+					version = "v1.1.0"
 				}
 				writeFile(t, member, string(readFile(t, member))+"replace "+warmRequestedModule+" v1.1.0 => "+warmSourceModule+" "+version+"\n")
 			case "work-override":
 				writeFile(t, member, string(readFile(t, member))+"replace "+warmRequestedModule+" v1.1.0 => example.com/unused v1.0.0\n")
 			case "no-wildcard":
 				work = strings.ReplaceAll(work, "replace "+warmRequestedModule+" =>", "replace "+warmRequestedModule+" v1.0.0 =>")
-				wantBeforeList = 0
 			case "replacement-once":
 				work += "replace " + warmSourceModule + " => example.com/unused v1.0.0\n"
 			case "versioned-main-target":

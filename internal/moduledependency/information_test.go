@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,47 +219,78 @@ func TestPrepareSourcesRetainsModuleInformation(t *testing.T) {
 }
 
 func TestPrepareSourcesInformationExcludesWorkspaceLocalSources(t *testing.T) {
-	for _, mode := range []string{"workfile-local", "member-local", "mixed", "workspace-main"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
-			fixture := warmPreparation(t, true, false)
-			work := "go 1.26\nuse (\n ./app\n ./member\n)\n"
-			requested := []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}
-			switch mode {
-			case "workfile-local", "mixed":
-				work += "replace " + warmRequestedModule + " => ./local\n"
-				if mode == "mixed" {
-					const other = "example.com/other"
-					writeModule(t, filepath.Join(fixture.root, "other"), other)
-					manifest := filepath.Join(fixture.app, "go.mod")
-					writeFile(t, manifest, string(readFile(t, manifest))+"replace "+other+" => ../other\n")
-					work += "replace " + other + " => " + warmSourceModule + " v1.0.0\n"
-					requested = append(requested, module.Version{Path: other, Version: "v1.0.0"})
-				}
-			case "workspace-main":
-				manifest := filepath.Join(fixture.app, "go.mod")
-				writeFile(t, manifest, string(readFile(t, manifest))+"replace example.com/member => ../member\n")
-				requested = []module.Version{{Path: "example.com/member", Version: "v1.0.0"}}
-			}
-			writeFile(t, fixture.work, work)
-			command, environment, trace := tracePreparation(t, fixture.root, fixture.environment)
-			calls := 0
-			err := moduledependency.PrepareSources(t.Context(), locate(t, fixture.app), requested, moduledependency.Options{
-				Environment: environment, GoCommand: command,
-				RetainModuleInformation: func(_ context.Context, paths []string) error {
-					calls++
-					if mode != "mixed" || len(paths) != 1 || paths[0] != strings.TrimSuffix(fixture.downloaded.GoMod, ".mod")+".info" {
-						t.Fatalf("local source entered information inventory: %v", paths)
+	for _, mode := range []string{"workfile-local", "member-local", "workfile-exact-local", "member-exact-local", "workfile-different-local", "member-different-local", "local-proof-budget", "mixed", "workspace-main"} {
+		for _, manifests := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/manifests=%t", mode, manifests), func(t *testing.T) {
+				t.Parallel()
+				fixture := warmPreparation(t, true, false)
+				work := "go 1.26\nuse (\n ./app\n ./member\n)\n"
+				requested := []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}
+				switch mode {
+				case "workfile-local", "workfile-exact-local", "workfile-different-local", "local-proof-budget", "mixed":
+					old := warmRequestedModule
+					if mode == "workfile-exact-local" {
+						old += " v1.0.0"
+						manifest := filepath.Join(fixture.app, "go.mod")
+						writeFile(t, manifest, strings.Replace(string(readFile(t, manifest)), "replace "+warmRequestedModule+" =>", "replace "+old+" =>", 1))
 					}
-					return nil
-				},
-			}, func([]moduledependency.Module) error { return nil })
-			if err != nil || mode == "mixed" && calls != 3 || mode != "mixed" && calls != 0 {
-				t.Fatalf("workspace source kind changed preparation: %v, callbacks=%d", err, calls)
-			}
-			if mode != "mixed" && strings.Contains(string(readFile(t, trace)), "GOMODCACHE") {
-				t.Fatal("local-only preparation probed the module cache")
-			}
-		})
+					work += "replace " + old + " => ./local\n"
+					if mode == "workfile-different-local" {
+						work += "replace " + warmRequestedModule + " v1.1.0 => ./other-local\n"
+					}
+					if mode == "local-proof-budget" {
+						for index := range 256 {
+							work += fmt.Sprintf("replace %s v1.1.%d => ./other-local\n", warmRequestedModule, index)
+						}
+					}
+					if mode == "mixed" {
+						const other = "example.com/other"
+						writeModule(t, filepath.Join(fixture.root, "other"), other)
+						manifest := filepath.Join(fixture.app, "go.mod")
+						writeFile(t, manifest, string(readFile(t, manifest))+"replace "+other+" => ../other\n")
+						work += "replace " + other + " => " + warmSourceModule + " v1.0.0\n"
+						requested = append(requested, module.Version{Path: other, Version: "v1.0.0"})
+					}
+				case "member-different-local":
+					manifest := filepath.Join(fixture.app, "go.mod")
+					writeFile(t, manifest, string(readFile(t, manifest))+"replace "+warmRequestedModule+" v1.1.0 => ../other-local\n")
+				case "member-exact-local":
+					manifest := filepath.Join(fixture.app, "go.mod")
+					writeFile(t, manifest, strings.Replace(string(readFile(t, manifest)), "replace "+warmRequestedModule+" =>", "replace "+warmRequestedModule+" v1.0.0 =>", 1))
+				case "workspace-main":
+					manifest := filepath.Join(fixture.app, "go.mod")
+					writeFile(t, manifest, string(readFile(t, manifest))+"replace example.com/member => ../member\n")
+					requested = []module.Version{{Path: "example.com/member", Version: "v1.0.0"}}
+				}
+				writeFile(t, fixture.work, work)
+				command, environment, trace := tracePreparation(t, fixture.root, fixture.environment)
+				calls := 0
+				options := moduledependency.Options{
+					Environment: environment, GoCommand: command,
+					RetainModuleInformation: func(_ context.Context, paths []string) error {
+						calls++
+						if mode != "mixed" || len(paths) != 1 || paths[0] != strings.TrimSuffix(fixture.downloaded.GoMod, ".mod")+".info" {
+							t.Fatalf("local source entered information inventory: %v", paths)
+						}
+						return nil
+					},
+				}
+				if manifests {
+					options.RetainRootManifests = func(_ context.Context, roots []moduledependency.RootManifest) error {
+						if mode != "mixed" && len(roots) != 0 {
+							t.Fatal("local-only request captured cache manifests")
+						}
+						return nil
+					}
+				}
+				err := moduledependency.PrepareSources(t.Context(), locate(t, fixture.app), requested, options, func([]moduledependency.Module) error { return nil })
+				if err != nil || mode == "mixed" && calls != 3 || mode != "mixed" && calls != 0 {
+					t.Fatalf("workspace source kind changed preparation: %v, callbacks=%d", err, calls)
+				}
+				if mode != "mixed" && strings.Contains(string(readFile(t, trace)), "GOMODCACHE") {
+					t.Fatal("local-only preparation probed the module cache")
+				}
+			})
+		}
 	}
 }

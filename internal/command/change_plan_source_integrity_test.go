@@ -631,6 +631,15 @@ func TestBuiltCLIChangePlanPreservesWarmPreparedWorkspaceSource(t *testing.T) {
 	testBuiltCLIChangePlanCacheInput(t, buildSourceIntegrityCLI(t), "workspace-prepared-unchanged")
 }
 
+func TestBuiltCLIChangePlanPreparedWorkspaceSelectedGraph(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"source-identity-after-list", "source-manifest-identity-after-list", "unchanged"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, "selected-graph-workspace-prepared-"+mode)
+		})
+	}
+}
+
 func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {
@@ -698,6 +707,8 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 
 func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
+	selectedGraph := strings.Contains(mode, "selected-graph-")
+	mode = strings.ReplaceAll(mode, "selected-graph-", "")
 	coldGraph := strings.Contains(mode, "cold-graph-")
 	mode = strings.ReplaceAll(mode, "cold-graph-", "")
 	coldSource := strings.Contains(mode, "cold-source-")
@@ -766,7 +777,11 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 			if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+previewDependencyModule+"="+filepath.ToSlash(initialLocal)); err != nil {
 				t.Fatal(err)
 			}
-			workSource += "replace " + previewDependencyModule + " => " + previewDependencyModule + " v1.0.0\n"
+			old := previewDependencyModule
+			if selectedGraph {
+				old += " v1.0.0"
+			}
+			workSource += "replace " + old + " => " + previewDependencyModule + " v1.0.0\n"
 			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_WORKSPACE=1")
 		}
 		writeCommandFile(t, work, workSource)

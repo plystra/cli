@@ -304,12 +304,16 @@ func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {
 }
 
 func TestPrepareSourcesRetainsWorkspaceSourcesBeforeSelection(t *testing.T) {
-	for _, mode := range []string{"source", "extracted-manifest"} {
+	for _, mode := range []string{"source", "extracted-manifest", "selected-source", "selected-extracted-manifest"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			fixture := warmPreparation(t, true, false)
+			if strings.HasPrefix(mode, "selected-") {
+				work := strings.ReplaceAll(string(readFile(t, fixture.work)), "replace "+warmRequestedModule+" =>", "replace "+warmRequestedModule+" v1.0.0 =>")
+				writeFile(t, fixture.work, work)
+			}
 			path := filepath.Join(fixture.downloaded.Dir, "smtp", "plugin.yaml")
-			if mode == "extracted-manifest" {
+			if strings.HasSuffix(mode, "extracted-manifest") {
 				path = filepath.Join(fixture.downloaded.Dir, "go.mod")
 			}
 			if err := os.Chmod(filepath.Dir(path), 0o755); err != nil {

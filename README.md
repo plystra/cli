@@ -1026,8 +1026,22 @@ workspace mains and local sources introduce no cache bundle; a versioned target
 whose path also names a main remains a versioned source. The workspace's separate
 original archive and manifest checksum authorities govern this capture. Callback
 rejection, cancellation, or metadata drift prevents selection; later selection
-failure retains completed evidence through stage cleanup. General MVS upgrades
-and cold-source first reads remain outside this early boundary.
+failure retains completed evidence through stage cleanup.
+For remaining requested paths, preparation reuses checked cached manifests to
+infer the complete synthetic selection graph. Only the requested module paths
+receive selected information and source capture; transitive summaries still
+participate in pruning and MVS without introducing unrelated source trees.
+Inference uses the actual metadata-only roots, including their `go 1.18`
+declarations and rebased replacements, rather than the authored requirements,
+exclusions, or toolchain suggestions omitted from those roots. Complete proofs
+retain actual upgraded selections and explicit self-replacement provenance;
+incomplete proofs retain no provisional source choice. Original separate checksum
+authority and fixed-source fallback remain intact. Cold-source first reads and
+complete resolution readsets remain unfinished. Replacement partitions that
+remain entirely local introduce no cache probe, even if their directories differ.
+Graph inference locates the cache only when it actually needs a versioned
+manifest or source; exact local replacements and exhausted optional proofs do
+not force a cache probe for an entirely local graph.
 Preparation independently retains existing cache module-information (`.info`)
 files before each exact download, even without original checksums, an extracted
 tree, or a complete archive. Inferable workspace-effective requested versions
