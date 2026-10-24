@@ -2,23 +2,28 @@
 package implementationcreate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"go/format"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
+	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/projectlocate"
 	"golang.org/x/mod/module"
 )
@@ -48,6 +53,8 @@ type Options struct {
 	GoCommand             string
 	Environment           []string
 	DependencyOutputLimit int
+	// Validate replaces the complete candidate's default build-only check.
+	Validate applicationgenerate.Validator
 }
 
 // Result identifies one committed ordinary Go Implementation package.
@@ -83,8 +90,9 @@ func (r Result) SourcePath() string { return r.sourcePath }
 func (r Result) Constructor() constructorsymbol.Symbol { return r.constructor }
 
 // Create writes and validates one new ordinary Go package implementing a visible
-// canonical Interface or Resource. It does not copy the contract, edit configuration, or
-// create authored registration source.
+// canonical Interface or Resource, then regenerates and builds the complete
+// selected application in the same rollback boundary. It does not copy the
+// contract, edit configuration, or create authored registration source.
 func Create(ctx context.Context, options Options) (Result, error) {
 	return create(ctx, options, nil)
 }
@@ -95,6 +103,10 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrCreate)
 	}
+	if options.Environment == nil {
+		options.Environment = os.Environ()
+	}
+	options.Environment = append([]string(nil), options.Environment...)
 	identifier, err := interfaceid.Parse(options.ContractID)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w: %v", ErrCreate, ErrInvalidContract, err)
@@ -136,6 +148,34 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 		ParentMustNotExist: true,
 	}
 	if err := atomicfs.WriteFiles(project.Path(), []atomicfs.Write{write}, func(updatedRoot string) error {
+		files, err := os.OpenRoot(updatedRoot)
+		if err != nil {
+			return err
+		}
+		defer files.Close()
+		installed, err := files.Lstat(target.sourcePath)
+		if err != nil {
+			return err
+		}
+		checkSource := func() error {
+			before, beforeErr := files.Lstat(target.sourcePath)
+			file, openErr := files.Open(target.sourcePath)
+			if openErr != nil {
+				return atomicfs.NewConcurrentChangeError([]string{target.sourcePath}, atomicfs.ErrConcurrentChange)
+			}
+			opened, statErr := file.Stat()
+			data, readErr := io.ReadAll(io.LimitReader(file, int64(len(source))+1))
+			closeErr := file.Close()
+			after, afterErr := files.Lstat(target.sourcePath)
+			if beforeErr != nil || statErr != nil || readErr != nil || closeErr != nil || afterErr != nil || !before.Mode().IsRegular() || !opened.Mode().IsRegular() || !after.Mode().IsRegular() ||
+				!os.SameFile(installed, before) || !os.SameFile(installed, opened) || !os.SameFile(installed, after) || installed.Mode() != before.Mode() || installed.Mode() != opened.Mode() || installed.Mode() != after.Mode() || !bytes.Equal(data, source) {
+				return atomicfs.NewConcurrentChangeError([]string{target.sourcePath}, atomicfs.ErrConcurrentChange)
+			}
+			return nil
+		}
+		if err := checkSource(); err != nil {
+			return err
+		}
 		updatedProject, err := projectlocate.Find(updatedRoot)
 		if err != nil {
 			return fmt.Errorf("locate updated Project: %w", err)
@@ -167,9 +207,30 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 			}
 		}
 		if after != nil {
-			return after(updatedRoot, discovery)
+			if err := after(updatedRoot, discovery); err != nil {
+				return err
+			}
 		}
-		return nil
+		validate := func(ctx context.Context, root string) error {
+			var err error
+			if options.Validate != nil {
+				err = options.Validate(ctx, root)
+			} else {
+				err = gocommand.Run(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: options.Environment}, "build", "-mod=readonly", "./...")
+			}
+			if err != nil {
+				return err
+			}
+			return checkSource()
+		}
+		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+				Start: updatedRoot, GoCommand: options.GoCommand, Environment: options.Environment,
+				DependencyOutputLimit: options.DependencyOutputLimit, Validate: validate,
+				MutateModule: mutate, RejectUnexpected: true,
+			})
+			return err
+		})
 	}); err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrCreate, err)
 	}

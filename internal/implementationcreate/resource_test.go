@@ -31,6 +31,7 @@ type Resource interface {
 `)
 	writeProject(t, root, "example.com/app")
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/app\n\ngo 1.26\n\nrequire example.com/contracts v1.0.0\nreplace example.com/contracts => ../contracts\n")
+	prepareRuntime(t, root)
 	before, dependencyBefore := snapshotTree(t, root), snapshotTree(t, dependency)
 	result, err := implementationcreate.Create(t.Context(), implementationcreate.Options{
 		Start: root, ContractID: "storage.database/v1", Package: "./database", Environment: goEnvironment(),
@@ -42,9 +43,13 @@ type Resource interface {
 		t.Fatalf("Resource result = %#v", result)
 	}
 	after := snapshotTree(t, root)
-	delete(after, result.SourcePath())
-	if !equalSnapshot(before, after) || !equalSnapshot(dependencyBefore, snapshotTree(t, dependency)) {
-		t.Fatal("scaffolding changed existing Project or dependency files")
+	for name, original := range before {
+		if name != "go.mod" && name != "go.sum" && after[name] != original {
+			t.Fatalf("scaffolding changed unrelated authored file %s", name)
+		}
+	}
+	if !equalSnapshot(dependencyBefore, snapshotTree(t, dependency)) {
+		t.Fatal("scaffolding changed dependency files")
 	}
 	source := readFile(t, filepath.Join(root, filepath.FromSlash(result.SourcePath())))
 	for _, wanted := range []string{"//plystra:implements-resource storage.database/v1", "func New() (*Provider, error)", "return nil, errNotImplemented", "var _ contract.Resource = (*Provider)(nil)", "func (*Provider) Name() string", "func (*Provider) Snapshot() struct", "...contract.Alias"} {
@@ -66,7 +71,7 @@ func TestUnfinishedProvider(t *testing.T) {
  new(Provider).Name()
 }
 `)
-	command := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "./...")
+	command := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "./database", "-run", "^TestUnfinishedProvider$", "-count=1")
 	command.Dir, command.Env = root, goEnvironment()
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("generated ordinary provider did not compile or fail visibly: %v\n%s", err, output)

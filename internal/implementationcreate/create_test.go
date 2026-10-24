@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/plystra/cli/internal/implementationcreate"
+	"github.com/plystra/cli/internal/modulemutation"
+	"github.com/plystra/cli/internal/version"
 )
 
 func TestCreateScaffoldsOrdinaryImplementationOfDependencyInterface(t *testing.T) {
@@ -32,7 +34,7 @@ replace example.com/contracts => ../contracts
 	if err := os.MkdirAll(start, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	beforeGoMod := readFile(t, filepath.Join(root, "go.mod"))
+	prepareRuntime(t, root)
 	beforeDependency := snapshotTree(t, dependencyRoot)
 
 	result, err := implementationcreate.Create(context.Background(), implementationcreate.Options{
@@ -75,8 +77,8 @@ var _ contract.Interface = (*Service)(nil)
 	if got != want {
 		t.Fatalf("implementation.go = %q, want %q", got, want)
 	}
-	if got := readFile(t, filepath.Join(root, "go.mod")); got != beforeGoMod {
-		t.Fatalf("go.mod changed:\n%s", got)
+	if requirement, found, err := modulemutation.FindRequirement(root, "example.com/contracts"); err != nil || !found || requirement.Version() != "v1.2.3" || requirement.Indirect() {
+		t.Fatalf("contract dependency changed: %#v, %t, %v", requirement, found, err)
 	}
 	if after := snapshotTree(t, dependencyRoot); !equalSnapshot(after, beforeDependency) {
 		t.Fatalf("dependency Project changed:\nbefore: %#v\nafter: %#v", beforeDependency, after)
@@ -254,7 +256,15 @@ func newProject(t testing.TB, modulePath string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeProject(t, root, modulePath)
+	prepareRuntime(t, root)
 	return root
+}
+
+func prepareRuntime(t testing.TB, root string) {
+	t.Helper()
+	modulePath := filepath.Join(root, "go.mod")
+	writeFile(t, modulePath, readFile(t, modulePath)+"\nrequire github.com/plystra/kernel "+version.KernelVersion+"\n")
+	writeFile(t, filepath.Join(root, "go.sum"), readFile(t, filepath.Join("..", "..", "go.sum")))
 }
 
 func writeProject(t testing.TB, root, modulePath string) {

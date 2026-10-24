@@ -18,8 +18,12 @@ or Resource ID including /vN. The kind is inferred without a flag. The package
 path must begin with ./ and its target directory must not already exist.
 The scaffold imports the canonical contract and adds a conformance assertion.
 Resource constructors return an error and methods panic until implemented.
-No configuration, dependencies, lifecycle hooks, or activation are invented;
-the command creates no selected Resource instance or generated output.
+No configuration, lifecycle hooks, explicit choices, or Resource instances are
+invented. The complete selected application must resolve, regenerate, tidy, and
+pass go build -mod=readonly ./...; application tests and business methods are not
+executed. A new candidate may satisfy a required Interface automatically; an
+ambiguous final selection fails. Scaffold, module metadata, generated output,
+and private runtime baseline share rollback while preserving concurrent edits.
 Missing, ambiguous, or inaccessible contracts fail before mutation.
 `
 
@@ -45,6 +49,6 @@ func runImplement(arguments []string, stdout, stderr io.Writer, workingDirectory
 		writeCommandFailure(stderr, "scaffold contract implementation", err, commandRecoveryContext("", "", environment))
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "created unfinished %s scaffold %s for %s at %s; not activated\n", result.Kind(), result.Constructor(), result.ContractID(), result.SourcePath())
+	_, _ = fmt.Fprintf(stdout, "created unfinished %s scaffold %s for %s at %s; application regenerated and built\n", result.Kind(), result.Constructor(), result.ContractID(), result.SourcePath())
 	return 0
 }

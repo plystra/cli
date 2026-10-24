@@ -1083,15 +1083,24 @@ compile-time assertion. Resource scaffolds use a concrete `Provider`; `New`
 returns `errNotImplemented`, and every provider method panics with that error
 until authored. Resource scaffolds contain no guessed Config, dependencies, or
 lifecycle hooks, create no selected instance, and do not activate the provider.
-Neither kind copies the contract, writes configuration or registration, or
-creates generated output. Plystra rediscovers and type-checks the new contract
-before committing; any failure removes the complete scaffold.
+Neither kind copies the contract or writes configuration or registration.
+Plystra rediscovers and type-checks the new contract, resolves the complete
+selected application, regenerates, tidies module metadata, and runs
+`go build -mod=readonly ./...` before committing. Application tests, business
+constructors, and business methods are not executed. A new candidate can
+automatically satisfy an already-required Interface; adding an ambiguous second
+candidate fails unless an explicit compatible choice resolves it. Ambient
+configuration selectors apply to the entire transaction. Scaffold, module
+metadata, generated artifacts, and the private runtime baseline share rollback;
+concurrent edits are preserved. This does not install shared primitive-plan
+execution, exact installation, or `change apply`.
 
 Creation diagnostics distinguish invalid, missing, ambiguous, or inaccessible
 Interface and Resource IDs, unsafe Implementation package paths, and existing
 targets. Each failure emits one recovery command or replacement choice and
 leaves the Project unchanged. A successful scaffold is explicitly unfinished
-and inactive; author behavior before using it in a generation workflow.
+without claiming implemented business behavior; author its constructor and
+methods before invoking it.
 
 Plugin-target inference resolves an explicit target, the enclosing plugin, or
 the only local plugin without prompting. Only an explicit `--interactive`
@@ -1471,7 +1480,9 @@ cleanup, regenerates, and validates with the same selector. Resource
 inactive ordinary Resource provider scaffold. It does not create a named
 instance, select a provider, infer configuration, or provide runtime behavior:
 implement `New`, provider methods, configuration, dependencies, and lifecycle
-hooks as appropriate before generation. Instance creation remains unsupported.
+hooks as appropriate before runtime use. The command regenerates and builds the
+complete selected application within its scaffold rollback boundary. Instance
+creation remains unsupported.
 Installed `resource.provider.scaffold` reports the scaffold stages separately
 from provider selection and full Resource acceptance; generated and executed
 scaffold support does not establish `accepted: yes`. After manual declaration or binding edits, run `plystra generate`,

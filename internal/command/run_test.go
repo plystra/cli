@@ -213,7 +213,22 @@ provider-declaration source before mutation.
 `
 	wantInterfaceUsage       = "Usage:\n  plystra interface create <interface-name>\n"
 	wantInterfaceCreateUsage = "Usage:\n  plystra interface create <interface-name>\n\nCreates the initial v1 canonical Go package for one unversioned Interface name.\nThe name must contain two or more lower-case dot-separated segments. The command\ndoes not create optional metadata or edit application configuration.\nAn existing target reports its module-relative package path. A visible ID in\nanother package reports the owning Interface declaration and its exact span.\nChoose a different name; the existing source is never changed.\n"
-	wantImplementUsage       = "Usage:\n  plystra implement <contract> --package <project-relative-package>\n\nCreates an unfinished ordinary Go scaffold for one visible canonical Interface\nor Resource ID including /vN. The kind is inferred without a flag. The package\npath must begin with ./ and its target directory must not already exist.\nThe scaffold imports the canonical contract and adds a conformance assertion.\nResource constructors return an error and methods panic until implemented.\nNo configuration, dependencies, lifecycle hooks, or activation are invented;\nthe command creates no selected Resource instance or generated output.\nMissing, ambiguous, or inaccessible contracts fail before mutation.\n"
+	wantImplementUsage       = `Usage:
+  plystra implement <contract> --package <project-relative-package>
+
+Creates an unfinished ordinary Go scaffold for one visible canonical Interface
+or Resource ID including /vN. The kind is inferred without a flag. The package
+path must begin with ./ and its target directory must not already exist.
+The scaffold imports the canonical contract and adds a conformance assertion.
+Resource constructors return an error and methods panic until implemented.
+No configuration, lifecycle hooks, explicit choices, or Resource instances are
+invented. The complete selected application must resolve, regenerate, tidy, and
+pass go build -mod=readonly ./...; application tests and business methods are not
+executed. A new candidate may satisfy a required Interface automatically; an
+ambiguous final selection fails. Scaffold, module metadata, generated output,
+and private runtime baseline share rollback while preserving concurrent edits.
+Missing, ambiguous, or inaccessible contracts fail before mutation.
+`
 )
 
 var wantGenerateUsageWithSourcesCurrent = wantGenerateUsage + wantPolicyUsage + wantDiagnosticSourceUsage + wantProtobufIdentitySourceUsage + wantProtobufOperationSourceUsage + wantProtobufPointerSourceUsage + wantCapabilityManifestSourceUsage + wantGenerationActivationSourceUsage + wantGenerationContributionSourceUsage + wantConcurrentSourceUsage
