@@ -15,7 +15,10 @@ import (
 	"github.com/plystra/cli/internal/runtimebaseline"
 )
 
-type entry struct{ digest [sha256.Size]byte }
+type entry struct {
+	digest [sha256.Size]byte
+	info   os.FileInfo
+}
 
 // This baseline is captured after relocation, so staging-only Go path rewrites
 // cannot masquerade as requested application changes. Digests stay private.
@@ -62,7 +65,7 @@ func capture(ctx context.Context, directory string) (map[string]entry, error) {
 		if readErr != nil || closeErr != nil || statErr != nil || total > projectstage.MaximumTotalBytes || read != info.Size() || !os.SameFile(info, after) || info.Size() != after.Size() || !info.ModTime().Equal(after.ModTime()) {
 			return errors.Join(ErrPreview, readErr, closeErr, statErr)
 		}
-		var value entry
+		value := entry{info: info}
 		copy(value.digest[:], hash.Sum(nil))
 		result[name] = value
 		return nil
@@ -83,13 +86,39 @@ func differences(before, after map[string]entry, configuration string, forceConf
 		old, existed := before[name]
 		current, exists := after[name]
 		force := name == runtimebaseline.Path || name == configuration && forceConfiguration
-		if existed == exists && old == current && !force || !existed && !exists {
+		if existed == exists && old.digest == current.digest && !force || !existed && !exists {
 			continue
 		}
 		result = append(result, commandschema.ChangePlanPathInput{Path: name, Kind: pathKind(name), BeforeExists: existed, AfterExists: exists})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
 	return result
+}
+
+func readCapturedFile(ctx context.Context, root *os.Root, name string, expected entry) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	info, err := root.Lstat(name)
+	if err != nil || expected.info == nil || !info.Mode().IsRegular() || !os.SameFile(info, expected.info) || info.Mode() != expected.info.Mode() || info.Size() != expected.info.Size() || !info.ModTime().Equal(expected.info.ModTime()) {
+		return nil, ErrPreview
+	}
+	file, err := root.Open(name)
+	if err != nil {
+		return nil, ErrPreview
+	}
+	opened, statErr := file.Stat()
+	if statErr != nil || !os.SameFile(info, opened) {
+		file.Close()
+		return nil, ErrPreview
+	}
+	data, readErr := io.ReadAll(io.LimitReader(file, projectstage.MaximumFileBytes+1))
+	closeErr := file.Close()
+	after, afterErr := root.Lstat(name)
+	if ctx.Err() != nil || readErr != nil || closeErr != nil || afterErr != nil || int64(len(data)) != info.Size() || !os.SameFile(info, after) || info.Mode() != after.Mode() || info.Size() != after.Size() || !info.ModTime().Equal(after.ModTime()) || sha256.Sum256(data) != expected.digest {
+		return nil, errors.Join(ErrPreview, ctx.Err(), readErr, closeErr, afterErr)
+	}
+	return data, nil
 }
 
 func pathKind(name string) string {

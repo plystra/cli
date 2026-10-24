@@ -371,6 +371,9 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 }
 
 func buildScaffoldChangePlanPayload(request changerequest.Request, planned scaffoldplan.Result) (commandschema.ChangePlan, commandschema.Effects, error) {
+	if !planned.Capture().MatchesRequest(request) {
+		return commandschema.ChangePlan{}, commandschema.Effects{}, scaffoldplan.ErrPreview
+	}
 	inputs := planned.Inputs()
 	_, _, afterDigest, err := inputs.ConfigurationLayerDigests(planned.Updated())
 	if err != nil {

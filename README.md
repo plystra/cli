@@ -968,6 +968,17 @@ success, and the private tree is removed on success and failure. Plans report
 authored, module, generated, and private-baseline creation, replacement, and
 deletion paths without publishing private content digests. The private baseline
 is always a planned write, including equal bytes, to hide private equality.
+Successful source and dependency previews retain the complete normalized private
+request, resolved selector, original staging-input evidence, and exact file
+preimages and candidate postimages in memory after temporary-tree cleanup.
+Public write paths are projected from those captured images. Captured module
+and vendor output restores authored local replacement paths rather than temporary
+copy paths. The private request is checked before public encoding, so equal
+value-free request digests cannot substitute different submitted values.
+Capture formatting, including nested private wrapper fields, is redacted;
+JSON, text, and YAML serialization is rejected.
+This is private transaction evidence, not a complete semantic-input snapshot,
+an approval token, a mutation lock, or installation authority.
 Dependency removal/update preconditions use the original `go.mod`. Additions
 remain direct and updates preserve existing direct requirements. Generation and
 tidy preserve the jointly resolved target versions and reject conflicting

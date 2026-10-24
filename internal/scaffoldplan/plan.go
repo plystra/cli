@@ -43,7 +43,7 @@ type Result struct {
 	inputs         applicationresolve.SelectionInputs
 	updated        []byte
 	impact         configurationimpact.Impact
-	writes         []commandschema.ChangePlanPathInput
+	capture        Capture
 	reads          []commandschema.ChangePlanPathInput
 	effects        commandschema.Effects
 	model          string
@@ -58,8 +58,9 @@ func (r Result) Format(state fmt.State, _ rune)                  { _, _ = state.
 func (r Result) Inputs() applicationresolve.SelectionInputs      { return r.inputs }
 func (r Result) Updated() []byte                                 { return append([]byte(nil), r.updated...) }
 func (r Result) ConfigurationImpact() configurationimpact.Impact { return r.impact }
+func (r Result) Capture() Capture                                { return r.capture }
 func (r Result) WriteSet() []commandschema.ChangePlanPathInput {
-	return append([]commandschema.ChangePlanPathInput(nil), r.writes...)
+	return r.capture.writeSet()
 }
 func (r Result) ReadSet() []commandschema.ChangePlanPathInput {
 	return append([]commandschema.ChangePlanPathInput(nil), r.reads...)
@@ -116,6 +117,9 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		result.effects, err = commandschema.NewEffects(accounting)
 		if err != nil {
 			resultErr = errors.Join(resultErr, ErrPreview, err)
+		}
+		if resultErr != nil {
+			result.capture, result.model = Capture{}, ""
 		}
 	}()
 	effect := func(id string, class commandschema.EffectClass, reason string, verification []string) commandschema.Effect {
@@ -312,7 +316,6 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	if err != nil {
 		return result, errors.Join(ErrPreview, err)
 	}
-	result.writes = differences(baseline, final, result.inputs.ConfigurationSelection().Path(), result.forceWrite)
 	for _, name := range []string{"go.mod", "go.sum", generatedfiles.ManifestPath, generatedfiles.ApplicationManifestPath, runtimebaseline.Path} {
 		_, exists := baseline[name]
 		result.reads = append(result.reads, commandschema.ChangePlanPathInput{Path: name, Kind: pathKind(name), BeforeExists: exists})
@@ -326,6 +329,11 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		return result, errors.Join(ErrPreview, err)
 	}
 	result.model = provenance.ApplicationModelDigest()
+	result.capture, err = captureCandidate(ctx, stage, request, baseline, final, result.inputs.ConfigurationSelection(), result.forceWrite, result.model)
+	if err != nil {
+		result.model = ""
+		return result, errors.Join(ErrPreview, err)
+	}
 	if err := stage.Recheck(ctx); err != nil {
 		result.model = ""
 		return result, errors.Join(ErrPreview, err)
