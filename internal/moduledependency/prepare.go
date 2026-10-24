@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -135,8 +136,8 @@ func preparationEnvironment(options Options) []string {
 
 func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
 	if callback := options.RetainModuleInformation; callback != nil {
-		options.RetainModuleInformation = func(paths []string) error {
-			return errors.Join(callback(paths), inputs.recheck())
+		options.RetainModuleInformation = func(retainCtx context.Context, paths []string) error {
+			return errors.Join(callback(retainCtx, paths), inputs.recheck())
 		}
 	}
 	if len(sources) == 0 {
@@ -158,18 +159,20 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		if err := retainWarmPreparedSources(ctx, root, group, checksums, options, environment, inputs, retain); err != nil {
 			return err
 		}
+		retainMetadata, err := preparationManifestRetainer(ctx, root, []module.Version{sourceVersion(group[0])}, checksums.manifests, options, environment, inputs)
+		if err != nil {
+			return err
+		}
 		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment, func(acquired []Module) error {
 			return errors.Join(retain(acquired), ctx.Err(), inputs.recheck())
-		}, func() error {
-			return retainPreparationManifests(ctx, root, []module.Version{sourceVersion(group[0])}, checksums.manifests, options, environment, inputs)
-		}); err != nil {
+		}, retainMetadata); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error, retainMetadata func() error) (resultErr error) {
+func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error, retainMetadata func(context.Context) error) error {
 	queries := map[module.Version][]int{}
 	var arguments []string
 	var versions []module.Version
@@ -191,12 +194,19 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	if err := retainModuleInformation(ctx, information, options); err != nil {
 		return err
 	}
-	defer func() { resultErr = errors.Join(resultErr, retainModuleInformation(ctx, information, options)) }()
-	output, downloadErr := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
+	output, started, downloadErr := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
 	var retentionErr error
-	if retainMetadata != nil {
-		retentionErr = retainMetadata()
+	if started && !errors.Is(downloadErr, gocommand.ErrProcessUnsettled) {
+		// Capture only local evidence after the process has stopped. Cancellation
+		// must not discard consumed metadata or start new Go work during cleanup.
+		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if retainMetadata != nil {
+			retentionErr = retainMetadata(captureCtx)
+		}
+		retentionErr = errors.Join(retentionErr, retainModuleInformation(captureCtx, information, options), captureCtx.Err())
 	}
+	retentionErr = errors.Join(retentionErr, ctx.Err())
 	if downloadErr != nil {
 		return errors.Join(ErrModuleUnavailable, downloadErr, retentionErr)
 	}

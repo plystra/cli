@@ -9,9 +9,9 @@ import (
 	"golang.org/x/mod/module"
 )
 
-func retainModuleInformationOnce(inputs preparationInputs, retain func([]string) error) func([]string) error {
+func retainModuleInformationOnce(inputs preparationInputs, retain func(context.Context, []string) error) func(context.Context, []string) error {
 	retained := map[string]bool{}
-	return func(paths []string) (resultErr error) {
+	return func(ctx context.Context, paths []string) (resultErr error) {
 		// Keep independent path and file evidence when a caller installs only the
 		// information hook and there is no source-bundle recheck.
 		defer func() { resultErr = errors.Join(resultErr, inputs.recheck()) }()
@@ -27,6 +27,9 @@ func retainModuleInformationOnce(inputs preparationInputs, retain func([]string)
 			return nil
 		}
 		for _, path := range pending {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			parent, err := filepath.EvalSymlinks(filepath.Dir(path))
 			if err != nil {
 				return ErrConcurrentChange
@@ -42,7 +45,7 @@ func retainModuleInformationOnce(inputs preparationInputs, retain func([]string)
 			snapshot.parent, snapshot.parentInfo = parent, info
 			inputs[path] = snapshot
 		}
-		if err := retain(append([]string(nil), pending...)); err != nil {
+		if err := retain(ctx, append([]string(nil), pending...)); err != nil {
 			return err
 		}
 		for _, path := range pending {
@@ -105,5 +108,5 @@ func retainModuleInformation(ctx context.Context, paths []string, options Option
 	if len(present) == 0 {
 		return nil
 	}
-	return errors.Join(options.RetainModuleInformation(present), ctx.Err())
+	return errors.Join(options.RetainModuleInformation(ctx, present), ctx.Err())
 }

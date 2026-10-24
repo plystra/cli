@@ -1,6 +1,7 @@
 package moduledependency_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -134,7 +135,7 @@ func TestDiscoverRetainsEffectiveWorkspaceRootManifests(t *testing.T) {
 			trace := filepath.Join(root, "commands")
 			env = append(env, "PLYSTRA_MODULE_DEPENDENCY_HELPER=root-manifests", "PLYSTRA_MODULE_REAL_GO="+realGo, "PLYSTRA_MODULE_COMMAND_TRACE="+trace)
 			called := false
-			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 				called = true
 				if len(manifests) != len(test.want) {
 					t.Fatalf("wrong root capture: %v, want %v", manifests, test.want)
@@ -282,7 +283,7 @@ func TestDiscoverRetainsWorkspaceRootManifestChecksumAuthority(t *testing.T) {
 			escaped, _ := module.EscapePath(path)
 			manifestPath := filepath.Join(cache, "cache", "download", filepath.FromSlash(escaped), "@v", version+".mod")
 			rejected, called := errors.New("root capture rejected"), false
-			_, err = moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+			_, err = moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 				called = true
 				if wantChecksum == "" || len(manifests) != 1 || manifests[0].Path != manifestPath || manifests[0].Checksum != wantChecksum {
 					t.Fatalf("wrong workspace checksum authority: %v", manifests)

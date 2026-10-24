@@ -21,8 +21,8 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
 		RetainSelectedSources:   func(sources []moduledependency.Module) error { return retainSources(ctx, stage, sources) },
-		RetainModuleInformation: func(paths []string) error { return retainInformation(ctx, stage, paths) },
-		RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainInformation(ctx, stage, paths) },
+		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))
 			for index, manifest := range manifests {
 				inputs[index] = projectstage.MetadataInput{Path: manifest.Path, GoModChecksum: manifest.Checksum}
@@ -45,8 +45,8 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 		return err
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
-		RetainModuleInformation: func(paths []string) error { return retainInformation(ctx, stage, paths) },
-		RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainInformation(ctx, stage, paths) },
+		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))
 			for index, manifest := range manifests {
 				inputs[index] = projectstage.MetadataInput{Path: manifest.Path, GoModChecksum: manifest.Checksum}

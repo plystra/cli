@@ -79,7 +79,7 @@ func TestPrepareSourcesRetainsMaterializedManifest(t *testing.T) {
 				rejected := errors.New("materialized manifest rejected")
 				captures, completed := 0, 0
 				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command,
-					RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+					RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 						captures++
 						if len(manifests) != 1 || manifests[0].Path != fixture.downloaded.GoMod || manifests[0].Checksum != fixture.downloaded.GoModSum {
 							t.Fatalf("materialized manifest lost its original authority: %v", manifests)
@@ -216,7 +216,7 @@ func TestPrepareSourcesRechecksWarmManifestAfterAcquisition(t *testing.T) {
 				environment = append(environment, "PLYSTRA_MODULE_METADATA_PHASE=download", "PLYSTRA_MODULE_METADATA_PATH="+fixture.downloaded.GoMod, "PLYSTRA_MODULE_METADATA_MODE="+mode, "PLYSTRA_MODULE_METADATA_MARKER="+marker)
 				captures := 0
 				err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment, GoCommand: command,
-					RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+					RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 						captures++
 						if len(manifests) != 1 || manifests[0].Path != fixture.downloaded.GoMod || manifests[0].Checksum != fixture.downloaded.GoModSum {
 							t.Fatalf("warm manifest authority changed: %v", manifests)

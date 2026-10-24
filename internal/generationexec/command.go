@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"os/exec"
-	"time"
-)
 
-const processWaitDelay = 5 * time.Second
+	"github.com/plystra/cli/internal/processcommand"
+)
 
 type commandResult struct {
 	stdout         []byte
@@ -21,11 +20,6 @@ func runCommand(ctx context.Context, name string, arguments []string, directory 
 	stdout := newBoundedWriter(stdoutLimit)
 	stderr := newBoundedWriter(stderrLimit)
 	command := exec.CommandContext(ctx, name, arguments...)
-	configureProcess(command)
-	command.Cancel = func() error {
-		return terminateProcessTree(command)
-	}
-	command.WaitDelay = processWaitDelay
 	command.Dir = directory
 	command.Env = append([]string(nil), environment...)
 	if stdin != nil {
@@ -33,7 +27,7 @@ func runCommand(ctx context.Context, name string, arguments []string, directory 
 	}
 	command.Stdout = stdout
 	command.Stderr = stderr
-	err := command.Run()
+	_, err := processcommand.Run(command)
 	return commandResult{
 		stdout:         stdout.Bytes(),
 		stderr:         stderr.Bytes(),

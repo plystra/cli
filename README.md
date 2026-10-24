@@ -992,9 +992,17 @@ validation, or the next acquisition. Failed command output supplies no authority
 newly reported sums cannot authorize a previously unrecorded manifest. Repeated
 capture rechecks the original evidence without refreshing it. Download failure,
 retention rejection, callback cancellation, and original metadata drift remain
-joined, and retained evidence survives stage cleanup. A context already cancelled
-before this capture can still prevent retention; complete interrupted-acquisition
-readsets and capture before Go's first cold reads remain unfinished.
+joined, and retained evidence survives stage cleanup. After a started acquisition
+has terminated, manifest and information capture share one independent 30-second
+context that preserves operation values without inheriting cancellation. Cache
+paths are selected before acquisition; cleanup starts no new Go command. Both
+metadata callbacks use that supplied context, and budget exhaustion prevents
+later capture. Original cancellation or deadline, capture failures, and original
+metadata drift remain joined. Cancellation terminates the owned process tree;
+uncertain termination or incomplete output-pipe drainage instead reports failure
+and skips post-download capture. A parent's exit status cannot hide that
+uncertainty. Complete interrupted-acquisition readsets and capture before Go's
+first cold reads remain unfinished.
 Cache selection uses each synthetic preparation phase's directory and environment
 so an unused authored toolchain suggestion cannot redirect the probe.
 Before each exact acquisition, preparation also retains an eligible warm complete

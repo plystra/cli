@@ -129,7 +129,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		retained = append(retained, RootManifest{Path: name, Checksum: checksums[version]})
 	}
 	if len(retained) != 0 && options.RetainRootManifests != nil {
-		if err := options.RetainRootManifests(retained); err != nil {
+		if err := options.RetainRootManifests(ctx, retained); err != nil {
 			return err
 		}
 	}

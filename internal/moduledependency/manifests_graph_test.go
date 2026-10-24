@@ -287,7 +287,7 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 			rejected := errors.New("transitive manifest rejected")
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 				batches = append(batches, len(manifests))
 				commands, _ := os.ReadFile(trace)
 				if strings.Contains(string(commands), "list ") || strings.Contains(string(commands), "download ") {
@@ -316,7 +316,7 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 				options.RetainRootManifests = nil
 			}
 			if test.wantInformation != nil {
-				options.RetainModuleInformation = func(paths []string) error {
+				options.RetainModuleInformation = func(_ context.Context, paths []string) error {
 					commands, _ := os.ReadFile(trace)
 					early := !strings.Contains(string(commands), "list ") && !strings.Contains(string(commands), "download ")
 					if early {

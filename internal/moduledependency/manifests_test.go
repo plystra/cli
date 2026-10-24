@@ -2,14 +2,17 @@ package moduledependency_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/moduledependency"
@@ -98,7 +101,7 @@ func TestDiscoverRetainsEffectiveRootManifestsBeforeListing(t *testing.T) {
 			env = append(env, "PLYSTRA_MODULE_DEPENDENCY_HELPER=root-manifests", "PLYSTRA_MODULE_REAL_GO="+realGo, "PLYSTRA_MODULE_COMMAND_TRACE="+trace)
 			called := false
 			rejected := errors.New("root manifest rejected")
-			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], Offline: mode == "offline", RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], Offline: mode == "offline", RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 				called = true
 				if len(manifests) != 1 || manifests[0].Path != manifestPath || manifests[0].Checksum != expectedChecksum {
 					t.Fatalf("wrong effective root manifest: %v", manifests)
@@ -160,6 +163,26 @@ func runRootManifestsHelper() int {
 	}
 	command := exec.Command(os.Getenv("PLYSTRA_MODULE_REAL_GO"), os.Args[1:]...)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if path := os.Getenv("PLYSTRA_MODULE_ABANDON_DOWNLOAD"); path != "" && len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download" {
+		if err := command.Start(); err != nil {
+			return 26
+		}
+		if err := os.WriteFile(path, []byte(strconv.Itoa(command.Process.Pid)), 0o600); err != nil {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+			return 27
+		}
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(path + ".exit"); err == nil {
+				return 28
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return 29
+	}
 	mode := os.Getenv("PLYSTRA_MODULE_DOWNLOAD_OUTPUT")
 	var downloaded bytes.Buffer
 	if mode != "" && len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download" {
@@ -377,7 +400,7 @@ func testRootManifestRetentionAcrossMVSAndCleanup(t *testing.T, workspace bool) 
 		}
 	})
 	var retained []moduledependency.RootManifest
-	index, err := moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{Environment: stage.Environment(), RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+	index, err := moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{Environment: stage.Environment(), RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 		retained = append(retained, manifests...)
 		var inputs []projectstage.MetadataInput
 		for _, manifest := range manifests {

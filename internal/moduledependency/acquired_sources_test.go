@@ -122,7 +122,7 @@ func TestDiscoverRetainsAcquiredSourcesBeforeValidation(t *testing.T) {
 				information := map[string]bool{}
 				options := moduledependency.Options{
 					Environment: environment, GoCommand: command, RequireSourceChecksums: true, Offline: mode == "offline",
-					RetainModuleInformation: func(paths []string) error {
+					RetainModuleInformation: func(_ context.Context, paths []string) error {
 						var files []projectstage.MetadataInput
 						for _, path := range paths {
 							if information[path] {

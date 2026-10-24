@@ -66,14 +66,17 @@ type Options struct {
 	// downloads or workspace selection. Exact preparation also captures present
 	// manifests after each download attempt under the original checksum authority.
 	// It does not initiate downloads or refresh previously retained evidence.
-	RetainRootManifests func([]RootManifest) error
+	// Callbacks must use the supplied context, including bounded post-download
+	// retention after the operation context has been cancelled.
+	RetainRootManifests func(context.Context, []RootManifest) error
 	// RetainModuleInformation captures present cache .info files before and
 	// after exact preparation downloads, including failed downloads, and
 	// before workspace selection for inferable requested effective versions.
 	// A completely inferred graph also retains selected effective information
 	// before graph listing, independently of manifest Go-version shortcuts.
 	// These files have no independent Go checksum authority.
-	RetainModuleInformation func([]string) error
+	// Callbacks honor the supplied context, including post-cancellation retention.
+	RetainModuleInformation func(context.Context, []string) error
 	// RetainSelectedSources captures warm and newly acquired source bundles before
 	// extracted-manifest validation. A completely inferred selected graph is
 	// captured before listing; otherwise actual Go-selected sources are captured
@@ -642,8 +645,8 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 	}
 	options.OutputLimit = outputLimit
 	if callback := options.RetainModuleInformation; callback != nil {
-		options.RetainModuleInformation = func(paths []string) error {
-			return errors.Join(callback(paths), ctx.Err(), inputs.recheck())
+		options.RetainModuleInformation = func(retainCtx context.Context, paths []string) error {
+			return errors.Join(callback(retainCtx, paths), retainCtx.Err(), inputs.recheck())
 		}
 	}
 	retain := func(sources []Module) error {

@@ -74,7 +74,7 @@ func TestPrepareSourcesRetainsModuleInformation(t *testing.T) {
 				rejected := errors.New("information retention rejected")
 				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{
 					Environment: environment, GoCommand: command, Offline: mode == "offline",
-					RetainModuleInformation: func(paths []string) error {
+					RetainModuleInformation: func(_ context.Context, paths []string) error {
 						calls++
 						if len(paths) != 1 || paths[0] != path {
 							t.Fatalf("wrong effective information file: %v", paths)
@@ -245,7 +245,7 @@ func TestPrepareSourcesInformationExcludesWorkspaceLocalSources(t *testing.T) {
 			calls := 0
 			err := moduledependency.PrepareSources(t.Context(), locate(t, fixture.app), requested, moduledependency.Options{
 				Environment: environment, GoCommand: command,
-				RetainModuleInformation: func(paths []string) error {
+				RetainModuleInformation: func(_ context.Context, paths []string) error {
 					calls++
 					if mode != "mixed" || len(paths) != 1 || paths[0] != strings.TrimSuffix(fixture.downloaded.GoMod, ".mod")+".info" {
 						t.Fatalf("local source entered information inventory: %v", paths)

@@ -33,8 +33,8 @@ type manifestGraph struct {
 	excluded          map[module.Version]bool
 	cache             string
 	toolchain         string
-	retain            func([]RootManifest) error
-	retainInformation func([]string) error
+	retain            func(context.Context, []RootManifest) error
+	retainInformation func(context.Context, []string) error
 	retainSources     func([]Module) error
 	archives          map[module.Version]string
 	retained          map[string]bool
@@ -407,7 +407,7 @@ func (graph *manifestGraph) retainEffectiveBatch(ctx context.Context, versions [
 	}
 	if len(manifests) != 0 {
 		if graph.retain != nil {
-			if err := graph.retain(manifests); err != nil {
+			if err := graph.retain(ctx, manifests); err != nil {
 				return err
 			}
 		}

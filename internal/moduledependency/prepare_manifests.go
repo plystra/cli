@@ -64,19 +64,29 @@ func (workspace *preparationWorkspace) retainPreparationMetadata(ctx context.Con
 }
 
 func retainPreparationManifests(ctx context.Context, root string, versions []module.Version, checksums map[module.Version]string, options Options, environment []string, inputs preparationInputs) error {
-	if options.RetainRootManifests == nil || len(versions) == 0 || len(checksums) == 0 {
-		return inputs.recheck()
-	}
-	cache, err := preparationModuleCache(ctx, root, options, environment)
+	retain, err := preparationManifestRetainer(ctx, root, versions, checksums, options, environment, inputs)
 	if err != nil {
 		return err
 	}
-	graph := manifestGraph{
-		inputs:    inputs,
-		checksums: checksums, cache: cache,
-		retain: options.RetainRootManifests, retained: map[string]bool{},
+	return retain(ctx)
+}
+
+func preparationManifestRetainer(ctx context.Context, root string, versions []module.Version, checksums map[module.Version]string, options Options, environment []string, inputs preparationInputs) (func(context.Context) error, error) {
+	if options.RetainRootManifests == nil || len(versions) == 0 || len(checksums) == 0 {
+		return func(ctx context.Context) error { return errors.Join(ctx.Err(), inputs.recheck()) }, nil
 	}
-	return errors.Join(graph.retainEffectiveBatch(ctx, versions), ctx.Err(), inputs.recheck())
+	cache, err := preparationModuleCache(ctx, root, options, environment)
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) error {
+		graph := manifestGraph{
+			inputs:    inputs,
+			checksums: checksums, cache: cache,
+			retain: options.RetainRootManifests, retained: map[string]bool{},
+		}
+		return errors.Join(graph.retainEffectiveBatch(ctx, versions), ctx.Err(), inputs.recheck())
+	}, nil
 }
 
 func preparationModuleCache(ctx context.Context, root string, options Options, environment []string) (string, error) {

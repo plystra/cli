@@ -68,7 +68,7 @@ func TestPrepareSourcesRetainsWarmRequestedManifestOnFailure(t *testing.T) {
 			command, env, trace := tracePreparation(t, root, stage.Environment())
 			calls := 0
 			err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{{Path: requested, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command,
-				RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+				RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 					calls++
 					if len(manifests) != 1 || manifests[0].Path != path || manifests[0].Checksum != checksum {
 						t.Fatalf("wrong prepared manifest authority: %v", manifests)
@@ -193,7 +193,7 @@ func TestPrepareSourcesManifestCaptureBoundaries(t *testing.T) {
 			rejected := errors.New("manifest retention rejected")
 			calls := 0
 			err = moduledependency.PrepareSources(ctx, locate(t, app), requested, moduledependency.Options{Environment: env, GoCommand: command, Offline: mode == "offline",
-				RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+				RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 					calls++
 					postDownload := strings.Contains(string(readFile(t, trace)), "download ")
 					if len(manifests) != 1 || manifests[0].Path != path || manifests[0].Checksum != checksum || postDownload != (calls == 2 || mode == "missing-manifest") {
@@ -331,7 +331,7 @@ func TestPrepareSourcesWorkspaceManifestAuthority(t *testing.T) {
 			calls := 0
 			rejected := errors.New("manifest checksum rejected")
 			err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command,
-				RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+				RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
 					calls++
 					commands := string(readFile(t, trace))
 					postDownload := calls == 2 || mode == "query-skip"

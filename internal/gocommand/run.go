@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/plystra/cli/internal/modulelocate"
+	"github.com/plystra/cli/internal/processcommand"
 	"golang.org/x/mod/modfile"
 )
 
@@ -27,8 +28,9 @@ var commandOutputURL = regexp.MustCompile(`(?i)\b(?:https?|file)://[^\s]+`)
 
 // ErrRun reports an unsuccessful Go tool invocation.
 var (
-	ErrRun            = errors.New("go command failed")
-	ErrOutputTooLarge = errors.New("go command output exceeds limit")
+	ErrRun              = errors.New("go command failed")
+	ErrOutputTooLarge   = errors.New("go command output exceeds limit")
+	ErrProcessUnsettled = processcommand.ErrUnsettled
 )
 
 // Options controls one Go tool invocation.
@@ -54,14 +56,11 @@ func RunObserved(ctx context.Context, options Options, arguments ...string) (boo
 	var output combinedBuffer
 	process.Stdout = &output
 	process.Stderr = &output
-	if err := process.Start(); err != nil {
-		return false, formatRunError(ctx, arguments, output.Bytes(), err, options.Directory)
-	}
-	err := process.Wait()
+	started, err := processcommand.Run(process)
 	if err == nil {
 		return true, nil
 	}
-	return true, formatRunError(ctx, arguments, output.Bytes(), err, options.Directory)
+	return started, formatRunError(ctx, arguments, output.Bytes(), err, options.Directory)
 }
 
 type combinedBuffer struct {
@@ -82,18 +81,22 @@ func (b *combinedBuffer) Bytes() []byte {
 }
 
 func formatRunError(ctx context.Context, arguments []string, output []byte, err error, directory string) error {
+	var cleanupErr error
+	if errors.Is(err, ErrProcessUnsettled) || errors.Is(err, exec.ErrWaitDelay) {
+		cleanupErr = ErrProcessUnsettled
+	}
 	operation := "go " + strings.Join(arguments, " ")
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return fmt.Errorf("%s: %w", operation, ctxErr)
+		return fmt.Errorf("%s: %w", operation, errors.Join(ctxErr, cleanupErr))
 	}
 	message := SanitizeOutput(string(output), directory)
 	if message == "" {
-		return fmt.Errorf("%w: %s", ErrRun, operation)
+		return errors.Join(fmt.Errorf("%w: %s", ErrRun, operation), cleanupErr)
 	}
 	if len(message) > maximumErrorOutput {
 		message = message[:maximumErrorOutput] + "..."
 	}
-	return fmt.Errorf("%w: %s: %s", ErrRun, operation, message)
+	return errors.Join(fmt.Errorf("%w: %s: %s", ErrRun, operation, message), cleanupErr)
 }
 
 // Output invokes the Go tool and returns bounded stdout. Failure diagnostics
@@ -115,27 +118,27 @@ func OutputObserved(ctx context.Context, options Options, arguments ...string) (
 	process := commandContext(ctx, options, arguments...)
 	process.Stdout = stdout
 	process.Stderr = stderr
-	err := process.Start()
-	started := err == nil
-	if started {
-		err = process.Wait()
+	started, err := processcommand.Run(process)
+	var cleanupErr error
+	if errors.Is(err, ErrProcessUnsettled) || errors.Is(err, exec.ErrWaitDelay) {
+		cleanupErr = ErrProcessUnsettled
 	}
 	operation := "go " + strings.Join(arguments, " ")
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, started, fmt.Errorf("%s: %w", operation, ctxErr)
+		return nil, started, fmt.Errorf("%s: %w", operation, errors.Join(ctxErr, cleanupErr))
 	}
 	if stdout.exceeded {
-		return nil, started, fmt.Errorf("%w: %s: limit %d bytes", ErrOutputTooLarge, operation, limit)
+		return nil, started, errors.Join(fmt.Errorf("%w: %s: limit %d bytes", ErrOutputTooLarge, operation, limit), cleanupErr)
 	}
 	if err != nil {
 		message := SanitizeOutput(string(bytes.Join([][]byte{stdout.bytes(), stderr.bytes()}, []byte("\n"))), options.Directory)
 		if message == "" {
-			return nil, started, fmt.Errorf("%w: %s", ErrRun, operation)
+			return nil, started, errors.Join(fmt.Errorf("%w: %s", ErrRun, operation), cleanupErr)
 		}
 		if stderr.exceeded || len(message) > maximumErrorOutput {
 			message = message[:min(len(message), maximumErrorOutput)] + "..."
 		}
-		return nil, started, fmt.Errorf("%w: %s: %s", ErrRun, operation, message)
+		return nil, started, errors.Join(fmt.Errorf("%w: %s: %s", ErrRun, operation, message), cleanupErr)
 	}
 	return stdout.bytes(), started, nil
 }

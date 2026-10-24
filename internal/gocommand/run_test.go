@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,25 @@ import (
 
 func TestMain(main *testing.M) {
 	switch os.Getenv("PLYSTRA_GO_COMMAND_HELPER") {
+	case "parent":
+		child := exec.Command(os.Args[0], "env")
+		child.Env = append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=wait", "READY_FILE="+os.Getenv("CHILD_READY_FILE"))
+		child.Stdout, child.Stderr = os.Stdout, os.Stderr
+		if err := child.Start(); err != nil {
+			os.Exit(5)
+		}
+		if err := os.WriteFile(os.Getenv("READY_FILE"), []byte(strconv.Itoa(child.Process.Pid)), 0o600); err != nil {
+			_ = child.Process.Kill()
+			_ = child.Wait()
+			os.Exit(5)
+		}
+		if status := os.Getenv("PARENT_EXIT"); status != "" {
+			_, _ = fmt.Fprint(os.Stdout, strings.Repeat("x", 1025))
+			code, _ := strconv.Atoi(status)
+			os.Exit(code)
+		}
+		_ = child.Wait()
+		os.Exit(0)
 	case "success":
 		if len(os.Args) != 3 || os.Args[1] != "test" || os.Args[2] != "./..." {
 			_, _ = fmt.Fprintln(os.Stderr, "unexpected helper arguments")
@@ -420,6 +442,155 @@ func TestOutputObservedRetainsStartupOnCancellation(t *testing.T) {
 	got := <-finished
 	if !got.started || !errors.Is(got.err, context.Canceled) || got.output != nil {
 		t.Fatalf("cancelled OutputObserved = %q, %t, %v", got.output, got.started, got.err)
+	}
+}
+
+func TestOutputObservedTerminatesDescendant(t *testing.T) {
+	for _, operation := range []string{"run", "output"} {
+		modes := []string{"cancel", "deadline"}
+		if runtime.GOOS == "windows" {
+			modes = append(modes, "failed-termination")
+		}
+		for _, mode := range modes {
+			t.Run(operation+"/"+mode, func(t *testing.T) {
+				if mode == "failed-termination" {
+					t.Setenv("PATH", t.TempDir())
+				}
+				testDescendantTermination(t, operation, mode)
+			})
+		}
+	}
+}
+
+func testDescendantTermination(t *testing.T, operation, mode string) {
+	t.Helper()
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	ready, childReady := filepath.Join(directory, "parent"), filepath.Join(directory, "child")
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	if mode == "deadline" {
+		cancel()
+		ctx, cancel = context.WithTimeout(t.Context(), 3*time.Second)
+	}
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() {
+		options := Options{Command: command, Directory: directory,
+			Environment: append(os.Environ(), "PLYSTRA_GO_COMMAND_HELPER=parent", "READY_FILE="+ready, "CHILD_READY_FILE="+childReady),
+		}
+		var started bool
+		var err error
+		if operation == "run" {
+			started, err = RunObserved(ctx, options, "env")
+		} else {
+			_, started, err = OutputObserved(ctx, options, "env")
+		}
+		if !started {
+			err = fmt.Errorf("parent was not started: %w", err)
+		}
+		finished <- err
+	}()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	var child *os.Process
+	for child == nil {
+		data, readErr := os.ReadFile(ready)
+		if _, childErr := os.Stat(childReady); readErr == nil && childErr == nil {
+			pid, err := strconv.Atoi(string(data))
+			if err != nil || pid <= 0 {
+				t.Fatalf("invalid owned child identity: %q, %v", data, err)
+			}
+			child, err = os.FindProcess(pid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = child.Kill(); _ = child.Release() }()
+			break
+		}
+		select {
+		case err := <-finished:
+			t.Fatalf("parent exited before child readiness: %v", err)
+		case <-ctx.Done():
+			t.Fatal("owned child did not start")
+		case <-ticker.C:
+		}
+	}
+	if mode != "deadline" {
+		cancel()
+	}
+	limit := 2 * time.Second
+	want := context.Canceled
+	if mode == "deadline" {
+		limit, want = 5*time.Second, context.DeadlineExceeded
+	} else if mode == "failed-termination" {
+		limit = 12 * time.Second
+	}
+	select {
+	case err := <-finished:
+		if !errors.Is(err, want) || errors.Is(err, ErrProcessUnsettled) != (mode == "failed-termination") {
+			t.Fatalf("descendant cancellation lost: %v", err)
+		}
+	case <-time.After(limit):
+		_ = child.Kill()
+		<-finished
+		t.Fatal("cancelled command retained a live descendant and inherited pipes")
+	}
+}
+
+func TestObservedCommandsRejectUnsettledDescendants(t *testing.T) {
+	for _, status := range []string{"0", "7"} {
+		for _, operation := range []string{"run", "output", "output-limit"} {
+			t.Run(status+"/"+operation, func(t *testing.T) {
+				t.Parallel()
+				command, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				directory := t.TempDir()
+				ready := filepath.Join(directory, "parent")
+				options := Options{Command: command, Directory: directory, Environment: append(os.Environ(),
+					"PLYSTRA_GO_COMMAND_HELPER=parent", "READY_FILE="+ready,
+					"CHILD_READY_FILE="+filepath.Join(directory, "child"), "PARENT_EXIT="+status)}
+				t.Cleanup(func() {
+					data, err := os.ReadFile(ready)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					pid, err := strconv.Atoi(string(data))
+					if err != nil || pid <= 0 {
+						t.Errorf("invalid owned child identity: %q", data)
+						return
+					}
+					child, err := os.FindProcess(pid)
+					if err == nil {
+						_ = child.Kill()
+						_ = child.Release()
+					}
+				})
+				ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+				defer cancel()
+				var started bool
+				if operation == "run" {
+					started, err = RunObserved(ctx, options, "env")
+				} else {
+					if operation == "output-limit" {
+						options.OutputLimit = 1024
+					}
+					var output []byte
+					output, started, err = OutputObserved(ctx, options, "env")
+					if output != nil {
+						t.Fatal("unsettled command returned successful output")
+					}
+				}
+				if !started || !errors.Is(err, ErrProcessUnsettled) || operation == "output-limit" && !errors.Is(err, ErrOutputTooLarge) {
+					t.Fatalf("unsettled descendant lost: started=%t, %v", started, err)
+				}
+			})
+		}
 	}
 }
 
