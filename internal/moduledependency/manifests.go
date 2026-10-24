@@ -121,7 +121,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		}
 		retained = append(retained, RootManifest{Path: name, Checksum: checksums[version]})
 	}
-	if len(retained) != 0 {
+	if len(retained) != 0 && options.RetainRootManifests != nil {
 		if err := options.RetainRootManifests(retained); err != nil {
 			return err
 		}
@@ -133,7 +133,8 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		root: root, mains: manifests, workspace: workspace, inputs: inputs,
 		checksums: checksums, excluded: excluded, cache: selected.GOMODCACHE,
 		toolchain: selected.GOVERSION, retain: options.RetainRootManifests,
-		retained: map[string]bool{}, parsed: map[string]*modfile.File{},
+		retainInformation: options.RetainModuleInformation,
+		retained:          map[string]bool{}, parsed: map[string]*modfile.File{},
 	}
 	for _, manifest := range retained {
 		graph.retained[manifest.Path] = true

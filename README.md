@@ -886,14 +886,25 @@ selected information set are each retained in a batch before metadata reads.
 Selected module-information reads
 retain only their own manifests, without traversing their requirements or
 applying graph-only syntax and module-identity validation. Known Go-version
-shortcuts and concurrent replacement aliases can suppress these reads.
+shortcuts and concurrent replacement aliases can suppress these manifest reads.
 An unavailable or unrecorded graph summary stops subsequent selection-dependent
-inference; already-demanded branches remain captured. Unknown toolchains,
-uncertain initialization, and order-dependent replacement information reads add
-no inferred inputs. This is a retained subset, not complete resolution capture:
-cold and unrecorded manifests and ambiguous information reads remain outside
-the early boundary. Traversal permits at most 65,536 graph states and 512 MiB of
+inference; already-demanded branches remain captured. Unknown toolchains and
+uncertain initialization add no selection inference. Order-dependent replacement
+summary reads add no inferred manifests. This is a retained subset, not complete
+resolution capture: cold and unrecorded manifests and ambiguous summary reads
+remain outside the early boundary. Traversal permits at most 65,536 graph states and 512 MiB of
 manifest bytes, in addition to the shared staging bounds.
+When those checked summaries establish the complete selected graph, previews
+also retain present cache `.info` files for its distinct versioned effective
+identities before listing. Go-version shortcuts, replacement aliases, and
+missing selected-manifest checksums do not suppress these information reads.
+Local replacements and versionless workspace mains introduce no cache input;
+a versioned replacement target still does, even when its path names a workspace
+main. Unselected historical versions and unused replacements remain excluded.
+The queried filenames provide raw private evidence without parsing their JSON
+or claiming checksum authority. Missing files may materialize normally; an
+uncertain graph introduces no provisional information set. Cold reads, proxy
+metadata, and earlier authored-query normalization remain outside this boundary.
 Source and dependency previews additionally retain versioned module source
 trees after module selection and before declaration discovery or candidate
 builds. This includes ordinary and transitive modules, versioned replacements,

@@ -357,7 +357,8 @@ func main() {
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download"
  requestedList := mode == "information-identity-after-list"
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList
+ requestedGraph := mode == "information-identity-after-graph"
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -408,15 +409,20 @@ func main() {
   }
   afterList = afterList && matched
  }
- if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list" || requestedList) && afterList || (mode == "manifest-after-download" || requestedDownload) && afterDownload) {
-  if (requestedDownload || requestedList) && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
+ if requestedGraph {
+  matched := false
+  for _, argument := range os.Args[1:] { if argument == "all" { matched = true } }
+  afterList = afterList && matched
+ }
+ if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list" || requestedList || requestedGraph) && afterList || (mode == "manifest-after-download" || requestedDownload) && afterDownload) {
+  if (requestedDownload || requestedList || requestedGraph) && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
   _, pathErr := os.Stat(path)
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) && pathErr == nil {
    data, readErr := os.ReadFile(path); check(readErr)
    info, statErr := os.Stat(path); check(statErr)
-   if mode == "manifest-identity-after-list" || requestedDownload || requestedList {
+   if mode == "manifest-identity-after-list" || requestedDownload || requestedList || requestedGraph {
     if !os.SameFile(info, info) { os.Exit(10) }
     backup = path + ".prior"
     check(os.Rename(path, backup))
@@ -630,6 +636,15 @@ func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRejectsChangedGraphInformation(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"information-identity-after-graph", "workspace-information-identity-after-graph"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
@@ -677,6 +692,9 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	workspaceRoot, initialLocal := "", ""
 	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
 		workspaceRoot = t.TempDir()
+		if workspaceMode == "information-identity-after-graph" {
+			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_WORKSPACE=1")
+		}
 		work := filepath.Join(workspaceRoot, "go.work")
 		workSource := "go 1.26\nuse " + fmt.Sprintf("%q\n", filepath.ToSlash(root))
 		if prepared {
@@ -736,7 +754,7 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	}
 	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
 	command.Dir, command.Env = root, environment
-	if transitive || prepared {
+	if transitive || prepared || mode == "information-identity-after-graph" {
 		command.Dir = filepath.Join(root, "reports")
 	}
 	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
@@ -751,8 +769,9 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	if data, err := os.ReadFile(marker); err != nil || string(data) != "manifest changed after Go output\n" {
 		t.Fatalf("compiled CLI did not exercise cache-input race: %v", err)
 	}
-	if !errors.As(err, &exited) || exited.ExitCode() != 3 || stderr.Len() != 0 || json.Unmarshal(output, &result) != nil || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
-		t.Fatalf("compiled CLI accepted cache-input drift: %v\n%s\n%s", err, output, &stderr)
+	decodeErr := json.Unmarshal(output, &result)
+	if !errors.As(err, &exited) || exited.ExitCode() != 3 || stderr.Len() != 0 || decodeErr != nil || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
+		t.Fatalf("compiled CLI accepted cache-input drift: error=%v, decode=%v, status=%q, plan-present=%t, stderr-bytes=%d", err, decodeErr, result.Status, result.Payload.PlanDigest != "", stderr.Len())
 	}
 	for _, private := range []string{cache, root, workspaceRoot, initialLocal, "changed after verified Go output"} {
 		if private == "" {

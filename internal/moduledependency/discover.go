@@ -68,6 +68,8 @@ type Options struct {
 	// RetainModuleInformation captures present cache .info files before and
 	// after exact preparation downloads, including failed downloads, and
 	// before workspace selection for inferable requested effective versions.
+	// A completely inferred graph also retains selected effective information
+	// before graph listing, independently of manifest Go-version shortcuts.
 	// These files have no independent Go checksum authority.
 	RetainModuleInformation func([]string) error
 }
@@ -240,7 +242,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if err != nil {
 		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 	}
-	if options.RetainRootManifests != nil {
+	if options.RetainRootManifests != nil || options.RetainModuleInformation != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
 				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)

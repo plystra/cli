@@ -1,6 +1,7 @@
 package moduledependency_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -56,7 +57,29 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 		rawRequirement                  bool
 		direct                          bool
 		memberReplacements              []string
+		wantInformation                 []module.Version
+		informationOnly                 bool
+		informationMode                 string
+		memberPath                      string
 	}{
+		{name: "information-known-go", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1, b1}, wantInformation: []module.Version{a1, b1}},
+		{name: "information-legacy", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.16", b1), node(b1, "1.17", c1)}, want: []module.Version{a1, b1, c1}, wantInformation: []module.Version{a1, b1, c1}},
+		{name: "information-workspace", workspace: true, roots: []module.Version{a1, d1}, modules: []graphModule{node(a1, "1.17", b1), node(d1, "1.17", b2)}, want: []module.Version{a1, d1, b2}, wantInformation: []module.Version{a1, d1, b2}},
+		{name: "information-workspace-upgrade", workspace: true, roots: []module.Version{a1, d1}, memberRoots: []module.Version{a3}, modules: []graphModule{node(d1, "1.17", a2), node(a3, "1.17", c1)}, want: []module.Version{a1, d1, a3, c1}, wantInformation: []module.Version{a3, d1, c1}},
+		{name: "information-readonly-rejection", fail: true, roots: []module.Version{a1, b1}, modules: []graphModule{node(b1, "1.17", a2), node(a2, "1.17", z1)}, want: []module.Version{a1, b1, a2}, wantInformation: []module.Version{a2, b1}},
+		{name: "information-replacement", roots: []module.Version{a1}, replacements: []string{a1.Path + " => " + c1.String(), a1.String() + " => " + d1.String()}, modules: []graphModule{node(d1, "1.17", b1)}, want: []module.Version{d1, b1}, wantInformation: []module.Version{d1, b1}},
+		{name: "information-versioned-main-target", workspace: true, memberPath: b1.Path, roots: []module.Version{a1}, replacements: []string{a1.String() + " => " + b1.String()}, want: []module.Version{b1}, wantInformation: []module.Version{b1}},
+		{name: "information-local", roots: []module.Version{a1}, replacements: []string{a1.String() + " => ../local"}, local: "module " + a1.Path + "\ngo 1.17\nrequire " + b1.Path + " " + b1.Version + "\n", want: []module.Version{b1}, wantInformation: []module.Version{b1}},
+		{name: "information-concurrent-replacements", roots: []module.Version{a1}, replacements: []string{x1.String() + " => " + b1.String(), b1.String() + " => " + c1.String()}, modules: []graphModule{node(a1, "1.17", x1, b1)}, want: []module.Version{a1, b1}, wantInformation: []module.Version{a1, b1, c1}},
+		{name: "information-shared-target", roots: []module.Version{a1}, replacements: []string{x1.String() + " => " + b1.String(), z1.String() + " => " + b1.String()}, modules: []graphModule{node(a1, "1.17", x1, z1)}, want: []module.Version{a1, b1}, wantInformation: []module.Version{a1, b1}},
+		{name: "information-unrecorded-selected-manifest", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, unrecorded: []module.Version{b1}, want: []module.Version{a1}, wantInformation: []module.Version{a1, b1}},
+		{name: "information-cold-frontier", roots: []module.Version{a1}, cold: []module.Version{a1}, wantInformation: []module.Version{}},
+		{name: "information-unrecorded-frontier", fail: true, roots: []module.Version{a1}, unrecorded: []module.Version{a1}, wantInformation: []module.Version{}},
+		{name: "information-only-callback", informationOnly: true, roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, wantInformation: []module.Version{a1, b1}},
+		{name: "information-missing", informationMode: "missing", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1, b1}, wantInformation: []module.Version{a1}},
+		{name: "information-rejected", fail: true, informationMode: "reject", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1}, wantInformation: []module.Version{a1, b1}},
+		{name: "information-cancelled", fail: true, informationMode: "cancel", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1}, wantInformation: []module.Version{a1, b1}},
+		{name: "information-changed-sums", fail: true, informationMode: "go.sum", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1)}, want: []module.Version{a1}, wantInformation: []module.Version{a1, b1}},
 		{name: "pruned-info-only", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1), node(b1, "1.17", c1)}, want: []module.Version{a1, b1}, poison: []module.Version{c1}},
 		{name: "legacy-info-only", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.17", b1), node(b1, "1.16", c1)}, want: []module.Version{a1, b1}, poison: []module.Version{c1}},
 		{name: "legacy-root", roots: []module.Version{a1}, modules: []graphModule{node(a1, "1.16", b1), node(b1, "1.17", c1)}, want: []module.Version{a1, b1, c1}},
@@ -187,7 +210,11 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 				writeFile(t, filepath.Join(root, "local", "go.mod"), test.local)
 			}
 			if test.workspace {
-				memberManifest := manifest("example.com/member", test.memberRoots)
+				memberPath := test.memberPath
+				if memberPath == "" {
+					memberPath = "example.com/member"
+				}
+				memberManifest := manifest(memberPath, test.memberRoots)
 				for _, replacement := range test.memberReplacements {
 					memberManifest += "replace " + strings.ReplaceAll(replacement, "@", " ") + "\n"
 				}
@@ -216,6 +243,11 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if test.informationMode == "missing" {
+				if err := os.Remove(strings.TrimSuffix(facts[b1].GoMod, ".mod") + ".info"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: app, Environment: env})
 			if err != nil {
 				t.Fatal(err)
@@ -236,7 +268,9 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 			var retained []string
 			var batches []int
 			rejected := errors.New("transitive manifest rejected")
-			index, err := moduledependency.Discover(t.Context(), locate(t, start), moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(manifests []moduledependency.RootManifest) error {
 				batches = append(batches, len(manifests))
 				commands, _ := os.ReadFile(trace)
 				if strings.Contains(string(commands), "list ") || strings.Contains(string(commands), "download ") {
@@ -258,7 +292,43 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 					writeFile(t, path, string(readFile(t, path))+"\n")
 				}
 				return nil
-			}})
+			}}
+			var information []string
+			informationCalls := 0
+			if test.informationOnly {
+				options.RetainRootManifests = nil
+			}
+			if test.wantInformation != nil {
+				options.RetainModuleInformation = func(paths []string) error {
+					commands, _ := os.ReadFile(trace)
+					early := !strings.Contains(string(commands), "list ") && !strings.Contains(string(commands), "download ")
+					if early {
+						informationCalls++
+					}
+					var metadata []projectstage.MetadataInput
+					for _, path := range paths {
+						if early {
+							information = append(information, path)
+						}
+						metadata = append(metadata, projectstage.MetadataInput{Path: path})
+					}
+					if err := stage.RetainMetadata(ctx, metadata); err != nil {
+						return err
+					}
+					switch test.informationMode {
+					case "reject":
+						return rejected
+					case "cancel":
+						cancel()
+					case "go.sum":
+						path := filepath.Join(stage.Root(), "go.sum")
+						writeFile(t, path, string(readFile(t, path))+"\n")
+						return rejected
+					}
+					return nil
+				}
+			}
+			index, err := moduledependency.Discover(ctx, locate(t, start), options)
 			if (err != nil) != test.fail {
 				t.Fatalf("unexpected Go listing result: %v", err)
 			}
@@ -279,6 +349,24 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 				if !errors.Is(err, wantError) || strings.Contains(string(readFile(t, trace)), "list ") {
 					t.Fatalf("failed transitive capture reached Go listing: %v", err)
 				}
+			}
+			if test.informationMode == "reject" || test.informationMode == "cancel" || test.informationMode == "go.sum" {
+				wantError := rejected
+				if test.informationMode == "cancel" {
+					wantError = context.Canceled
+				}
+				if !errors.Is(err, wantError) || test.informationMode == "go.sum" && !errors.Is(err, moduledependency.ErrConcurrentChange) || strings.Contains(string(readFile(t, trace)), "list ") {
+					t.Fatalf("failed information capture reached Go: %v", err)
+				}
+			}
+			var wantInformation []string
+			for _, mod := range test.wantInformation {
+				wantInformation = append(wantInformation, strings.TrimSuffix(facts[mod].GoMod, ".mod")+".info")
+			}
+			sort.Strings(wantInformation)
+			sort.Strings(information)
+			if !slices.Equal(information, wantInformation) || len(information) != 0 && informationCalls != 1 {
+				t.Fatalf("wrong selected information batch: got %v, want %v, callbacks=%d", information, wantInformation, informationCalls)
 			}
 			var want []string
 			for _, mod := range test.want {
@@ -304,6 +392,38 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 			writeFile(t, facts[unused].GoMod, "another unrelated manifest\n")
 			if err := inputs.Recheck(t.Context()); err != nil {
 				t.Fatal("unrelated manifest invalidated retained graph evidence")
+			}
+			if test.wantInformation != nil {
+				writeFile(t, strings.TrimSuffix(facts[unused].GoMod, ".mod")+".info", "unrelated information")
+				if err := inputs.Recheck(t.Context()); err != nil {
+					t.Fatal("unselected information invalidated retained evidence")
+				}
+				if len(information) != 0 {
+					path := information[0]
+					data := readFile(t, path)
+					info, err := os.Stat(path)
+					if err != nil || !os.SameFile(info, info) {
+						t.Fatal("cannot initialize information identity")
+					}
+					if err := os.Rename(path, path+".prior"); err != nil {
+						t.Fatal(err)
+					}
+					writeFile(t, path, string(data))
+					if err := os.Chmod(path, info.Mode()); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+						t.Fatal(err)
+					}
+					replacement, err := os.Stat(path)
+					if err != nil || os.SameFile(info, replacement) {
+						t.Fatal("information identity fixture failed")
+					}
+					if err := inputs.Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+						t.Fatalf("information identity survived cleanup: %v", err)
+					}
+				}
+				return
 			}
 			for _, mod := range test.want {
 				if slices.Contains(test.roots, mod) {

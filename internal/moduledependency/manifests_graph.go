@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -24,19 +25,20 @@ const (
 )
 
 type manifestGraph struct {
-	root       string
-	mains      []*modfile.File
-	workspace  *preparationWorkspace
-	inputs     preparationInputs
-	checksums  map[module.Version]string
-	excluded   map[module.Version]bool
-	cache      string
-	toolchain  string
-	retain     func([]RootManifest) error
-	retained   map[string]bool
-	parsed     map[string]*modfile.File
-	goVersions map[module.Version]bool
-	bytes      int64
+	root              string
+	mains             []*modfile.File
+	workspace         *preparationWorkspace
+	inputs            preparationInputs
+	checksums         map[module.Version]string
+	excluded          map[module.Version]bool
+	cache             string
+	toolchain         string
+	retain            func([]RootManifest) error
+	retainInformation func([]string) error
+	retained          map[string]bool
+	parsed            map[string]*modfile.File
+	goVersions        map[module.Version]bool
+	bytes             int64
 }
 
 func (graph *manifestGraph) capture(ctx context.Context) error {
@@ -185,11 +187,20 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 		}
 	}
 	if complete {
+		var selectedModules []module.Version
+		for path, selectedVersion := range selected {
+			if !mainPaths[path] {
+				selectedModules = append(selectedModules, module.Version{Path: path, Version: selectedVersion})
+			}
+		}
+		module.Sort(selectedModules)
+		if err := graph.retainSelectedInformation(ctx, selectedModules); err != nil {
+			return err
+		}
 		var candidates []module.Version
 		possibleVersions := map[module.Version]bool{}
-		for path := range selected {
-			mod := module.Version{Path: path, Version: selected[path]}
-			if mainPaths[path] || graph.goVersions[mod] {
+		for _, mod := range selectedModules {
+			if graph.goVersions[mod] {
 				continue
 			}
 			effective, err := graph.effectiveVersion(mod)
@@ -355,14 +366,43 @@ func (graph *manifestGraph) retainEffectiveBatch(ctx context.Context, versions [
 		manifests = append(manifests, RootManifest{Path: path, Checksum: graph.checksums[effective]})
 	}
 	if len(manifests) != 0 {
-		if err := graph.retain(manifests); err != nil {
-			return err
+		if graph.retain != nil {
+			if err := graph.retain(manifests); err != nil {
+				return err
+			}
 		}
 		for _, manifest := range manifests {
 			graph.retained[manifest.Path] = true
 		}
 	}
 	return graph.inputs.recheck()
+}
+
+func (graph *manifestGraph) retainSelectedInformation(ctx context.Context, mods []module.Version) error {
+	if graph.retainInformation == nil {
+		return nil
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, mod := range mods {
+		effective, err := graph.effectiveVersion(mod)
+		if err != nil {
+			return err
+		}
+		if effective.Version == "" {
+			continue
+		}
+		path, err := graph.manifestPath(effective)
+		if err != nil {
+			return err
+		}
+		path = strings.TrimSuffix(path, ".mod") + ".info"
+		if !seen[path] {
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	return errors.Join(retainModuleInformation(ctx, paths, Options{RetainModuleInformation: graph.retainInformation}), graph.inputs.recheck())
 }
 
 func (graph *manifestGraph) read(ctx context.Context, mod module.Version, infoOnly bool) (*modfile.File, bool, error) {
