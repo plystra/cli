@@ -181,7 +181,7 @@ func TestRunChangePlanConfigurationBatchChecksNoOpsAndRejectsInvalidFinalStates(
 	), false, "--env", "production")
 }
 
-func TestRunChangePlanConfigurationBatchRejectsMixedKindsWithoutDiscovery(t *testing.T) {
+func TestRunChangePlanConfigurationDependencyBatchRejectsMissingProject(t *testing.T) {
 	configuration := configurationPlanRequest(t, "database.primary", "value", "set", json.RawMessage(`"PRIVATE_NEW"`))
 	for _, other := range []string{
 		`{"kind":"interface_root","action":"present","root":"require","interface":"email.send/v1"},{"kind":"dependency","action":"remove","module":"example.com/unused"}`,
@@ -199,7 +199,7 @@ func TestRunChangePlanConfigurationBatchRejectsMixedKindsWithoutDiscovery(t *tes
 				Payload json.RawMessage
 				Effects struct{ Planned []json.RawMessage }
 			}
-			if err := json.Unmarshal([]byte(stdout), &result); err != nil || exit != 2 || result.Status != "unsupported" || stderr != "" || strings.Contains(stdout, "PRIVATE_") || len(result.Payload) != 0 && string(result.Payload) != "null" || len(result.Effects.Planned) != 0 {
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil || exit != 3 || result.Status != "validation_failed" || stderr != "" || strings.Contains(stdout, "PRIVATE_") || len(result.Payload) != 0 && string(result.Payload) != "null" || len(result.Effects.Planned) != 0 {
 				t.Fatalf("mixed request did not fail closed: %d\n%s\n%s", exit, stdout, stderr)
 			}
 			if !reflect.DeepEqual(before, commandTree(t, root)) {

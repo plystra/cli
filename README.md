@@ -849,8 +849,8 @@ parsed for relocation have individual 1 MiB limits; non-main dependency
 manifests remain uninterpreted source inputs.
 Included symbolic and nonregular entries, source-nested temporary parents, and
 alternate `-modfile` or `-overlay` inputs fail closed. This is filesystem
-isolation, not a sandbox for trusted native code. Public scaffold previews use
-this capture; dependency previews and change apply remain uninstalled.
+isolation, not a sandbox for trusted native code. Public source and dependency
+previews use this capture; change apply remains uninstalled.
 
 The internal `changerequest` package parses `plystra.change/v1` intent for
 Interface and Implementation creation, dependencies, configuration, Interface
@@ -862,7 +862,8 @@ operations, 64 JSON levels, 65,536 value nodes, 4,096 decoded bytes per string o
 key, and 1,024 bytes per Implementation package path. Duplicate keys and
 conflicting targets fail without exposing submitted configuration values.
 The installed public `plystra change plan` slice accepts batches of
-`interface_create`, `implementation_create`, `interface_root` present/absent,
+`interface_create`, `implementation_create`, `dependency` add/remove/update,
+`interface_root` present/absent,
 `implementation_selection` set/remove, `resource_selection` set/remove,
 and `configuration` set/remove operations, with up to 1,024 requested
 operations in total. All selections and fields share the final ownership graph
@@ -949,10 +950,10 @@ the new provider; first assignment or an unknown old provider proves no such
 cleanup. Resource removal never makes fields on that removed instance editable.
 Every multi-operation selection batch requires a valid complete final state,
 including Resource-only batches without field edits. Singleton root and selection
-requests retain their bounded missing-value decisions. Dependency operations
-remain unsupported.
+requests retain their bounded missing-value decisions.
 
-Source previews materialize every requested Interface and Implementation before
+Source and dependency previews jointly resolve module targets and materialize
+every requested Interface and Implementation before
 ordinary discovery validates the complete candidate. They support same-request
 contract imports, selections, roots, and typed configuration edits. The selected
 model is generated, tidied, and checked with `go build -mod=readonly ./...` in an
@@ -965,6 +966,16 @@ success, and the private tree is removed on success and failure. Plans report
 authored, module, generated, and private-baseline creation, replacement, and
 deletion paths without publishing private content digests. The private baseline
 is always a planned write, including equal bytes, to hide private equality.
+Dependency removal/update preconditions use the original `go.mod`. Additions
+remain direct and updates preserve existing direct requirements. Generation and
+tidy preserve the jointly resolved target versions and reject conflicting
+runtime requirements. Captured old declarations establish obsolete owners and
+Resource parameters; unknown old declarations prove neither automatic ownership
+nor obsolete parameter removal. Required-field
+impact compares old and final schemas even when the constructor symbol is
+unchanged. Old configuration digests use old schemas, so a schema change cannot
+reinterpret private old fields as public identity. Every dependency batch must
+validate completely; no partial missing-value decisions are returned.
 Public plans bound requested and derived operations separately at 1,024 each;
 automatic cleanup does not consume the request allowance.
 An already-satisfied removal retains its normalized operation but reports an
@@ -991,8 +1002,7 @@ An invalid previous state is never offered as a provider-retention alternative.
 Typed lower-layer validation and every unrelated final obligation still apply.
 Missing binding candidates, invalid explicit bindings, non-enumerable required fields,
 and unrelated validation failures still fail validation. `plystra use` also
-rejects the invalid final configuration. Dependency operations return a
-structured unsupported result; `change apply`,
+rejects the invalid final configuration. `change apply`,
 primitive-command lowering, and `--dry-run` remain unavailable. These previews
 are always `non_exact` and cannot authorize apply. Their public read/write and
 snapshot digests are typed semantic identities, not exact file preimages:
