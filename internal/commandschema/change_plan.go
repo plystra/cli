@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"strings"
 
 	"github.com/plystra/cli/internal/configurationimpact"
+	"github.com/plystra/cli/internal/interfaceid"
 	"github.com/plystra/cli/internal/modulepath"
 )
 
@@ -49,6 +51,10 @@ type ChangePlanPathInput struct {
 type ChangePlanOperationInput struct {
 	Kind        string
 	Action      string
+	Name        string
+	Semantics   string
+	Contract    string
+	Package     string
 	Interface   string
 	Root        string
 	Constructor string
@@ -123,6 +129,10 @@ type changePlanPathDocument struct {
 type changePlanOperationDocument struct {
 	Kind        string `json:"kind"`
 	Action      string `json:"action"`
+	Name        string `json:"name,omitempty"`
+	Semantics   string `json:"semantics,omitempty"`
+	Contract    string `json:"contract,omitempty"`
+	Package     string `json:"package,omitempty"`
 	Interface   string `json:"interface,omitempty"`
 	Root        string `json:"root,omitempty"`
 	Constructor string `json:"constructor,omitempty"`
@@ -334,6 +344,28 @@ func validOperation(value ChangePlanOperationInput) bool {
 	if value.Kind == "" || value.Action == "" || len(value.Kind) > 128 || len(value.Action) > 128 || strings.ContainsRune(value.Kind, '\x00') || strings.ContainsRune(value.Action, '\x00') {
 		return false
 	}
+	if value.Kind == "interface_create" {
+		id, err := interfaceid.Parse(value.Name)
+		if err != nil || id.Major() != 1 || id.String() != value.Name || value.Action != "create" || value.Semantics != "query" && value.Semantics != "command" || value.Contract != "" || value.Package != "" || value.Derived {
+			return false
+		}
+	} else if value.Name != "" || value.Semantics != "" {
+		return false
+	}
+	if value.Kind == "implementation_create" {
+		id, err := interfaceid.Parse(value.Contract)
+		relative := strings.TrimPrefix(value.Package, "./")
+		if err != nil || id.String() != value.Contract || value.Action != "create" || !strings.HasPrefix(value.Package, "./") || len(value.Package) > 1024 || relative == "." || !fs.ValidPath(relative) || !validPlanRelativePath(relative) || value.Derived {
+			return false
+		}
+	} else if value.Contract != "" || value.Package != "" {
+		return false
+	}
+	if value.Kind == "interface_create" || value.Kind == "implementation_create" {
+		if value.Interface != "" || value.Root != "" || value.Constructor != "" || value.Instance != "" || value.Provider != "" || value.Owner != "" || value.Path != "" {
+			return false
+		}
+	}
 	if value.Kind == "configuration" && !value.Derived {
 		if value.Action != "set" && value.Action != "remove" || value.Owner == "" || value.Path == "" || value.Interface != "" || value.Constructor != "" || value.Instance != "" || value.Provider != "" {
 			return false
@@ -346,7 +378,7 @@ func validOperation(value ChangePlanOperationInput) bool {
 	} else if value.Root != "" {
 		return false
 	}
-	for _, field := range []string{value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path} {
+	for _, field := range []string{value.Name, value.Semantics, value.Contract, value.Package, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path} {
 		if len(field) > 4096 || strings.ContainsRune(field, '\x00') {
 			return false
 		}
@@ -416,7 +448,7 @@ func sortChangePlan(p *ChangePlan) {
 }
 
 func operationKey(value ChangePlanOperationInput) string {
-	return strings.Join([]string{value.Kind, value.Action, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path, fmt.Sprint(value.Derived)}, "\x00")
+	return strings.Join([]string{value.Kind, value.Action, value.Name, value.Semantics, value.Contract, value.Package, value.Interface, value.Root, value.Constructor, value.Instance, value.Provider, value.Owner, value.Path, fmt.Sprint(value.Derived)}, "\x00")
 }
 
 func snapshotDocument(value ChangePlanSnapshotInput) changePlanSnapshotDocument {
@@ -436,7 +468,7 @@ func pathDocuments(values []ChangePlanPathInput, writes bool) []changePlanPathDo
 func operationDocuments(values []ChangePlanOperationInput) []changePlanOperationDocument {
 	result := make([]changePlanOperationDocument, len(values))
 	for index, value := range values {
-		result[index] = changePlanOperationDocument{Kind: value.Kind, Action: value.Action, Interface: value.Interface, Root: value.Root, Constructor: value.Constructor, Instance: value.Instance, Provider: value.Provider, Owner: value.Owner, Path: value.Path, Derived: value.Derived}
+		result[index] = changePlanOperationDocument{Kind: value.Kind, Action: value.Action, Name: value.Name, Semantics: value.Semantics, Contract: value.Contract, Package: value.Package, Interface: value.Interface, Root: value.Root, Constructor: value.Constructor, Instance: value.Instance, Provider: value.Provider, Owner: value.Owner, Path: value.Path, Derived: value.Derived}
 	}
 	return result
 }
