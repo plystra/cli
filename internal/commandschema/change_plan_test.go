@@ -29,7 +29,7 @@ func TestChangePlanPreservesVerificationArgumentOrder(t *testing.T) {
 			ModulePath: "example.com/acme/app", ConfigurationMode: "default", ConfigurationPath: "plystra.yaml",
 			RootDigest: changePlanDigest, SelectedDigest: changePlanDigest,
 		},
-		ReadSet: []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest}},
+		ReadSet: []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeExists: true, BeforeDigest: changePlanDigest}},
 		Operations: []commandschema.ChangePlanOperationInput{
 			{Kind: "interface_root", Action: "present", Interface: "email.send/v1", Root: "require"},
 		},
@@ -133,7 +133,7 @@ func TestChangePlanAndEffectBindLiteralVerificationSelectors(t *testing.T) {
 					ConfigurationPath: test.target, Environment: test.environment,
 					RootDigest: changePlanDigest, SelectedDigest: changePlanDigest,
 				},
-				ReadSet:             []commandschema.ChangePlanPathInput{{Path: test.target, Kind: "configuration", BeforeDigest: changePlanDigest}},
+				ReadSet:             []commandschema.ChangePlanPathInput{{Path: test.target, Kind: "configuration", BeforeExists: true, BeforeDigest: changePlanDigest}},
 				Operations:          []commandschema.ChangePlanOperationInput{{Kind: "interface_root", Action: "present", Interface: "email.send/v1", Root: "require"}},
 				ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: mode, Path: test.target, Environment: test.environment},
 				ConfigurationImpact: impact, Effects: effects, FinalModelDigest: changePlanDigest, Completeness: "non_exact",
@@ -189,7 +189,7 @@ func TestChangePlanBoundsRequestedAndDerivedOperationsSeparately(t *testing.T) {
 					ModulePath: "example.com/acme/app", ConfigurationMode: "default", ConfigurationPath: "plystra.yaml",
 					RootDigest: changePlanDigest, SelectedDigest: changePlanDigest,
 				},
-				ReadSet:    []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest}},
+				ReadSet:    []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeExists: true, BeforeDigest: changePlanDigest}},
 				Operations: operations, ConfigurationScope: commandschema.ChangePlanConfigurationScopeInput{Mode: "default", Path: "plystra.yaml"},
 				ConfigurationImpact: impact, Effects: effects, FinalModelDigest: changePlanDigest,
 				Verification: []string{"plystra", "check"}, Completeness: "non_exact",
@@ -221,10 +221,10 @@ func TestChangePlanCanonicalizesIdentityAndKeepsAllImpactArrays(t *testing.T) {
 			RootDigest: changePlanDigest, SelectedDigest: changePlanDigest,
 		},
 		ReadSet: []commandschema.ChangePlanPathInput{
-			{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest},
+			{Path: "plystra.yaml", Kind: "configuration", BeforeExists: true, BeforeDigest: changePlanDigest},
 		},
 		WriteSet: []commandschema.ChangePlanPathInput{
-			{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest, AfterDigest: changePlanDigest},
+			{Path: "plystra.yaml", Kind: "configuration", BeforeExists: true, AfterExists: true, BeforeDigest: changePlanDigest, AfterDigest: changePlanDigest},
 		},
 		Operations: []commandschema.ChangePlanOperationInput{
 			{Kind: "implementation_selection", Action: "set", Interface: "email.send/v1", Constructor: "example.com/email/smtp.New"},
@@ -292,7 +292,7 @@ func TestChangePlanCanonicalizesIdentityAndKeepsAllImpactArrays(t *testing.T) {
 	if _, err := commandschema.NewChangePlan(input); err == nil {
 		t.Fatal("empty read set was accepted")
 	}
-	input.ReadSet = []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest}}
+	input.ReadSet = []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeExists: true, BeforeDigest: changePlanDigest}}
 	input.Operations = []commandschema.ChangePlanOperationInput{{Kind: "interface_root", Action: "present", Interface: "email.send/v1", Root: "require"}}
 	require, err := commandschema.NewChangePlan(input)
 	if err != nil {
@@ -346,8 +346,8 @@ func TestChangePlanRejectsInvalidNewWritePaths(t *testing.T) {
 			ModulePath: "example.com/acme/app", ConfigurationMode: "default", ConfigurationPath: "plystra.yaml",
 			RootDigest: changePlanDigest, SelectedDigest: changePlanDigest,
 		},
-		ReadSet:             []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest}},
-		WriteSet:            []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", AfterDigest: changePlanDigest}},
+		ReadSet:             []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeExists: true, BeforeDigest: changePlanDigest}},
+		WriteSet:            []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", AfterExists: true, AfterDigest: changePlanDigest}},
 		Operations:          []commandschema.ChangePlanOperationInput{{Kind: "implementation_selection", Action: "set", Interface: "email.send/v1", Constructor: "example.com/email/smtp.New"}},
 		ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: "default", Path: "plystra.yaml"},
 		ConfigurationImpact: impact, Effects: effects, FinalModelDigest: changePlanDigest,
@@ -355,13 +355,13 @@ func TestChangePlanRejectsInvalidNewWritePaths(t *testing.T) {
 	}
 	for _, path := range []string{"../escape", "C:/absolute", ""} {
 		input := base
-		input.WriteSet = []commandschema.ChangePlanPathInput{{Path: path, Kind: "configuration", AfterDigest: changePlanDigest}}
+		input.WriteSet = []commandschema.ChangePlanPathInput{{Path: path, Kind: "configuration", AfterExists: true, AfterDigest: changePlanDigest}}
 		if _, err := commandschema.NewChangePlan(input); err == nil {
 			t.Fatalf("path %q was accepted for a new write", path)
 		}
 	}
 	input := base
-	input.WriteSet = []commandschema.ChangePlanPathInput{{Path: "new.yaml", AfterDigest: changePlanDigest}}
+	input.WriteSet = []commandschema.ChangePlanPathInput{{Path: "new.yaml", AfterExists: true, AfterDigest: changePlanDigest}}
 	if _, err := commandschema.NewChangePlan(input); err == nil {
 		t.Fatal("empty write kind was accepted for a new write")
 	}

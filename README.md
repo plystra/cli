@@ -982,6 +982,13 @@ primitive-command lowering, and `--dry-run` remain unavailable. These previews
 are always `non_exact` and cannot authorize apply. Their public read/write and
 snapshot digests are typed semantic identities, not exact file preimages:
 private runtime values and Secret targets do not enter the public plan digest.
+Path entries carry explicit `before_exists`; write entries also carry explicit
+`after_exists`, so creation and deletion have distinct representations. Public
+digests are optional independently of existence: a present private file can
+omit its digest without claiming absence. Digest omission alone never proves
+an exact content preimage; present states without digests require `non_exact`.
+The installed configuration previews update existing
+selected documents; this path schema alone does not install scaffold previews.
 `effect_requirements` is the sorted, unique inventory of stable apply-time
 effects bound by that digest. It is separate from the four `effects` arrays,
 which retain invocation-specific observations without changing plan identity.

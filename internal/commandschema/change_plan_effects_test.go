@@ -153,7 +153,7 @@ func changePlanEffectInput(t *testing.T) commandschema.ChangePlanInput {
 			ModulePath: "example.com/acme/app", ConfigurationMode: "default", ConfigurationPath: "plystra.yaml",
 			RootDigest: changePlanDigest, SelectedDigest: changePlanDigest,
 		},
-		ReadSet:             []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeDigest: changePlanDigest}},
+		ReadSet:             []commandschema.ChangePlanPathInput{{Path: "plystra.yaml", Kind: "configuration", BeforeExists: true, BeforeDigest: changePlanDigest}},
 		Operations:          []commandschema.ChangePlanOperationInput{{Kind: "interface_root", Action: "present", Interface: "email.send/v1", Root: "require"}},
 		ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: "default", Path: "plystra.yaml"},
 		ConfigurationImpact: impact, Effects: effects, FinalModelDigest: changePlanDigest,

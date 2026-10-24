@@ -313,9 +313,9 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 	if err != nil {
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}
-	readSet := []commandschema.ChangePlanPathInput{{Path: inputs.RootSnapshot().Path(), Kind: "configuration", BeforeDigest: rootDigest}}
+	readSet := []commandschema.ChangePlanPathInput{{Path: inputs.RootSnapshot().Path(), Kind: "configuration", BeforeExists: true, BeforeDigest: rootDigest}}
 	if inputs.SelectedSnapshot().Path() != inputs.RootSnapshot().Path() {
-		readSet = append(readSet, commandschema.ChangePlanPathInput{Path: inputs.SelectedSnapshot().Path(), Kind: "configuration", BeforeDigest: selectedDigest})
+		readSet = append(readSet, commandschema.ChangePlanPathInput{Path: inputs.SelectedSnapshot().Path(), Kind: "configuration", BeforeExists: true, BeforeDigest: selectedDigest})
 	}
 	var operations []commandschema.ChangePlanOperationInput
 	configurationRequested := false
@@ -330,7 +330,7 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 	var writeSet []commandschema.ChangePlanPathInput
 	var plannedEffects []commandschema.Effect
 	if planned.Changed() {
-		writeSet = append(writeSet, commandschema.ChangePlanPathInput{Path: selection.Path(), Kind: "configuration", BeforeDigest: selectedDigest, AfterDigest: afterDigest})
+		writeSet = append(writeSet, commandschema.ChangePlanPathInput{Path: selection.Path(), Kind: "configuration", BeforeExists: true, AfterExists: true, BeforeDigest: selectedDigest, AfterDigest: afterDigest})
 		effect, err := commandschema.NewEffect(commandschema.EffectInput{
 			ID: "apply-change-plan", Class: commandschema.EffectProjectWrite, Phase: "apply", Target: selection.Path(),
 			Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_configuration_change", Reversibility: "rollback", Verification: verification,
