@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/changerequest"
 	"github.com/plystra/cli/internal/dependencycleanup"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -49,6 +51,10 @@ func Add(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrAdd)
 	}
+	if options.Environment == nil {
+		options.Environment = os.Environ()
+	}
+	options.Environment = append([]string(nil), options.Environment...)
 	query, modulePath, err := moduleargument.ParseQuery(options.Query)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrAdd, err)
@@ -57,29 +63,36 @@ func Add(ctx context.Context, options Options) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: locate Project: %w", ErrAdd, err)
 	}
+	ownership, err := dependencycleanup.Capture(ctx, dependencycleanup.Options{
+		Start: project.Path(), GoCommand: options.GoCommand,
+		Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: capture pre-change ownership: %w", ErrAdd, err)
+	}
+	if err := ownership.Validate(ctx); err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrAdd, err)
+	}
+
 	err = modulemutation.Change(ctx, project.Path(), modulemutation.ChangeOptions{
 		GoCommand:          options.GoCommand,
 		Environment:        options.Environment,
 		Arguments:          []string{"get", query},
 		DirectRequirements: []string{modulePath},
+		Observe:            ownership.ObserveChange,
 	}, func(mutate applicationgenerate.ModuleMutation) error {
-		plan, err := dependencycleanup.Plan(ctx, dependencycleanup.Options{
-			Start:                 project.Path(),
-			GoCommand:             options.GoCommand,
-			Environment:           options.Environment,
-			DependencyOutputLimit: options.DependencyOutputLimit,
-		})
+		plan, err := dependencycleanup.Plan(ctx, ownership, changerequest.DependencyAdd, query)
 		if err != nil {
 			return err
 		}
-		return dependencycleanup.Commit(project.Path(), plan, func(root string) error {
+		return dependencycleanup.Commit(ctx, project.Path(), plan, func(root string) error {
 			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 				Start:                 root,
 				GoCommand:             options.GoCommand,
 				Environment:           options.Environment,
 				DependencyOutputLimit: options.DependencyOutputLimit,
 				Validate:              options.Validate,
-				MutateModule:          mutate,
+				MutateModule:          plan.GuardMutation(mutate),
 				RejectUnexpected:      true,
 			})
 			return err

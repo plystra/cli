@@ -209,25 +209,27 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 		}
 		moduleMetadata = append(moduleMetadata, metadata)
 	}
+	inputs := SelectionInputs{
+		module: module, dependencies: dependencies,
+		rootManifest: rootManifest, selectedManifest: selectedManifest,
+		rootSnapshot: rootSnapshot, selectedSnapshot: selectedSnapshot, selector: selector,
+		moduleMetadata: moduleMetadata, workspaceSnapshots: workspaceSnapshots, dependencyOptions: dependencyOptions,
+	}
 	declarations, err := interfaceinventory.DiscoverApplication(ctx, module, dependencies, interfaceinventory.Options{
 		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...), OutputLimit: options.DependencyOutputLimit, Offline: options.Offline,
 	})
 	if err != nil {
-		return SelectionInputs{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return inputs, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	if err := interfaceinventory.ValidateUniqueIDs(declarations.Interfaces()); err != nil {
-		return SelectionInputs{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return inputs, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	inventory, err := plugininventory.Build(module, dependencies)
 	if err != nil {
-		return SelectionInputs{}, fmt.Errorf("%w: %w", ErrResolve, err)
+		return inputs, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
-	return SelectionInputs{
-		module: module, dependencies: dependencies, declarations: declarations, inventory: inventory,
-		rootManifest: rootManifest, selectedManifest: selectedManifest,
-		rootSnapshot: rootSnapshot, selectedSnapshot: selectedSnapshot, selector: selector,
-		moduleMetadata: moduleMetadata, workspaceSnapshots: workspaceSnapshots, dependencyOptions: dependencyOptions,
-	}, nil
+	inputs.declarations, inputs.inventory = declarations, inventory
+	return inputs, nil
 }
 
 func (s SelectionInputs) schemaLookup(namespace applicationmeta.ConfigurationNamespace, symbol constructorsymbol.Symbol) (implementationinventory.Configuration, bool) {
