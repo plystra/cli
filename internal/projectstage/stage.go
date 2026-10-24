@@ -186,14 +186,14 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	var used budget
 	for index, root := range outermostRoots(modules) {
 		destination := fmt.Sprintf("module-%d", index)
-		snapshot, err := captureTree(ctx, root, destination, s.files, &used)
+		snapshot, err := captureTree(ctx, root, destination, s.files, &used, false)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStage, err)
 		}
 		s.trees = append(s.trees, snapshot)
 	}
 	if vendorSource != "" {
-		snapshot, err := captureTree(ctx, vendorSource, "vendor", s.files, &used)
+		snapshot, err := captureTree(ctx, vendorSource, "vendor", s.files, &used, false)
 		if err != nil {
 			return nil, ErrStage
 		}

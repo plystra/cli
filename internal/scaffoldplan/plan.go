@@ -236,16 +236,15 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	}
 	var previous applicationresolve.SelectionInputs
 	if len(dependencies) != 0 {
-		// Unloadable old authored sources cannot block a same-request repair or
-		// establish old ownership. Only successfully captured declarations prove it.
-		if err := retainDependencySources(ctx, stage, options.GoCommand); err == nil {
-			previous, _ = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
-				Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
-				GoCommand: options.GoCommand, Environment: stage.Environment(),
-			})
-		} else if errors.Is(err, projectstage.ErrConcurrentChange) || ctx.Err() != nil {
+		if err := retainDependencySources(ctx, stage, options.GoCommand); err != nil {
 			return result, errors.Join(ErrPreview, err)
 		}
+		// Unloadable old authored declarations cannot block a same-request
+		// repair or prove old ownership, but their module sources must be safe.
+		previous, _ = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+			GoCommand: options.GoCommand, Environment: stage.Environment(),
+		})
 	}
 	build := effect("candidate-build", commandschema.EffectTrustedCodeExecution, "validate_complete_candidate", []string{"go", "build", "-mod=readonly", "./..."})
 	validateCandidate := func(mutate applicationgenerate.ModuleMutation) error {

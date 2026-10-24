@@ -858,17 +858,27 @@ newly selected versions, and earlier consumed versions later removed from the
 candidate. The original Go-selected directory spelling retains symbolic path
 provenance even when module discovery uses a canonical source root.
 Source bytes, identities, modes, and membership remain private and are rechecked
-after temporary cleanup. Unrelated cache entries are excluded; rechecks never
-download or repair modules. These read-only roots share the staging tree's
-cumulative bounds. Capturing newly selected sources before their first use by
+after temporary cleanup. Each complete versioned tree is checked against its
+effective module's Go `h1:` archive checksum, including the replacement path and
+version when applicable. Validation reuses captured file hashes and includes
+unexpected VCS entries; an archive without `go.mod` is hashed as it exists.
+Expected checksums come from Project `go.sum`, or ordinary Go download
+verification in an isolated module retaining those recorded sums. Missing or
+inconsistent evidence fails explicitly, and offline discovery never fills
+missing evidence. Checksum resolution leaves Project module files unchanged;
+source-integrity failures cannot be ignored when removing an old dependency.
+Unrelated cache entries are excluded; retained-input rechecks never download or
+repair modules. These read-only roots share the staging tree's cumulative
+bounds. Capturing newly selected sources before their first use by
 Go's dependency resolution and normalization, complete module-resolution
 metadata, and native permission capture remain unfinished; previews remain
 `non_exact`.
 Destination writes and cleanup use opened directory roots. Copies are bounded
 to 1,024 module roots and directory-alias inputs, 65,536 entries, 64 MiB per
 file, and 512 MiB of tree contents. Main-module, workspace, and vendor metadata
-parsed for relocation and the selected `GOENV` file have individual 1 MiB
-limits; non-main dependency manifests remain uninterpreted source inputs.
+parsed for relocation, source-checksum `go.sum`, and the selected `GOENV` file
+have individual 1 MiB limits; non-main dependency manifests remain uninterpreted
+source inputs.
 Included symbolic and nonregular entries, source-nested temporary parents, and
 alternate `-modfile` or `-overlay` inputs fail closed. This is filesystem
 isolation, not a sandbox for trusted native code. Public source and dependency

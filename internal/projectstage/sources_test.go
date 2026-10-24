@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/plystra/cli/internal/projectstage"
+	"golang.org/x/mod/module"
+	"golang.org/x/mod/sumdb/dirhash"
 )
 
 func TestRetainedSourcesRejectDriftAfterCleanup(t *testing.T) {
@@ -20,7 +23,8 @@ func TestRetainedSourcesRejectDriftAfterCleanup(t *testing.T) {
 			write(t, source, "value.go", "package dependency\nconst Value = 1\n")
 			stage := capturedStage(t, root, parent)
 			earlier := stage.Inputs()
-			if err := stage.RetainSources(t.Context(), []string{source, source}); err != nil {
+			input := sourceInput(t, source)
+			if err := stage.RetainSources(t.Context(), []projectstage.Source{input, input}); err != nil {
 				t.Fatal(err)
 			}
 			inputs := stage.Inputs()
@@ -79,12 +83,12 @@ func TestRetainSourcesKeepsEarlierVersions(t *testing.T) {
 	write(t, next, "value.go", "package dependency\nconst Value = 2\n")
 	stage := capturedStage(t, root, parent)
 	for _, source := range []string{old, next, old} {
-		if err := stage.RetainSources(t.Context(), []string{source}); err != nil {
+		if err := stage.RetainSources(t.Context(), []projectstage.Source{sourceInput(t, source)}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	write(t, old, "value.go", "package dependency\nconst Value = 3\n")
-	if err := stage.RetainSources(t.Context(), []string{next}); !errors.Is(err, projectstage.ErrConcurrentChange) {
+	if err := stage.RetainSources(t.Context(), []projectstage.Source{sourceInput(t, next)}); !errors.Is(err, projectstage.ErrConcurrentChange) {
 		t.Fatalf("a later capture discarded or refreshed earlier evidence: %v", err)
 	}
 }
@@ -127,7 +131,9 @@ func TestRetainSourcesRejectsUnsafeInputs(t *testing.T) {
 			case "nil-context":
 				ctx = nil
 			}
-			if err := stage.RetainSources(ctx, []string{source}); err == nil {
+			input := projectstage.Source{Directory: source, Module: module.Version{Path: "example.com/dependency", Version: "v1.0.0"},
+				Checksum: "h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="}
+			if err := stage.RetainSources(ctx, []projectstage.Source{input}); err == nil {
 				t.Fatalf("accepted %s source capture", mode)
 			}
 		})
@@ -138,13 +144,13 @@ func TestRetainSourcesSharesRootBoundAcrossCalls(t *testing.T) {
 	root, parent := fixture(t)
 	stage := capturedStage(t, root, parent, "GOWORK=off", "GOENV=off")
 	base := t.TempDir()
-	var roots []string
+	var roots []projectstage.Source
 	for index := range projectstage.MaximumRoots {
 		path := filepath.Join(base, fmt.Sprint(index))
 		if err := os.Mkdir(path, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		roots = append(roots, path)
+		roots = append(roots, sourceInput(t, path))
 	}
 	if err := stage.RetainSources(t.Context(), roots[:projectstage.MaximumRoots-2]); err != nil {
 		t.Fatal(err)
@@ -157,5 +163,127 @@ func TestRetainSourcesSharesRootBoundAcrossCalls(t *testing.T) {
 	}
 	if err := stage.Recheck(t.Context()); err != nil {
 		t.Fatal("a rejected capture invalidated earlier evidence")
+	}
+}
+
+func sourceInput(t *testing.T, root string) projectstage.Source {
+	t.Helper()
+	version := module.Version{Path: "example.com/dependency", Version: "v1.0.0"}
+	checksum, err := dirhash.HashDir(root, version.String(), dirhash.Hash1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return projectstage.Source{Directory: root, Module: version, Checksum: checksum}
+}
+
+func TestRetainedSourcesValidateCompleteArchiveInventory(t *testing.T) {
+	for _, mode := range []string{"ordinary", "legacy", "vcs"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			root, parent := fixture(t)
+			source := t.TempDir()
+			for _, name := range []string{"a.go", "a-1.go", "a/value.go", "nested/z.go", "z.go"} {
+				write(t, source, name, "package dependency\n")
+			}
+			if mode != "legacy" {
+				write(t, source, "go.mod", "module example.com/Upper/Dependency/v2\n")
+			}
+			if mode == "vcs" {
+				for _, name := range []string{".git/config", ".hg/history", ".svn/entries"} {
+					write(t, source, name, "archive content\n")
+				}
+			}
+			input := projectstage.Source{Directory: source, Module: module.Version{Path: "example.com/Upper/Dependency/v2", Version: "v2.1.0"}}
+			var err error
+			input.Checksum, err = dirhash.HashDir(source, input.Module.String(), dirhash.Hash1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stage := capturedStage(t, root, parent)
+			if err := stage.RetainSources(t.Context(), []projectstage.Source{input}); err != nil {
+				t.Fatalf("Go Hash1 inventory rejected: %v", err)
+			}
+			inputs := stage.Inputs()
+			if err := stage.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := inputs.Recheck(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "legacy" {
+				if _, err := os.Stat(filepath.Join(source, "go.mod")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("legacy source was modified to synthesize go.mod")
+				}
+			}
+			write(t, source, ".git/config", "injected content\n")
+			if err := inputs.Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+				t.Fatalf("VCS path drift escaped complete source inventory: %v", err)
+			}
+		})
+	}
+}
+
+func TestRetainSourcesRejectsInvalidChecksumClaims(t *testing.T) {
+	for _, mode := range []string{"changed-bytes", "injected-file", "missing", "malformed", "noncanonical", "algorithm", "path", "version", "duplicate", "earlier", "ancestor"} {
+		t.Run(mode, func(t *testing.T) {
+			root, parent := fixture(t)
+			source := t.TempDir()
+			write(t, source, "value.go", "package dependency\nconst Value = 1\n")
+			input := sourceInput(t, source)
+			stage := capturedStage(t, root, parent)
+			switch mode {
+			case "changed-bytes":
+				path := filepath.Join(source, "value.go")
+				info, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				write(t, source, "value.go", "package dependency\nconst Value = 2\n")
+				if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+			case "injected-file":
+				write(t, source, ".hg/extra", "not in the archive")
+			case "missing":
+				input.Checksum = ""
+			case "malformed":
+				input.Checksum = "h1:invalid"
+			case "noncanonical":
+				input.Checksum = "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB="
+			case "algorithm":
+				input.Checksum = strings.Replace(input.Checksum, "h1:", "h2:", 1)
+			case "path":
+				input.Module.Path = "example.com/different"
+			case "version":
+				input.Module.Version = "v1.1.0"
+			case "earlier":
+				if err := stage.RetainSources(t.Context(), []projectstage.Source{input}); err != nil {
+					t.Fatal(err)
+				}
+				input.Module.Version = "v1.1.0"
+			case "ancestor":
+				ancestor := t.TempDir()
+				source = filepath.Join(ancestor, "nested")
+				write(t, source, "value.go", "package dependency\n")
+				if err := stage.RetainSources(t.Context(), []projectstage.Source{sourceInput(t, ancestor)}); err != nil {
+					t.Fatal(err)
+				}
+				input = sourceInput(t, source)
+				input.Module.Version = "v1.1.0"
+			}
+			claims := []projectstage.Source{input}
+			if mode == "duplicate" {
+				changed := input
+				changed.Module.Version = "v1.1.0"
+				claims = append(claims, changed)
+			}
+			earlier := stage.Inputs()
+			if err := stage.RetainSources(t.Context(), claims); !errors.Is(err, projectstage.ErrSourceIntegrity) {
+				t.Fatalf("invalid %s source accepted: %v", mode, err)
+			}
+			if err := earlier.Recheck(t.Context()); err != nil {
+				t.Fatal("a rejected source claim changed earlier inputs")
+			}
+		})
 	}
 }

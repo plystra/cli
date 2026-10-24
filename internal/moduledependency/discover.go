@@ -42,6 +42,8 @@ var (
 	// ErrConcurrentChange reports dependency state that changed during
 	// discovery.
 	ErrConcurrentChange = errors.New("dependency module state changed during discovery")
+	// ErrSourceIntegrity reports unavailable or inconsistent archive checksum evidence.
+	ErrSourceIntegrity = errors.New("dependency source integrity unavailable")
 )
 
 // Options controls the read-only Go command used for module discovery.
@@ -52,6 +54,10 @@ type Options struct {
 	// Offline requires the selected module sources to be present locally and
 	// prevents Go from contacting a module proxy or checksum service.
 	Offline bool
+	// RequireSourceChecksums binds every versioned source to its effective
+	// module's archive checksum, using Project go.sum or ordinary Go download
+	// verification in an isolated module. It never hashes the extracted tree.
+	RequireSourceChecksums bool
 }
 
 // Replacement records the selected replacement provenance reported by Go.
@@ -101,8 +107,10 @@ func (m Module) RequiredVersion() string { return m.requiredVersion }
 // module supplied directly by the active go.work workspace.
 func (m Module) SelectedVersion() string { return m.selectedVersion }
 
-// Checksum returns the verified Go checksum for the selected module archive.
-// It is empty for workspace and local-replacement sources.
+// Checksum returns Go's reported archive checksum for the effective source,
+// including a versioned replacement. RequireSourceChecksums additionally binds
+// it to Project go.sum or an isolated Go download. It may otherwise be absent;
+// workspace and local-replacement sources have no archive checksum.
 func (m Module) Checksum() string { return m.checksum }
 
 // GoModChecksum returns the verified Go checksum for the selected module's
@@ -241,6 +249,12 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if err := resolveMissingSources(ctx, application.Path(), application.ModulePath(), before, modules, options, outputLimit); err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
 	}
+	if options.RequireSourceChecksums {
+		options.Environment = environment
+		if err := resolveSourceChecksums(ctx, application.Path(), before, modules, options, outputLimit); err != nil {
+			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
+		}
+	}
 	for index := range modules {
 		project, err := projectlocate.Recognize(modules[index].root, modules[index].path)
 		if err != nil {
@@ -330,10 +344,12 @@ type listedModule struct {
 }
 
 type listedReplacement struct {
-	Path    string `json:"Path"`
-	Version string `json:"Version"`
-	Dir     string `json:"Dir"`
-	GoMod   string `json:"GoMod"`
+	Path     string `json:"Path"`
+	Version  string `json:"Version"`
+	Dir      string `json:"Dir"`
+	GoMod    string `json:"GoMod"`
+	Checksum string `json:"Sum"`
+	GoModSum string `json:"GoModSum"`
 }
 
 type listedError struct {
@@ -394,6 +410,7 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 
 		directory := listed.Dir
 		goModPath := listed.GoMod
+		checksum, goModChecksum := listed.Checksum, listed.GoModSum
 		var replacement Replacement
 		expectedSourcePath := listed.Path
 		if listed.Replace != nil {
@@ -415,6 +432,7 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 				goModPath = listed.Replace.GoMod
 			}
 			replacement = Replacement{path: listed.Replace.Path, version: listed.Replace.Version}
+			checksum, goModChecksum = listed.Replace.Checksum, listed.Replace.GoModSum
 		}
 		root := ""
 		var goModData []byte
@@ -443,8 +461,8 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 			root:            root,
 			sourceDirectory: directory,
 			sourcePath:      expectedSourcePath,
-			checksum:        listed.Checksum,
-			goModChecksum:   listed.GoModSum,
+			checksum:        checksum,
+			goModChecksum:   goModChecksum,
 			direct:          isDirect,
 			indirect:        isDirect && declared.indirect,
 			workspace:       listed.Main,

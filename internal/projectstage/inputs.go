@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/mod/module"
 )
 
 var errPrivateInput = errors.New("private Project staging inputs cannot be serialized")
@@ -34,8 +36,11 @@ type inputState struct {
 }
 
 type inputTree struct {
-	source  string
-	entries map[string]treeEntry
+	source   string
+	entries  map[string]treeEntry
+	allFiles bool
+	module   module.Version
+	checksum string
 }
 
 func (Inputs) String() string                   { return "<private-project-inputs>" }
@@ -110,7 +115,8 @@ func (s *Stage) captureInputs() Inputs {
 		state.metadata[index].data = append([]byte(nil), state.metadata[index].data...)
 	}
 	for _, tree := range append(append([]treeSnapshot(nil), s.trees...), s.sources...) {
-		state.trees = append(state.trees, inputTree{source: tree.source, entries: maps.Clone(tree.entries)})
+		state.trees = append(state.trees, inputTree{source: tree.source, entries: maps.Clone(tree.entries),
+			allFiles: tree.allFiles, module: tree.module, checksum: tree.checksum})
 	}
 	return Inputs{state: &state}
 }
@@ -148,8 +154,11 @@ func (i Inputs) Recheck(ctx context.Context) error {
 	}
 	var used budget
 	for _, before := range state.trees {
-		after, err := captureTree(ctx, before.source, "", nil, &used)
+		after, err := captureTree(ctx, before.source, "", nil, &used, before.allFiles)
 		if err != nil || !sameTree(treeSnapshot{entries: before.entries}, after) {
+			return ErrConcurrentChange
+		}
+		if before.checksum != "" && after.checkSource(ctx, Source{Module: before.module, Checksum: before.checksum}) != nil {
 			return ErrConcurrentChange
 		}
 	}

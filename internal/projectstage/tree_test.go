@@ -14,18 +14,18 @@ func TestCaptureTreeBoundsAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, used := range []budget{{entries: MaximumEntries - 1}, {bytes: MaximumTotalBytes}} {
-		if _, err := captureTree(t.Context(), root, "", nil, &used); err == nil {
+		if _, err := captureTree(t.Context(), root, "", nil, &used, false); err == nil {
 			t.Fatal("copy budget was exceeded")
 		}
 	}
 	for _, used := range []budget{{entries: MaximumEntries - 2}, {bytes: MaximumTotalBytes - 1}} {
-		if _, err := captureTree(t.Context(), root, "", nil, &used); err != nil {
+		if _, err := captureTree(t.Context(), root, "", nil, &used, false); err != nil {
 			t.Fatalf("exact boundary rejected: %v", err)
 		}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := captureTree(ctx, root, "", nil, &budget{}); !errors.Is(err, context.Canceled) {
+	if _, err := captureTree(ctx, root, "", nil, &budget{}, false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled copy: %v", err)
 	}
 	large, err := os.Create(filepath.Join(root, "large"))
@@ -37,7 +37,7 @@ func TestCaptureTreeBoundsAndCancellation(t *testing.T) {
 	if err != nil || closeErr != nil {
 		t.Fatalf("large input: %v, %v", err, closeErr)
 	}
-	if _, err := captureTree(t.Context(), root, "", nil, &budget{}); err == nil {
+	if _, err := captureTree(t.Context(), root, "", nil, &budget{}, false); err == nil {
 		t.Fatal("oversized input was accepted")
 	}
 }
@@ -71,7 +71,7 @@ func TestCaptureTreeWritesThroughHeldRoot(t *testing.T) {
 	if err := os.Symlink(external, destination); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := captureTree(t.Context(), source, "module", root, &budget{}); err != nil {
+	if _, err := captureTree(t.Context(), source, "module", root, &budget{}, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(external, "module")); !errors.Is(err, os.ErrNotExist) {

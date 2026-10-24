@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/plystra/cli/internal/privatefile"
+	"golang.org/x/mod/module"
 )
 
 type budget struct {
@@ -35,6 +36,9 @@ type treeSnapshot struct {
 	entries     map[string]treeEntry
 	output      *os.Root
 	outputPath  string
+	allFiles    bool
+	module      module.Version
+	checksum    string
 }
 
 type treeEntry struct {
@@ -42,8 +46,8 @@ type treeEntry struct {
 	digest [sha256.Size]byte
 }
 
-func captureTree(ctx context.Context, source, destination string, output *os.Root, used *budget) (treeSnapshot, error) {
-	result := treeSnapshot{source: source, output: output, outputPath: destination, entries: map[string]treeEntry{}}
+func captureTree(ctx context.Context, source, destination string, output *os.Root, used *budget, allFiles bool) (treeSnapshot, error) {
+	result := treeSnapshot{source: source, output: output, outputPath: destination, entries: map[string]treeEntry{}, allFiles: allFiles}
 	if output != nil {
 		result.destination = filepath.Join(output.Name(), destination)
 	}
@@ -91,16 +95,13 @@ func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative stri
 			return ErrStage
 		}
 		opened, statErr := directory.Stat()
-		children, readErr := boundedChildren(ctx, directory, MaximumEntries-used.entries)
+		children, readErr := boundedChildren(ctx, directory, MaximumEntries-used.entries, s.allFiles)
 		closeErr := directory.Close()
 		if statErr != nil || readErr != nil || closeErr != nil || !os.SameFile(info, opened) {
 			return ErrConcurrentChange
 		}
 		sort.Slice(children, func(i, j int) bool { return children[i].Name() < children[j].Name() })
 		for _, child := range children {
-			if child.Name() == ".git" || child.Name() == ".hg" || child.Name() == ".svn" {
-				continue
-			}
 			if err := s.capture(ctx, root, filepath.Join(relative, child.Name()), used); err != nil {
 				return err
 			}
@@ -150,7 +151,7 @@ func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative stri
 	return nil
 }
 
-func boundedChildren(ctx context.Context, directory *os.File, remaining int) ([]os.DirEntry, error) {
+func boundedChildren(ctx context.Context, directory *os.File, remaining int, allFiles bool) ([]os.DirEntry, error) {
 	var result []os.DirEntry
 	for {
 		if err := ctx.Err(); err != nil {
@@ -158,7 +159,7 @@ func boundedChildren(ctx context.Context, directory *os.File, remaining int) ([]
 		}
 		batch, err := directory.ReadDir(min(128, remaining-len(result)+1))
 		for _, child := range batch {
-			if child.Name() == ".git" || child.Name() == ".hg" || child.Name() == ".svn" {
+			if !allFiles && (child.Name() == ".git" || child.Name() == ".hg" || child.Name() == ".svn") {
 				continue
 			}
 			result = append(result, child)
