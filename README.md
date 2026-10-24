@@ -883,6 +883,18 @@ cannot modify the selected workspace. Preparation snapshots the workfile, member
 manifests, and present or absent sums before downloads and rechecks them after
 source retention. Mutable queries retain ordinary Go semantics and are not
 resolved by this preparation step.
+Each retained or prepared versioned source also retains Go's exact selected
+cache module manifest (`.mod`) and its sibling archive checksum reference
+(`.ziphash`). These regular files retain bytes, identity, mode, and parent-path
+provenance across later phases and temporary cleanup; later removal from the
+selected graph does not discard their evidence. Repeated capture never refreshes
+an earlier baseline. The captured checksum-reference bytes must match the
+independently resolved archive checksum. Unrelated files in the same cache
+directory remain outside the read set. These metadata files have individual
+1 MiB limits and share the
+cumulative entry and content bounds with source trees. This does not establish
+capture before the first metadata read or cover every intermediate resolution
+version.
 Unrelated cache entries are excluded; retained-input rechecks never download or
 repair modules. These read-only roots share the staging tree's cumulative
 bounds. Complete capture before first use, including workspace MVS upgrades,
@@ -891,7 +903,7 @@ module-resolution metadata, and native permission capture remain unfinished; pre
 `non_exact`.
 Destination writes and cleanup use opened directory roots. Copies are bounded
 to 1,024 module roots and directory-alias inputs, 65,536 entries, 64 MiB per
-file, and 512 MiB of tree contents. Main-module, workspace, and vendor metadata
+file, and 512 MiB of captured contents. Main-module, workspace, and vendor metadata
 parsed for relocation, source-checksum `go.sum`, and the selected `GOENV` file
 have individual 1 MiB limits; non-main dependency manifests remain uninterpreted
 source inputs.

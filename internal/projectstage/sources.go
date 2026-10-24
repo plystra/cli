@@ -40,15 +40,7 @@ func (s *Stage) RetainSources(ctx context.Context, sources []Source) (resultErr 
 	sources = slices.Clone(sources)
 	slices.SortFunc(sources, func(a, b Source) int { return strings.Compare(a.Directory, b.Directory) })
 	trees := append(slices.Clone(s.trees), s.sources...)
-	var used budget
-	for _, tree := range trees {
-		used.entries += len(tree.entries)
-		for _, entry := range tree.entries {
-			if entry.info.Mode().IsRegular() {
-				used.bytes += entry.info.Size()
-			}
-		}
-	}
+	used := s.inputBudget()
 	var added []treeSnapshot
 	for _, source := range sources {
 		decoded, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(source.Checksum, "h1:"))

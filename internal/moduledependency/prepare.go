@@ -155,6 +155,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		for _, index := range indices {
 			result[index].root, result[index].goMod, result[index].goModChecksum = canonical, append([]byte(nil), manifest...), downloaded.GoModSum
 			result[index].sourceDirectory, result[index].checksum = downloaded.Dir, downloaded.Checksum
+			result[index].goModFile = downloaded.GoMod
 		}
 		delete(queries, version)
 	}

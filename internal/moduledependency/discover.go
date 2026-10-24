@@ -91,6 +91,7 @@ type Module struct {
 	sourcePath      string
 	checksum        string
 	goModChecksum   string
+	goModFile       string
 	direct          bool
 	indirect        bool
 	workspace       bool
@@ -119,6 +120,10 @@ func (m Module) Checksum() string { return m.checksum }
 // GoModChecksum returns the verified Go checksum for the selected module's
 // go.mod file. It is empty when Go does not report one for the source.
 func (m Module) GoModChecksum() string { return m.goModChecksum }
+
+// GoModFile returns the exact module manifest path reported by Go. Versioned
+// modules use a cache manifest independently of their extracted source tree.
+func (m Module) GoModFile() string { return m.goModFile }
 
 // Root returns the canonical absolute source root. This CLI-only path is not
 // generation-extension input or generated manifest data.
@@ -488,6 +493,7 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 			sourcePath:      expectedSourcePath,
 			checksum:        checksum,
 			goModChecksum:   goModChecksum,
+			goModFile:       goModPath,
 			direct:          isDirect,
 			indirect:        isDirect && declared.indirect,
 			workspace:       listed.Main,
@@ -595,6 +601,7 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		modules[index].goMod = goModData
 		modules[index].checksum = downloaded.Checksum
 		modules[index].goModChecksum = downloaded.GoModSum
+		modules[index].goModFile = downloaded.GoMod
 	}
 
 	// Downloads run outside the Project directory. Recheck the Project module

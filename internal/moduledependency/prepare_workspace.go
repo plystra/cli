@@ -346,6 +346,7 @@ func (workspace *preparationWorkspace) resolveChecksums(ctx context.Context, mod
 		}
 		modules[indices[index]].checksum = source.checksum
 		modules[indices[index]].goModChecksum = source.goModChecksum
+		modules[indices[index]].goModFile = source.goModFile
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/projectlocate"
@@ -44,6 +45,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 
 func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies []moduledependency.Module) error {
 	var sources []projectstage.Source
+	var metadata []projectstage.MetadataInput
 	for _, dependency := range dependencies {
 		replacement, _ := dependency.Replacement()
 		if dependency.Workspace() || replacement.Local() {
@@ -53,8 +55,19 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 		if replacement.Path() != "" {
 			path, version = replacement.Path(), replacement.Version()
 		}
+		escaped, err := module.EscapeVersion(version)
+		manifest := dependency.GoModFile()
+		if err != nil || !filepath.IsAbs(manifest) || filepath.Base(manifest) != escaped+".mod" {
+			return moduledependency.ErrSourceIntegrity
+		}
+		metadata = append(metadata, projectstage.MetadataInput{Path: manifest}, projectstage.MetadataInput{
+			Path: strings.TrimSuffix(manifest, ".mod") + ".ziphash", Expected: []byte(dependency.Checksum()),
+		})
 		sources = append(sources, projectstage.Source{Directory: filepath.Clean(dependency.SourceDirectory()),
 			Module: module.Version{Path: path, Version: version}, Checksum: dependency.Checksum()})
+	}
+	if err := stage.RetainMetadata(ctx, metadata); err != nil {
+		return errors.Join(moduledependency.ErrSourceIntegrity, err)
 	}
 	return stage.RetainSources(ctx, sources)
 }

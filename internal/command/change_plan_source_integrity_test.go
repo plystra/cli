@@ -132,7 +132,7 @@ func TestRunChangePlanRejectsPreexistingSourceTampering(t *testing.T) {
 
 func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 	command := sourcePreparationGoWrapper(t)
-	for _, mode := range []string{"cold", "added", "updated", "replacement", "workspace-cold", "workspace", "workspace-replacement", "workspace-module-replacement", "workspace-initial-replacement", "workspace-initial-local"} {
+	for _, mode := range []string{"cold", "added", "updated", "replacement", "module-manifest", "module-checksum", "workspace-cold", "workspace", "workspace-replacement", "workspace-module-replacement", "workspace-initial-replacement", "workspace-initial-local", "workspace-module-manifest", "workspace-module-checksum"} {
 		t.Run(mode, func(t *testing.T) {
 			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false), previewDependency(t, "v1.1.0", false)})
 			environment := previewDependencyEnvironment(t, proxy)
@@ -207,6 +207,13 @@ func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 				t.Fatal("missing isolated source cache")
 			}
 			path := filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@"+effectiveVersion), "remote", "implementation.go")
+			if strings.HasSuffix(mode, "module-manifest") || strings.HasSuffix(mode, "module-checksum") {
+				extension := ".mod"
+				if strings.HasSuffix(mode, "module-checksum") {
+					extension = ".ziphash"
+				}
+				path = filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", effectiveVersion+extension)
+			}
 			if initialLocal != "" {
 				path = filepath.Join(initialLocal, "remote", "implementation.go")
 			}
@@ -224,6 +231,20 @@ func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 			if strings.HasSuffix(mode, "cold") {
 				if err != nil || !planned.Capture().Valid() {
 					t.Fatalf("cold prepared target rejected: %v", err)
+				}
+				if err := planned.Capture().Recheck(t.Context()); err != nil {
+					t.Fatalf("retained candidate inputs were invalid after cleanup: %v", err)
+				}
+				extension := ".mod"
+				if mode == "workspace-cold" {
+					extension = ".ziphash"
+				}
+				metadata := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", effectiveVersion+extension)
+				if err := os.Rename(metadata, metadata+".old"); err != nil {
+					t.Fatal(err)
+				}
+				if err := planned.Capture().Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+					t.Fatalf("removed cache metadata accepted after preview cleanup: %v", err)
 				}
 			} else if !errors.Is(err, projectstage.ErrConcurrentChange) || planned.Capture().Valid() || planned.FinalModelDigest() != "" {
 				t.Fatalf("same-byte source replacement during get was accepted: %v", err)
@@ -279,6 +300,17 @@ func main() {
  command := exec.Command(REAL_GO, os.Args[1:]...)
  command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
  err := command.Run()
+ if err == nil && os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE") == "checksum-after-list" && len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m" {
+  marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
+  if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) {
+   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+   info, statErr := os.Stat(path); check(statErr)
+   check(os.Chmod(path, 0600))
+   check(os.WriteFile(path, []byte("h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="), 0600))
+   check(os.Chmod(path, info.Mode()))
+   check(os.WriteFile(marker, []byte("checksum changed after module listing\n"), 0600))
+  } else { check(markerErr) }
+ }
  if backup != "" { check(os.Chmod(backup, 0600)); check(os.Remove(backup)) }
  if err != nil {
   if exited, ok := err.(*exec.ExitError); ok { os.Exit(exited.ExitCode()) }
@@ -299,4 +331,47 @@ func main() {
 		t.Fatalf("build Go source-preparation wrapper: %v\n%s", err, output)
 	}
 	return binary
+}
+
+func TestScaffoldPreviewRejectsChangedChecksumReferenceBeforeRetention(t *testing.T) {
+	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
+	environment := previewDependencyEnvironment(t, proxy)
+	root := writeImplementationSelectionCommandProject(t)
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
+	if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "get", previewDependencyModule+"@v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	var cache string
+	for _, entry := range environment {
+		if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {
+			cache = value
+		}
+	}
+	if cache == "" {
+		t.Fatal("missing isolated source cache")
+	}
+	path := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.ziphash")
+	marker := filepath.Join(t.TempDir(), "metadata-changed")
+	environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE=checksum-after-list")
+	request, err := changerequest.Parse([]byte(fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"remove","module":%q}]}`, previewDependencyModule)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, parent := commandTree(t, root), t.TempDir()
+	planned, err := scaffoldplan.Preview(t.Context(), scaffoldplan.Options{
+		Start: root, Environment: environment, GoCommand: sourcePreparationGoWrapper(t), TemporaryParent: parent,
+	}, request)
+	if data, markerErr := os.ReadFile(marker); markerErr != nil || string(data) != "checksum changed after module listing\n" {
+		t.Fatalf("checksum-reference race was not exercised: %v, preview=%v", markerErr, err)
+	}
+	if !errors.Is(err, moduledependency.ErrSourceIntegrity) || planned.Capture().Valid() || planned.FinalModelDigest() != "" {
+		t.Fatalf("checksum conflict did not fail as source integrity before removal: %v", err)
+	}
+	if !reflect.DeepEqual(before, commandTree(t, root)) {
+		t.Fatal("failed metadata capture changed the original Project")
+	}
+	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+		t.Fatal("failed metadata capture retained private stage files")
+	}
+	assertNoCommandTransactions(t, root)
 }
