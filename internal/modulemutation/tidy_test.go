@@ -342,6 +342,59 @@ func TestTidyRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T) {
 	}
 }
 
+func TestTidyRejectsModuleEditsBeforeNormalization(t *testing.T) {
+	t.Parallel()
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []string{"edit-mod", "edit-sum", "create-sum", "remove-sum"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/acme/concurrent\n\ngo 1.26\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if change != "create-sum" {
+				if err := os.WriteFile(filepath.Join(root, "go.sum"), []byte("original checksum metadata\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var edited moduleFiles
+			validated := false
+			err := Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=1"), func(mutate applicationgenerate.ModuleMutation) error {
+				name, data := "go.sum", "concurrent checksum metadata\n"
+				if change == "edit-mod" {
+					name, data = "go.mod", "module example.com/acme/concurrent\n\ngo 1.26\n\n// concurrent authored edit\n"
+				}
+				if change == "remove-sum" {
+					if err := os.Remove(filepath.Join(root, name)); err != nil {
+						return err
+					}
+				} else if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
+					return err
+				}
+				var err error
+				edited, err = captureModuleFiles(root)
+				if err != nil {
+					return err
+				}
+				return mutate(t.Context(), root, nil, func() error {
+					validated = true
+					return errors.New("candidate build rejected")
+				})
+			})
+			if !errors.Is(err, atomicfs.ErrConcurrentChange) || validated {
+				t.Fatalf("Tidy = %v, validated = %t; want concurrent-edit rejection before validation", err, validated)
+			}
+			after, captureErr := captureModuleFiles(root)
+			if captureErr != nil || !reflect.DeepEqual(after, edited) {
+				t.Fatalf("concurrent edit changed: %v\nbefore: %#v\nafter: %#v", captureErr, edited, after)
+			}
+		})
+	}
+}
+
 func TestTidySelectsGeneratedRuntimeMinimumAndPreservesNewerDirectRequirement(t *testing.T) {
 	t.Parallel()
 

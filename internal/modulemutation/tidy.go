@@ -209,6 +209,20 @@ func Tidy(ctx context.Context, root, goCommand string, environment []string, ope
 		if !sameModuleRoot(mutationRoot, root) {
 			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrTidy, root, mutationRoot)
 		}
+		current, captureErr := captureModuleFiles(root)
+		if captureErr != nil {
+			return fmt.Errorf("%w: recheck module metadata: %w", ErrTidy, captureErr)
+		}
+		var changed []string
+		for _, name := range []string{"go.mod", "go.sum"} {
+			original, observed := before[name], current[name]
+			if original.exists != observed.exists || original.mode != observed.mode || !bytes.Equal(original.data, observed.data) {
+				changed = append(changed, name)
+			}
+		}
+		if len(changed) != 0 {
+			return fmt.Errorf("%w: %w", ErrTidy, atomicfs.NewConcurrentChangeError(changed, atomicfs.ErrConcurrentChange))
+		}
 		normalized, err = normalizeModuleMetadata(ctx, root, goCommand, environment, before, requirements)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrTidy, err)
