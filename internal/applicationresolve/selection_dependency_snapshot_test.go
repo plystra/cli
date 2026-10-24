@@ -12,6 +12,7 @@ import (
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/modulemutation"
 )
 
@@ -142,5 +143,92 @@ func TestDependencyOwnershipSnapshotStreamsLargeGeneratedTypeSupport(t *testing.
 	}
 	if err := snapshot.ValidateAuthoredSnapshot(t.Context(), nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDependencyOwnershipSnapshotBindsCgoTypeInputs(t *testing.T) {
+	for _, scenario := range []string{"header-edit", "c-source-edit", "header-add", "header-remove", "c-source-add", "c-source-remove", "inactive-c-source"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := writeResourceConsumerProject(t, "optional-absent")
+			options := selectionOptions(root)
+			options.Environment = goEnvironment(map[string]string{"GOWORK": "off", "GOPROXY": "off", "CGO_ENABLED": "1"})
+			writeFile(t, filepath.Join(root, "support/types.go"), "package support\n/*\n#include \"shape.h\"\n#include \"shape.c\"\n*/\nimport \"C\"\nconst Width = C.HEADER_WIDTH + C.SOURCE_WIDTH\n")
+			writeFile(t, filepath.Join(root, "support/shape.h"), "#define HEADER_WIDTH 1\n")
+			writeFile(t, filepath.Join(root, "support/shape.c"), "#define SOURCE_WIDTH 1\n")
+			writeFile(t, filepath.Join(root, "support/unused.h"), "/* selected header */\n")
+			writeFile(t, filepath.Join(root, "support/unused.c"), "/* selected C source */\n")
+			consumer := filepath.Join(root, "consumer/service.go")
+			data, err := os.ReadFile(consumer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := strings.Replace(string(data), "import (", "import (\n support \"example.com/resource-consumer/support\"", 1)
+			source = strings.Replace(source, "type Service struct{}", "type Config struct { Values [support.Width]string }\ntype Service struct{}", 1)
+			writeFile(t, consumer, strings.Replace(source, "func New(", "func New(config Config, ", 1))
+			snapshot, err := applicationresolve.CaptureDependencyOwnership(t.Context(), options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner, err := constructorsymbol.Parse("example.com/resource-consumer/consumer.New")
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertArrayLength := func(inputs applicationresolve.SelectionInputs, want int64) {
+				t.Helper()
+				declaration, exists := inputs.Declarations().Implementations().BySymbol(owner)
+				schema, configured := declaration.Configuration()
+				fields := schema.Fields()
+				if !exists || !configured || len(fields) != 1 {
+					t.Fatal("native cgo imported support did not supply the constructor Config schema")
+				}
+				if length, array := fields[0].Value().ArrayLength(); !array || length != want {
+					t.Fatalf("compiled cgo Config array length = %d (array=%t), want %d", length, array, want)
+				}
+			}
+			assertArrayLength(snapshot.Previous(), 2)
+			mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(root, "go.mod"), string(mod)+"// intentional dependency postimage\n")
+			if err := snapshot.ValidateAuthoredSnapshot(t.Context(), nil); err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "header-edit":
+				writeFile(t, filepath.Join(root, "support/shape.h"), "#define HEADER_WIDTH 2\n")
+			case "c-source-edit":
+				writeFile(t, filepath.Join(root, "support/shape.c"), "#define SOURCE_WIDTH 2\n")
+			case "header-add":
+				writeFile(t, filepath.Join(root, "support/added.h"), "/* new selected header */\n")
+			case "c-source-add":
+				writeFile(t, filepath.Join(root, "support/added.c"), "/* new selected C source */\n")
+			case "header-remove", "c-source-remove":
+				name := "unused.h"
+				if scenario == "c-source-remove" {
+					name = "unused.c"
+				}
+				if err := os.Remove(filepath.Join(root, "support", name)); err != nil {
+					t.Fatal(err)
+				}
+			case "inactive-c-source":
+				writeFile(t, filepath.Join(root, "support/ignored.c"), "//go:build never_ownership_fixture\n\nPRIVATE_INVALID_C\n")
+			}
+			if scenario == "header-edit" || scenario == "c-source-edit" {
+				current, err := applicationresolve.DiscoverSelectionInputs(t.Context(), options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertArrayLength(current, 3)
+			}
+			err = snapshot.ValidateAuthoredSnapshot(t.Context(), nil)
+			if scenario == "inactive-c-source" {
+				if err != nil {
+					t.Fatalf("Go-excluded C source invalidated old ownership: %v", err)
+				}
+			} else if !errors.Is(err, applicationresolve.ErrConcurrentChange) {
+				t.Fatalf("changed cgo type input was accepted: %v", err)
+			}
+		})
 	}
 }

@@ -116,16 +116,18 @@ func (d Discovery) CaptureOwnershipSources(ctx context.Context, application modu
 				return ErrOwnershipSnapshot
 			}
 		}
-		for _, file := range append(append([]string(nil), loaded.GoFiles...), loaded.CgoFiles...) {
-			if filepath.Base(file) != file {
-				return ErrOwnershipSnapshot
+		for _, files := range ownershipSourceFiles(loaded) {
+			for _, file := range files {
+				if filepath.Base(file) != file {
+					return ErrOwnershipSnapshot
+				}
+				name := filepath.Join(loaded.Dir, file)
+				value, err := captureOwnershipFile(ctx, name)
+				if err != nil {
+					return err
+				}
+				s.files[name] = value
 			}
-			name := filepath.Join(loaded.Dir, file)
-			value, err := captureOwnershipFile(ctx, name)
-			if err != nil {
-				return err
-			}
-			s.files[name] = value
 		}
 		for _, imported := range loaded.Imports {
 			if mapped, exists := loaded.ImportMap[imported]; exists {
@@ -159,7 +161,7 @@ func (d Discovery) CaptureOwnershipSources(ctx context.Context, application modu
 	return s, nil
 }
 
-// ValidateSnapshot rechecks old source bytes and identities, active Go-file
+// ValidateSnapshot rechecks old source bytes and identities, selected source
 // membership, and declaration membership in the original module roots. Source
 // selection uses captured module metadata only in private alternate files;
 // it neither compiles application tests nor changes the authored module graph.
@@ -219,7 +221,7 @@ func (s OwnershipSnapshot) ValidateSnapshot(ctx context.Context) error {
 	}
 	for name, before := range s.packages {
 		after, exists := selected[name]
-		if !exists || before.Dir != after.Dir || !reflect.DeepEqual(before.GoFiles, after.GoFiles) || !reflect.DeepEqual(before.CgoFiles, after.CgoFiles) {
+		if !exists || before.Dir != after.Dir || !reflect.DeepEqual(ownershipSourceFiles(before), ownershipSourceFiles(after)) {
 			return ErrOwnershipSnapshot
 		}
 	}
@@ -244,6 +246,12 @@ func (s OwnershipSnapshot) ValidateSnapshot(ctx context.Context) error {
 		return err
 	}
 	return s.recheckFiles(ctx)
+}
+
+// Native sources included by a cgo preamble can change exported Go types and
+// constants. Retain Go's selected source groups rather than scanning directories.
+func ownershipSourceFiles(loaded listedPackage) [][]string {
+	return [][]string{loaded.GoFiles, loaded.CgoFiles, loaded.CFiles, loaded.CXXFiles, loaded.MFiles, loaded.HFiles, loaded.FFiles, loaded.SFiles}
 }
 
 func (s OwnershipSnapshot) recheckDirectories() error {

@@ -1082,6 +1082,12 @@ type listedPackage struct {
 	Export     string                `json:"Export"`
 	GoFiles    []string              `json:"GoFiles"`
 	CgoFiles   []string              `json:"CgoFiles"`
+	CFiles     []string              `json:"CFiles"`
+	CXXFiles   []string              `json:"CXXFiles"`
+	MFiles     []string              `json:"MFiles"`
+	HFiles     []string              `json:"HFiles"`
+	FFiles     []string              `json:"FFiles"`
+	SFiles     []string              `json:"SFiles"`
 	Imports    []string              `json:"Imports"`
 	ImportMap  map[string]string     `json:"ImportMap"`
 	Incomplete bool                  `json:"Incomplete"`
