@@ -60,6 +60,9 @@ type Options struct {
 // Stage owns only its independently allocated temporary tree. Captured file
 // identities and digests are private concurrency evidence, not public plan data.
 type Stage struct {
+	project       string
+	inputs        Inputs
+	projectImages map[string]relocationImage
 	root          string
 	temporary     string
 	parent        *os.Root
@@ -110,9 +113,10 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	if json.Unmarshal(output, &settings) != nil || unsafeGoFlags(settings.GOFLAGS) {
 		return nil, ErrStage
 	}
-	s := &Stage{environment: append([]string(nil), environment...)}
+	s := &Stage{project: project.Path(), environment: append([]string(nil), environment...), projectImages: map[string]relocationImage{}}
 	defer func() {
 		if resultErr != nil {
+			s.inputs = Inputs{}
 			if cleanupErr := s.Close(); cleanupErr != nil {
 				result, resultErr = s, errors.Join(resultErr, cleanupErr)
 			}
@@ -221,6 +225,7 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 		}
 	}
 	s.environment = replaceEnvironment(s.environment, "GOWORK", selectedWorkspace)
+	s.inputs = s.captureInputs()
 	if err := s.Recheck(ctx); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStage, err)
 	}
@@ -258,38 +263,7 @@ func (s *Stage) Recheck(ctx context.Context) error {
 			return ErrConcurrentChange
 		}
 	}
-	for _, file := range s.metadata {
-		if ctx.Err() != nil {
-			return ErrConcurrentChange
-		}
-		if err := file.recheck(); err != nil {
-			return ErrConcurrentChange
-		}
-	}
-	for _, alias := range s.aliases {
-		current, err := canonicalDirectory(alias.path)
-		if err != nil || current != alias.target {
-			return ErrConcurrentChange
-		}
-		info, err := os.Lstat(current)
-		if err != nil || !sameFile(alias.info, info) {
-			return ErrConcurrentChange
-		}
-	}
-	for _, path := range s.paths {
-		current, err := os.Lstat(path.path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) || !sameFile(path.info, current) {
-			return ErrConcurrentChange
-		}
-	}
-	var used budget
-	for _, before := range s.trees {
-		after, err := captureTree(ctx, before.source, "", nil, &used)
-		if err != nil || !sameTree(before, after) {
-			return ErrConcurrentChange
-		}
-	}
-	return nil
+	return s.inputs.Recheck(ctx)
 }
 
 // Close removes only this Stage's allocated directory and is idempotent.
@@ -555,6 +529,7 @@ func (s *Stage) relocateModule(root string) error {
 	if err != nil {
 		return err
 	}
+	originalData := append([]byte(nil), data...)
 	module, err := modfile.Parse("go.mod", data, nil)
 	if err != nil {
 		return err
@@ -574,7 +549,11 @@ func (s *Stage) relocateModule(root string) error {
 			// A shadowed main-module replacement need not be a captured input.
 			continue
 		}
-		relocations = append(relocations, replacementRelocation{module: replacement.Old.Path, version: replacement.Old.Version, original: replacement.New.Path, workspaceOriginal: s.workspaceVendorPath(logical, replacement.New.Path), mapped: mapped})
+		token, err := originalReplacementToken(originalData, replacement)
+		if err != nil {
+			return err
+		}
+		relocations = append(relocations, replacementRelocation{owner: root, module: replacement.Old.Path, version: replacement.Old.Version, original: replacement.New.Path, originalToken: token.text, workspaceOriginal: s.workspaceVendorPath(logical, replacement.New.Path), mapped: mapped})
 		if err := relocateReplacement(replacement, mapped); err != nil {
 			return err
 		}
@@ -588,6 +567,9 @@ func (s *Stage) relocateModule(root string) error {
 		if err := s.files.WriteFile(relative, data, 0o600); err != nil {
 			return err
 		}
+	}
+	if root == s.project {
+		s.projectImages["go.mod"] = relocationImage{original: originalData, baseline: append([]byte(nil), data...)}
 	}
 	s.relocations = append(s.relocations, relocations...)
 	return s.relocateVendor(filepath.Join(filepath.Dir(relative), "vendor", "modules.txt"), relocations, false)
