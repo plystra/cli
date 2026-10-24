@@ -124,6 +124,19 @@ func composeRuntimeConfigurations(layers []*yaml.Node, inventory map[string]runt
 		removed := false
 		for index, node := range objects[symbol] {
 			if node == nil { continue }
+			if index == 0 {
+				// A suppressed root object still follows complete-document syntax.
+				stack := []*yaml.Node{node}
+				for len(stack) > 0 {
+					last := len(stack) - 1
+					child := stack[last]
+					stack = stack[:last]
+					if runtimeRemovalMapping(child) {
+						return nil, runtimeConfigurationError("removal markers are valid only in environment overlays")
+					}
+					stack = append(stack, child.Content...)
+				}
+			}
 			fields, err := runtimeMapping(node, "constructor Config", nil)
 			if err != nil { return nil, err }
 			removed = runtimeRemovalMapping(node)

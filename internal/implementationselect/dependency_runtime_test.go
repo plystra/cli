@@ -90,6 +90,8 @@ func TestRemovedConstructorConfiguration(t *testing.T) {
   {"invalid lower mapping", "config: {"+old+": [PRIVATE_INVALID]}\n", "config: {"+old+": {$remove: true}}\n", false},
   {"duplicate lower key", "config: {"+old+": {name: PRIVATE_FIRST, name: PRIVATE_SECOND}}\n", "config: {"+old+": {$remove: true}}\n", false},
   {"lower anchor", "config: {"+old+": {name: &private PRIVATE_VALUE}}\n", "config: {"+old+": {$remove: true}}\n", false},
+  {"nested root tombstone", "config: {"+old+": {name: {$remove: true}}}\n", "config: {"+old+": {$remove: true}}\n", false},
+  {"sequence root tombstone", "config: {"+old+": {names: [{$remove: true}]}}\n", "config: {"+old+": {$remove: true}}\n", false},
   {"root tombstone", "config: {"+old+": {$remove: true}}\n", "{}\n", false},
  } {
   t.Run(test.name, func(t *testing.T) {
