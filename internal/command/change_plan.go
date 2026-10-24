@@ -15,19 +15,25 @@ import (
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/changerequest"
 	"github.com/plystra/cli/internal/commandschema"
+	"github.com/plystra/cli/internal/configurationimpact"
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/implementationselect"
+	"github.com/plystra/cli/internal/scaffoldplan"
 )
 
 const changePlanUsage = `Usage:
   plystra change plan --request <path|-> [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Plans one bounded declarative change request without modifying the Project. This
-installed slice accepts batches of interface_root present/absent (require or
-expose), implementation_selection set/remove, resource_selection set/remove,
-and configuration set/remove operations (at most 1024 requested operations).
-It analyzes the final ownership graph.
+installed slice accepts interface_create, implementation_create, interface_root
+present/absent (require or expose), implementation_selection set/remove,
+resource_selection set/remove, and configuration set/remove operations
+(at most 1024 requested operations). It analyzes the final ownership graph.
+Source requests create all Interface and Implementation scaffolds in a private
+working copy before final discovery, generation, and "go build -mod=readonly ./...".
+Scaffolds retain deterministic unfinished behavior. No application tests or
+business methods are executed. Dependency operations remain unsupported.
 Root changes preserve complete-set boundaries
 or sparse environment intent and clean up only owners lost in the final state.
 Resource removal deletes the whole exact instance, including provider and Config,
@@ -58,13 +64,12 @@ it does not enumerate missing-value decisions. Edits use the final owners' schem
 and obsolete Config and binding cleanup happens in the same document edit.
 Resource set requires an existing effective instance. A provider change discards
 old selected Config, including its exclusion; matching fields are never migrated.
-Other operation kinds remain unsupported. Public plans allow at most 1024
+Public plans allow at most 1024
 derived operations separately; cleanup does not consume the request limit.
 Public request identity omits submitted values. Every configuration set declares a
 planned write, even for equal values, so private equality is not disclosed.
 This preview is non_exact and cannot authorize apply. Change apply remains uninstalled.
-Other operation kinds return a structured unsupported result until their staged
-planners are installed.
+Dependency operations return a structured unsupported result.
 `
 
 type changePlanArguments struct {
@@ -115,6 +120,40 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The change request is invalid.")
 	}
 	operations := request.Operations()
+	hasScaffolds, hasDependency := false, false
+	for _, operation := range operations {
+		hasScaffolds = hasScaffolds || operation.Kind() == changerequest.KindInterfaceCreate || operation.Kind() == changerequest.KindImplementationCreate
+		hasDependency = hasDependency || operation.Kind() == changerequest.KindDependency
+	}
+	if hasScaffolds {
+		if hasDependency {
+			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "Dependency changes are not installed in staged scaffold previews.")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
+		defer cancel()
+		planned, err := scaffoldplan.Preview(ctx, scaffoldplan.Options{
+			Start: workingDirectory, ConfigurationPath: parsed.configurationPath, EnvironmentName: parsed.environmentName, Environment: environment,
+		}, request)
+		if planned.Effects().Valid() {
+			emptyEffects = planned.Effects()
+		}
+		if err != nil {
+			return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The complete scaffold candidate could not be validated; no Project changes were installed.")
+		}
+		payload, effects, err := buildScaffoldChangePlanPayload(request, planned)
+		if err != nil {
+			return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The scaffold plan could not be encoded.")
+		}
+		snapshot, err := changePlanSelectorSnapshot(planned.Inputs().ConfigurationSelection())
+		if err != nil {
+			return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The selected configuration snapshot could not be encoded.")
+		}
+		result, err := commandschema.NewResult(commandschema.ResultInput{Operation: "change.plan", InvocationID: invocationID, Snapshot: &snapshot, Status: commandschema.StatusSuccess, Effects: effects, Payload: payload})
+		if err != nil {
+			return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The scaffold plan result could not be built.")
+		}
+		return writeChangePlanResult(output, result, fmt.Sprintf("change plan %s (%s; Implementation scaffolds have incomplete behavior)", payload.PlanDigest(), payload.Completeness()))
+	}
 	configurations, implementationSelections, resourceSelections, roots := 0, 0, 0, 0
 	for _, operation := range operations {
 		switch operation.Kind() {
@@ -297,6 +336,81 @@ func readChangeRequest(base, path string) ([]byte, error) {
 
 func buildChangePlanPayload(request changerequest.Request, planned implementationselect.PlanResult) (commandschema.ChangePlan, commandschema.Effects, error) {
 	inputs := planned.Inputs()
+	input, afterDigest, err := changePlanProjection(request, inputs, planned.Updated(), planned.ConfigurationImpact())
+	if err != nil {
+		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+	}
+	selection := inputs.ConfigurationSelection()
+	var plannedEffects []commandschema.Effect
+	if planned.Changed() {
+		input.WriteSet = []commandschema.ChangePlanPathInput{{Path: selection.Path(), Kind: "configuration", BeforeExists: true, AfterExists: true, BeforeDigest: input.InputSnapshot.SelectedDigest, AfterDigest: afterDigest}}
+		effect, err := commandschema.NewEffect(commandschema.EffectInput{
+			ID: "apply-change-plan", Class: commandschema.EffectProjectWrite, Phase: "apply", Target: selection.Path(),
+			Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_configuration_change", Reversibility: "rollback", Verification: input.Verification,
+		})
+		if err != nil {
+			return commandschema.ChangePlan{}, commandschema.Effects{}, err
+		}
+		plannedEffects = append(plannedEffects, effect)
+	}
+	input.Effects, err = commandschema.NewEffects(commandschema.EffectsInput{Planned: plannedEffects})
+	if err != nil {
+		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+	}
+	input.EffectRequirements, input.FinalModelDigest = plannedEffects, planned.CompositionDigest()
+	payload, err := commandschema.NewChangePlan(input)
+	return payload, input.Effects, err
+}
+
+func buildScaffoldChangePlanPayload(request changerequest.Request, planned scaffoldplan.Result) (commandschema.ChangePlan, commandschema.Effects, error) {
+	inputs := planned.Inputs()
+	input, afterDigest, err := changePlanProjection(request, inputs, planned.Updated(), planned.ConfigurationImpact())
+	if err != nil {
+		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+	}
+	seen := map[string]bool{}
+	for _, path := range input.ReadSet {
+		seen[path.Path] = true
+	}
+	for _, path := range planned.ReadSet() {
+		if !seen[path.Path] {
+			input.ReadSet = append(input.ReadSet, path)
+			seen[path.Path] = true
+		}
+	}
+	input.WriteSet = planned.WriteSet()
+	for index := range input.WriteSet {
+		path := &input.WriteSet[index]
+		verification := []string{"go", "build", "-mod=readonly", "./..."}
+		if path.Path == inputs.ConfigurationSelection().Path() {
+			path.Kind, path.BeforeDigest, path.AfterDigest = "configuration", input.InputSnapshot.SelectedDigest, afterDigest
+			verification = input.Verification
+		}
+		if !seen[path.Path] {
+			input.ReadSet = append(input.ReadSet, commandschema.ChangePlanPathInput{Path: path.Path, Kind: path.Kind, BeforeExists: path.BeforeExists, BeforeDigest: path.BeforeDigest})
+			seen[path.Path] = true
+		}
+		effect, err := commandschema.NewEffect(commandschema.EffectInput{
+			ID: fmt.Sprintf("write-%x", sha256.Sum256([]byte(path.Path))), Class: commandschema.EffectProjectWrite, Phase: "apply", Target: path.Path,
+			Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_candidate_write", Reversibility: "rollback", Verification: verification,
+		})
+		if err != nil {
+			return commandschema.ChangePlan{}, commandschema.Effects{}, err
+		}
+		input.EffectRequirements = append(input.EffectRequirements, effect)
+	}
+	input.Effects, err = commandschema.NewEffects(commandschema.EffectsInput{
+		Observed: planned.Effects().Observed(), Planned: input.EffectRequirements, Skipped: planned.Effects().Skipped(), Unverified: planned.Effects().Unverified(),
+	})
+	if err != nil {
+		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+	}
+	input.FinalModelDigest = planned.FinalModelDigest()
+	payload, err := commandschema.NewChangePlan(input)
+	return payload, input.Effects, err
+}
+
+func changePlanProjection(request changerequest.Request, inputs applicationresolve.SelectionInputs, updated []byte, impact configurationimpact.Impact) (commandschema.ChangePlanInput, string, error) {
 	selection := inputs.ConfigurationSelection()
 	verification := []string{"plystra", "check"}
 	switch generation.ConfigurationMode(selection.Mode()) {
@@ -309,9 +423,9 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 		}
 		verification = append(verification, "--config", path)
 	}
-	rootDigest, selectedDigest, afterDigest, err := inputs.ConfigurationLayerDigests(planned.Updated())
+	rootDigest, selectedDigest, afterDigest, err := inputs.ConfigurationLayerDigests(updated)
 	if err != nil {
-		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+		return commandschema.ChangePlanInput{}, "", err
 	}
 	readSet := []commandschema.ChangePlanPathInput{{Path: inputs.RootSnapshot().Path(), Kind: "configuration", BeforeExists: true, BeforeDigest: rootDigest}}
 	if inputs.SelectedSnapshot().Path() != inputs.RootSnapshot().Path() {
@@ -324,25 +438,8 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 		configurationRequested = configurationRequested || requested.Kind() == changerequest.KindConfiguration
 	}
 	requestedCount := len(operations)
-	for _, derived := range planned.ConfigurationImpact().DerivedOperations() {
+	for _, derived := range impact.DerivedOperations() {
 		operations = append(operations, commandschema.ChangePlanOperationInput{Kind: derived.Kind, Action: derived.Action, Owner: derived.Owner, Path: derived.Path, Derived: true})
-	}
-	var writeSet []commandschema.ChangePlanPathInput
-	var plannedEffects []commandschema.Effect
-	if planned.Changed() {
-		writeSet = append(writeSet, commandschema.ChangePlanPathInput{Path: selection.Path(), Kind: "configuration", BeforeExists: true, AfterExists: true, BeforeDigest: selectedDigest, AfterDigest: afterDigest})
-		effect, err := commandschema.NewEffect(commandschema.EffectInput{
-			ID: "apply-change-plan", Class: commandschema.EffectProjectWrite, Phase: "apply", Target: selection.Path(),
-			Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_configuration_change", Reversibility: "rollback", Verification: verification,
-		})
-		if err != nil {
-			return commandschema.ChangePlan{}, commandschema.Effects{}, err
-		}
-		plannedEffects = append(plannedEffects, effect)
-	}
-	effects, err := commandschema.NewEffects(commandschema.EffectsInput{Planned: plannedEffects})
-	if err != nil {
-		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}
 	requestDigest := request.Digest()
 	if configurationRequested {
@@ -350,26 +447,28 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 		// canonical request digest would reveal submitted value equality.
 		identity, err := json.Marshal(operations[:requestedCount])
 		if err != nil {
-			return commandschema.ChangePlan{}, commandschema.Effects{}, err
+			return commandschema.ChangePlanInput{}, "", err
 		}
 		requestDigest = fmt.Sprintf("sha256:%x", sha256.Sum256(append([]byte("plystra.change-plan/v1:public-request\x00"), identity...)))
 	}
-	payload, err := commandschema.NewChangePlan(commandschema.ChangePlanInput{
+	return commandschema.ChangePlanInput{
 		RequestDigest:       requestDigest,
 		InputSnapshot:       commandschema.ChangePlanSnapshotInput{ModulePath: inputs.Module().ModulePath(), ConfigurationMode: selection.Mode(), ConfigurationPath: selection.Path(), Environment: selection.Environment(), RootDigest: rootDigest, SelectedDigest: selectedDigest},
 		ReadSet:             readSet,
-		WriteSet:            writeSet,
 		Operations:          operations,
 		ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: selection.Mode(), Path: selection.Path(), Environment: selection.Environment()},
-		ConfigurationImpact: planned.ConfigurationImpact(), EffectRequirements: plannedEffects, Effects: effects, FinalModelDigest: planned.CompositionDigest(),
-		Verification: verification, Completeness: "non_exact",
-	})
-	return payload, effects, err
+		ConfigurationImpact: impact,
+		Verification:        verification, Completeness: "non_exact",
+	}, afterDigest, nil
 }
 
 func requestedSelectionOperation(operation changerequest.Operation) commandschema.ChangePlanOperationInput {
 	result := commandschema.ChangePlanOperationInput{Kind: string(operation.Kind())}
-	if selection, ok := operation.ImplementationSelection(); ok {
+	if creation, ok := operation.InterfaceCreate(); ok {
+		result.Action, result.Name, result.Semantics = "create", creation.Name(), string(creation.Semantics())
+	} else if creation, ok := operation.ImplementationCreate(); ok {
+		result.Action, result.Contract, result.Package = "create", creation.Contract(), creation.Package()
+	} else if selection, ok := operation.ImplementationSelection(); ok {
 		result.Action = string(selection.Action())
 		result.Interface = selection.Interface()
 		result.Constructor, _ = selection.Constructor()

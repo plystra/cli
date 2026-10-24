@@ -430,8 +430,10 @@ catalog entries, governed proxies, or transports. Use selects a compatible
 provider for an existing named instance without a kind flag. Implement creates
 unfinished Interface or Resource scaffolds without activation. Full Resource
 acceptance and change apply remain unsupported. The installed
-change-plan slice supports Interface root, Implementation/Resource selection,
-and configuration batches, with at most 1024 requested operations in total.
+change-plan slice supports Interface/Implementation creation, Interface roots,
+Implementation/Resource selections, and configuration batches, with at most
+1024 requested operations in total. Source candidates are generated and built
+privately before a plan is returned; authored Projects remain unchanged.
 Every multi-operation selection batch requires a valid complete final state.
 The configuration view retains the selected current-Project layer, redacted
 field summaries, ownership and precedence, effective and overridden

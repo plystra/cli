@@ -849,8 +849,8 @@ parsed for relocation have individual 1 MiB limits; non-main dependency
 manifests remain uninterpreted source inputs.
 Included symbolic and nonregular entries, source-nested temporary parents, and
 alternate `-modfile` or `-overlay` inputs fail closed. This is filesystem
-isolation, not a sandbox for trusted native code. It is a planning prerequisite,
-not an installed scaffold/dependency preview or change-apply implementation.
+isolation, not a sandbox for trusted native code. Public scaffold previews use
+this capture; dependency previews and change apply remain uninstalled.
 
 The internal `changerequest` package parses `plystra.change/v1` intent for
 Interface and Implementation creation, dependencies, configuration, Interface
@@ -861,9 +861,10 @@ SHA-256 request digest. Bounds are 1 MiB for input and normalized JSON, 1,024
 operations, 64 JSON levels, 65,536 value nodes, 4,096 decoded bytes per string or
 key, and 1,024 bytes per Implementation package path. Duplicate keys and
 conflicting targets fail without exposing submitted configuration values.
-The installed public `plystra change plan` slice accepts batches of `interface_root`
-present/absent, `implementation_selection` set/remove, `resource_selection`
-set/remove, and `configuration` set/remove operations, with up to 1,024 requested
+The installed public `plystra change plan` slice accepts batches of
+`interface_create`, `implementation_create`, `interface_root` present/absent,
+`implementation_selection` set/remove, `resource_selection` set/remove,
+and `configuration` set/remove operations, with up to 1,024 requested
 operations in total. All selections and fields share the final ownership graph
 and one selected-document edit. The read-only `plystra.change-plan/v1` payload contains a plan digest and
 all five `configuration_impact` arrays. When both old and candidate Interface
@@ -948,8 +949,22 @@ the new provider; first assignment or an unknown old provider proves no such
 cleanup. Resource removal never makes fields on that removed instance editable.
 Every multi-operation selection batch requires a valid complete final state,
 including Resource-only batches without field edits. Singleton root and selection
-requests retain their bounded missing-value decisions. Other operation kinds
+requests retain their bounded missing-value decisions. Dependency operations
 remain unsupported.
+
+Source previews materialize every requested Interface and Implementation before
+ordinary discovery validates the complete candidate. They support same-request
+contract imports, selections, roots, and typed configuration edits. The selected
+model is generated, tidied, and checked with `go build -mod=readonly ./...` in an
+owner-private working copy; application tests and business methods are not run.
+All source batches require a valid complete final state. Interface scaffolds
+retain the requested first-version query or command semantics, and ordinary
+Interface and Resource provider scaffolds retain deterministic unfinished
+behavior. Original Project and local dependency inputs are rechecked before
+success, and the private tree is removed on success and failure. Plans report
+authored, module, generated, and private-baseline creation, replacement, and
+deletion paths without publishing private content digests. The private baseline
+is always a planned write, including equal bytes, to hide private equality.
 Public plans bound requested and derived operations separately at 1,024 each;
 automatic cleanup does not consume the request allowance.
 An already-satisfied removal retains its normalized operation but reports an
@@ -976,7 +991,7 @@ An invalid previous state is never offered as a provider-retention alternative.
 Typed lower-layer validation and every unrelated final obligation still apply.
 Missing binding candidates, invalid explicit bindings, non-enumerable required fields,
 and unrelated validation failures still fail validation. `plystra use` also
-rejects the invalid final configuration. Other operation kinds return a
+rejects the invalid final configuration. Dependency operations return a
 structured unsupported result; `change apply`,
 primitive-command lowering, and `--dry-run` remain unavailable. These previews
 are always `non_exact` and cannot authorize apply. Their public read/write and
@@ -987,8 +1002,8 @@ Path entries carry explicit `before_exists`; write entries also carry explicit
 digests are optional independently of existence: a present private file can
 omit its digest without claiming absence. Digest omission alone never proves
 an exact content preimage; present states without digests require `non_exact`.
-The installed configuration previews update existing
-selected documents; this path schema alone does not install scaffold previews.
+Configuration edits update existing selected documents. Source previews also
+report scaffold and generated output paths from the complete candidate.
 `effect_requirements` is the sorted, unique inventory of stable apply-time
 effects bound by that digest. It is separate from the four `effects` arrays,
 which retain invocation-specific observations without changing plan identity.
