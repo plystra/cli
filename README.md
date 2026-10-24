@@ -851,6 +851,19 @@ adds no file input, and the caller's environment is copied before Go selection.
 Absolute and Project-relative settings paths are supported. Candidate tooling
 reads an owner-private frozen copy outside the module trees, preserving the
 selected settings even if the original changes; drift still rejects the plan.
+Source and dependency previews additionally retain versioned module source
+trees after module selection and before declaration discovery or candidate
+builds. This includes ordinary and transitive modules, versioned replacements,
+newly selected versions, and earlier consumed versions later removed from the
+candidate. The original Go-selected directory spelling retains symbolic path
+provenance even when module discovery uses a canonical source root.
+Source bytes, identities, modes, and membership remain private and are rechecked
+after temporary cleanup. Unrelated cache entries are excluded; rechecks never
+download or repair modules. These read-only roots share the staging tree's
+cumulative bounds. Capturing newly selected sources before their first use by
+Go's dependency resolution and normalization, complete module-resolution
+metadata, and native permission capture remain unfinished; previews remain
+`non_exact`.
 Destination writes and cleanup use opened directory roots. Copies are bounded
 to 1,024 module roots and directory-alias inputs, 65,536 entries, 64 MiB per
 file, and 512 MiB of tree contents. Main-module, workspace, and vendor metadata

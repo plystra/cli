@@ -109,7 +109,7 @@ func (s *Stage) captureInputs() Inputs {
 	for index := range state.metadata {
 		state.metadata[index].data = append([]byte(nil), state.metadata[index].data...)
 	}
-	for _, tree := range s.trees {
+	for _, tree := range append(append([]treeSnapshot(nil), s.trees...), s.sources...) {
 		state.trees = append(state.trees, inputTree{source: tree.source, entries: maps.Clone(tree.entries)})
 	}
 	return Inputs{state: &state}

@@ -238,13 +238,20 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	if len(dependencies) != 0 {
 		// Unloadable old authored sources cannot block a same-request repair or
 		// establish old ownership. Only successfully captured declarations prove it.
-		previous, _ = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
-			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
-			GoCommand: options.GoCommand, Environment: stage.Environment(),
-		})
+		if err := retainDependencySources(ctx, stage, options.GoCommand); err == nil {
+			previous, _ = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+				Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+				GoCommand: options.GoCommand, Environment: stage.Environment(),
+			})
+		} else if errors.Is(err, projectstage.ErrConcurrentChange) || ctx.Err() != nil {
+			return result, errors.Join(ErrPreview, err)
+		}
 	}
 	build := effect("candidate-build", commandschema.EffectTrustedCodeExecution, "validate_complete_candidate", []string{"go", "build", "-mod=readonly", "./..."})
 	validateCandidate := func(mutate applicationgenerate.ModuleMutation) error {
+		if err := retainDependencySources(ctx, stage, options.GoCommand); err != nil {
+			return err
+		}
 		var implementations []implementationcreate.StageRequest
 		for _, operation := range request.Operations() {
 			if creation, ok := operation.InterfaceCreate(); ok {
@@ -335,6 +342,9 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 			GoCommand: options.GoCommand, Environment: stage.Environment(), MutateModule: mutate, RejectUnexpected: true,
 			Validate: func(ctx context.Context, root string) error {
+				if err := retainDependencySources(ctx, stage, options.GoCommand); err != nil {
+					return err
+				}
 				started, buildErr := gocommand.RunObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: stage.Environment()}, "build", "-mod=readonly", "./...")
 				if started {
 					accounting.Observed = append(accounting.Observed, build)

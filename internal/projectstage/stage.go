@@ -70,6 +70,7 @@ type Stage struct {
 	files         *os.Root
 	environment   []string
 	trees         []treeSnapshot
+	sources       []treeSnapshot
 	metadata      []fileSnapshot
 	aliases       []directorySnapshot
 	mainRoots     map[string]string

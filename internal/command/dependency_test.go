@@ -477,6 +477,8 @@ type commandProxyModule struct {
 	version  string
 	manifest string
 	sources  map[string]string
+	goMod    string
+	ordinary bool
 }
 
 func writeCommandDependencyProxy(t *testing.T, modules []commandProxyModule) string {
@@ -503,6 +505,9 @@ func writeCommandDependencyProxy(t *testing.T, modules []commandProxyModule) str
 		writeCommandFile(t, listPath, string(listData)+candidate.version+"\n")
 		writeCommandFile(t, filepath.Join(versionRoot, escapedVersion+".info"), fmt.Sprintf("{\"Version\":%q,\"Time\":\"2026-07-19T00:00:00Z\"}\n", candidate.version))
 		goMod := []byte("module " + candidate.path + "\n\ngo 1.26\n")
+		if candidate.goMod != "" {
+			goMod = []byte(candidate.goMod)
+		}
 		writeCommandFile(t, filepath.Join(versionRoot, escapedVersion+".mod"), string(goMod))
 
 		archiveFile, err := os.Create(filepath.Join(versionRoot, escapedVersion+".zip"))
@@ -516,8 +521,13 @@ func writeCommandDependencyProxy(t *testing.T, modules []commandProxyModule) str
 			data []byte
 		}{
 			{name: "go.mod", data: goMod},
-			{name: "plystra.yaml", data: []byte(candidate.manifest)},
 			{name: "project.go", data: []byte("package project\n")},
+		}
+		if !candidate.ordinary {
+			files = append(files, struct {
+				name string
+				data []byte
+			}{name: "plystra.yaml", data: []byte(candidate.manifest)})
 		}
 		var sourcePaths []string
 		for name := range candidate.sources {

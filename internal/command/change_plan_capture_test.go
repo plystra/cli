@@ -15,6 +15,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/changerequest"
+	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/projectstage"
 	"github.com/plystra/cli/internal/scaffoldplan"
 	"go.yaml.in/yaml/v3"
@@ -254,6 +255,162 @@ func TestScaffoldPreviewRetainsExternalGoEnvironment(t *testing.T) {
 	}
 	if !reflect.DeepEqual(before, commandTree(t, root)) || string(readCommandFile(t, settings, "env")) != "GOFLAGS=-tags=PRIVATE_GOENV_CHANGED\n" {
 		t.Fatal("preview changed original inputs or overwrote external editing")
+	}
+}
+
+func TestScaffoldPreviewRetainsSelectedDependencySources(t *testing.T) {
+	for _, mode := range []string{"existing", "added", "updated", "removed", "versioned-replacement", "transitive", "aliased-cache"} {
+		t.Run(mode, func(t *testing.T) {
+			modules := []commandProxyModule{
+				previewDependency(t, "v1.0.0", false), previewDependency(t, "v1.1.0", false),
+			}
+			const support = "example.com/preview/width"
+			if mode == "transitive" {
+				modules[0].goMod = "module " + previewDependencyModule + "\n\ngo 1.26\nrequire " + support + " v1.0.0\n"
+				modules[0].sources["remote/implementation.go"] = strings.ReplaceAll(modules[0].sources["remote/implementation.go"], "\"context\"", "\"context\"\nwidth \""+support+"\"")
+				modules[0].sources["remote/implementation.go"] = strings.ReplaceAll(modules[0].sources["remote/implementation.go"], "type Config struct {", "type Config struct { Padding [width.Size]int64;")
+				modules = append(modules, commandProxyModule{path: support, version: "v1.0.0", ordinary: true, sources: map[string]string{"width.go": "package project\nconst Size = 1\n"}})
+			}
+			proxy := writeCommandDependencyProxy(t, modules)
+			env := previewDependencyEnvironment(t, proxy)
+			if mode == "aliased-cache" {
+				for index, entry := range env {
+					if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {
+						alias := filepath.Join(t.TempDir(), "cache")
+						if err := os.Symlink(value, alias); err != nil {
+							t.Fatal(err)
+						}
+						env[index] = name + "=" + alias
+					}
+				}
+			}
+			root := writeImplementationSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
+			if mode != "added" {
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: env}, "get", previewDependencyModule+"@v1.0.0"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "existing" || mode == "versioned-replacement" || mode == "transitive" || mode == "aliased-cache" {
+				writeCommandFile(t, filepath.Join(root, "keep", "keep.go"), "package keep\nimport _ \""+previewDependencyModule+"/echo/v1\"\n")
+			}
+			if mode == "versioned-replacement" {
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: env}, "mod", "edit", "-replace="+previewDependencyModule+"="+previewDependencyModule+"@v1.1.0"); err != nil {
+					t.Fatal(err)
+				}
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: env}, "mod", "download", previewDependencyModule); err != nil {
+					t.Fatal(err)
+				}
+			}
+			operations := []map[string]any{{"kind": "interface_create", "name": "todo.add", "semantics": "command"}}
+			if mode == "added" || mode == "updated" {
+				action, version := "add", "v1.0.0"
+				if mode == "updated" {
+					action, version = "update", "v1.1.0"
+				}
+				operations = append(operations, map[string]any{"kind": "dependency", "action": action, "module": previewDependencyModule + "@" + version})
+			} else if mode == "removed" {
+				operations = append(operations, map[string]any{"kind": "dependency", "action": "remove", "module": previewDependencyModule})
+			}
+			data, err := json.Marshal(map[string]any{"schema": "plystra.change/v1", "operations": operations})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := changerequest.Parse(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent := t.TempDir()
+			before := commandTree(t, root)
+			planned, err := scaffoldplan.Preview(t.Context(), scaffoldplan.Options{Start: root, Environment: env, TemporaryParent: parent}, request)
+			if err != nil || !planned.Capture().Valid() {
+				t.Fatalf("%s selected source preview failed: %v", mode, err)
+			}
+			if err := planned.Capture().Recheck(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+				t.Fatal("preview retained temporary files")
+			}
+			var cache string
+			for _, entry := range env {
+				if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {
+					cache = value
+				}
+			}
+			if cache == "" {
+				t.Fatal("test has no isolated module cache")
+			}
+			writeCommandFile(t, filepath.Join(cache, "unrelated@v1.0.0", "value.go"), "unrelated cache input")
+			if err := planned.Capture().Recheck(t.Context()); err != nil {
+				t.Fatal("unrelated cache edit invalidated retained inputs")
+			}
+			versions := []string{"v1.0.0"}
+			if mode == "updated" {
+				versions = append(versions, "v1.1.0")
+			} else if mode == "versioned-replacement" {
+				versions = []string{"v1.1.0"}
+			}
+			for _, version := range versions {
+				path := filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@"+version), "remote", "implementation.go")
+				if mode == "transitive" {
+					path = filepath.Join(cache, filepath.FromSlash(support+"@"+version), "width.go")
+				}
+				original, err := os.ReadFile(path)
+				info, statErr := os.Stat(path)
+				if err != nil || statErr != nil {
+					t.Fatalf("missing consumed %s source: %v, %v", version, err, statErr)
+				}
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				changed := bytes.ReplaceAll(original, []byte("string"), []byte("uint64"))
+				if mode == "transitive" {
+					changed = bytes.ReplaceAll(original, []byte("Size = 1"), []byte("Size = 2"))
+				}
+				if bytes.Equal(original, changed) {
+					t.Fatal("test did not change a compiled field type")
+				}
+				writeCommandFile(t, path, string(changed))
+				if err := os.Chmod(path, info.Mode()); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+				if err := planned.Capture().Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+					t.Fatalf("%s consumed %s source drift accepted: %v", mode, version, err)
+				}
+				if err := os.Chmod(path, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				writeCommandFile(t, path, string(original))
+				if err := os.Chmod(path, info.Mode()); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+				if err := planned.Capture().Recheck(t.Context()); err != nil {
+					t.Fatal("restored exact source preimage failed recheck")
+				}
+			}
+			assertCandidateCaptureRedaction(t, planned, cache)
+			if mode == "aliased-cache" {
+				if err := os.Remove(cache); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), cache); err != nil {
+					t.Fatal(err)
+				}
+				if err := planned.Capture().Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+					t.Fatalf("retained capture accepted retargeted Go source directory: %v", err)
+				}
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("preview modified original Project")
+			}
+		})
 	}
 }
 

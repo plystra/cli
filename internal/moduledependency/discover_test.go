@@ -259,6 +259,48 @@ func TestDiscoverAcceptsDownloadedSelectedVersionWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestDiscoverPreservesReportedSourceDirectory(t *testing.T) {
+	for _, warm := range []bool{true, false} {
+		t.Run(fmt.Sprint(warm), func(t *testing.T) {
+			t.Parallel()
+			const modulePath, version = "example.com/plugin", "v1.2.3"
+			root := t.TempDir()
+			proxy := writeModuleProxy(t, root, modulePath, version)
+			app := filepath.Join(root, "app")
+			writeFile(t, filepath.Join(app, "go.mod"), "module example.com/app\n\ngo 1.26\nrequire "+modulePath+" "+version+"\n")
+			env := isolatedGoEnvironment(t, proxy)
+			cache := environmentValue(t, env, "GOMODCACHE")
+			if err := os.MkdirAll(cache, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			alias := filepath.Join(root, "cache-alias")
+			if err := os.Symlink(cache, alias); err != nil {
+				t.Fatal(err)
+			}
+			for index, entry := range env {
+				if strings.HasPrefix(entry, "GOMODCACHE=") {
+					env[index] = "GOMODCACHE=" + alias
+				}
+			}
+			runGo(t, app, env, "mod", "download", modulePath+"@"+version)
+			if !warm {
+				if err := os.RemoveAll(filepath.Join(cache, filepath.FromSlash(modulePath+"@"+version))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env})
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := index.Modules()[0]
+			logical := filepath.Join(alias, filepath.FromSlash(modulePath+"@"+version))
+			if selected.SourceDirectory() != logical || selected.Root() != canonicalPath(t, logical) {
+				t.Fatal("discovery discarded reported source path provenance")
+			}
+		})
+	}
+}
+
 func TestDiscoverOfflineUsesWarmSelectedSourceWithoutProjectMutation(t *testing.T) {
 	t.Parallel()
 

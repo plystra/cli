@@ -78,6 +78,7 @@ type Module struct {
 	requiredVersion string
 	selectedVersion string
 	root            string
+	sourceDirectory string
 	sourcePath      string
 	checksum        string
 	goModChecksum   string
@@ -111,6 +112,10 @@ func (m Module) GoModChecksum() string { return m.goModChecksum }
 // Root returns the canonical absolute source root. This CLI-only path is not
 // generation-extension input or generated manifest data.
 func (m Module) Root() string { return m.root }
+
+// SourceDirectory returns the source directory spelling selected by Go before
+// canonicalization. It preserves symbolic path provenance for private snapshots.
+func (m Module) SourceDirectory() string { return m.sourceDirectory }
 
 // Direct reports whether the current Project's go.mod explicitly requires the
 // module. It does not grant resolution or composition precedence.
@@ -436,6 +441,7 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 			requiredVersion: declared.version,
 			selectedVersion: listed.Version,
 			root:            root,
+			sourceDirectory: directory,
 			sourcePath:      expectedSourcePath,
 			checksum:        listed.Checksum,
 			goModChecksum:   listed.GoModSum,
@@ -542,6 +548,7 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 			return err
 		}
 		modules[index].root = root
+		modules[index].sourceDirectory = downloaded.Dir
 		modules[index].goMod = goModData
 		modules[index].checksum = downloaded.Checksum
 		modules[index].goModChecksum = downloaded.GoModSum
