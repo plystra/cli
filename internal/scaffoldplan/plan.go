@@ -1,4 +1,4 @@
-// Package scaffoldplan validates complete scaffold candidates in private stages.
+// Package scaffoldplan validates complete source and dependency candidates in private stages.
 package scaffoldplan
 
 import (
@@ -11,6 +11,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgen"
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/applicationmeta"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
 	"github.com/plystra/cli/internal/changerequest"
@@ -28,7 +29,7 @@ import (
 	"github.com/plystra/cli/internal/runtimebaseline"
 )
 
-var ErrPreview = errors.New("preview staged scaffolds")
+var ErrPreview = errors.New("preview staged candidate")
 
 type Options struct {
 	Start, ConfigurationPath, EnvironmentName string
@@ -39,14 +40,16 @@ type Options struct {
 // Result retains public-safe projections and private captured configuration.
 // It confers no installation authority. Effects remain available on failure.
 type Result struct {
-	inputs     applicationresolve.SelectionInputs
-	updated    []byte
-	impact     configurationimpact.Impact
-	writes     []commandschema.ChangePlanPathInput
-	reads      []commandschema.ChangePlanPathInput
-	effects    commandschema.Effects
-	model      string
-	forceWrite bool
+	inputs         applicationresolve.SelectionInputs
+	updated        []byte
+	impact         configurationimpact.Impact
+	writes         []commandschema.ChangePlanPathInput
+	reads          []commandschema.ChangePlanPathInput
+	effects        commandschema.Effects
+	model          string
+	forceWrite     bool
+	rootDigest     string
+	selectedDigest string
 }
 
 func (Result) String() string                                    { return "<private-scaffold-plan>" }
@@ -63,9 +66,12 @@ func (r Result) ReadSet() []commandschema.ChangePlanPathInput {
 }
 func (r Result) Effects() commandschema.Effects { return r.effects }
 func (r Result) FinalModelDigest() string       { return r.model }
+func (r Result) OriginalConfigurationDigests() (string, string) {
+	return r.rootDigest, r.selectedDigest
+}
 
 // Preview never installs candidate files into an authored Project. Every
-// scaffold is present before configuration planning and complete generation.
+// scaffold and dependency is present before final-state planning and generation.
 func Preview(ctx context.Context, options Options, request changerequest.Request) (result Result, resultErr error) {
 	if ctx == nil || !request.Valid() {
 		return result, ErrPreview
@@ -74,15 +80,16 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		return result, errors.Join(ErrPreview, err)
 	}
 	scaffolds := 0
+	var dependencies []modulemutation.DependencyChange
 	for _, operation := range request.Operations() {
-		if operation.Kind() == changerequest.KindDependency {
-			return result, ErrPreview
+		if change, ok := operation.Dependency(); ok {
+			dependencies = append(dependencies, modulemutation.DependencyChange{Action: string(change.Action()), Module: change.Module()})
 		}
 		if operation.Kind() == changerequest.KindInterfaceCreate || operation.Kind() == changerequest.KindImplementationCreate {
 			scaffolds++
 		}
 	}
-	if scaffolds == 0 {
+	if scaffolds == 0 && len(dependencies) == 0 {
 		return result, ErrPreview
 	}
 	project, err := projectlocate.Find(options.Start)
@@ -163,66 +170,104 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	if err != nil {
 		return result, errors.Join(ErrPreview, err)
 	}
-	var implementations []implementationcreate.StageRequest
-	for _, operation := range request.Operations() {
-		if creation, ok := operation.InterfaceCreate(); ok {
-			if _, err := interfacecreate.Materialize(ctx, stage, creation.Name(), interfacemeta.OperationKind(creation.Semantics())); err != nil {
-				return result, errors.Join(ErrPreview, err)
-			}
-		} else if creation, ok := operation.ImplementationCreate(); ok {
-			implementations = append(implementations, implementationcreate.StageRequest{ContractID: creation.Contract(), Package: creation.Package()})
-		} else if operation.Kind() == changerequest.KindDependency {
-			return result, ErrPreview
-		}
-	}
-	if len(implementations) != 0 {
-		if _, err := implementationcreate.Materialize(ctx, stage, implementations); err != nil {
-			return result, errors.Join(ErrPreview, err)
-		}
-	}
-	remaining, err := selectionRequest(request)
-	if err != nil {
-		return result, errors.Join(ErrPreview, err)
-	}
-	selectionOptions := implementationselect.Options{
-		Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
-		GoCommand: options.GoCommand, Environment: stage.Environment(),
-	}
-	if len(remaining) != 0 {
-		filtered, err := changerequest.Parse(remaining)
-		if err != nil {
-			return result, errors.Join(ErrPreview, err)
-		}
-		planned, err := previewSelection(ctx, selectionOptions, filtered)
-		if err != nil {
-			return result, errors.Join(ErrPreview, err)
-		}
-		result.inputs, result.updated, result.impact, result.forceWrite = planned.Inputs(), planned.Updated(), planned.ConfigurationImpact(), planned.Changed()
-		if result.forceWrite {
-			if err := atomicfs.WriteFiles(stage.Root(), []atomicfs.Write{{Path: result.inputs.ConfigurationSelection().Path(), Data: result.updated, ExpectedData: planned.Original(), OwnerPrivate: true}}, func(string) error { return stage.Recheck(ctx) }); err != nil {
-				return result, errors.Join(ErrPreview, err)
-			}
-		}
-	} else {
-		result.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+	var previous applicationresolve.SelectionInputs
+	if len(dependencies) != 0 {
+		// Unloadable old authored sources cannot block a same-request repair or
+		// establish old ownership. Only successfully captured declarations prove it.
+		previous, _ = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
 			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 			GoCommand: options.GoCommand, Environment: stage.Environment(),
 		})
-		if err != nil {
-			return result, errors.Join(ErrPreview, err)
-		}
-		result.updated = result.inputs.SelectedSnapshot().Data()
-		result.impact, err = configurationimpact.New(configurationimpact.Input{})
-		if err != nil {
-			return result, errors.Join(ErrPreview, err)
-		}
-	}
-	if err := stage.Recheck(ctx); err != nil {
-		return result, errors.Join(ErrPreview, err)
 	}
 	build := effect("candidate-build", commandschema.EffectTrustedCodeExecution, "validate_complete_candidate", []string{"go", "build", "-mod=readonly", "./..."})
-	err = modulemutation.Tidy(ctx, stage.Root(), options.GoCommand, stage.Environment(), func(mutate applicationgenerate.ModuleMutation) error {
-		_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
+	validateCandidate := func(mutate applicationgenerate.ModuleMutation) error {
+		var implementations []implementationcreate.StageRequest
+		for _, operation := range request.Operations() {
+			if creation, ok := operation.InterfaceCreate(); ok {
+				if _, err := interfacecreate.Materialize(ctx, stage, creation.Name(), interfacemeta.OperationKind(creation.Semantics())); err != nil {
+					return errors.Join(ErrPreview, err)
+				}
+			} else if creation, ok := operation.ImplementationCreate(); ok {
+				implementations = append(implementations, implementationcreate.StageRequest{ContractID: creation.Contract(), Package: creation.Package()})
+			}
+		}
+		if len(implementations) != 0 {
+			if _, err := implementationcreate.Materialize(ctx, stage, implementations); err != nil {
+				return errors.Join(ErrPreview, err)
+			}
+		}
+		remaining, err := selectionRequest(request)
+		if err != nil {
+			return errors.Join(ErrPreview, err)
+		}
+		selectionOptions := implementationselect.Options{
+			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+			GoCommand: options.GoCommand, Environment: stage.Environment(),
+		}
+		var planned implementationselect.PlanResult
+		if len(dependencies) != 0 {
+			result.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+				Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+				GoCommand: options.GoCommand, Environment: stage.Environment(),
+			})
+			if err == nil {
+				planned, err = implementationselect.PreviewDependencyConfigurations(ctx, previous, result.inputs, request)
+			}
+			if err != nil {
+				return errors.Join(ErrPreview, err)
+			}
+		} else if len(remaining) != 0 {
+			filtered, err := changerequest.Parse(remaining)
+			if err != nil {
+				return errors.Join(ErrPreview, err)
+			}
+			planned, err = previewSelection(ctx, selectionOptions, filtered)
+			if err != nil {
+				return errors.Join(ErrPreview, err)
+			}
+		}
+		if len(dependencies) != 0 || len(remaining) != 0 {
+			result.inputs, result.updated, result.impact, result.forceWrite = planned.Inputs(), planned.Updated(), planned.ConfigurationImpact(), planned.Changed()
+			if result.forceWrite {
+				if err := atomicfs.WriteFiles(stage.Root(), []atomicfs.Write{{Path: result.inputs.ConfigurationSelection().Path(), Data: result.updated, ExpectedData: planned.Original(), OwnerPrivate: true}}, func(string) error { return stage.Recheck(ctx) }); err != nil {
+					return errors.Join(ErrPreview, err)
+				}
+			}
+		} else {
+			result.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
+				Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+				GoCommand: options.GoCommand, Environment: stage.Environment(),
+			})
+			if err != nil {
+				return errors.Join(ErrPreview, err)
+			}
+			result.updated = result.inputs.SelectedSnapshot().Data()
+			result.impact, err = configurationimpact.New(configurationimpact.Input{})
+			if err != nil {
+				return errors.Join(ErrPreview, err)
+			}
+		}
+		if len(dependencies) == 0 || previous.Module().Path() != "" {
+			original := result.inputs
+			if len(dependencies) != 0 {
+				original = previous
+			}
+			result.rootDigest, result.selectedDigest, _, err = original.ConfigurationLayerDigests(original.SelectedSnapshot().Data())
+		} else {
+			// Without an old schema no old field is proven public. Hash only the
+			// value-free fallback instead of reinterpreting old private data as public.
+			result.rootDigest, err = applicationmeta.ConfigurationLayerDigest(result.inputs.RootManifest(), nil)
+			if err == nil {
+				result.selectedDigest, err = applicationmeta.ConfigurationLayerDigest(result.inputs.SelectedManifest(), nil)
+			}
+		}
+		if err != nil {
+			return errors.Join(ErrPreview, err)
+		}
+		if err := stage.Recheck(ctx); err != nil {
+			return errors.Join(ErrPreview, err)
+		}
+		_, err = applicationgenerate.Generate(ctx, applicationgenerate.Options{
 			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 			GoCommand: options.GoCommand, Environment: stage.Environment(), MutateModule: mutate, RejectUnexpected: true,
 			Validate: func(ctx context.Context, root string) error {
@@ -236,7 +281,27 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 			},
 		})
 		return err
-	})
+	}
+	if len(dependencies) == 0 {
+		err = modulemutation.Tidy(ctx, stage.Root(), options.GoCommand, stage.Environment(), validateCandidate)
+	} else {
+		get := effect("candidate-dependencies", commandschema.EffectTrustedCodeExecution, "resolve_dependency_batch", []string{"go", "get"})
+		reported := false
+		err = modulemutation.ChangeDependencies(ctx, stage.Root(), modulemutation.DependencyBatchOptions{
+			GoCommand: options.GoCommand, Environment: stage.Environment(), Changes: dependencies,
+			Observe: func(started bool) {
+				reported = true
+				if started {
+					accounting.Observed = append(accounting.Observed, get)
+				} else {
+					accounting.Skipped = append(accounting.Skipped, get)
+				}
+			},
+		}, validateCandidate)
+		if !reported {
+			accounting.Skipped = append(accounting.Skipped, get)
+		}
+	}
 	if err != nil {
 		return result, errors.Join(ErrPreview, err)
 	}
@@ -284,7 +349,7 @@ func selectionRequest(request changerequest.Request) ([]byte, error) {
 		if err := json.Unmarshal(operation, &identity); err != nil {
 			return nil, err
 		}
-		if identity.Kind != string(changerequest.KindInterfaceCreate) && identity.Kind != string(changerequest.KindImplementationCreate) {
+		if identity.Kind != string(changerequest.KindInterfaceCreate) && identity.Kind != string(changerequest.KindImplementationCreate) && identity.Kind != string(changerequest.KindDependency) {
 			kept = append(kept, operation)
 		}
 	}

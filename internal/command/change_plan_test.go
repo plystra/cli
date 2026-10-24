@@ -1321,14 +1321,14 @@ func (*Value) Read() {}
 `)
 }
 
-func TestRunChangePlanRejectsUninstalledOperationWithoutMutation(t *testing.T) {
+func TestRunChangePlanRejectsAbsentDependencyWithoutMutation(t *testing.T) {
 	root := writeImplementationSelectionCommandProject(t)
 	requestPath := filepath.Join(root, "change.json")
-	writeCommandFile(t, requestPath, `{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"add","module":"example.com/other@v1.0.0"}]}`)
+	writeCommandFile(t, requestPath, `{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"remove","module":"example.com/other"}]}`)
 	before := commandTree(t, root)
 	exitCode, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, implementationSelectionCommandEnvironment(nil))
-	if exitCode != 2 || stderr != "" {
-		t.Fatalf("unsupported change plan = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
+	if exitCode != 3 || stderr != "" {
+		t.Fatalf("absent dependency plan = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	var result struct {
 		Status      string `json:"status"`
@@ -1337,13 +1337,13 @@ func TestRunChangePlanRejectsUninstalledOperationWithoutMutation(t *testing.T) {
 		} `json:"diagnostics"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
-		t.Fatalf("decode unsupported result: %v\n%s", err, stdout)
+		t.Fatalf("decode absent dependency result: %v\n%s", err, stdout)
 	}
-	if result.Status != "unsupported" || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "PLYSTRA_CHANGE_PLAN_OPERATION_UNSUPPORTED" {
-		t.Fatalf("unsupported result = %#v", result)
+	if result.Status != "validation_failed" || len(result.Diagnostics) != 1 || result.Diagnostics[0].Code != "PLYSTRA_CHANGE_PLAN_FAILED" {
+		t.Fatalf("absent dependency result = %#v", result)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
-		t.Fatalf("unsupported change plan mutated the Project:\nbefore: %#v\nafter: %#v", before, after)
+		t.Fatalf("absent dependency plan mutated the Project:\nbefore: %#v\nafter: %#v", before, after)
 	}
 }
 

@@ -154,7 +154,7 @@ func TestRunChangePlanScaffoldFailuresPreserveInputsAndEffects(t *testing.T) {
 			case "missing binding":
 				operations = append(operations, map[string]any{"kind": "interface_create", "name": "todo.other", "semantics": "query"}, map[string]any{"kind": "interface_root", "action": "present", "interface": "todo.other/v1", "root": "require"})
 			case "dependency":
-				operations = append(operations, map[string]any{"kind": "dependency", "action": "add", "module": "example.com/other@v1.0.0"})
+				operations = append(operations, map[string]any{"kind": "dependency", "action": "remove", "module": "example.com/other"})
 			case "stage capture":
 				asset := filepath.Join(t.TempDir(), "asset.txt")
 				writeCommandFile(t, asset, "USER_ASSET\n")
@@ -173,7 +173,7 @@ func TestRunChangePlanScaffoldFailuresPreserveInputsAndEffects(t *testing.T) {
 			if code == 0 || stderr != "" || result.Status == "success" || result.Payload.PlanDigest != "" {
 				t.Fatalf("invalid final candidate accepted: exit=%d %s %s", code, stdout, stderr)
 			}
-			if failure != "dependency" && len(result.Effects.Observed) < 2 {
+			if len(result.Effects.Observed) < 2 {
 				t.Fatalf("known staging effects lost on failure: %s", stdout)
 			}
 			if !reflect.DeepEqual(before, commandTree(t, root)) {

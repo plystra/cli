@@ -26,14 +26,17 @@ const changePlanUsage = `Usage:
   plystra change plan --request <path|-> [--format human|json] [--env <environment>|--config <yaml-path>]
 
 Plans one bounded declarative change request without modifying the Project. This
-installed slice accepts interface_create, implementation_create, interface_root
-present/absent (require or expose), implementation_selection set/remove,
+installed slice accepts interface_create, implementation_create, dependency
+add/remove/update, interface_root present/absent (require or expose),
+implementation_selection set/remove,
 resource_selection set/remove, and configuration set/remove operations
 (at most 1024 requested operations). It analyzes the final ownership graph.
-Source requests create all Interface and Implementation scaffolds in a private
-working copy before final discovery, generation, and "go build -mod=readonly ./...".
+Source and dependency requests resolve dependencies jointly and create all
+Interface and Implementation scaffolds in a private working copy before final
+discovery, generation, and "go build -mod=readonly ./...".
 Scaffolds retain deterministic unfinished behavior. No application tests or
-business methods are executed. Dependency operations remain unsupported.
+business methods are executed. Dependency removal/update require a target in the
+original go.mod. Resolved versions survive generation and tidy; conflicts fail.
 Root changes preserve complete-set boundaries
 or sparse environment intent and clean up only owners lost in the final state.
 Resource removal deletes the whole exact instance, including provider and Config,
@@ -69,7 +72,8 @@ derived operations separately; cleanup does not consume the request limit.
 Public request identity omits submitted values. Every configuration set declares a
 planned write, even for equal values, so private equality is not disclosed.
 This preview is non_exact and cannot authorize apply. Change apply remains uninstalled.
-Dependency operations return a structured unsupported result.
+Dependency previews compare captured old and final declarations for ownership,
+obsolete Resource parameters, and newly required fields on unchanged symbols.
 `
 
 type changePlanArguments struct {
@@ -125,10 +129,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		hasScaffolds = hasScaffolds || operation.Kind() == changerequest.KindInterfaceCreate || operation.Kind() == changerequest.KindImplementationCreate
 		hasDependency = hasDependency || operation.Kind() == changerequest.KindDependency
 	}
-	if hasScaffolds {
-		if hasDependency {
-			return fail(commandschema.StatusUnsupported, diagnosticcode.ChangePlanOperationUnsupported, "Dependency changes are not installed in staged scaffold previews.")
-		}
+	if hasScaffolds || hasDependency {
 		ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 		defer cancel()
 		planned, err := scaffoldplan.Preview(ctx, scaffoldplan.Options{
@@ -138,11 +139,11 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			emptyEffects = planned.Effects()
 		}
 		if err != nil {
-			return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The complete scaffold candidate could not be validated; no Project changes were installed.")
+			return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The complete staged candidate could not be validated; no Project changes were installed.")
 		}
 		payload, effects, err := buildScaffoldChangePlanPayload(request, planned)
 		if err != nil {
-			return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The scaffold plan could not be encoded.")
+			return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The staged change plan could not be encoded.")
 		}
 		snapshot, err := changePlanSelectorSnapshot(planned.Inputs().ConfigurationSelection())
 		if err != nil {
@@ -150,9 +151,16 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		}
 		result, err := commandschema.NewResult(commandschema.ResultInput{Operation: "change.plan", InvocationID: invocationID, Snapshot: &snapshot, Status: commandschema.StatusSuccess, Effects: effects, Payload: payload})
 		if err != nil {
-			return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The scaffold plan result could not be built.")
+			return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The staged plan result could not be built.")
 		}
-		return writeChangePlanResult(output, result, fmt.Sprintf("change plan %s (%s; Implementation scaffolds have incomplete behavior)", payload.PlanDigest(), payload.Completeness()))
+		message := fmt.Sprintf("change plan %s (%s)", payload.PlanDigest(), payload.Completeness())
+		for _, operation := range operations {
+			if operation.Kind() == changerequest.KindImplementationCreate {
+				message = fmt.Sprintf("change plan %s (%s; Implementation scaffolds have incomplete behavior)", payload.PlanDigest(), payload.Completeness())
+				break
+			}
+		}
+		return writeChangePlanResult(output, result, message)
 	}
 	configurations, implementationSelections, resourceSelections, roots := 0, 0, 0, 0
 	for _, operation := range operations {
@@ -364,7 +372,12 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 
 func buildScaffoldChangePlanPayload(request changerequest.Request, planned scaffoldplan.Result) (commandschema.ChangePlan, commandschema.Effects, error) {
 	inputs := planned.Inputs()
-	input, afterDigest, err := changePlanProjection(request, inputs, planned.Updated(), planned.ConfigurationImpact())
+	_, _, afterDigest, err := inputs.ConfigurationLayerDigests(planned.Updated())
+	if err != nil {
+		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+	}
+	rootDigest, selectedDigest := planned.OriginalConfigurationDigests()
+	input, err := changePlanProjectionWithDigests(request, inputs, planned.ConfigurationImpact(), rootDigest, selectedDigest)
 	if err != nil {
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}
@@ -411,6 +424,15 @@ func buildScaffoldChangePlanPayload(request changerequest.Request, planned scaff
 }
 
 func changePlanProjection(request changerequest.Request, inputs applicationresolve.SelectionInputs, updated []byte, impact configurationimpact.Impact) (commandschema.ChangePlanInput, string, error) {
+	rootDigest, selectedDigest, afterDigest, err := inputs.ConfigurationLayerDigests(updated)
+	if err != nil {
+		return commandschema.ChangePlanInput{}, "", err
+	}
+	input, err := changePlanProjectionWithDigests(request, inputs, impact, rootDigest, selectedDigest)
+	return input, afterDigest, err
+}
+
+func changePlanProjectionWithDigests(request changerequest.Request, inputs applicationresolve.SelectionInputs, impact configurationimpact.Impact, rootDigest, selectedDigest string) (commandschema.ChangePlanInput, error) {
 	selection := inputs.ConfigurationSelection()
 	verification := []string{"plystra", "check"}
 	switch generation.ConfigurationMode(selection.Mode()) {
@@ -422,10 +444,6 @@ func changePlanProjection(request changerequest.Request, inputs applicationresol
 			path = "./" + path
 		}
 		verification = append(verification, "--config", path)
-	}
-	rootDigest, selectedDigest, afterDigest, err := inputs.ConfigurationLayerDigests(updated)
-	if err != nil {
-		return commandschema.ChangePlanInput{}, "", err
 	}
 	readSet := []commandschema.ChangePlanPathInput{{Path: inputs.RootSnapshot().Path(), Kind: "configuration", BeforeExists: true, BeforeDigest: rootDigest}}
 	if inputs.SelectedSnapshot().Path() != inputs.RootSnapshot().Path() {
@@ -447,7 +465,7 @@ func changePlanProjection(request changerequest.Request, inputs applicationresol
 		// canonical request digest would reveal submitted value equality.
 		identity, err := json.Marshal(operations[:requestedCount])
 		if err != nil {
-			return commandschema.ChangePlanInput{}, "", err
+			return commandschema.ChangePlanInput{}, err
 		}
 		requestDigest = fmt.Sprintf("sha256:%x", sha256.Sum256(append([]byte("plystra.change-plan/v1:public-request\x00"), identity...)))
 	}
@@ -459,7 +477,7 @@ func changePlanProjection(request changerequest.Request, inputs applicationresol
 		ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: selection.Mode(), Path: selection.Path(), Environment: selection.Environment()},
 		ConfigurationImpact: impact,
 		Verification:        verification, Completeness: "non_exact",
-	}, afterDigest, nil
+	}, nil
 }
 
 func requestedSelectionOperation(operation changerequest.Operation) commandschema.ChangePlanOperationInput {
@@ -468,6 +486,8 @@ func requestedSelectionOperation(operation changerequest.Operation) commandschem
 		result.Action, result.Name, result.Semantics = "create", creation.Name(), string(creation.Semantics())
 	} else if creation, ok := operation.ImplementationCreate(); ok {
 		result.Action, result.Contract, result.Package = "create", creation.Contract(), creation.Package()
+	} else if dependency, ok := operation.Dependency(); ok {
+		result.Action, result.Module = string(dependency.Action()), dependency.Module()
 	} else if selection, ok := operation.ImplementationSelection(); ok {
 		result.Action = string(selection.Action())
 		result.Interface = selection.Interface()

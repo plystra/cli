@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -475,6 +476,7 @@ type commandProxyModule struct {
 	path     string
 	version  string
 	manifest string
+	sources  map[string]string
 }
 
 func writeCommandDependencyProxy(t *testing.T, modules []commandProxyModule) string {
@@ -516,6 +518,17 @@ func writeCommandDependencyProxy(t *testing.T, modules []commandProxyModule) str
 			{name: "go.mod", data: goMod},
 			{name: "plystra.yaml", data: []byte(candidate.manifest)},
 			{name: "project.go", data: []byte("package project\n")},
+		}
+		var sourcePaths []string
+		for name := range candidate.sources {
+			sourcePaths = append(sourcePaths, name)
+		}
+		sort.Strings(sourcePaths)
+		for _, name := range sourcePaths {
+			files = append(files, struct {
+				name string
+				data []byte
+			}{name: name, data: []byte(candidate.sources[name])})
 		}
 		for _, file := range files {
 			header := &zip.FileHeader{Name: prefix + file.name, Method: zip.Deflate}

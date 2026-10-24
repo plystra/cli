@@ -53,7 +53,7 @@ func TestRunChangePlanConfigurationHelpDescribesInstalledBounds(t *testing.T) {
 			"even for equal values", "non_exact and cannot authorize apply", "Same-owner ancestor/descendant targets conflict",
 			"interface_create, implementation_create", "interface_root", "implementation_selection set/remove",
 			"resource_selection set/remove", "Every multi-operation selection batch requires a valid complete final state",
-			"Dependency operations remain unsupported", "derived operations separately", "private",
+			"Dependency previews compare captured old and final declarations", "derived operations separately", "private",
 			"go build -mod=readonly ./...", "No application tests or",
 		} {
 			if !strings.Contains(stdout, phrase) {

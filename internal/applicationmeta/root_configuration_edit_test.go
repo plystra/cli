@@ -162,6 +162,9 @@ func TestSelectionChangesIdentityMatchesFinalAuthoredEdit(t *testing.T) {
 		if _, err := applicationmeta.SelectionChangesIdentity(manifest, nil, choices, nil, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
 			t.Fatal("invalid joint identity accepted")
 		}
+		if len(choices) == 0 {
+			continue // The document editor also supports edits without choices.
+		}
 		if data, changed, err := applicationmeta.EditSelectionConfiguration([]byte("{}"), applicationmeta.SelectionConfigurationEdit{Selections: choices}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || data != nil {
 			t.Fatal("invalid joint edit accepted")
 		}
@@ -226,8 +229,97 @@ func TestInterfaceRootBatchIdentityMatchesFinalAuthoredEdit(t *testing.T) {
 		if _, err := applicationmeta.InterfaceRootsIdentity(manifest, invalid, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) {
 			t.Fatal("invalid root batch identity accepted")
 		}
+		if len(invalid) == 0 {
+			continue
+		}
 		if data, changed, err := applicationmeta.EditSelectionConfiguration([]byte("{}"), applicationmeta.SelectionConfigurationEdit{Roots: invalid}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || data != nil || changed {
 			t.Fatal("invalid root batch edit accepted")
+		}
+	}
+}
+
+func TestEditSelectionConfigurationWithoutSelections(t *testing.T) {
+	t.Parallel()
+	owner := mustImplementationChoiceConstructor(t, "example.com/email/current.New")
+	old := mustImplementationChoiceConstructor(t, "example.com/email/old.New")
+	schema := composeSchema(t, "Value string\n")
+	value, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, owner.String(), "value", schema, []byte(`"PRIVATE_NEW"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, overlay := range []bool{false, true} {
+		input := []byte("# KEEP\ninterfaces: {require: [app.run/v1]}\nconfig: {" + owner.String() + ": {value: PRIVATE_KEEP}, " + old.String() + ": {value: PRIVATE_OLD}}\nresources: {bind: {implementations: {" + old.String() + ": {primary: database}}}}\n")
+		before := bytes.Clone(input)
+		for _, test := range []struct {
+			name            string
+			fields, cleanup bool
+		}{
+			{"noop", false, false}, {"fields-only", true, false}, {"cleanup-only", false, true}, {"cleanup-and-fields", true, true},
+		} {
+			t.Run(test.name+map[bool]string{false: "-complete", true: "-overlay"}[overlay], func(t *testing.T) {
+				edit := applicationmeta.SelectionConfigurationEdit{}
+				if test.fields {
+					edit.Values = []applicationmeta.ConfigurationValueEdit{value}
+				}
+				if test.cleanup {
+					edit.Configurations = []applicationmeta.ConstructorConfigurationRemoval{{Constructor: old, Tombstone: overlay}}
+					edit.Bindings = []applicationmeta.ResourceBindingRemoval{{Namespace: "implementations", Consumer: old.String(), ParameterName: "primary", Tombstone: overlay}}
+				}
+				updated, changed, err := applicationmeta.EditSelectionConfiguration(input, edit, overlay)
+				if err != nil || changed != (test.fields || test.cleanup) || !bytes.Equal(input, before) || !bytes.Contains(updated, []byte("# KEEP")) {
+					t.Fatalf("document-only edit = %t, %v", changed, err)
+				}
+				if !test.fields && !test.cleanup && !bytes.Equal(updated, before) {
+					t.Fatal("no-op changed captured document bytes")
+				}
+				if test.fields != bytes.Contains(updated, []byte("PRIVATE_NEW")) || test.cleanup == bytes.Contains(updated, []byte("PRIVATE_OLD")) {
+					t.Fatal("field or cleanup edit changed the wrong owned paths")
+				}
+				if overlay && test.cleanup && bytes.Count(updated, []byte("$remove: true")) != 2 {
+					t.Fatal("cleanup did not preserve the exact overlay exclusions")
+				}
+				updated[0] = '!'
+				if !bytes.Equal(input, before) {
+					t.Fatal("editor returned aliased bytes")
+				}
+			})
+		}
+		for _, edit := range []applicationmeta.SelectionConfigurationEdit{
+			{Values: []applicationmeta.ConfigurationValueEdit{{}}},
+			{Configurations: []applicationmeta.ConstructorConfigurationRemoval{{Constructor: owner}}, Values: []applicationmeta.ConfigurationValueEdit{value}},
+		} {
+			if data, changed, err := applicationmeta.EditSelectionConfiguration(input, edit, overlay); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || data != nil {
+				t.Fatal("invalid field or overlapping cleanup accepted without selections")
+			}
+		}
+	}
+}
+
+func TestEditSelectionConfigurationWithoutSelectionsUsesFinalBounds(t *testing.T) {
+	t.Parallel()
+	schema := composeSchema(t, "Before string\nZAfter string\n")
+	input := []byte("config:\n  " + constructorConfigurationSymbol + ":\n    zafter: " + strings.Repeat("x", applicationmeta.MaximumSize-150) + "\n")
+	value := []byte(`"` + strings.Repeat("a", 256) + `"`)
+	set, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, "before", schema, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remove, err := applicationmeta.PrepareConfigurationValueEdit(applicationmeta.ConfigurationNamespaceImplementation, constructorConfigurationSymbol, "zafter", schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := applicationmeta.EditSelectionConfiguration(input, applicationmeta.SelectionConfigurationEdit{Values: []applicationmeta.ConfigurationValueEdit{set}}, false); err == nil {
+		t.Fatal("fixture does not exceed the intermediate document bound")
+	}
+	for _, values := range [][]applicationmeta.ConfigurationValueEdit{{set, remove}, {remove, set}} {
+		updated, changed, err := applicationmeta.EditSelectionConfiguration(input, applicationmeta.SelectionConfigurationEdit{Values: values}, false)
+		if err != nil || !changed || len(updated) >= 1024 {
+			t.Fatalf("final-sized edit rejected without selections: %t, %v", changed, err)
+		}
+	}
+	for _, invalid := range [][]byte{[]byte("[PRIVATE_INVALID"), []byte("#" + strings.Repeat("x", applicationmeta.MaximumSize))} {
+		if data, changed, err := applicationmeta.EditSelectionConfiguration(invalid, applicationmeta.SelectionConfigurationEdit{}, false); !errors.Is(err, applicationmeta.ErrEditConfiguration) || changed || data != nil || strings.Contains(err.Error(), "PRIVATE_") {
+			t.Fatal("a no-op bypassed document validation or disclosed private input")
 		}
 	}
 }
