@@ -189,7 +189,7 @@ func normalizeEffect(input EffectInput) (EffectInput, error) {
 	if !validToken(input.Reason, 128) || !validToken(input.Reversibility, 128) {
 		return EffectInput{}, errors.New("reason or reversibility is invalid")
 	}
-	if !validArgumentVector(input.Verification) {
+	if !validVerificationArgumentVector(input.Verification, input.Target) {
 		return EffectInput{}, errors.New("verification must be a fully bound argv")
 	}
 	return EffectInput{

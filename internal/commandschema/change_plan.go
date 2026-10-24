@@ -309,13 +309,8 @@ func validateChangePlanInput(input ChangePlanInput) error {
 	if input.Completeness != "exact" && input.Completeness != "non_exact" {
 		return errors.New("completeness must be exact or non_exact")
 	}
-	if len(input.Verification) == 0 {
-		return errors.New("verification must contain one command")
-	}
-	for _, value := range input.Verification {
-		if value == "" || len(value) > 256 || strings.ContainsRune(value, '\x00') {
-			return errors.New("verification contains an invalid token")
-		}
+	if !validVerificationArgumentVector(input.Verification, input.ConfigurationScope.Path) {
+		return errors.New("verification must be a fully bound argv")
 	}
 	return nil
 }
@@ -397,7 +392,6 @@ func sortChangePlan(p *ChangePlan) {
 	sort.Slice(p.operations, func(left, right int) bool {
 		return operationKey(p.operations[left]) < operationKey(p.operations[right])
 	})
-	sort.Strings(p.verification)
 }
 
 func operationKey(value ChangePlanOperationInput) string {

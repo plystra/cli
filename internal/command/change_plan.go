@@ -298,6 +298,17 @@ func readChangeRequest(base, path string) ([]byte, error) {
 func buildChangePlanPayload(request changerequest.Request, planned implementationselect.PlanResult) (commandschema.ChangePlan, commandschema.Effects, error) {
 	inputs := planned.Inputs()
 	selection := inputs.ConfigurationSelection()
+	verification := []string{"plystra", "check"}
+	switch generation.ConfigurationMode(selection.Mode()) {
+	case generation.ConfigurationModeEnvironment:
+		verification = append(verification, "--env", selection.Environment())
+	case generation.ConfigurationModeExplicit:
+		path := selection.Path()
+		if strings.HasPrefix(path, "--") {
+			path = "./" + path
+		}
+		verification = append(verification, "--config", path)
+	}
 	rootDigest, selectedDigest, afterDigest, err := inputs.ConfigurationLayerDigests(planned.Updated())
 	if err != nil {
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
@@ -322,7 +333,7 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 		writeSet = append(writeSet, commandschema.ChangePlanPathInput{Path: selection.Path(), Kind: "configuration", BeforeDigest: selectedDigest, AfterDigest: afterDigest})
 		effect, err := commandschema.NewEffect(commandschema.EffectInput{
 			ID: "apply-change-plan", Class: commandschema.EffectProjectWrite, Phase: "apply", Target: selection.Path(),
-			Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_configuration_change", Reversibility: "rollback", Verification: []string{"plystra", "check"},
+			Owner: commandschema.Owner{Module: inputs.Module().ModulePath(), Path: "."}, Reason: "planned_configuration_change", Reversibility: "rollback", Verification: verification,
 		})
 		if err != nil {
 			return commandschema.ChangePlan{}, commandschema.Effects{}, err
@@ -351,7 +362,7 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 		Operations:          operations,
 		ConfigurationScope:  commandschema.ChangePlanConfigurationScopeInput{Mode: selection.Mode(), Path: selection.Path(), Environment: selection.Environment()},
 		ConfigurationImpact: planned.ConfigurationImpact(), Effects: effects, FinalModelDigest: planned.CompositionDigest(),
-		Verification: []string{"plystra", "check"}, Completeness: "non_exact",
+		Verification: verification, Completeness: "non_exact",
 	})
 	return payload, effects, err
 }

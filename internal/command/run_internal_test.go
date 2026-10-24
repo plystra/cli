@@ -193,6 +193,7 @@ func TestParseCheckArguments(t *testing.T) {
 		{arguments: []string{"check"}, ok: true},
 		{arguments: []string{"check", "--config", "deploy/customer.yaml"}, configurationPath: "deploy/customer.yaml", ok: true},
 		{arguments: []string{"check", "--env", "test"}, environmentName: "test", ok: true},
+		{arguments: []string{"check", "--env", "--production"}, environmentName: "--production", ok: true},
 		{arguments: nil},
 		{arguments: []string{"generate"}},
 		{arguments: []string{"check", "--check"}},

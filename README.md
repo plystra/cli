@@ -982,6 +982,18 @@ primitive-command lowering, and `--dry-run` remain unavailable. These previews
 are always `non_exact` and cannot authorize apply. Their public read/write and
 snapshot digests are typed semantic identities, not exact file preimages:
 private runtime values and Secret targets do not enter the public plan digest.
+The plan's `verification` is one ordered command argument vector. Argument
+order and repeated tokens are preserved and bound by the plan digest. The plan
+and its planned-write effects retain the selected `--env` or `--config`,
+including selections originally supplied through ambient variables.
+An option-like normalized configuration path keeps a parser-safe `./` prefix
+in verification arguments without changing its canonical snapshot path.
+`check --env` accepts a safe environment component even when it starts with
+`--`. Literal selector filenames that resemble placeholders remain usable only
+when verification names the exact declared configuration target; other
+unresolved placeholders remain invalid.
+The shared argv bounds allow at most 256 nonempty, fully bound arguments of
+at most 4,096 bytes each; invalid UTF-8 and control characters are rejected.
 An eventual apply must independently capture and recheck exact owner-private
 preimages before any write.
 

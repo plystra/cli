@@ -737,7 +737,7 @@ func parseCheckArguments(arguments []string) (checkArguments, bool) {
 			index++
 			result.configurationPath = arguments[index]
 		case "--env":
-			if environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" || strings.HasPrefix(arguments[index+1], "--") {
+			if environmentSet || index+1 >= len(arguments) || strings.TrimSpace(arguments[index+1]) == "" {
 				return checkArguments{}, false
 			}
 			environmentSet = true

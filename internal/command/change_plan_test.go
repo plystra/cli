@@ -42,17 +42,90 @@ config:
 	var result struct {
 		Status  string `json:"status"`
 		Payload struct {
-			WriteSet   []struct{ Path string }         `json:"write_set"`
-			Operations []struct{ Kind, Action string } `json:"operations"`
+			WriteSet     []struct{ Path string }         `json:"write_set"`
+			Operations   []struct{ Kind, Action string } `json:"operations"`
+			Verification []string                        `json:"verification"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(output, &result); err != nil || result.Status != "success" || len(result.Payload.WriteSet) != 1 || result.Payload.WriteSet[0].Path != "plystra.production.yaml" || len(result.Payload.Operations) != 2 {
 		t.Fatalf("built CLI removal result = %s, %v", output, err)
 	}
+	if !reflect.DeepEqual(result.Payload.Verification, []string{"plystra", "check", "--env", "production"}) {
+		t.Fatalf("built CLI verification changed argument order: %q", result.Payload.Verification)
+	}
 	if after := commandTree(t, root); !reflect.DeepEqual(before, after) {
 		t.Fatal("built CLI preview changed Project files")
 	}
 	assertNoCommandTransactions(t, root)
+}
+
+func TestRunChangePlanVerificationRetainsSelectedConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		arguments []string
+		ambient   map[string]string
+		selector  []string
+		verify    bool
+	}{
+		{name: "default"},
+		{name: "explicit environment", arguments: []string{"--env", "production"}, selector: []string{"--env", "production"}},
+		{name: "ambient environment", ambient: map[string]string{"PLYSTRA_ENV": "production"}, selector: []string{"--env", "production"}},
+		{name: "explicit replacement", arguments: []string{"--config", "deploy/production config.yaml"}, selector: []string{"--config", "deploy/production config.yaml"}},
+		{name: "ambient replacement", ambient: map[string]string{"PLYSTRA_CONFIG": "deploy/production config.yaml"}, selector: []string{"--config", "deploy/production config.yaml"}},
+		{name: "flag-like explicit replacement", arguments: []string{"--config", "./--production.yaml"}, selector: []string{"--config", "./--production.yaml"}, verify: true},
+		{name: "flag-like ambient replacement", ambient: map[string]string{"PLYSTRA_CONFIG": "--production.yaml"}, selector: []string{"--config", "./--production.yaml"}, verify: true},
+		{name: "flag-like ambient environment", ambient: map[string]string{"PLYSTRA_ENV": "--production"}, selector: []string{"--env", "--production"}, verify: true},
+		{name: "literal replacement", arguments: []string{"--config", "deploy/{{blue}}.yaml"}, selector: []string{"--config", "deploy/{{blue}}.yaml"}, verify: true},
+		{name: "literal ambient replacement", ambient: map[string]string{"PLYSTRA_CONFIG": "deploy/${blue}.yaml"}, selector: []string{"--config", "deploy/${blue}.yaml"}, verify: true},
+		{name: "literal ambient environment", ambient: map[string]string{"PLYSTRA_ENV": "{{blue}}"}, selector: []string{"--env", "{{blue}}"}, verify: true},
+		{name: "long replacement path", arguments: []string{"--config", strings.Repeat("nested/", 40) + "configuration.yaml"}, selector: []string{"--config", strings.Repeat("nested/", 40) + "configuration.yaml"}},
+		{name: "explicit overrides ambient", arguments: []string{"--config", "deploy/production config.yaml"}, ambient: map[string]string{"PLYSTRA_ENV": "missing"}, selector: []string{"--config", "deploy/production config.yaml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeImplementationSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, "plystra.production.yaml"), "{}\n")
+			if len(test.selector) != 0 && test.selector[0] == "--env" {
+				writeCommandFile(t, filepath.Join(root, "plystra."+test.selector[1]+".yaml"), "{}\n")
+			}
+			replacement := "deploy/production config.yaml"
+			if len(test.selector) != 0 && test.selector[0] == "--config" {
+				replacement = test.selector[1]
+			}
+			writeCommandFile(t, filepath.Join(root, filepath.FromSlash(replacement)), "interfaces:\n  require: [email.send/v1]\n")
+			request := filepath.Join(root, "change.json")
+			writeCommandFile(t, request, `{"schema":"plystra.change/v1","operations":[{"kind":"implementation_selection","action":"set","interface":"email.send/v1","constructor":"example.com/acme/implementation-use/local.New"}]}`)
+			before := commandTree(t, root)
+			arguments := append([]string{"change", "plan", "--request", request, "--format", "json"}, test.arguments...)
+			exitCode, stdout, stderr := runCommand(t, arguments, filepath.Join(root, "local"), implementationSelectionCommandEnvironment(test.ambient))
+			if exitCode != 0 || stderr != "" {
+				t.Fatalf("change plan failed: %d\n%s\n%s", exitCode, stdout, stderr)
+			}
+			var result struct {
+				Payload struct {
+					Verification []string
+					Effects      struct {
+						Planned []struct{ Verification []string }
+					}
+				}
+			}
+			if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+				t.Fatal(err)
+			}
+			want := append([]string{"plystra", "check"}, test.selector...)
+			if !reflect.DeepEqual(result.Payload.Verification, want) || len(result.Payload.Effects.Planned) != 1 || !reflect.DeepEqual(result.Payload.Effects.Planned[0].Verification, want) {
+				t.Fatalf("verification lost selected configuration: %s", stdout)
+			}
+			if test.verify {
+				checkExit, _, checkStderr := runCommand(t, result.Payload.Verification[1:], filepath.Join(root, "local"), implementationSelectionCommandEnvironment(nil))
+				if checkExit != 1 || !strings.Contains(checkStderr, "PLYSTRA_RESOLVE_MULTIPLE_IMPLEMENTATIONS") {
+					t.Fatalf("verification did not reach the selected Project: %d\n%s", checkExit, checkStderr)
+				}
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("verification preview changed Project files")
+			}
+		})
+	}
 }
 
 func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.T) {
@@ -81,6 +154,7 @@ func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.
 		PlanDigest          string                     `json:"plan_digest"`
 		Completeness        string                     `json:"completeness"`
 		FinalModelDigest    string                     `json:"final_model_digest"`
+		Verification        []string                   `json:"verification"`
 		ConfigurationImpact map[string]json.RawMessage `json:"configuration_impact"`
 	}
 	if err := json.Unmarshal(first.Payload, &payload); err != nil {
@@ -88,6 +162,9 @@ func TestRunChangePlanImplementationSelectionIsStructuredAndReadOnly(t *testing.
 	}
 	if first.Status != "success" || payload.Schema != "plystra.change-plan/v1" || !strings.HasPrefix(payload.RequestDigest, "sha256:") || !strings.HasPrefix(payload.PlanDigest, "sha256:") || !strings.HasPrefix(payload.FinalModelDigest, "sha256:") || payload.Completeness != "non_exact" {
 		t.Fatalf("result identity = status %q payload %#v", first.Status, payload)
+	}
+	if !reflect.DeepEqual(payload.Verification, []string{"plystra", "check"}) {
+		t.Fatalf("verification is not executable in its emitted order: %q", payload.Verification)
 	}
 	for _, name := range []string{"newly_required_fields", "retained_owners", "newly_unowned_paths", "derived_operations", "unresolved_decisions"} {
 		if string(payload.ConfigurationImpact[name]) == "null" {

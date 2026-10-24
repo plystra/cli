@@ -110,6 +110,27 @@ func validArgumentVector(arguments []string) bool {
 	return true
 }
 
+// A selected filename is literal data even when it resembles a placeholder.
+// This exception requires an exact match to the declared configuration target.
+func validVerificationArgumentVector(arguments []string, target string) bool {
+	if validArgumentVector(arguments) {
+		return true
+	}
+	if len(arguments) != 4 || arguments[0] != "plystra" || arguments[1] != "check" ||
+		!validArgumentVector(arguments[:3]) || !validSafeText(arguments[3], maximumArgumentLength) {
+		return false
+	}
+	switch arguments[2] {
+	case "--config":
+		selected := strings.TrimPrefix(arguments[3], "./")
+		return validRelativePath(selected, false) && selected == target
+	case "--env":
+		return validSelectorEnvironmentName(arguments[3]) && "plystra."+arguments[3]+".yaml" == target
+	default:
+		return false
+	}
+}
+
 func cloneStrings(values []string) []string {
 	return append([]string(nil), values...)
 }
