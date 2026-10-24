@@ -62,7 +62,7 @@ type Options struct {
 	// when offline.
 	RequireSourceChecksums bool
 	// RetainRootManifests captures existing checksummed root manifests before
-	// single-module graph resolution. It does not prepare sources or downloads.
+	// graph resolution. It does not prepare sources or downloads.
 	RetainRootManifests func([]RootManifest) error
 }
 
@@ -234,13 +234,13 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if err != nil {
 		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 	}
-	if workspace == nil && options.RetainRootManifests != nil {
+	if options.RetainRootManifests != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
 				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)
 			}
 		}()
-		if err := retainRootManifests(ctx, application.Path(), before, options, inputs); err != nil {
+		if err := retainRootManifests(ctx, application.Path(), before, options, inputs, workspace); err != nil {
 			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 		}
 	}

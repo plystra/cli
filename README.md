@@ -851,17 +851,23 @@ adds no file input, and the caller's environment is copied before Go selection.
 Absolute and Project-relative settings paths are supported. Candidate tooling
 reads an owner-private frozen copy outside the module trees, preserving the
 selected settings even if the original changes; drift still rejects the plan.
-Before single-module graph listing, previews retain already-cached root
-dependency manifests whose effective versions have original Project `go.sum`
-manifest checksums. Exact replacements take precedence over wildcard
-replacements; excluded requirements and local replacements do not introduce
-cache inputs. Capture uses the first applicable `h1:` row, ignoring Go's
-historical empty-manifest sentinel, and obtains the cache path under the same
-offline settings as resolution. It neither downloads missing manifests nor
-prefetches archives. Module and checksum inputs remain guarded through capture
-and listing, and retained evidence survives failed resolution and stage cleanup.
-This early boundary does not cover workspace graph inputs or manifests without
-recorded checksums.
+Before graph listing, previews retain already-cached root dependency manifests
+whose effective versions have original Project or workspace manifest checksums.
+Every workspace member's raw requirements participate, including different
+versions of one path and historical versions of workspace main modules. Go's
+workfile precedence, member order, per-file exact-over-wildcard replacement
+lookup, and conflict rules are preserved. Exclusions from any member filter
+original requirements; local replacements do not introduce cache inputs.
+Capture uses the first applicable primary `h1:` row, ignoring Go's historical
+empty-manifest sentinel; without primary authority, all applicable member rows
+must agree. Unknown checksum algorithms supply no authority, and malformed sum
+files fail even when another file supplies a primary match. The cache path uses
+the same offline settings as resolution. Capture neither downloads missing
+manifests nor prefetches archives. Workfile, member manifest, and checksum inputs
+remain guarded through capture and listing, including absent sums. Retained
+evidence survives MVS selection, failed resolution, and stage cleanup. This early
+boundary does not cover transitive or intermediate graph inputs or manifests
+without recorded checksums.
 Source and dependency previews additionally retain versioned module source
 trees after module selection and before declaration discovery or candidate
 builds. This includes ordinary and transitive modules, versioned replacements,

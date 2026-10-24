@@ -134,7 +134,7 @@ func TestDiscoverRetainsEffectiveRootManifestsBeforeListing(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			wantCall := mode != "local" && mode != "excluded" && mode != "missing-manifest" && mode != "missing-checksum" && mode != "workspace"
+			wantCall := mode != "local" && mode != "excluded" && mode != "missing-manifest" && mode != "missing-checksum"
 			if called != wantCall {
 				t.Fatalf("root capture callback=%v, want %v", called, wantCall)
 			}
@@ -165,10 +165,50 @@ func runRootManifestsHelper() int {
 		}
 		return 11
 	}
+	if path := os.Getenv("PLYSTRA_MODULE_METADATA_PATH"); path != "" && len(os.Args) > 1 && os.Args[1] == "list" {
+		if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "create" {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				return 13
+			}
+			if err := os.WriteFile(path, []byte{'\n'}, 0o600); err != nil {
+				return 14
+			}
+		} else {
+			data, err := os.ReadFile(path)
+			info, statErr := os.Stat(path)
+			if err != nil || statErr != nil || !os.SameFile(info, info) {
+				return 15
+			}
+			if err := os.Rename(path, path+".prior"); err != nil {
+				return 16
+			}
+			if err := os.WriteFile(path, data, info.Mode()); err != nil {
+				return 17
+			}
+			if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+				return 18
+			}
+			if err := os.Remove(path + ".prior"); err != nil {
+				return 19
+			}
+		}
+		if err := os.WriteFile(os.Getenv("PLYSTRA_MODULE_METADATA_MARKER"), []byte("metadata changed after module list\n"), 0o600); err != nil {
+			return 20
+		}
+	}
 	return 0
 }
 
 func TestRootManifestRetentionSurvivesRejectedMVSUpgradeAndStageCleanup(t *testing.T) {
+	testRootManifestRetentionAcrossMVSAndCleanup(t, false)
+}
+
+func TestWorkspaceRootManifestRetentionSurvivesMVSUpgradeAndStageCleanup(t *testing.T) {
+	testRootManifestRetentionAcrossMVSAndCleanup(t, true)
+}
+
+func testRootManifestRetentionAcrossMVSAndCleanup(t *testing.T, workspace bool) {
+	t.Helper()
 	const first, second = "example.com/Source/Dependency", "example.com/root"
 	root := t.TempDir()
 	proxy := writeModuleProxy(t, root, first, "v1.0.0", "module "+first+"\ngo 1.16\n")
@@ -186,6 +226,11 @@ func TestRootManifestRetentionSurvivesRejectedMVSUpgradeAndStageCleanup(t *testi
 	}
 	sums := readFile(t, filepath.Join(app, "go.sum"))
 	writeFile(t, filepath.Join(app, "go.sum"), string(sums)+first+" v1.1.0 "+downloaded.Sum+"\n"+first+" v1.1.0/go.mod "+downloaded.GoModSum+"\n")
+	if workspace {
+		work := filepath.Join(root, "go.work")
+		writeFile(t, work, "go 1.26\nuse ./app\n")
+		env = append(env, "GOWORK="+work)
+	}
 	cache := environmentValue(t, env, "GOMODCACHE")
 	escaped, _ := module.EscapePath(first)
 	oldBase := filepath.Join(cache, "cache", "download", filepath.FromSlash(escaped), "@v", "v1.0.0")
@@ -213,7 +258,12 @@ func TestRootManifestRetentionSurvivesRejectedMVSUpgradeAndStageCleanup(t *testi
 		}
 		return stage.RetainMetadata(t.Context(), inputs)
 	}})
-	if !errors.Is(err, moduledependency.ErrDiscover) || !strings.Contains(err.Error(), "updates to go.mod needed") || len(index.Modules()) != 0 || len(retained) != 2 {
+	if workspace {
+		selected, ok := index.ByPath(first)
+		if err != nil || !ok || selected.SelectedVersion() != "v1.1.0" || len(retained) != 2 {
+			t.Fatalf("workspace MVS result or retained roots: %v, %v, %v", err, index.Modules(), retained)
+		}
+	} else if !errors.Is(err, moduledependency.ErrDiscover) || !strings.Contains(err.Error(), "updates to go.mod needed") || len(index.Modules()) != 0 || len(retained) != 2 {
 		t.Fatalf("unexpected readonly MVS result or retained roots: %v, %v, %v", err, index.Modules(), retained)
 	}
 	found := false

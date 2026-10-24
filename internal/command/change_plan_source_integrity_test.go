@@ -405,10 +405,12 @@ func TestScaffoldPreviewRejectsChangedChecksumReferenceBeforeRetention(t *testin
 
 func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T) {
 	command := sourcePreparationGoWrapper(t)
-	for _, mode := range []string{"unchanged", "existing", "removal", "prepared", "workspace", "replacement", "existing-identity", "removal-identity", "replacement-identity"} {
+	for _, mode := range []string{"unchanged", "existing", "removal", "prepared", "workspace", "replacement", "existing-identity", "removal-identity", "replacement-identity", "workspace-identity", "workspace-unchanged", "workspace-removal-identity", "workspace-replacement-identity"} {
 		t.Run(mode, func(t *testing.T) {
 			identity := strings.HasSuffix(mode, "-identity")
 			mode = strings.TrimSuffix(mode, "-identity")
+			workspace := mode == "workspace" || strings.HasPrefix(mode, "workspace-")
+			mode = strings.TrimPrefix(mode, "workspace-")
 			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
 			environment := previewDependencyEnvironment(t, proxy)
 			root := writeImplementationSelectionCommandProject(t)
@@ -425,7 +427,7 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 					t.Fatal(err)
 				}
 			}
-			if mode == "workspace" {
+			if workspace {
 				work := filepath.Join(t.TempDir(), "go.work")
 				writeCommandFile(t, work, "go 1.26\nuse "+fmt.Sprintf("%q\n", filepath.ToSlash(root)))
 				environment = append(environment, "GOWORK="+work)
@@ -498,7 +500,7 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, output)
 	}
-	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list"} {
+	for _, mode := range []string{"manifest-after-list", "manifest-identity-after-list", "workspace-manifest-identity-after-list"} {
 		t.Run(mode, func(t *testing.T) {
 			testBuiltCLIChangePlanRejectsChangedModuleManifest(t, binary, mode)
 		})
@@ -512,6 +514,12 @@ func testBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T, binary, mo
 	root := writeImplementationSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 	seedPreviewDependency(t, root, environment, "v1.0.0")
+	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
+		work := filepath.Join(t.TempDir(), "go.work")
+		writeCommandFile(t, work, "go 1.26\nuse "+fmt.Sprintf("%q\n", filepath.ToSlash(root)))
+		environment = append(environment, "GOWORK="+work)
+		mode = workspaceMode
+	}
 	var cache string
 	for _, entry := range environment {
 		if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {

@@ -14,61 +14,69 @@ import (
 	"golang.org/x/mod/module"
 )
 
-// RootManifest identifies an already-cached single-module graph input and its
-// independent checksum from the original Project go.sum.
+// RootManifest identifies an already-cached graph input and its independent
+// checksum from the original Project or workspace checksum files.
 type RootManifest struct {
 	Path     string
 	Checksum string
 }
 
-func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot, options Options, inputs preparationInputs) error {
-	parsed, err := modfile.Parse("go.mod", manifest.data, nil)
-	if err != nil {
-		return ErrInvalidGoMod
+func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot, options Options, inputs preparationInputs, workspace *preparationWorkspace) error {
+	var manifests []*modfile.File
+	var primary []byte
+	var memberSums [][]byte
+	if workspace == nil {
+		parsed, err := modfile.Parse("go.mod", manifest.data, nil)
+		if err != nil {
+			return ErrInvalidGoMod
+		}
+		sums, err := inputs.read(filepath.Join(root, "go.sum"), true)
+		if err != nil {
+			return err
+		}
+		manifests, primary = []*modfile.File{parsed}, sums.data
+	} else {
+		if err := workspace.validateRootManifestReplacements(); err != nil {
+			return err
+		}
+		primary = workspace.sum
+		for _, member := range workspace.members {
+			manifests = append(manifests, member.mod)
+			memberSums = append(memberSums, member.sum)
+		}
 	}
-	sums, err := inputs.read(filepath.Join(root, "go.sum"), true)
+	checksums, err := rootManifestChecksums(primary, memberSums)
 	if err != nil {
 		return err
 	}
-	checksums := map[module.Version]string{}
-	// Go discards this historical checksum of an empty manifest before checking
-	// recorded rows, even when it precedes the real checksum.
-	const emptyGoModHash = "h1:G7mAYYxgmS0lVkHyy2hEOLQCFB0DlQFTMLWggykrydY="
-	for _, line := range bytes.Split(sums.data, []byte{'\n'}) {
-		fields := strings.Fields(string(line))
-		if len(fields) != 3 || !strings.HasSuffix(fields[1], "/go.mod") || !strings.HasPrefix(fields[2], "h1:") || fields[2] == emptyGoModHash {
-			continue
-		}
-		version := module.Version{Path: fields[0], Version: strings.TrimSuffix(fields[1], "/go.mod")}
-		if _, exists := checksums[version]; !exists {
-			checksums[version] = fields[2] // Go checks the first h1 row before later matches.
-		}
-	}
 	excluded := map[module.Version]bool{}
-	for _, exclusion := range parsed.Exclude {
-		excluded[exclusion.Mod] = true
+	for _, parsed := range manifests {
+		for _, exclusion := range parsed.Exclude {
+			excluded[exclusion.Mod] = true
+		}
 	}
 	seen := map[module.Version]bool{}
 	var versions []module.Version
-	for _, required := range parsed.Require {
-		if excluded[required.Mod] {
-			continue
-		}
-		version := required.Mod
-		var replacement *modfile.Replace
-		for _, candidate := range parsed.Replace {
-			if candidate.Old.Path == version.Path && (candidate.Old.Version == version.Version || candidate.Old.Version == "" && replacement == nil) {
-				replacement = candidate
+	for _, parsed := range manifests {
+		for _, required := range parsed.Require {
+			if excluded[required.Mod] {
+				continue
 			}
+			version := required.Mod
+			if workspace != nil {
+				version, err = workspace.rootManifestVersion(version)
+				if err != nil {
+					return err
+				}
+			} else if replacement := rootManifestReplacement(version, parsed.Replace); replacement != nil {
+				version = replacement.New
+			}
+			if version.Version == "" || !validSourceChecksum(checksums[version]) || seen[version] {
+				continue
+			}
+			seen[version] = true
+			versions = append(versions, version)
 		}
-		if replacement != nil {
-			version = replacement.New
-		}
-		if version.Version == "" || !validSourceChecksum(checksums[version]) || seen[version] {
-			continue
-		}
-		seen[version] = true
-		versions = append(versions, version)
 	}
 	if len(versions) == 0 {
 		return nil
@@ -81,7 +89,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 	if json.Unmarshal(output, &selected) != nil || !filepath.IsAbs(selected.GOMODCACHE) {
 		return ErrInvalidOutput
 	}
-	var manifests []RootManifest
+	var retained []RootManifest
 	for _, version := range versions {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -97,12 +105,122 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		} else if err != nil {
 			return err
 		}
-		manifests = append(manifests, RootManifest{Path: name, Checksum: checksums[version]})
+		retained = append(retained, RootManifest{Path: name, Checksum: checksums[version]})
 	}
-	if len(manifests) != 0 {
-		if err := options.RetainRootManifests(manifests); err != nil {
+	if len(retained) != 0 {
+		if err := options.RetainRootManifests(retained); err != nil {
 			return err
 		}
 	}
 	return inputs.recheck()
+}
+
+func rootManifestChecksums(primary []byte, members [][]byte) (map[module.Version]string, error) {
+	checksums := map[module.Version]string{}
+	primaryKeys := map[module.Version]bool{}
+	for index, sums := range append([][]byte{primary}, members...) {
+		for _, line := range bytes.Split(sums, []byte{'\n'}) {
+			fields := strings.Fields(string(line))
+			if len(fields) == 0 {
+				continue
+			}
+			if len(fields) != 3 {
+				return nil, ErrInvalidOutput
+			}
+			// Go ignores the historical empty-manifest hash before checking rows.
+			if !strings.HasSuffix(fields[1], "/go.mod") || !strings.HasPrefix(fields[2], "h1:") || fields[2] == "h1:G7mAYYxgmS0lVkHyy2hEOLQCFB0DlQFTMLWggykrydY=" {
+				continue
+			}
+			version := module.Version{Path: fields[0], Version: strings.TrimSuffix(fields[1], "/go.mod")}
+			if primaryKeys[version] {
+				continue // The first primary h1 row decides before any member rows.
+			}
+			if previous, exists := checksums[version]; exists && previous != fields[2] {
+				checksums[version] = "" // A member conflict cannot regain authority.
+			} else {
+				checksums[version] = fields[2]
+			}
+			if index == 0 {
+				primaryKeys[version] = true
+			}
+		}
+	}
+	return checksums, nil
+}
+
+func rootManifestReplacement(version module.Version, replacements []*modfile.Replace) *modfile.Replace {
+	var selected *modfile.Replace
+	for _, candidate := range replacements {
+		if candidate.Old.Path == version.Path && (candidate.Old.Version == version.Version || candidate.Old.Version == "" && selected == nil) {
+			selected = candidate
+		}
+	}
+	return selected
+}
+
+func (workspace *preparationWorkspace) rootManifestVersion(version module.Version) (module.Version, error) {
+	if replacement := rootManifestReplacement(version, workspace.work.Replace); replacement != nil {
+		return replacement.New, nil
+	}
+	var selected module.Version
+	found := false
+	for _, member := range workspace.members {
+		replacement := rootManifestReplacement(version, member.mod.Replace)
+		if replacement == nil {
+			continue
+		}
+		next := replacement.New
+		// Go visits members in workfile order. A later version-specific rule
+		// conflicts with a different earlier match, rather than overriding it.
+		if found && replacement.Old.Version != "" && selected != next {
+			return module.Version{}, ErrInvalidGoMod
+		}
+		selected, found = next, true
+	}
+	if found {
+		return selected, nil
+	}
+	return version, nil
+}
+
+func (workspace *preparationWorkspace) validateRootManifestReplacements() error {
+	mainPaths, overridden := map[string]bool{}, map[string]bool{}
+	for _, member := range workspace.members {
+		mainPaths[member.mod.Module.Mod.Path] = true
+	}
+	workReplacements := map[module.Version]module.Version{}
+	for _, replacement := range workspace.work.Replace {
+		if previous, exists := workReplacements[replacement.Old]; exists && previous != replacement.New {
+			return ErrInvalidGoMod
+		}
+		if mainPaths[replacement.Old.Path] && replacement.Old.Version == "" {
+			return ErrInvalidGoMod
+		}
+		workReplacements[replacement.Old] = replacement.New
+		overridden[replacement.Old.Path] = true
+	}
+	replacements := map[module.Version]module.Version{}
+	for _, member := range workspace.members {
+		local := map[module.Version]module.Version{}
+		for _, replacement := range member.mod.Replace {
+			if previous, exists := local[replacement.Old]; exists && previous != replacement.New {
+				return ErrInvalidGoMod
+			}
+			local[replacement.Old] = replacement.New
+			if overridden[replacement.Old.Path] {
+				continue
+			}
+			next := replacement.New
+			// Initialization compares member-relative local paths after rebasing;
+			// lookup separately compares their original spelling.
+			if next.Version == "" && !filepath.IsAbs(next.Path) {
+				next.Path = filepath.Join(member.root, next.Path)
+			}
+			if previous, exists := replacements[replacement.Old]; exists && previous != next {
+				return ErrInvalidGoMod
+			}
+			replacements[replacement.Old] = next
+		}
+	}
+	return nil
 }
