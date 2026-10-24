@@ -355,7 +355,7 @@ func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9)
 func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
- requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download"
+ requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download"
  requestedList := mode == "information-identity-after-list"
  requestedGraph := mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
  firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
@@ -654,6 +654,15 @@ func TestBuiltCLIChangePlanRejectsChangedGraphSource(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRejectsChangedListedSource(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"workspace-cold-graph-source-identity-after-download", "workspace-cold-graph-source-manifest-identity-after-download", "cold-graph-duplicate-sum-source-identity-after-download", "cold-graph-duplicate-sum-source-manifest-identity-after-download"} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanRejectsChangedCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
@@ -667,6 +676,10 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 
 func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
+	coldGraph := strings.Contains(mode, "cold-graph-")
+	mode = strings.ReplaceAll(mode, "cold-graph-", "")
+	duplicateSum := strings.Contains(mode, "duplicate-sum-")
+	mode = strings.ReplaceAll(mode, "duplicate-sum-", "")
 	prepared := strings.Contains(mode, "prepared-")
 	mode = strings.ReplaceAll(mode, "prepared-", "")
 	transitive := strings.Contains(mode, "transitive-")
@@ -682,6 +695,17 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	root := writeImplementationSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 	seedPreviewDependency(t, root, environment, "v1.0.0")
+	if duplicateSum {
+		path := filepath.Join(root, "go.sum")
+		sums, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeCommandFile(t, path, string(sums)+previewDependencyModule+" v1.0.0/go.mod h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=\n")
+	}
+	if coldGraph {
+		environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_QUERY="+previewDependencyModule+"@v1.0.0")
+	}
 	if prepared {
 		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-droprequire="+previewDependencyModule); err != nil {
 			t.Fatal(err)
@@ -701,7 +725,7 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	workspaceRoot, initialLocal := "", ""
 	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
 		workspaceRoot = t.TempDir()
-		if strings.HasSuffix(workspaceMode, "-after-graph") {
+		if coldGraph || strings.HasSuffix(workspaceMode, "-after-graph") {
 			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_WORKSPACE=1")
 		}
 		work := filepath.Join(workspaceRoot, "go.work")
@@ -727,6 +751,11 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	}
 	if cache == "" {
 		t.Fatal("missing isolated source cache")
+	}
+	if coldGraph {
+		if err := os.Remove(filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	wrapper := sourcePreparationGoWrapper(t)
 	goName := "go"
@@ -766,7 +795,7 @@ func testBuiltCLIChangePlanRejectsChangedCacheInput(t *testing.T, binary, mode s
 	}
 	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
 	command.Dir, command.Env = root, environment
-	if transitive || prepared || strings.HasSuffix(mode, "-after-graph") {
+	if transitive || prepared || coldGraph || strings.HasSuffix(mode, "-after-graph") {
 		command.Dir = filepath.Join(root, "reports")
 	}
 	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)

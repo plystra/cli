@@ -915,6 +915,20 @@ files do not prevent capture of an otherwise complete tree. Later discovery
 rechecks the same baseline, and retention failures prevent listing. Incomplete
 selection, missing authority or components, and cold acquisition still do not
 establish capture before first use.
+After Go returns a complete valid module list, discovery also retains eligible
+actual selected warm bundles before the CLI parses any versioned extracted
+manifest or normalizes source checksums. This includes selections that could
+not be inferred before listing. Archive and manifest authority comes from
+checksum files frozen before listing, with separate workspace primary and
+member precedence; newly materialized or reported sums cannot authorize this
+capture. Shared effective sources retain their logical provenance together,
+and already-retained selections with identical source and manifest paths reuse
+their original evidence. Go-reported source paths remain intact. Rejection,
+cancellation, or changed original metadata stops discovery, and later manifest
+or checksum failure preserves retained inputs through stage cleanup. Invalid or
+incomplete JSON selections introduce no post-list captures. This closes the
+warm-source boundary before the CLI's first extracted-manifest read, while
+cold acquisition and complete capture before Go's own reads remain unfinished.
 Source and dependency previews additionally retain versioned module source
 trees after module selection and before declaration discovery or candidate
 builds. This includes ordinary and transitive modules, versioned replacements,

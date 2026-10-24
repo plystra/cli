@@ -196,6 +196,11 @@ func runRootManifestsHelper() int {
 			return 20
 		}
 	}
+	if len(os.Args) > 1 && os.Args[1] == "list" {
+		if _, err := os.Stdout.WriteString(os.Getenv("PLYSTRA_MODULE_LIST_SUFFIX")); err != nil {
+			return 21
+		}
+	}
 	return 0
 }
 

@@ -72,8 +72,10 @@ type Options struct {
 	// before graph listing, independently of manifest Go-version shortcuts.
 	// These files have no independent Go checksum authority.
 	RetainModuleInformation func([]string) error
-	// RetainSelectedSources captures eligible warm source bundles for a
-	// completely inferred selected graph before listing or source validation.
+	// RetainSelectedSources captures eligible warm source bundles before
+	// extracted-manifest validation. A completely inferred selected graph is
+	// captured before listing; otherwise actual Go-selected sources are captured
+	// after listing, before the CLI reads their extracted manifests.
 	// Bundles require independent original archive and manifest checksums;
 	// their extracted manifests have not been parsed or recognized as Projects.
 	RetainSelectedSources func([]Module) error
@@ -247,6 +249,14 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if err != nil {
 		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 	}
+	var sourceChecksums preparationChecksums
+	if options.RetainSelectedSources != nil {
+		sourceChecksums, err = originalSourceChecksums(application.Path(), workspace, inputs)
+		if err != nil {
+			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
+		}
+		options.RetainSelectedSources = retainSelectedSourcesOnce(options.RetainSelectedSources)
+	}
 	if options.RetainRootManifests != nil || options.RetainModuleInformation != nil || options.RetainSelectedSources != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
@@ -303,6 +313,21 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	modules, err := decodeModules(output, application, requirements)
 	if err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
+	}
+	if options.RetainSelectedSources != nil {
+		if err := retainListedSources(ctx, modules, sourceChecksums, inputs, options.RetainSelectedSources); err != nil {
+			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
+		}
+	}
+	for index := range modules {
+		dependency := &modules[index]
+		if dependency.root != "" || dependency.sourceDirectory == "" || dependency.goModFile == "" {
+			continue
+		}
+		dependency.root, dependency.goMod, err = validateModuleRoot(dependency.path, dependency.sourceDirectory, dependency.goModFile, dependency.sourcePath, false)
+		if err != nil {
+			return Index{}, errors.Join(ErrDiscover, err)
+		}
 	}
 	if err := resolveMissingSources(ctx, application.Path(), application.ModulePath(), before, modules, options, outputLimit); err != nil {
 		return Index{}, fmt.Errorf("%w: %w", ErrDiscover, err)
@@ -494,10 +519,12 @@ func decodeModules(data []byte, application modulelocate.Module, requirements []
 		}
 		root := ""
 		var goModData []byte
-		if (directory == "" || goModPath == "") && !listed.Main && (listed.Replace == nil || listed.Replace.Version != "") {
-			// go list may report only graph metadata when a selected source
-			// archive has not been extracted yet. Resolve that exact selected
-			// version later, outside the Project directory.
+		if !listed.Main && (listed.Replace == nil || listed.Replace.Version != "") {
+			// Decode the complete selection before retaining or reading any
+			// versioned tree. Missing sources are acquired separately afterward.
+			if directory != "" && !filepath.IsAbs(directory) || goModPath != "" && !filepath.IsAbs(goModPath) {
+				return nil, fmt.Errorf("%w: module %q returned non-absolute source provenance", ErrInvalidOutput, listed.Path)
+			}
 		} else {
 			var err error
 			root, goModData, err = validateModuleRoot(listed.Path, directory, goModPath, expectedSourcePath, listed.Main)

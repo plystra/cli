@@ -98,7 +98,7 @@ func retainWarmBundle(t *testing.T, stage *projectstage.Stage, ctx context.Conte
 
 func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 	for _, workspace := range []bool{false, true} {
-		for _, mode := range []string{"success", "offline", "legacy", "missing-archive", "partial", "missing-tree", "missing-manifest", "missing-checksum-file", "archive-only", "manifest-only", "poisoned-source", "poisoned-manifest", "poisoned-checksum", "unsafe-checksum"} {
+		for _, mode := range []string{"success", "mutated-callback-group", "offline", "legacy", "missing-archive", "partial", "missing-tree", "missing-manifest", "missing-checksum-file", "archive-only", "manifest-only", "poisoned-source", "poisoned-manifest", "poisoned-checksum", "unsafe-checksum"} {
 			t.Run(fmt.Sprintf("workspace=%t/%s", workspace, mode), func(t *testing.T) {
 				t.Parallel()
 				fixture := warmPreparation(t, workspace, mode == "legacy")
@@ -147,18 +147,26 @@ func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = stage.Close() })
 				command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
-				calls := 0
+				calls, listedCalls := 0, 0
 				_, err = moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{
 					Environment: environment, GoCommand: command, Offline: mode == "offline",
 					RetainSelectedSources: func(sources []moduledependency.Module) error {
-						calls++
 						if commands := string(readFile(t, trace)); strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
-							t.Fatal("selected warm source was captured after consumption")
+							listedCalls++
+							if strings.Contains(commands, "download ") {
+								t.Fatal("listed source was captured after acquisition")
+							}
+						} else {
+							calls++
 						}
 						if len(sources) != 1 || len(sources[0].ProjectGoMod()) != 0 {
 							t.Fatal("early source callback parsed extracted declarations")
 						}
-						return retainWarmBundle(t, stage, t.Context(), sources)
+						err := retainWarmBundle(t, stage, t.Context(), sources)
+						if mode == "mutated-callback-group" {
+							sources[0] = moduledependency.Module{}
+						}
+						return err
 					},
 				})
 				wantCalls := 1
@@ -168,6 +176,13 @@ func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 				wantError := strings.HasPrefix(mode, "poisoned-") || mode == "unsafe-checksum" || mode == "archive-only" && !workspace
 				if calls != wantCalls || (err != nil) != wantError {
 					t.Fatalf("selected warm capture: calls=%d, want=%d, error=%v", calls, wantCalls, err)
+				}
+				wantListed := 0
+				if mode == "missing-manifest" {
+					wantListed = 1
+				}
+				if listedCalls != wantListed {
+					t.Fatalf("listed source capture: calls=%d, want=%d", listedCalls, wantListed)
 				}
 				if strings.HasPrefix(mode, "poisoned-") || mode == "unsafe-checksum" {
 					if strings.Contains(string(readFile(t, trace)), "list ") {
