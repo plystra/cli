@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
+	"github.com/plystra/cli/internal/changerequest"
 	"github.com/plystra/cli/internal/dependencycleanup"
 	"github.com/plystra/cli/internal/moduleargument"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -67,6 +69,10 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 	if ctx == nil {
 		return Result{}, fmt.Errorf("%w: context is nil", ErrRemove)
 	}
+	if options.Environment == nil {
+		options.Environment = os.Environ()
+	}
+	options.Environment = append([]string(nil), options.Environment...)
 	modulePath, err := moduleargument.ParsePath(options.ModulePath)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrRemove, err)
@@ -83,28 +89,35 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrRemove, &notSelectedError{modulePath: modulePath})
 	}
 
+	ownership, err := dependencycleanup.Capture(ctx, dependencycleanup.Options{
+		Start: project.Path(), GoCommand: options.GoCommand,
+		Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
+	})
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: capture pre-change ownership: %w", ErrRemove, err)
+	}
+	if err := ownership.Validate(ctx); err != nil {
+		return Result{}, fmt.Errorf("%w: %w", ErrRemove, err)
+	}
+
 	err = modulemutation.Change(ctx, project.Path(), modulemutation.ChangeOptions{
 		GoCommand:   options.GoCommand,
 		Environment: options.Environment,
 		Arguments:   []string{"get", modulePath + "@none"},
+		Observe:     ownership.ObserveChange,
 	}, func(mutate applicationgenerate.ModuleMutation) error {
-		plan, err := dependencycleanup.Plan(ctx, dependencycleanup.Options{
-			Start:                 project.Path(),
-			GoCommand:             options.GoCommand,
-			Environment:           options.Environment,
-			DependencyOutputLimit: options.DependencyOutputLimit,
-		})
+		plan, err := dependencycleanup.Plan(ctx, ownership, changerequest.DependencyRemove, modulePath)
 		if err != nil {
 			return err
 		}
-		return dependencycleanup.Commit(project.Path(), plan, func(root string) error {
+		return dependencycleanup.Commit(ctx, project.Path(), plan, func(root string) error {
 			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 				Start:                 root,
 				GoCommand:             options.GoCommand,
 				Environment:           options.Environment,
 				DependencyOutputLimit: options.DependencyOutputLimit,
 				Validate:              options.Validate,
-				MutateModule: func(ctx context.Context, root string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
+				MutateModule: plan.GuardMutation(func(ctx context.Context, root string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
 					return mutate(ctx, root, requirements, func() error {
 						if err := validate(); err != nil {
 							return err
@@ -118,7 +131,7 @@ func Remove(ctx context.Context, options Options) (Result, error) {
 						}
 						return nil
 					})
-				},
+				}),
 				RejectUnexpected: true,
 			})
 			return err

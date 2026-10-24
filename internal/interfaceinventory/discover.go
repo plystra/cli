@@ -252,6 +252,8 @@ type Discovery struct {
 	implementations   implementationinventory.Index
 	resources         ResourceIndex
 	resourceProviders resourceproviderinventory.Index
+	sourcePackages    map[string]listedPackage
+	sourceCandidates  []packageCandidate
 }
 
 // Resources returns the validated visible Resource contracts from the shared scan.
@@ -456,6 +458,8 @@ func discoverApplication(ctx context.Context, application modulelocate.Module, d
 		implementations:   implementations,
 		resources:         resourceInventory,
 		resourceProviders: providers,
+		sourcePackages:    found.sourcePackages,
+		sourceCandidates:  candidates,
 	}, nil
 }
 
@@ -485,6 +489,7 @@ type loadedInventory struct {
 	resources         []Resource
 	resourceProviders []resourceproviderinventory.Input
 	importer          types.Importer
+	sourcePackages    map[string]listedPackage
 }
 
 func loadCandidates(ctx context.Context, candidates []packageCandidate, options Options) (loadedInventory, error) {
@@ -565,7 +570,7 @@ func loadCandidatesAt(ctx context.Context, candidates []packageCandidate, option
 		return loadedInventory{}, err
 	}
 	checkedImporter := importer.ForCompiler(token.NewFileSet(), runtime.Compiler, exportLookup(exports))
-	result := loadedInventory{importer: checkedImporter}
+	result := loadedInventory{importer: checkedImporter, sourcePackages: listed}
 	for _, candidate := range candidates {
 		loaded, exists := listed[candidate.importPath]
 		if !exists {
@@ -1077,6 +1082,14 @@ type listedPackage struct {
 	Export     string                `json:"Export"`
 	GoFiles    []string              `json:"GoFiles"`
 	CgoFiles   []string              `json:"CgoFiles"`
+	CFiles     []string              `json:"CFiles"`
+	CXXFiles   []string              `json:"CXXFiles"`
+	MFiles     []string              `json:"MFiles"`
+	HFiles     []string              `json:"HFiles"`
+	FFiles     []string              `json:"FFiles"`
+	SFiles     []string              `json:"SFiles"`
+	Imports    []string              `json:"Imports"`
+	ImportMap  map[string]string     `json:"ImportMap"`
 	Incomplete bool                  `json:"Incomplete"`
 	Error      *listedPackageError   `json:"Error"`
 	DepsErrors []*listedPackageError `json:"DepsErrors"`

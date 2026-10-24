@@ -527,20 +527,53 @@ func TestPreviewDependencyConfigurationsExcludedLiteralIsNotOldOwner(t *testing.
 
 func TestPreviewDependencyConfigurationsDependencyOnlyCleansLostAutomaticOwner(t *testing.T) {
 	t.Parallel()
-	document := "interfaces: {require: [app.main/v1]}\nconfig: {" + dependencyOwner + ": {name: PRIVATE_OLD}}\n"
-	fixture := dependencyFixtureOptions{fields: "Name string `yaml:\"name\"`", document: document, onlyService: true}
-	old := dependencyInputs(t, fixture)
-	fixture.onlyService, fixture.onlyAlternate = false, true
-	current := dependencyInputs(t, fixture)
-	request := dependencyRequest(t, dependencyOperation)
-	plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
-	if err != nil {
-		t.Fatal(err)
+	for _, mode := range []string{"default", "environment", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			document := "interfaces: {require: [app.main/v1]}\nconfig: {" + dependencyOwner + ": {name: PRIVATE_OLD}}\n"
+			fixture := dependencyFixtureOptions{fields: "Name string `yaml:\"name\"`", document: document, onlyService: true, mode: mode}
+			old := dependencyInputs(t, fixture)
+			fixture.onlyService, fixture.onlyAlternate = false, true
+			current := dependencyInputs(t, fixture)
+			if mode == "environment" {
+				t.Run("persisted-tombstone", func(t *testing.T) {
+					candidate, err := current.ComposeCandidate([]byte("config: {" + dependencyOwner + ": {$remove: true}}\n"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := current.ValidateCandidate(candidate); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
+			request := dependencyRequest(t, dependencyOperation)
+			plan, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.Changed() || bytes.Contains(plan.Updated(), []byte("PRIVATE_OLD")) || len(plan.ConfigurationImpact().DerivedOperations()) != 1 {
+				t.Fatalf("dependency-only automatic cleanup = %s", plan.ConfigurationImpact().CanonicalJSON())
+			}
+			if mode != "environment" && bytes.Contains(plan.Updated(), []byte(dependencyOwner)) {
+				t.Fatal("complete document retained its lost owner")
+			}
+			if mode == "environment" && !bytes.Contains(plan.Updated(), []byte("$remove: true")) {
+				t.Fatal("lost inherited owner did not receive an exact tombstone")
+			}
+			if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, request); err == nil {
+				t.Fatal("unknown old automatic owner authorized dependency-only cleanup")
+			}
+		})
 	}
-	if !plan.Changed() || bytes.Contains(plan.Updated(), []byte(dependencyOwner)) || len(plan.ConfigurationImpact().DerivedOperations()) != 1 {
-		t.Fatalf("dependency-only automatic cleanup = %s", plan.ConfigurationImpact().CanonicalJSON())
-	}
-	if _, err := implementationselect.PreviewDependencyConfigurations(t.Context(), applicationresolve.SelectionInputs{}, current, request); err == nil {
-		t.Fatal("unknown old automatic owner authorized dependency-only cleanup")
+}
+
+func TestPreviewDependencyConfigurationsKeepsTypedLowerValidation(t *testing.T) {
+	t.Parallel()
+	document := dependencyDocument() + "config: {" + dependencyOwner + ": {name: [PRIVATE_INVALID]}}\n"
+	fixture := dependencyFixtureOptions{fields: "Name string `yaml:\"name\"`", document: document, mode: "environment"}
+	old, current := dependencyInputs(t, fixture), dependencyInputs(t, fixture)
+	_, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, dependencyRequest(t, dependencyOperation, dependencySelection(dependencyOtherOwner)))
+	if !errors.Is(err, applicationmeta.ErrConfigurationInvalidValue) || strings.Contains(err.Error(), "PRIVATE_") {
+		t.Fatalf("owner cleanup relaxed known lower-layer validation: %v", err)
 	}
 }

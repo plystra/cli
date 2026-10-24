@@ -60,13 +60,21 @@ targets, invalid explicit choices, and
 missing, ambiguous, or cyclic Interface Implementation resolution, add
 canonical module-relative Source lines first.
 `
+	dependencyOwnershipUsage = `
+Old and final declarations prove cleanup of configuration whose last owner
+disappears and exact binding parameters removed by their consumer. Bindings
+that the old consumer never declared remain errors. Still-owned configuration,
+Resource instances, and surviving bindings are retained; no missing value or
+replacement binding is guessed. Cleanup shares generation's rollback boundary.
+PLYSTRA_ENV or PLYSTRA_CONFIG selects an environment or replacement document.
+`
 	addUsage = `Usage:
   plystra add <go-module-query>
 
 Adds one ordinary Go Module dependency, regenerates, tidies, and validates the
 complete Project in one rollback boundary. Dependency Project configuration is
 inert; dependency Project roots are used only as ordinary discovery markers.
-
+` + dependencyOwnershipUsage + `
 Malformed queries emit PLYSTRA_DEPENDENCY_ADD_QUERY_INVALID before Project
 discovery or mutation.
 `
@@ -76,7 +84,7 @@ discovery or mutation.
 Removes one ordinary Go Module dependency, regenerates, tidies, and validates
 the complete Project in one rollback boundary. Dependency Project configuration
 is inert; dependency Project roots are used only as ordinary discovery markers.
-
+` + dependencyOwnershipUsage + `
 Malformed paths emit PLYSTRA_DEPENDENCY_REMOVE_PATH_INVALID before Project
 discovery or mutation.
 Valid paths absent from go.mod emit PLYSTRA_DEPENDENCY_REMOVE_NOT_SELECTED
@@ -89,7 +97,7 @@ Updates one selected ordinary Go Module dependency, regenerates, tidies, and
 validates the complete Project in one rollback boundary. Dependency Project
 configuration is inert; dependency Project roots are used only as ordinary
 discovery markers.
-
+` + dependencyOwnershipUsage + `
 Malformed queries emit PLYSTRA_DEPENDENCY_UPDATE_QUERY_INVALID before Project
 discovery or mutation.
 Valid queries whose module path is absent from go.mod emit
@@ -430,10 +438,11 @@ catalog entries, governed proxies, or transports. Use selects a compatible
 provider for an existing named instance without a kind flag. Implement creates
 unfinished Interface or Resource scaffolds without activation. Full Resource
 acceptance and change apply remain unsupported. The installed
-change-plan slice supports Interface/Implementation creation, Interface roots,
-Implementation/Resource selections, and configuration batches, with at most
-1024 requested operations in total. Source candidates are generated and built
-privately before a plan is returned; authored Projects remain unchanged.
+change-plan slice supports Interface/Implementation creation, dependency changes,
+Interface roots, Implementation/Resource selections, and configuration batches,
+with at most 1024 requested operations in total. Source and dependency candidates
+are generated and built privately before a plan is returned; authored Projects
+remain unchanged.
 Every multi-operation selection batch requires a valid complete final state.
 The configuration view retains the selected current-Project layer, redacted
 field summaries, ownership and precedence, effective and overridden

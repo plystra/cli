@@ -1,21 +1,22 @@
-// Package dependencycleanup applies only ownership-derived edits caused by a
-// changed dependency declaration. It deliberately does not choose providers,
-// remove Interface selections, or implement product-specific behavior.
+// Package dependencycleanup applies ownership-derived edits within dependency
+// primitives using the same captured old/final planner as staged previews.
 package dependencycleanup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
-	"github.com/plystra/cli/internal/applicationmeta"
+	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/atomicfs"
+	"github.com/plystra/cli/internal/changerequest"
 	"github.com/plystra/cli/internal/configurationimpact"
-	"github.com/plystra/cli/internal/constructorsymbol"
+	"github.com/plystra/cli/internal/implementationselect"
 )
 
-// Options controls discovery for one dependency mutation's post-change graph.
+// Options controls discovery for one dependency mutation.
 type Options struct {
 	Start                 string
 	ConfigurationPath     string
@@ -25,165 +26,109 @@ type Options struct {
 	DependencyOutputLimit int
 }
 
-// Result contains the post-mutation inputs and the selected document postimage.
+// Result contains the post-mutation inputs and selected document postimage.
 type Result struct {
 	Inputs  applicationresolve.SelectionInputs
 	Data    []byte
 	Changed bool
 	impact  configurationimpact.Impact
+	before  Snapshot
 }
 
-// ConfigurationImpact returns deterministic ownership consequences for the
-// planned dependency cleanup. It contains no configured values or Secret
-// references.
+// ConfigurationImpact contains ownership consequences without configured values.
 func (r Result) ConfigurationImpact() configurationimpact.Impact { return r.impact }
 
-// Commit installs the planned selected-document postimage for the duration of
-// operation. A failed operation restores the exact preimage and a concurrent
-// edit is never overwritten.
-func Commit(root string, plan Result, operation func(string) error) error {
-	if operation == nil {
-		return errors.New("dependency cleanup operation is nil")
+// Plan discovers the final graph using the captured selector and authored
+// preimage. Only old declarations or literal authored ownership prove cleanup.
+func Plan(ctx context.Context, before Snapshot, action changerequest.DependencyAction, target string) (Result, error) {
+	if err := before.validate(ctx, nil); err != nil {
+		return Result{}, err
 	}
-	if !plan.Changed {
-		return operation(root)
+	if err := before.validateChange(); err != nil {
+		return Result{}, err
 	}
-	return atomicfs.WriteFiles(root, []atomicfs.Write{{
-		Path:         plan.Inputs.SelectedSnapshot().Path(),
-		Data:         plan.Data,
-		ExpectedData: plan.Inputs.SelectedSnapshot().Data(),
-	}}, operation)
-}
-
-// Plan discovers the changed application and removes only Resource binding
-// leaves whose consumer no longer declares that exact parameter. Lower-layer
-// leaves become sparse tombstones; local leaves are removed. The caller owns
-// the surrounding filesystem transaction.
-func Plan(ctx context.Context, options Options) (Result, error) {
+	options := before.options
 	inputs, err := applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
-		Start:                 options.Start,
-		ConfigurationPath:     options.ConfigurationPath,
-		EnvironmentName:       options.EnvironmentName,
-		GoCommand:             options.GoCommand,
-		Environment:           options.Environment,
-		DependencyOutputLimit: options.DependencyOutputLimit,
+		Start: options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+		GoCommand: options.GoCommand, Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("discover post-change ownership: %w", err)
 	}
-	original := inputs.SelectedSnapshot().Data()
-	composition, err := inputs.ComposeSelectionCandidate(original)
+	if err := before.validateDependencies(inputs); err != nil {
+		return Result{}, err
+	}
+	data, err := json.Marshal(map[string]any{"schema": changerequest.SchemaV1, "operations": []any{
+		map[string]any{"kind": "dependency", "action": action, "module": target},
+	}})
 	if err != nil {
-		return Result{}, fmt.Errorf("compose post-change ownership: %w", err)
+		return Result{}, err
 	}
-	removals, err := obsoleteBindings(inputs, composition.Manifest())
+	request, err := changerequest.Parse(data)
 	if err != nil {
-		return Result{}, fmt.Errorf("derive Resource binding cleanup: %w", err)
+		return Result{}, err
 	}
-	if len(removals) == 0 {
-		impact, err := configurationimpact.Compare(composition.Manifest(), composition.Manifest(), configurationimpact.Input{})
-		if err != nil {
-			return Result{}, fmt.Errorf("build empty configuration impact: %w", err)
-		}
-		return Result{Inputs: inputs, Data: original, impact: impact}, nil
-	}
-
-	edit := applicationmeta.CleanupSelectionOwnership
-	if inputs.ConfigurationSelection().Mode() == "environment" {
-		edit = applicationmeta.CleanupSelectionOwnershipOverlay
-	}
-	updated, _, err := edit(original, nil, removals)
+	plan, err := implementationselect.PreviewDependencyConfigurations(ctx, before.inputs, inputs, request)
 	if err != nil {
-		return Result{}, fmt.Errorf("remove local Resource bindings: %w", err)
+		return Result{}, fmt.Errorf("plan dependency ownership: %w", err)
 	}
-	lower, err := inputs.ComposeSelectionCandidate(updated)
-	if err != nil {
-		return Result{}, fmt.Errorf("compose Resource binding cleanup: %w", err)
+	if err := before.validate(ctx, nil); err != nil {
+		return Result{}, err
 	}
-	for index := range removals {
-		removals[index].Tombstone = hasBinding(lower.Manifest().ResourceBindings(), removals[index])
+	if err := before.validateChange(); err != nil {
+		return Result{}, err
 	}
-	updated, changed, err := edit(original, nil, removals)
-	if err != nil {
-		return Result{}, fmt.Errorf("materialize Resource binding cleanup: %w", err)
-	}
-	final, err := inputs.ComposeSelectionCandidate(updated)
-	if err != nil {
-		return Result{}, fmt.Errorf("compose final Resource binding cleanup: %w", err)
-	}
-	impact, err := configurationimpact.Compare(composition.Manifest(), final.Manifest(), configurationimpact.Input{})
-	if err != nil {
-		return Result{}, fmt.Errorf("build configuration impact: %w", err)
-	}
-	return Result{Inputs: inputs, Data: updated, Changed: changed, impact: impact}, nil
+	return Result{Inputs: inputs, Data: plan.Updated(), Changed: plan.Changed(), impact: plan.ConfigurationImpact(), before: before}, nil
 }
 
-func obsoleteBindings(inputs applicationresolve.SelectionInputs, manifest applicationmeta.Manifest) ([]applicationmeta.ResourceBindingRemoval, error) {
-	var removals []applicationmeta.ResourceBindingRemoval
-	for _, binding := range manifest.ResourceBindings() {
-		parameters, known, err := resourceParameters(inputs, manifest, binding)
-		if err != nil {
-			return nil, err
-		}
-		if !known {
-			continue
-		}
-		if _, exists := parameters[binding.ParameterName()]; !exists {
-			removals = append(removals, applicationmeta.ResourceBindingRemoval{
-				Namespace:     binding.Namespace(),
-				Consumer:      binding.Consumer(),
-				ParameterName: binding.ParameterName(),
-			})
-		}
+// Commit installs the selected document while generation/module rollback stays
+// open. Even an unchanged document requires the original snapshot checks.
+func Commit(ctx context.Context, root string, plan Result, operation func(string) error) error {
+	if operation == nil {
+		return errors.New("dependency cleanup operation is nil")
 	}
-	return removals, nil
+	if err := plan.before.validate(ctx, nil); err != nil {
+		return err
+	}
+	if err := plan.before.validateChange(); err != nil {
+		return err
+	}
+	if err := plan.Inputs.ValidateSnapshot(ctx); err != nil {
+		return err
+	}
+	var writes []atomicfs.Write
+	if plan.Changed {
+		writes = []atomicfs.Write{{Path: plan.Inputs.SelectedSnapshot().Path(), Data: plan.Data, ExpectedData: plan.Inputs.SelectedSnapshot().Data()}}
+	}
+	return atomicfs.WriteFiles(root, writes, operation)
 }
 
-func resourceParameters(inputs applicationresolve.SelectionInputs, manifest applicationmeta.Manifest, binding applicationmeta.ResourceBinding) (map[string]string, bool, error) {
-	if binding.Namespace() == "implementations" {
-		constructor, err := constructorsymbol.Parse(binding.Consumer())
-		if err != nil {
-			return nil, false, err
+// GuardMutation binds generation validation to post-change discovery and old
+// authored evidence. CaptureTidySnapshot sees only the new graph; it never
+// authorizes the preceding intentional dependency version change.
+func (r Result) GuardMutation(mutate applicationgenerate.ModuleMutation) applicationgenerate.ModuleMutation {
+	return func(ctx context.Context, root string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
+		if err := r.before.validate(ctx, r.Data); err != nil {
+			return err
 		}
-		if implementation, exists := inputs.Declarations().Implementations().BySymbol(constructor); exists {
-			parameters := make(map[string]string, len(implementation.RequiredResources()))
-			for _, dependency := range implementation.RequiredResources() {
-				parameters[dependency.ParameterName()] = dependency.ID().String()
+		if err := r.before.validateChange(); err != nil {
+			return err
+		}
+		return mutate(ctx, root, requirements, func() error {
+			tidy, err := r.Inputs.CaptureTidySnapshot(ctx)
+			if err != nil {
+				return err
 			}
-			return parameters, true, nil
-		}
-		if provider, exists := inputs.Declarations().ResourceProviders().BySymbol(constructor); exists {
-			parameters := make(map[string]string, len(provider.Dependencies()))
-			for _, dependency := range provider.Dependencies() {
-				parameters[dependency.ParameterName()] = dependency.ID()
+			if err := r.before.validate(ctx, r.Data); err != nil {
+				return err
 			}
-			return parameters, true, nil
-		}
-		return nil, false, nil
+			if err := validate(); err != nil {
+				return err
+			}
+			if err := r.before.validate(ctx, r.Data); err != nil {
+				return err
+			}
+			return r.Inputs.ValidatePostwriteSnapshot(ctx, r.Data, tidy)
+		})
 	}
-
-	for _, instance := range manifest.ResourceInstances() {
-		if instance.Name() != binding.Consumer() {
-			continue
-		}
-		provider, exists := inputs.Declarations().ResourceProviders().BySymbol(instance.Provider())
-		if !exists {
-			return nil, false, nil
-		}
-		parameters := make(map[string]string, len(provider.Dependencies()))
-		for _, dependency := range provider.Dependencies() {
-			parameters[dependency.ParameterName()] = dependency.ID()
-		}
-		return parameters, true, nil
-	}
-	return nil, false, nil
-}
-
-func hasBinding(bindings []applicationmeta.ResourceBinding, removal applicationmeta.ResourceBindingRemoval) bool {
-	for _, binding := range bindings {
-		if binding.Namespace() == removal.Namespace && binding.Consumer() == removal.Consumer && binding.ParameterName() == removal.ParameterName {
-			return true
-		}
-	}
-	return false
 }

@@ -286,8 +286,10 @@ func TestComposeRejectsUnavailableConstructorConfigurationSchemaWithoutDisclosur
 		if err != nil {
 			t.Fatalf("WithProjectModule: %v", err)
 		}
-		_, err = applicationmeta.Compose(nil, manifest, composeSchemaLookup(nil))
-		assertError(t, err, "example.com/application", "plystra.production.yaml")
+		composition, err := applicationmeta.Compose(nil, manifest, composeSchemaLookup(nil))
+		if err != nil || len(composition.Manifest().Configurations()) != 0 {
+			t.Fatalf("exact whole-owner exclusion required an obsolete schema: %v", err)
+		}
 	})
 
 	t.Run("dependency value", func(t *testing.T) {

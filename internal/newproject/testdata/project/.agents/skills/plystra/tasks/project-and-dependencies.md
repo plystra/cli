@@ -20,6 +20,8 @@ The positional name is one safe child directory; `--module` sets its independent
 
 `--format json` returns one `plystra.result/v1` document. Success nests `plystra.project-created/v1`; enter `payload.directory` and run `plystra check` independently.
 
+Dependency commands compare captured old and final declarations. They remove only configuration whose last proven owner disappears and binding parameters proven obsolete on that consumer. Still-owned configuration, Resource instances, surviving bindings, and unselected documents remain unchanged. Unknown old declarations prove no automatic ownership or parameter cleanup; a never-declared binding remains an error. Cleanup, generation, module metadata, and the private runtime baseline share rollback. Ambient PLYSTRA_ENV or PLYSTRA_CONFIG selects one environment or replacement document; dependency commands have no explicit selector flags yet. Public change plans remain non_exact and cannot authorize installation.
+
 ## Completion checks
 
 1. Confirm `go.mod` has the intended module identity and direct dependencies.

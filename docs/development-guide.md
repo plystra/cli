@@ -761,13 +761,33 @@ through ordinary Go tooling, and verifies that regeneration plus tidy did not
 select it again. Update also requires an existing selection, preserves a direct
 requirement as direct, and verifies that the module remains selected. It
 targets one query; ordinary Go resolution may still adjust transitive versions
-required by the selected graph. Each command recomputes discovery and the root selected current-Project model, regenerates, tidies,
-and runs `go test -mod=readonly ./...`. The current dependency surfaces use the
-default root configuration; environment and full-replacement validation for
-dependency mutations remains incomplete. The commands never activate ordinary dependencies, infer intent from equal values, or rewrite root `plystra.yaml`,
-an environment overlay, or an alternative YAML file. A removed or updated
-module that invalidates selected current-Project model fails and restores `go.mod`,
-`go.sum`, generated output, and every other transaction-owned file.
+required by the selected graph. Each command captures old declarations before
+module resolution, recomputes final discovery and the selected current-Project
+model, regenerates, tidies, and runs its validation. The default validation is
+`go test -mod=readonly ./...`. Ambient `PLYSTRA_ENV` and `PLYSTRA_CONFIG` select
+one environment overlay or complete replacement document; these commands do
+not yet accept explicit selector flags.
+
+The shared old/final ownership planner removes configuration whose last proven
+owner disappears and exact binding parameters declared by an old consumer but
+absent from its replacement. Unknown old declarations cannot prove automatic
+owners or obsolete parameters. A binding that the old consumer never declared
+remains an error. Still-owned configuration, Resource instances, surviving
+bindings, Interface selections, and unselected documents are retained. An
+environment cleanup writes only the necessary tombstones or sparse changes.
+Whole-constructor tombstones remain valid when an updated dependency no longer
+declares the old Config schema; the suppressed root object retains only
+value-free owner provenance in inspection. Known-schema lower objects still
+receive typed validation before removal, and unmasked unknown objects fail.
+No dependency is activated implicitly, no configuration is migrated by matching
+names or values, and no missing binding or required value is guessed.
+
+Cleanup, module metadata, generated output, and the private runtime baseline
+share the existing rollback boundary. Invalid final models and verification
+failures restore transaction-owned files without overwriting concurrent user
+edits. A concurrent selected-document edit retains its original recovery backup.
+This ownership cleanup does not install `change apply` or the complete
+shared primitive-plan execution contract.
 
 Malformed dependency input is classified before Project discovery or mutation:
 
