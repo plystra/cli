@@ -1014,6 +1014,20 @@ decline this optional early capture. The retention callback receives source
 provenance and both checksums before any extracted manifest is parsed, and later
 successful acquisition revalidates the same evidence without refreshing its
 baseline. Retained warm bundles survive an acquisition failure and stage cleanup.
+Before metadata-only workspace selection, preparation also retains eligible warm
+bundles whose effective source is fixed across every possible selected version.
+A versioned wildcard replacement establishes the fallback, and every exact rule
+must resolve to that same source under workfile and member precedence. A differing
+or unresolved alternative, or an exhausted inference budget, declines this optional
+capture; ordinary Go selection still runs. The callback preserves original
+requested identities and their one-step
+replacement provenance, not a prediction of the final selected version. Requested
+workspace mains and local sources introduce no cache bundle; a versioned target
+whose path also names a main remains a versioned source. The workspace's separate
+original archive and manifest checksum authorities govern this capture. Callback
+rejection, cancellation, or metadata drift prevents selection; later selection
+failure retains completed evidence through stage cleanup. General MVS upgrades
+and cold-source first reads remain outside this early boundary.
 Preparation independently retains existing cache module-information (`.info`)
 files before each exact download, even without original checksums, an extracted
 tree, or a complete archive. Inferable workspace-effective requested versions

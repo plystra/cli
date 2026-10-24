@@ -356,7 +356,7 @@ func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download"
- requestedList := mode == "information-identity-after-list"
+ requestedList := mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
  requestedGraph := mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
  firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
@@ -620,11 +620,15 @@ func TestBuiltCLIChangePlanRejectsChangedModuleManifest(t *testing.T) {
 
 func TestBuiltCLIChangePlanRejectsChangedPreparedSource(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
-	for _, mode := range []string{"prepared-source-identity-after-download", "workspace-prepared-source-identity-after-download"} {
+	for _, mode := range []string{"prepared-source-identity-after-download", "workspace-prepared-source-identity-after-download", "workspace-prepared-source-identity-after-list", "workspace-prepared-source-manifest-identity-after-list"} {
 		t.Run(mode, func(t *testing.T) {
 			testBuiltCLIChangePlanCacheInput(t, binary, mode)
 		})
 	}
+}
+
+func TestBuiltCLIChangePlanPreservesWarmPreparedWorkspaceSource(t *testing.T) {
+	testBuiltCLIChangePlanCacheInput(t, buildSourceIntegrityCLI(t), "workspace-prepared-unchanged")
 }
 
 func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
@@ -852,7 +856,11 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 		if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 			t.Fatal("unchanged acquisition changed cache input")
 		}
-		for _, path := range []string{filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "remote", "implementation.go"), filepath.Join(cache, filepath.FromSlash(transitivePath+"@v1.0.0"), "go.mod")} {
+		paths := []string{filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "remote", "implementation.go")}
+		if transitive {
+			paths = append(paths, filepath.Join(cache, filepath.FromSlash(transitivePath+"@v1.0.0"), "go.mod"))
+		}
+		for _, path := range paths {
 			if _, err := os.Stat(path); err != nil {
 				t.Fatal("cold acquisition did not materialize selected source", err)
 			}

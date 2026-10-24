@@ -273,8 +273,8 @@ func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {
 				switch mode {
 				case "primary-conflict", "primary-conflict-first":
 					if kind == "manifest" {
-						if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 0 || strings.Contains(string(readFile(t, trace)), "mod download -json "+warmSourceModule+"@") {
-							t.Fatalf("workspace manifest conflict passed metadata selection: %v, calls=%d", err, calls)
+						if !errors.Is(err, rejected) || calls != 1 || strings.Contains(string(readFile(t, trace)), "list -m ") {
+							t.Fatalf("workspace manifest authority was not retained before selection: %v, calls=%d", err, calls)
 						}
 					} else if !errors.Is(err, rejected) || calls != 1 {
 						t.Fatalf("primary checksum authority lost: %v, calls=%d", err, calls)
@@ -288,7 +288,7 @@ func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {
 						t.Fatalf("primary match hid malformed member: %v, calls=%d", err, calls)
 					}
 				default:
-					if err != nil || calls != 2 {
+					if err != nil || calls != 3 {
 						t.Fatalf("warm workspace checksum selection: %v, calls=%d", err, calls)
 					}
 				}
@@ -300,6 +300,59 @@ func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPrepareSourcesRetainsWorkspaceSourcesBeforeSelection(t *testing.T) {
+	for _, mode := range []string{"source", "extracted-manifest"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			fixture := warmPreparation(t, true, false)
+			path := filepath.Join(fixture.downloaded.Dir, "smtp", "plugin.yaml")
+			if mode == "extracted-manifest" {
+				path = filepath.Join(fixture.downloaded.Dir, "go.mod")
+			}
+			if err := os.Chmod(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.Stat(path)
+			if err != nil || !os.SameFile(before, before) {
+				t.Fatal(err)
+			}
+			stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: fixture.app, Environment: fixture.environment})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stage.Close() })
+			command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
+			marker := filepath.Join(fixture.root, "replaced")
+			environment = append(environment, "PLYSTRA_MODULE_METADATA_PATH="+path, "PLYSTRA_MODULE_METADATA_MARKER="+marker)
+			err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{
+				Environment: environment, GoCommand: command,
+			}, func(sources []moduledependency.Module) error {
+				return retainWarmBundle(t, stage, t.Context(), sources)
+			})
+			if _, markerErr := os.Stat(marker); markerErr != nil {
+				t.Fatalf("selection did not replace the source identity: %v, preparation=%v", markerErr, err)
+			}
+			after, statErr := os.Stat(path)
+			if statErr != nil || os.SameFile(before, after) || before.Mode() != after.Mode() || before.ModTime() != after.ModTime() {
+				t.Fatal("fixture did not replace only the source identity")
+			}
+			if !errors.Is(err, projectstage.ErrConcurrentChange) {
+				t.Fatalf("source replacement during workspace selection was accepted: %v", err)
+			}
+			if strings.Contains(string(readFile(t, trace)), "mod download -json "+warmSourceModule+"@v1.0.0") {
+				t.Fatal("download followed concurrent workspace source replacement")
+			}
+			inputs := stage.Inputs()
+			if err := stage.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := inputs.Recheck(t.Context()); !errors.Is(err, projectstage.ErrConcurrentChange) {
+				t.Fatalf("source identity evidence was lost after cleanup: %v", err)
+			}
+		})
 	}
 }
 
@@ -421,6 +474,7 @@ func TestPrepareSourcesRetainsWarmBundlesBeforeDownloads(t *testing.T) {
 				if phase == "workspace" && mode == "missing-manifest" {
 					wantEarly = true // Metadata-only selection materializes the manifest before acquisition.
 				}
+				wantSelection := phase == "workspace" && wantEarly && mode != "missing-manifest"
 				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command, Offline: mode == "offline"}, func(sources []moduledependency.Module) error {
 					if len(sources) == 0 {
 						return nil
@@ -431,6 +485,9 @@ func TestPrepareSourcesRetainsWarmBundlesBeforeDownloads(t *testing.T) {
 					}
 					if calls == 1 && wantEarly && strings.Contains(string(readFile(t, trace)), "mod download -json "+warmSourceModule+"@v1.0.0") {
 						t.Fatal("warm source retention followed its first exact download")
+					}
+					if calls == 1 && wantSelection && strings.Contains(string(readFile(t, trace)), "list -m ") {
+						t.Fatal("fixed workspace source retention followed selection")
 					}
 					if calls == 1 && wantEarly && len(sources[0].ProjectGoMod()) != 0 {
 						t.Fatal("early source retention parsed the extracted manifest")
@@ -463,7 +520,11 @@ func TestPrepareSourcesRetainsWarmBundlesBeforeDownloads(t *testing.T) {
 						t.Fatalf("unsafe warm metadata accepted: %v, calls=%d", err, calls)
 					}
 				case strings.HasPrefix(mode, "failed-"):
-					if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 1 {
+					wantCalls := 1
+					if wantSelection {
+						wantCalls++
+					}
+					if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != wantCalls {
 						t.Fatalf("failed acquisition lost warm source evidence: %v, calls=%d", err, calls)
 					}
 				case mode == "callback-error" || mode == "callback-error-and-drift":
@@ -486,6 +547,9 @@ func TestPrepareSourcesRetainsWarmBundlesBeforeDownloads(t *testing.T) {
 					wantCalls := 1
 					if wantEarly {
 						wantCalls = 2
+					}
+					if wantSelection {
+						wantCalls++
 					}
 					if err != nil || calls != wantCalls {
 						t.Fatalf("warm acquisition: %v, calls=%d, want=%d", err, calls, wantCalls)

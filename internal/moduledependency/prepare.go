@@ -24,8 +24,10 @@ import (
 // Retention provides source provenance and checksums, not parsed declarations.
 // The same source may be retained again after acquisition to recheck the
 // original evidence; metadata remains guarded through the last callback. Local
-// sources must already be captured. Mutable queries and transitive selections
-// remain outside this boundary.
+// sources must already be captured. Before workspace selection, eligible warm
+// sources are also retained when wildcard and exact replacements fix the same
+// effective source for every possible selected version. Mutable queries and
+// general transitive selections remain outside this boundary.
 func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func([]Module) error) (resultErr error) {
 	if ctx == nil || application.Path() == "" || len(requested) > 1_024 || retain == nil {
 		return ErrInvalidOutput

@@ -11,13 +11,15 @@ import (
 	"golang.org/x/mod/module"
 )
 
-func (workspace *preparationWorkspace) retainPreparationMetadata(ctx context.Context, root string, requested []module.Version, options Options, environment []string, inputs preparationInputs) error {
-	if options.RetainRootManifests == nil && options.RetainModuleInformation == nil || len(requested) == 0 {
+func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Context, root string, requested []module.Version, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
+	if len(requested) == 0 {
 		return nil
 	}
 	var memberSums [][]byte
 	mainPaths := map[string]bool{}
+	replacementCount := len(workspace.work.Replace)
 	for _, member := range workspace.members {
+		replacementCount += len(member.mod.Replace)
 		original, exists := inputs[filepath.Join(member.root, "go.mod")]
 		if !exists {
 			return ErrInvalidGoMod
@@ -33,34 +35,124 @@ func (workspace *preparationWorkspace) retainPreparationMetadata(ctx context.Con
 		memberSums = append(memberSums, member.sum)
 	}
 	if err := workspace.validateRootManifestReplacements(); err != nil {
-		return err
-	}
-	checksums, err := rootManifestChecksums(workspace.sum, memberSums)
-	if err != nil {
-		return err
-	}
-	var versions []module.Version
-	for _, requested := range requested {
-		if mainPaths[requested.Path] {
-			continue
+		if options.RetainRootManifests != nil || options.RetainModuleInformation != nil {
+			return err
 		}
-		effective, err := workspace.rootManifestVersion(requested)
+		return nil // Preserve ordinary Go diagnostics when optional inference fails.
+	}
+	if options.RetainRootManifests != nil || options.RetainModuleInformation != nil {
+		checksums, err := rootManifestChecksums(workspace.sum, memberSums)
 		if err != nil {
 			return err
 		}
-		versions = append(versions, effective)
+		var versions []module.Version
+		for _, requested := range requested {
+			if mainPaths[requested.Path] {
+				continue
+			}
+			effective, err := workspace.rootManifestVersion(requested)
+			if err != nil {
+				return err
+			}
+			versions = append(versions, effective)
+		}
+		information, err := preparationInformationPaths(ctx, root, versions, options, environment)
+		if err != nil {
+			return err
+		}
+		if err := errors.Join(retainModuleInformation(ctx, information, options), inputs.recheck()); err != nil {
+			return err
+		}
+		if err := retainPreparationManifests(ctx, root, versions, checksums, options, environment, inputs); err != nil {
+			return err
+		}
 	}
-	information, err := preparationInformationPaths(ctx, root, versions, options, environment)
+	sourceChecksums, err := originalSourceChecksums(root, workspace, inputs)
 	if err != nil {
-		return err
+		return errors.Join(ctx.Err(), inputs.recheck()) // Let Go diagnose malformed authority without guessing a source.
 	}
-	if err := errors.Join(retainModuleInformation(ctx, information, options), inputs.recheck()); err != nil {
-		return err
+	indices := map[module.Version]int{}
+	var groups [][]Module
+	proofBudget := 65_536
+	for _, version := range requested {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(err, inputs.recheck())
+		}
+		if mainPaths[version.Path] {
+			continue
+		}
+		effective, fixed := workspace.fixedPreparationSource(ctx, version.Path, replacementCount, &proofBudget)
+		if !fixed {
+			continue
+		}
+		index, exists := indices[effective]
+		if !exists {
+			index = len(groups)
+			indices[effective] = index
+			groups = append(groups, nil)
+		}
+		groups[index] = append(groups[index], Module{path: version.Path, selectedVersion: version.Version, sourcePath: effective.Path,
+			replacement: Replacement{path: effective.Path, version: effective.Version}})
 	}
-	if options.RetainRootManifests == nil {
-		return nil
+	for _, group := range groups {
+		err := retainWarmPreparedSources(ctx, root, group, sourceChecksums, options, environment, inputs, retain)
+		if err := errors.Join(err, ctx.Err(), inputs.recheck()); err != nil {
+			return err
+		}
 	}
-	return retainPreparationManifests(ctx, root, versions, checksums, options, environment, inputs)
+	return errors.Join(ctx.Err(), inputs.recheck())
+}
+
+// A wildcard must map every possible MVS choice to the same effective source.
+// Exact rules partition that mapping; an unresolved partition is not evidence
+// that the requested version's extracted tree will participate in selection.
+func (workspace *preparationWorkspace) fixedPreparationSource(ctx context.Context, path string, replacementCount int, budget *int) (module.Version, bool) {
+	spend := func(count int) bool {
+		if ctx.Err() != nil || count > *budget {
+			return false
+		}
+		*budget -= count
+		return true
+	}
+	// Existing precedence lookup may inspect every declaration. Bound the whole
+	// batch conservatively rather than duplicating that resolver for inference.
+	if !spend(replacementCount) {
+		return module.Version{}, false
+	}
+	effective, err := workspace.rootManifestVersion(module.Version{Path: path})
+	if err != nil || effective.Version == "" {
+		return module.Version{}, false
+	}
+	seen := map[string]bool{}
+	check := func(replacements []*modfile.Replace) bool {
+		for _, replacement := range replacements {
+			if !spend(1) {
+				return false
+			}
+			version := replacement.Old
+			if version.Path != path || version.Version == "" || seen[version.Version] {
+				continue
+			}
+			seen[version.Version] = true
+			if !spend(replacementCount) {
+				return false
+			}
+			selected, err := workspace.rootManifestVersion(version)
+			if err != nil || selected != effective {
+				return false
+			}
+		}
+		return true
+	}
+	if !check(workspace.work.Replace) {
+		return module.Version{}, false
+	}
+	for _, member := range workspace.members {
+		if !check(member.mod.Replace) {
+			return module.Version{}, false
+		}
+	}
+	return effective, true
 }
 
 func retainPreparationManifests(ctx context.Context, root string, versions []module.Version, checksums map[module.Version]string, options Options, environment []string, inputs preparationInputs) error {

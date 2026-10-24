@@ -254,7 +254,7 @@ func (workspace *preparationWorkspace) prepare(ctx context.Context, root string,
 	}
 	selectionRoot := filepath.Join(filepath.Dir(work), "member-0")
 	environment = environmentWith(environment, "GOWORK", work)
-	if err := workspace.retainPreparationMetadata(ctx, selectionRoot, requested, options, environment, inputs); err != nil {
+	if err := workspace.retainPreparationInputs(ctx, selectionRoot, requested, options, environment, inputs, retain); err != nil {
 		return err
 	}
 	var arguments = []string{"list", "-m", "-json"}
