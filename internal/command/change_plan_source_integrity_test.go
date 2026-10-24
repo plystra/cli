@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -126,4 +128,131 @@ func TestRunChangePlanRejectsPreexistingSourceTampering(t *testing.T) {
 			assertNoCommandTransactions(t, root)
 		})
 	}
+}
+
+func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
+	command := sourcePreparationGoWrapper(t)
+	for _, mode := range []string{"cold", "added", "updated", "replacement"} {
+		t.Run(mode, func(t *testing.T) {
+			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false), previewDependency(t, "v1.1.0", false)})
+			environment := previewDependencyEnvironment(t, proxy)
+			root := writeImplementationSelectionCommandProject(t)
+			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
+			action, version := "add", "v1.0.0"
+			if mode == "updated" {
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "get", previewDependencyModule+"@v1.0.0"); err != nil {
+					t.Fatal(err)
+				}
+				action, version = "update", "v1.1.0"
+			}
+			effectiveVersion := version
+			if mode == "replacement" {
+				effectiveVersion = "v1.1.0"
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+previewDependencyModule+"="+previewDependencyModule+"@"+effectiveVersion); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode != "cold" {
+				if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "download", previewDependencyModule+"@"+effectiveVersion); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var cache string
+			for _, entry := range environment {
+				if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {
+					cache = value
+				}
+			}
+			if cache == "" {
+				t.Fatal("missing isolated source cache")
+			}
+			path := filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@"+effectiveVersion), "remote", "implementation.go")
+			marker := filepath.Join(t.TempDir(), "get-started")
+			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+mode, "PLYSTRA_SOURCE_PREPARATION_BACKUP="+filepath.Join(cache, "source-before-get.go"))
+			request, err := changerequest.Parse([]byte(fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":%q,"module":%q}]}`, action, previewDependencyModule+"@"+version)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, parent := commandTree(t, root), t.TempDir()
+			planned, err := scaffoldplan.Preview(t.Context(), scaffoldplan.Options{Start: root, Environment: environment, GoCommand: command, TemporaryParent: parent}, request)
+			if markerBytes, markerErr := os.ReadFile(marker); markerErr != nil || string(markerBytes) != "source present before get\nget completed\n" {
+				t.Fatalf("exact target was not available before get: %v, preview=%v", markerErr, err)
+			}
+			if mode == "cold" {
+				if err != nil || !planned.Capture().Valid() {
+					t.Fatalf("cold prepared target rejected: %v", err)
+				}
+			} else if !errors.Is(err, projectstage.ErrConcurrentChange) || planned.Capture().Valid() || planned.FinalModelDigest() != "" {
+				t.Fatalf("same-byte source replacement during get was accepted: %v", err)
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("source preparation changed the authored Project")
+			}
+			if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+				t.Fatal("source preparation retained private stage files")
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
+func sourcePreparationGoWrapper(t *testing.T) string {
+	t.Helper()
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	source := `package main
+import (
+ "fmt"
+ "os"
+ "os/exec"
+)
+func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9) } }
+func main() {
+ backup := ""
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get"
+ if firstGet {
+  _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
+  if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
+ }
+ if firstGet {
+  path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+  data, err := os.ReadFile(path); check(err)
+  info, err := os.Stat(path); check(err)
+  if !os.SameFile(info, info) { os.Exit(10) }
+  check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("source present before get\n"), 0600))
+  if os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE") != "cold" {
+   backup = os.Getenv("PLYSTRA_SOURCE_PREPARATION_BACKUP")
+   check(os.Rename(path, backup))
+   check(os.WriteFile(path, data, info.Mode().Perm()))
+   check(os.Chtimes(path, info.ModTime(), info.ModTime()))
+   replacement, err := os.Stat(path); check(err)
+   if os.SameFile(info, replacement) { os.Exit(10) }
+  }
+ }
+ command := exec.Command(REAL_GO, os.Args[1:]...)
+ command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+ err := command.Run()
+ if backup != "" { check(os.Chmod(backup, 0600)); check(os.Remove(backup)) }
+ if err != nil {
+  if exited, ok := err.(*exec.ExitError); ok { os.Exit(exited.ExitCode()) }
+  check(err)
+ }
+ if firstGet {
+  marker, err := os.OpenFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), os.O_APPEND|os.O_WRONLY, 0600); check(err)
+  _, err = marker.WriteString("get completed\n"); check(err); check(marker.Close())
+ }
+}
+`
+	source = strings.ReplaceAll(source, "REAL_GO", fmt.Sprintf("%q", realGo))
+	writeCommandFile(t, filepath.Join(root, "main.go"), source)
+	binary := filepath.Join(root, "go-wrapper.exe")
+	build := exec.CommandContext(t.Context(), realGo, "build", "-buildvcs=false", "-o", binary, filepath.Join(root, "main.go"))
+	build.Dir, build.Env = commandRepositoryRoot(t), commandGoEnvironmentWith(map[string]string{"GOFLAGS": os.Getenv("GOFLAGS")})
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build Go source-preparation wrapper: %v\n%s", err, output)
+	}
+	return binary
 }

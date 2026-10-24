@@ -28,6 +28,7 @@ import (
 	"github.com/plystra/cli/internal/projectlocate"
 	"github.com/plystra/cli/internal/projectstage"
 	"github.com/plystra/cli/internal/runtimebaseline"
+	"golang.org/x/mod/module"
 )
 
 var ErrPreview = errors.New("preview staged candidate")
@@ -362,6 +363,9 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		reported := false
 		err = modulemutation.ChangeDependencies(ctx, stage.Root(), modulemutation.DependencyBatchOptions{
 			GoCommand: options.GoCommand, Environment: stage.Environment(), Changes: dependencies,
+			Prepare: func(versions []module.Version) error {
+				return prepareDependencySources(ctx, stage, options.GoCommand, versions)
+			},
 			Observe: func(started bool) {
 				reported = true
 				if started {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/gocommand"
+	"golang.org/x/mod/module"
 )
 
 func TestChangeDependenciesJointResolutionAndOrderIndependence(t *testing.T) {
@@ -69,6 +70,82 @@ func TestChangeDependenciesJointResolutionAndOrderIndependence(t *testing.T) {
 		} else if !reflect.DeepEqual(final, files) {
 			t.Fatal("request order changed selected module metadata")
 		}
+	}
+}
+
+func TestChangeDependenciesPreparesOnlyValidatedExactTargets(t *testing.T) {
+	root := writeBatchModule(t, "package application\n")
+	want := []module.Version{{Path: "example.com/beta", Version: "v1.1.0"}, {Path: "example.com/exact", Version: "v1.2.3"}}
+	preparationFailure := errors.New("preparation rejected")
+	observed := false
+	err := ChangeDependencies(t.Context(), root, DependencyBatchOptions{
+		Changes: []DependencyChange{
+			{Action: "add", Module: "example.com/query@latest"},
+			{Action: "remove", Module: "example.com/gone"},
+			{Action: "add", Module: "example.com/exact@v1.2.3"},
+			{Action: "update", Module: "example.com/beta@v1.1.0"},
+			{Action: "add", Module: "example.com/short@v1.2"},
+			{Action: "add", Module: "example.com/bare"},
+		},
+		GoCommand: filepath.Join(t.TempDir(), "must-not-run"),
+		Prepare: func(versions []module.Version) error {
+			if !reflect.DeepEqual(versions, want) {
+				t.Fatalf("prepared targets = %v, want %v", versions, want)
+			}
+			return preparationFailure
+		},
+		Observe: func(bool) { observed = true },
+	}, func(applicationgenerate.ModuleMutation) error {
+		t.Fatal("preparation failure reached operation")
+		return nil
+	})
+	if !errors.Is(err, preparationFailure) || observed {
+		t.Fatalf("preparation failure crossed command boundary: %v, observed=%t", err, observed)
+	}
+	prepared := false
+	err = ChangeDependencies(t.Context(), root, DependencyBatchOptions{
+		Changes: []DependencyChange{{Action: "update", Module: "example.com/missing@v1.0.0"}},
+		Prepare: func([]module.Version) error { prepared = true; return nil },
+	}, func(applicationgenerate.ModuleMutation) error { return nil })
+	if err == nil || prepared {
+		t.Fatal("invalid batch reached source preparation")
+	}
+}
+
+func TestChangeDependenciesPreservesMetadataEditedDuringPreparation(t *testing.T) {
+	for _, mode := range []string{"go.mod", "go.sum", "removed-sum"} {
+		t.Run(mode, func(t *testing.T) {
+			root := writeBatchModule(t, "package application\n")
+			if mode == "removed-sum" {
+				writeBatchFile(t, root, "go.sum", "original checksum evidence\n")
+			}
+			observed := false
+			err := ChangeDependencies(t.Context(), root, DependencyBatchOptions{
+				Changes:   []DependencyChange{{Action: "add", Module: "example.com/exact@v1.0.0"}},
+				GoCommand: filepath.Join(t.TempDir(), "must-not-run"),
+				Prepare: func([]module.Version) error {
+					if mode == "removed-sum" {
+						return os.Remove(filepath.Join(root, "go.sum"))
+					}
+					writeBatchFile(t, root, mode, "concurrent edit\n")
+					return nil
+				},
+				Observe: func(bool) { observed = true },
+			}, func(applicationgenerate.ModuleMutation) error {
+				t.Fatal("edited metadata reached operation")
+				return nil
+			})
+			if !errors.Is(err, ErrChange) || observed {
+				t.Fatalf("metadata edit reached get: %v, observed=%t", err, observed)
+			}
+			if mode == "removed-sum" {
+				if _, err := os.Stat(filepath.Join(root, "go.sum")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("preparation restored a concurrent checksum removal")
+				}
+			} else if data, err := os.ReadFile(filepath.Join(root, mode)); err != nil || string(data) != "concurrent edit\n" {
+				t.Fatal("preparation overwrote a concurrent metadata edit")
+			}
+		})
 	}
 }
 

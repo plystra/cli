@@ -867,10 +867,16 @@ verification in an isolated module retaining those recorded sums. Missing or
 inconsistent evidence fails explicitly, and offline discovery never fills
 missing evidence. Checksum resolution leaves Project module files unchanged;
 source-integrity failures cannot be ignored when removing an old dependency.
+Single-module dependency previews prepare explicitly requested canonical versions
+before `go get`: exact effective source archives are materialized in an isolated
+module retaining Project checksums, then captured before package resolution.
+An exact old-version replacement takes priority over a wildcard replacement;
+local replacements use their existing staged input evidence. Mutable queries
+retain ordinary Go semantics and are not resolved by this preparation step.
 Unrelated cache entries are excluded; retained-input rechecks never download or
 repair modules. These read-only roots share the staging tree's cumulative
-bounds. Capturing newly selected sources before their first use by
-Go's dependency resolution and normalization, complete module-resolution
+bounds. Complete capture before first use, including workspace, mutable-query,
+transitive, and intermediate resolution sources, complete module-resolution
 metadata, and native permission capture remain unfinished; previews remain
 `non_exact`.
 Destination writes and cleanup use opened directory roots. Copies are bounded

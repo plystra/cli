@@ -167,14 +167,16 @@ func TestRunChangePlanDependencyOnlyUsesSelectedConfiguration(t *testing.T) {
 func TestRunChangePlanDependencyFailurePreservesInputsAndActualEffects(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
 	environment := previewDependencyEnvironment(t, proxy)
-	for _, failure := range []string{"get", "missing required configuration", "unselected removal"} {
+	for _, failure := range []string{"prepare", "get", "missing required configuration", "unselected removal"} {
 		t.Run(failure, func(t *testing.T) {
 			root := writeImplementationSelectionCommandProject(t)
 			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 			operations := []map[string]any{{"kind": "dependency", "action": "add", "module": previewDependencyModule + "@v1.0.0"}}
 			switch failure {
-			case "get":
+			case "prepare":
 				operations[0]["module"] = previewDependencyModule + "@v1.9.0"
+			case "get":
+				operations[0]["module"] = previewDependencyModule + "@missing-revision"
 			case "missing required configuration":
 				operations = append(operations, map[string]any{"kind": "interface_root", "action": "present", "interface": "remote.echo/v1", "root": "require"})
 			case "unselected removal":
@@ -192,7 +194,7 @@ func TestRunChangePlanDependencyFailurePreservesInputsAndActualEffects(t *testin
 				t.Fatalf("invalid dependency candidate accepted: %d %s %s", code, stdout, stderr)
 			}
 			effects := result.Effects.Observed
-			if failure == "unselected removal" {
+			if failure == "prepare" || failure == "unselected removal" {
 				effects = result.Effects.Skipped
 			}
 			found := false

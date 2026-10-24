@@ -1,14 +1,17 @@
 package modulemutation
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
 	"github.com/plystra/cli/internal/moduleargument"
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 )
 
 const (
@@ -29,6 +32,9 @@ type DependencyBatchOptions struct {
 	Environment []string
 	Changes     []DependencyChange
 	Observe     func(started bool)
+	// Prepare captures exact canonical-version targets after batch validation
+	// and before go get. Mutable queries retain ordinary Go query semantics.
+	Prepare func([]module.Version) error
 }
 
 type dependencyTarget struct {
@@ -52,7 +58,11 @@ func ChangeDependencies(ctx context.Context, root string, options DependencyBatc
 	if err := ctx.Err(); err != nil {
 		return errors.Join(ErrChange, err)
 	}
-	modulePath, selected, err := dependencySelections(root)
+	before, err := captureModuleFiles(root)
+	if err != nil {
+		return errors.Join(ErrChange, err)
+	}
+	modulePath, selected, err := parseDependencySelections(before)
 	if err != nil {
 		return errors.Join(ErrChange, err)
 	}
@@ -84,6 +94,28 @@ func ChangeDependencies(ctx context.Context, root string, options DependencyBatc
 		targets = append(targets, target)
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].path < targets[j].path })
+	if options.Prepare != nil {
+		var versions []module.Version
+		for _, target := range targets {
+			_, version, explicit := strings.Cut(target.query, "@")
+			if !target.remove && explicit && version != "" && module.CanonicalVersion(version) == version && module.Check(target.path, version) == nil {
+				versions = append(versions, module.Version{Path: target.path, Version: version})
+			}
+		}
+		if err := options.Prepare(versions); err != nil {
+			return errors.Join(ErrChange, err)
+		}
+		current, err := captureModuleFiles(root)
+		if err != nil {
+			return errors.Join(ErrChange, err)
+		}
+		for name, original := range before {
+			observed := current[name]
+			if original.exists != observed.exists || original.mode != observed.mode || !bytes.Equal(original.data, observed.data) {
+				return ErrChange
+			}
+		}
+	}
 	arguments := []string{"get"}
 	var direct []string
 	for _, target := range targets {
@@ -144,6 +176,10 @@ func dependencySelections(root string) (string, map[string]Requirement, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	return parseDependencySelections(files)
+}
+
+func parseDependencySelections(files moduleFiles) (string, map[string]Requirement, error) {
 	parsed, err := modfile.Parse("go.mod", files["go.mod"].data, nil)
 	if err != nil || parsed.Module == nil {
 		return "", nil, ErrChange
