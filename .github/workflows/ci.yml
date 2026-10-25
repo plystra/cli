@@ -36,7 +36,18 @@ jobs:
           cache-dependency-path: internal/javascriptgen/testdata/canonical/package-lock.json
       - run: go mod download all
       - run: go mod download github.com/go-logr/logr@v1.2.2 go.opentelemetry.io/otel/metric/x@v0.68.0
-      - run: go test -timeout=${{ matrix.timeout }} ./...
+      - name: Check command shard runner
+        shell: pwsh
+        run: ./.github/scripts/test-command-shard.tests.ps1
+      - name: Test other Go packages
+        shell: pwsh
+        run: |
+          $packages = @(go list ./...)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packages = @($packages | Where-Object { $_ -cne 'github.com/plystra/cli/internal/command' })
+          if ($packages.Count -eq 0) { throw 'No non-command Go packages listed.' }
+          go test -timeout=${{ matrix.timeout }} @packages
+          exit $LASTEXITCODE
       - run: go vet ./...
       - run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: internal/javascriptgen/testdata/canonical
@@ -61,4 +72,54 @@ jobs:
           cache: true
       - run: go mod download all
       - run: go mod download github.com/go-logr/logr@v1.2.2 go.opentelemetry.io/otel/metric/x@v0.68.0
-      - run: go test -race -timeout=20m ./...
+      - name: Race other Go packages
+        shell: pwsh
+        run: |
+          $packages = @(go list ./...)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packages = @($packages | Where-Object { $_ -cne 'github.com/plystra/cli/internal/command' })
+          if ($packages.Count -eq 0) { throw 'No non-command Go packages listed.' }
+          go test -race -timeout=20m @packages
+          exit $LASTEXITCODE
+
+  command:
+    name: command / ${{ matrix.target }} / shard ${{ matrix.shard }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [linux, macos, windows, linux-race]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        include:
+          - target: linux
+            os: ubuntu-latest
+            timeout: 20m
+            race: false
+          - target: macos
+            os: macos-latest
+            timeout: 20m
+            race: false
+          - target: windows
+            os: windows-latest
+            timeout: 60m
+            race: false
+          - target: linux-race
+            os: ubuntu-latest
+            timeout: 20m
+            race: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.x"
+          cache: npm
+          cache-dependency-path: internal/javascriptgen/testdata/canonical/package-lock.json
+      - run: go mod download all
+      - run: go mod download github.com/go-logr/logr@v1.2.2 go.opentelemetry.io/otel/metric/x@v0.68.0
+      - name: Test command shard
+        shell: pwsh
+        run: ./.github/scripts/test-command-shard.ps1 -ShardIndex ${{ matrix.shard }} -ShardCount 8 -Timeout ${{ matrix.timeout }} -Race:('${{ matrix.race }}' -eq 'true')
