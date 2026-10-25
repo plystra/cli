@@ -256,16 +256,28 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		return err
 	}
 	if options.AcquisitionCache != nil {
-		output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE", "GOSUMDB", "GOTOOLCHAIN")
+		output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE", "GOSUMDB", "GONOSUMDB", "GOTOOLCHAIN")
 		if err != nil {
 			return err
 		}
-		var selected struct{ GOMODCACHE, GOSUMDB, GOTOOLCHAIN string }
+		var selected struct{ GOMODCACHE, GOSUMDB, GONOSUMDB, GOTOOLCHAIN string }
 		if json.Unmarshal(output, &selected) != nil || !filepath.IsAbs(selected.GOMODCACHE) {
 			return ErrInvalidOutput
 		}
 		isolated := selected.GOMODCACHE
-		if selected.GOSUMDB == "off" && selected.GOTOOLCHAIN == "local" {
+		withoutChecksumService := selected.GOSUMDB == "off"
+		if !withoutChecksumService {
+			withoutChecksumService = true
+			for _, version := range versions {
+				// Distribution modules have stronger verification rules than
+				// ordinary modules, even when a private-path pattern matches.
+				if version.Path == "golang.org/toolchain" || version.Path == "golang.org/fips140" || !module.MatchPrefixPatterns(selected.GONOSUMDB, version.Path) {
+					withoutChecksumService = false
+					break
+				}
+			}
+		}
+		if withoutChecksumService && selected.GOTOOLCHAIN == "local" {
 			isolated, err = options.AcquisitionCache(ctx, selected.GOMODCACHE, append([]module.Version(nil), versions...))
 			if err != nil {
 				return err

@@ -395,6 +395,9 @@ func main() {
   isolatedDownload = matched && strings.HasPrefix(filepath.Base(directory), "plystra-source-preparation-")
   if isolatedDownload {
    checkOriginalCache()
+   if expected := os.Getenv("PLYSTRA_SOURCE_EXPECTED_SUMDB"); expected != "" && os.Getenv("GOSUMDB") != expected {
+    check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("checksum-service setting changed\n"), 0600)); os.Exit(12)
+   }
    if os.Getenv("GOMODCACHE") == os.Getenv("PLYSTRA_SOURCE_ORIGINAL_CACHE") {
     check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("original acquisition cache selected\n"), 0600)); os.Exit(12)
    }

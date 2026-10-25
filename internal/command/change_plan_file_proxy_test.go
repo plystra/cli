@@ -121,8 +121,15 @@ func TestBuiltCLIChangePlanRejectsReplacedCachedArchive(t *testing.T) {
 
 func TestBuiltCLIChangePlanIsolatesExactAcquisition(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
-	for _, partial := range []bool{false, true} {
-		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		partial, exempted bool
+	}{
+		{name: "partial=false"},
+		{name: "partial=true", partial: true},
+		{name: "sumdb-exempt", exempted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			root, proxy, environment := fileProxyPreviewFixture(t)
 			cacheOutput, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "env", "GOMODCACHE")
@@ -131,7 +138,7 @@ func TestBuiltCLIChangePlanIsolatesExactAcquisition(t *testing.T) {
 			}
 			cache := strings.TrimSpace(string(cacheOutput))
 			original := filepath.Join(cache, filepath.FromSlash(fileProxyPreviewModule)+"@v1.0.0")
-			if partial {
+			if test.partial {
 				output, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "download", "-json", fileProxyPreviewModule+"@v1.0.0")
 				var downloaded struct{ Dir, Zip string }
 				if err != nil || json.Unmarshal(output, &downloaded) != nil || downloaded.Dir != original || downloaded.Zip == "" {
@@ -141,6 +148,10 @@ func TestBuiltCLIChangePlanIsolatesExactAcquisition(t *testing.T) {
 				writeCommandFile(t, marker, "partial extraction\n")
 				writeCommandFile(t, filepath.Join(original, "partial-only.go"), "invalid partial Go source\n")
 				environment = append(environment, "PLYSTRA_SOURCE_PARTIAL_PATH="+marker)
+			}
+			if test.exempted {
+				environment = append(environment, "GOSUMDB=invalid.example", "GONOSUMDB="+fileProxyPreviewModule,
+					"PLYSTRA_SOURCE_EXPECTED_SUMDB=invalid.example")
 			}
 			wrapper := sourcePreparationGoWrapper(t)
 			goName := "go"

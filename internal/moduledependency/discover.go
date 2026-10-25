@@ -108,8 +108,9 @@ type Options struct {
 	// It receives the effective cache and canonical versions after original-input
 	// retention. The returned absolute cache must remain available to all source
 	// callbacks and consumers. Other resolution commands keep their environment.
-	// It is used only with GOSUMDB=off and GOTOOLCHAIN=local; checksum-service
-	// cache and toolchain acquisition require separate isolation contracts.
+	// It requires GOTOOLCHAIN=local and either GOSUMDB=off or an effective
+	// GONOSUMDB exemption for every ordinary version. Checksum-service cache
+	// and toolchain acquisition require separate isolation contracts.
 	AcquisitionCache func(context.Context, string, []module.Version) (string, error)
 	// RetainSourceTrees preserves existing extracted trees before their archive
 	// checksum is independently available. It records private concurrency evidence

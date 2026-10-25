@@ -3,13 +3,16 @@ package moduledependency_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/moduledependency"
 	"github.com/plystra/cli/internal/projectstage"
 	"golang.org/x/mod/module"
@@ -106,6 +109,167 @@ func TestPrepareSourcesAcquisitionCache(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAcquisitionCacheUsesEffectiveChecksumExemptions(t *testing.T) {
+	for _, workspace := range []bool{false, true} {
+		for _, discover := range []bool{false, true} {
+			for _, test := range []struct {
+				name, patterns, private string
+				isolate, reject         bool
+			}{
+				{name: "exact", patterns: warmSourceModule, isolate: true},
+				{name: "glob-prefix", patterns: "example.com/*", isolate: true},
+				{name: "pattern-list", patterns: "invalid[,unrelated.example,example.com/Warm", isolate: true},
+				{name: "private-inheritance", private: "example.com/Warm", isolate: true},
+				{name: "manifest-only-authority", patterns: warmSourceModule, isolate: true},
+				{name: "unmatched-manifest-only", patterns: "unrelated.example", reject: true},
+				{name: "requested-not-effective", patterns: warmRequestedModule},
+				{name: "case-sensitive", patterns: "example.com/warm"},
+				{name: "segment-prefix", patterns: "example.com/War"},
+				{name: "explicit-override", patterns: "unrelated.example", private: "example.com/Warm"},
+			} {
+				t.Run(fmt.Sprintf("workspace=%t/discover=%t/%s", workspace, discover, test.name), func(t *testing.T) {
+					t.Parallel()
+					fixture := warmPreparation(t, workspace, false)
+					if strings.Contains(test.name, "manifest-only") {
+						writeFile(t, fixture.authority, warmSourceModule+" v1.0.0/go.mod "+fixture.downloaded.GoModSum+"\n")
+					}
+					if discover {
+						project := filepath.Join(fixture.app, "go.mod")
+						writeFile(t, project, string(readFile(t, project))+"require "+warmRequestedModule+" v1.0.0\n")
+					}
+					relative, err := filepath.Rel(fixture.cache, fixture.downloaded.Dir)
+					if err != nil || !filepath.IsLocal(relative) || relative == "." {
+						t.Fatal("source removal escaped cache")
+					}
+					if err := os.RemoveAll(fixture.downloaded.Dir); err != nil {
+						t.Fatal(err)
+					}
+					goPath := t.TempDir()
+					fixture.environment = append(fixture.environment, "GOPATH="+goPath,
+						"GOSUMDB=invalid.example", "GONOSUMDB="+test.patterns, "GOPRIVATE="+test.private)
+					stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: fixture.app, Environment: fixture.environment})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := stage.Close(); err != nil {
+							t.Error(err)
+						}
+					})
+					calls := 0
+					options := moduledependency.Options{Environment: stage.Environment(), RequireSourceChecksums: true,
+						AcquisitionCache: func(ctx context.Context, cache string, versions []module.Version) (string, error) {
+							calls++
+							return stage.AcquisitionCache(ctx, cache, versions)
+						},
+						RetainSelectedSources: func(sources []moduledependency.Module) error {
+							return retainWarmBundle(t, stage, t.Context(), sources)
+						},
+					}
+					if discover {
+						_, err = moduledependency.Discover(t.Context(), locate(t, stage.Root()), options)
+					} else {
+						err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options, options.RetainSelectedSources)
+					}
+					if test.reject {
+						if !errors.Is(err, moduledependency.ErrModuleUnavailable) || calls != 0 {
+							t.Fatalf("unexempt acquisition bypassed checksum verification: calls=%d, %v", calls, err)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal("effective checksum exemption changed Go verification", err)
+					}
+					if (calls > 0) != test.isolate {
+						t.Fatalf("effective checksum exemption: acquisition callbacks=%d, want isolation=%t", calls, test.isolate)
+					}
+					_, statErr := os.Lstat(fixture.downloaded.Dir)
+					if test.isolate && !errors.Is(statErr, os.ErrNotExist) || !test.isolate && statErr != nil {
+						t.Fatal("checksum exemption chose the wrong consuming cache", statErr)
+					}
+					for _, directory := range []string{filepath.Join(goPath, "pkg", "sumdb"), filepath.Join(fixture.cache, "cache", "download", "sumdb")} {
+						if _, err := os.Lstat(directory); !errors.Is(err, os.ErrNotExist) {
+							t.Fatal("exempt acquisition materialized checksum-service state", err)
+						}
+					}
+					inputs := stage.Inputs()
+					if err := stage.Close(); err != nil {
+						t.Fatal(err)
+					}
+					if err := inputs.Recheck(t.Context()); err != nil {
+						t.Fatal("exempt acquisition lost retained inputs after cleanup", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestAcquisitionCacheRequiresWholeBatchChecksumExemption(t *testing.T) {
+	for _, all := range []bool{false, true} {
+		t.Run(fmt.Sprintf("all=%t", all), func(t *testing.T) {
+			t.Parallel()
+			fixture := warmPreparation(t, true, false)
+			const later = "example.com/zz-later"
+			writeModuleProxy(t, fixture.root, later, "v1.0.0")
+			seed := t.TempDir()
+			writeModule(t, seed, "example.com/seed")
+			output, err := gocommand.Output(t.Context(), gocommand.Options{Directory: seed, Environment: fixture.environment}, "mod", "download", "-json", later+"@v1.0.0")
+			var downloaded struct{ Sum, GoModSum string }
+			if err != nil || json.Unmarshal(output, &downloaded) != nil || downloaded.Sum == "" || downloaded.GoModSum == "" {
+				t.Fatal("seed second batch source", err)
+			}
+			writeFile(t, fixture.authority, string(readFile(t, fixture.authority))+later+" v1.0.0 "+downloaded.Sum+"\n"+later+" v1.0.0/go.mod "+downloaded.GoModSum+"\n")
+			project := filepath.Join(fixture.app, "go.mod")
+			writeFile(t, project, string(readFile(t, project))+"require (\n"+warmRequestedModule+" v1.0.0\n"+later+" v1.0.0\n)\n")
+			patterns := "example.com/Warm"
+			if all {
+				patterns = "example.com/*"
+			}
+			fixture.environment = append(fixture.environment, "GOSUMDB=invalid.example", "GONOSUMDB="+patterns)
+			stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: fixture.app, Environment: fixture.environment})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = stage.Close() })
+			calls := 0
+			_, err = moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{Environment: stage.Environment(), RequireSourceChecksums: true,
+				AcquisitionCache: func(_ context.Context, cache string, versions []module.Version) (string, error) {
+					calls++
+					if len(versions) != 2 {
+						t.Fatal("checksum normalization lost its complete batch")
+					}
+					return cache, nil
+				},
+				RetainSelectedSources: func(sources []moduledependency.Module) error { return retainWarmBundle(t, stage, t.Context(), sources) },
+			})
+			if err != nil || all && calls != 1 || !all && calls != 0 {
+				t.Fatalf("whole-batch checksum exemption: calls=%d, %v", calls, err)
+			}
+		})
+	}
+}
+
+func TestAcquisitionCacheKeepsDistributionVerification(t *testing.T) {
+	for _, path := range []string{"golang.org/toolchain", "golang.org/fips140"} {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			proxy := writeModuleProxy(t, root, path, "v1.0.0")
+			app := filepath.Join(root, "app")
+			writeModule(t, app, "example.com/app")
+			environment := append(isolatedGoEnvironment(t, proxy), "GOSUMDB=invalid.example", "GONOSUMDB=golang.org/*")
+			calls := 0
+			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: path, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment,
+				AcquisitionCache: func(_ context.Context, cache string, _ []module.Version) (string, error) { calls++; return cache, nil },
+			}, func([]moduledependency.Module) error { return nil })
+			if err != nil || calls != 0 {
+				t.Fatalf("distribution verification changed: calls=%d, %v", calls, err)
+			}
+		})
 	}
 }
 

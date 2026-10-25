@@ -1238,10 +1238,16 @@ earlier graph, cold, mutable-query, or failed-resolution read.
 Capture drains requested archives made newly consumable by earlier archive
 callbacks before starting Go; each round preserves all prior evidence and adds
 only previously uncaptured requested versions.
-With the effective `GOSUMDB=off` and `GOTOOLCHAIN=local`, exact preparation and
-discovery downloads whose source directories are absent or marked partial now
-use an owner-private Module Cache. Only requested versions' present `.info`,
-`.mod`, `.ziphash`, and consumed ZIP bytes are seeded from retained originals.
+With effective `GOTOOLCHAIN=local`, exact preparation and discovery downloads
+whose source directories are absent or marked partial use an owner-private
+Module Cache when `GOSUMDB=off` or every ordinary effective module path matches
+Go's effective `GONOSUMDB` patterns. Go resolves `GOPRIVATE` inheritance and
+explicit overrides; matching uses unescaped replacement paths. With the checksum
+service enabled, any nonmatching version keeps the whole batch on its original
+cache. Toolchain and FIPS distributions also keep the original cache. Acquisition
+never disables or rewrites the checksum-service settings. Only requested versions'
+present `.info`, `.mod`, `.ziphash`, and consumed ZIP bytes are seeded from
+retained originals.
 The original cache is not extracted or repaired by that acquisition. Partial
 source bytes and progress markers are not copied; later ordinary Go phases may
 finish the original extraction without invalidating the retained content.
@@ -1255,8 +1261,9 @@ the original sums. Cleanup removes only the allocated caches, including Go's
 default read-only extracted directories. Temporary outputs do not become
 original inputs after cleanup; retained positive originals remain recheckable.
 This does not isolate general graph, checksum-service, direct/VCS, or later
-candidate cache access, nor retain complete negative cache metadata. Unsupported
-checksum-service and toolchain settings retain their ordinary acquisition path.
+candidate cache access, nor retain complete negative cache metadata. Acquisitions
+that may consult the checksum service, or use other toolchain settings, retain
+their ordinary acquisition path.
 For a sole `file://` Go proxy with `GOTOOLCHAIN=local`, source and dependency
 previews now capture requested proxy payloads before returning successful
 response headers or bytes to Go. One owner-private loopback session spans old

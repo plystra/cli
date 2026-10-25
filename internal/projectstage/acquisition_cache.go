@@ -16,9 +16,10 @@ import (
 // AcquisitionCache isolates exact downloads whose extracted sources are absent
 // or partial. Complete extracted trees keep their existing acquisition path:
 // rebuilding them from an archive would silently repair their authored bytes.
-// The caller must retain ordinary Go checksum authority and use local toolchain
-// selection with the checksum service disabled. The returned cache lives until
-// Close. Only positive original inputs are retained; cache absence is not frozen.
+// The caller must retain ordinary Go checksum authority, use local toolchain
+// selection, and establish that every version bypasses checksum-service lookups.
+// The returned cache lives until Close. Only positive original inputs are retained;
+// cache absence is not frozen.
 func (s *Stage) AcquisitionCache(ctx context.Context, cache string, versions []module.Version) (string, error) {
 	if err := s.Recheck(ctx); err != nil {
 		return "", err
