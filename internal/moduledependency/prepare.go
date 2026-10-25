@@ -44,6 +44,9 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 	}
 	options.Environment = append([]string{}, options.Environment...)
 	inputs := preparationInputs{}
+	if options.RetainManifestFiles != nil {
+		options.RetainManifestFiles = retainModuleFilesOnce(inputs, options.RetainManifestFiles)
+	}
 	defer func() { resultErr = errors.Join(resultErr, inputs.recheck()) }()
 	goModPath, sumPath := filepath.Join(application.Path(), "go.mod"), filepath.Join(application.Path(), "go.sum")
 	before, err := inputs.read(goModPath, false)
@@ -205,7 +208,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	if err != nil {
 		return err
 	}
-	if err := retainModuleInformation(ctx, information, options); err != nil {
+	if err := retainPresentModuleFiles(ctx, information, options.RetainModuleInformation); err != nil {
 		return err
 	}
 	output, started, downloadErr := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
@@ -218,7 +221,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		if retainMetadata != nil {
 			retentionErr = retainMetadata(captureCtx)
 		}
-		retentionErr = errors.Join(retentionErr, retainModuleInformation(captureCtx, information, options), captureCtx.Err())
+		retentionErr = errors.Join(retentionErr, retainPresentModuleFiles(captureCtx, information, options.RetainModuleInformation), captureCtx.Err())
 	}
 	retentionErr = errors.Join(retentionErr, ctx.Err())
 	if downloadErr != nil {

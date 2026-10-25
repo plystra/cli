@@ -9,11 +9,11 @@ import (
 	"golang.org/x/mod/module"
 )
 
-func retainModuleInformationOnce(inputs preparationInputs, retain func(context.Context, []string) error) func(context.Context, []string) error {
+func retainModuleFilesOnce(inputs preparationInputs, retain func(context.Context, []string) error) func(context.Context, []string) error {
 	retained := map[string]bool{}
 	return func(ctx context.Context, paths []string) (resultErr error) {
 		// Keep independent path and file evidence when a caller installs only the
-		// information hook and there is no source-bundle recheck.
+		// metadata hook and there is no source-bundle recheck.
 		defer func() { resultErr = errors.Join(resultErr, inputs.recheck()) }()
 		var pending []string
 		seen := map[string]bool{}
@@ -86,8 +86,8 @@ func preparationInformationPaths(ctx context.Context, root string, versions []mo
 	return paths, nil
 }
 
-func retainModuleInformation(ctx context.Context, paths []string, options Options) error {
-	if options.RetainModuleInformation == nil {
+func retainPresentModuleFiles(ctx context.Context, paths []string, retain func(context.Context, []string) error) error {
+	if retain == nil {
 		return nil
 	}
 	var present []string
@@ -97,7 +97,7 @@ func retainModuleInformation(ctx context.Context, paths []string, options Option
 		}
 		info, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			continue // Go may legitimately materialize a missing information file.
+			continue // Go may legitimately materialize a missing metadata file.
 		} else if err != nil {
 			return errors.Join(ErrSourceIntegrity, err)
 		} else if !info.Mode().IsRegular() {
@@ -108,5 +108,5 @@ func retainModuleInformation(ctx context.Context, paths []string, options Option
 	if len(present) == 0 {
 		return nil
 	}
-	return errors.Join(options.RetainModuleInformation(ctx, present), ctx.Err())
+	return errors.Join(retain(ctx, present), ctx.Err())
 }

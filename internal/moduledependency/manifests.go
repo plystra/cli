@@ -140,8 +140,9 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		root: root, mains: manifests, workspace: workspace, inputs: inputs,
 		checksums: checksums, excluded: excluded, cache: selected.GOMODCACHE,
 		toolchain: selected.GOVERSION, retain: options.RetainRootManifests,
-		retainInformation: options.RetainModuleInformation,
-		retainSources:     options.RetainSelectedSources, retainTrees: options.RetainSourceTrees, archives: archives,
+		retainManifestFiles: options.RetainManifestFiles,
+		retainInformation:   options.RetainModuleInformation,
+		retainSources:       options.RetainSelectedSources, retainTrees: options.RetainSourceTrees, archives: archives,
 		retained: map[string]bool{}, parsed: map[string]*modfile.File{},
 	}
 	for _, manifest := range retained {

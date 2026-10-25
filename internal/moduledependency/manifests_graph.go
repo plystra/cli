@@ -25,25 +25,26 @@ const (
 )
 
 type manifestGraph struct {
-	root              string
-	mains             []*modfile.File
-	workspace         *preparationWorkspace
-	inputs            preparationInputs
-	checksums         map[module.Version]string
-	excluded          map[module.Version]bool
-	cache             string
-	loadCache         func(context.Context) (string, error)
-	toolchain         string
-	retain            func(context.Context, []RootManifest) error
-	retainInformation func(context.Context, []string) error
-	retainSources     func([]Module) error
-	retainTrees       func(context.Context, []string) error
-	archives          map[module.Version]string
-	queryPaths        map[string]bool // Nil queries all selected modules; graph traversal remains unfiltered.
-	retained          map[string]bool
-	parsed            map[string]*modfile.File
-	goVersions        map[module.Version]bool
-	bytes             int64
+	root                string
+	mains               []*modfile.File
+	workspace           *preparationWorkspace
+	inputs              preparationInputs
+	checksums           map[module.Version]string
+	excluded            map[module.Version]bool
+	cache               string
+	loadCache           func(context.Context) (string, error)
+	toolchain           string
+	retain              func(context.Context, []RootManifest) error
+	retainManifestFiles func(context.Context, []string) error
+	retainInformation   func(context.Context, []string) error
+	retainSources       func([]Module) error
+	retainTrees         func(context.Context, []string) error
+	archives            map[module.Version]string
+	queryPaths          map[string]bool // Nil queries all selected modules; graph traversal remains unfiltered.
+	retained            map[string]bool
+	parsed              map[string]*modfile.File
+	goVersions          map[module.Version]bool
+	bytes               int64
 }
 
 func (graph *manifestGraph) capture(ctx context.Context) error {
@@ -251,7 +252,7 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 }
 
 func (graph *manifestGraph) retainFixedRootInputs(ctx context.Context) error {
-	if graph.retainTrees == nil && graph.retainInformation == nil {
+	if graph.retainTrees == nil && graph.retainInformation == nil && graph.retainManifestFiles == nil {
 		return nil
 	}
 	mains := map[string]bool{}
@@ -286,6 +287,9 @@ func (graph *manifestGraph) retainFixedRootInputs(ctx context.Context) error {
 		}
 		seenSources[effective] = true
 		sources = append(sources, effective)
+	}
+	if err := graph.retainEffectiveManifestFiles(ctx, sources); err != nil {
+		return err
 	}
 	if err := graph.retainEffectiveInformation(ctx, sources); err != nil {
 		return err
@@ -358,6 +362,26 @@ func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected 
 		}
 	}
 	return nil
+}
+
+func (graph *manifestGraph) retainEffectiveManifestFiles(ctx context.Context, versions []module.Version) error {
+	if graph.retainManifestFiles == nil {
+		return nil
+	}
+	var paths []string
+	for _, effective := range versions {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		path, err := graph.manifestPath(ctx, effective)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, path)
+	}
+	// This evidence never enters retained or parsed: observing an identity does
+	// not supply the independent checksum needed to read a graph summary.
+	return errors.Join(retainPresentModuleFiles(ctx, paths, graph.retainManifestFiles), ctx.Err(), graph.inputs.recheck())
 }
 
 func (graph *manifestGraph) initialized() bool {
@@ -553,7 +577,7 @@ func (graph *manifestGraph) retainEffectiveInformation(ctx context.Context, mods
 			paths = append(paths, path)
 		}
 	}
-	return errors.Join(retainModuleInformation(ctx, paths, Options{RetainModuleInformation: graph.retainInformation}), graph.inputs.recheck())
+	return errors.Join(retainPresentModuleFiles(ctx, paths, graph.retainInformation), graph.inputs.recheck())
 }
 
 func (graph *manifestGraph) read(ctx context.Context, mod module.Version, infoOnly bool) (*modfile.File, bool, error) {

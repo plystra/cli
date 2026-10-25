@@ -69,6 +69,11 @@ type Options struct {
 	// Callbacks must use the supplied context, including bounded post-download
 	// retention after the operation context has been cancelled.
 	RetainRootManifests func(context.Context, []RootManifest) error
+	// RetainManifestFiles preserves present cache .mod files as private concurrency
+	// evidence when all-version replacement proofs fix their physical source before
+	// discovery or workspace preparation selection. It is independent of source-tree
+	// availability and original checksums, and supplies no graph-reading authority.
+	RetainManifestFiles func(context.Context, []string) error
 	// RetainModuleInformation captures present cache .info files before and
 	// after exact preparation downloads, including failed downloads, and
 	// before workspace selection for inferable requested effective versions.
@@ -291,9 +296,12 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		}
 	}
 	if options.RetainModuleInformation != nil {
-		options.RetainModuleInformation = retainModuleInformationOnce(inputs, options.RetainModuleInformation)
+		options.RetainModuleInformation = retainModuleFilesOnce(inputs, options.RetainModuleInformation)
 	}
-	if options.RetainRootManifests != nil || options.RetainModuleInformation != nil || options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
+	if options.RetainManifestFiles != nil {
+		options.RetainManifestFiles = retainModuleFilesOnce(inputs, options.RetainManifestFiles)
+	}
+	if options.RetainRootManifests != nil || options.RetainManifestFiles != nil || options.RetainModuleInformation != nil || options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
 				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)
@@ -327,7 +335,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		OutputLimit: outputLimit,
 	}, "list", "-m", "-json", "-mod=readonly", "all")
 	if err != nil {
-		return Index{}, fmt.Errorf("%w: resolve effective module graph: %w", ErrDiscover, err)
+		return Index{}, fmt.Errorf("%w: resolve effective module graph: %w", ErrDiscover, errors.Join(err, ctx.Err(), inputs.recheck()))
 	}
 	after, err := readGoMod(goModPath)
 	if err != nil || !sameSnapshot(before, after) {
@@ -344,6 +352,9 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 				fmt.Errorf("%w: application go.mod changed: %v", ErrConcurrentChange, err),
 			),
 		)
+	}
+	if err := errors.Join(ctx.Err(), inputs.recheck()); err != nil {
+		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 	}
 
 	modules, err := decodeModules(output, application, requirements)

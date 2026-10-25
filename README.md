@@ -891,8 +891,8 @@ An unavailable or unrecorded graph summary stops subsequent selection-dependent
 inference; already-demanded branches remain captured. Unknown toolchains and
 uncertain initialization add no selection inference. Order-dependent replacement
 summary reads add no inferred manifests. This is a retained subset, not complete
-resolution capture: cold and unrecorded manifests and ambiguous summary reads
-remain outside the early boundary. Traversal permits at most 65,536 graph states and 512 MiB of
+resolution capture: cold manifests, summaries without independent authority,
+and ambiguous summary reads remain outside graph inference. Traversal permits at most 65,536 graph states and 512 MiB of
 manifest bytes, in addition to the shared staging bounds.
 When those checked summaries establish the complete selected graph, previews
 also retain present cache `.info` files for its distinct versioned effective
@@ -912,6 +912,18 @@ physical files are captured in one batch during this phase; replacements
 resolve only once. Uncertain alternatives introduce no provisional information
 set. Cold reads, proxy metadata, and earlier authored-query normalization remain
 outside this boundary.
+The same bounded fixed-source proofs also retain present cache `.mod` files
+before discovery or workspace preparation selection, even without original
+manifest checksums, source-tree callbacks, or extracted directories. A separate
+paths-only callback preserves file and parent identities without authorizing
+graph traversal or authenticating a source. Shared physical manifests deduplicate;
+missing files may materialize normally, and uncertain or unused replacements
+introduce no provisional capture. Callback failure, cancellation, or input drift
+prevents selection. Inputs are rechecked when selection returns, before source
+acquisition or checksum normalization; failed selection preserves both its error
+and any observed drift. Original evidence remains recheckable after cleanup and
+must still match when later authenticated. Cold first reads and complete
+resolution metadata remain incomplete.
 The same complete selection also retains eligible warm source bundles before
 listing or extracted-manifest validation. Each effective version requires
 original archive checksum authority, an extracted tree, and no `.partial`

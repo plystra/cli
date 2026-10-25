@@ -22,7 +22,8 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
 		RetainSourceTrees:       stage.RetainSourceTrees,
 		RetainSelectedSources:   func(sources []moduledependency.Module) error { return retainSources(ctx, stage, sources) },
-		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainInformation(ctx, stage, paths) },
+		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
+		RetainManifestFiles:     func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
 		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))
 			for index, manifest := range manifests {
@@ -50,7 +51,8 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
 		RetainSourceTrees:       stage.RetainSourceTrees,
-		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainInformation(ctx, stage, paths) },
+		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
+		RetainManifestFiles:     func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
 		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
 			inputs := make([]projectstage.MetadataInput, len(manifests))
 			for index, manifest := range manifests {
@@ -111,7 +113,7 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 	return stage.RetainSources(ctx, sources, metadata...)
 }
 
-func retainInformation(ctx context.Context, stage *projectstage.Stage, paths []string) error {
+func retainMetadataFiles(ctx context.Context, stage *projectstage.Stage, paths []string) error {
 	metadata := make([]projectstage.MetadataInput, len(paths))
 	for index, path := range paths {
 		metadata[index] = projectstage.MetadataInput{Path: path}

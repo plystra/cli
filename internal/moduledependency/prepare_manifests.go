@@ -61,7 +61,7 @@ func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		if err := errors.Join(retainModuleInformation(ctx, information, options), inputs.recheck()); err != nil {
+		if err := errors.Join(retainPresentModuleFiles(ctx, information, options.RetainModuleInformation), inputs.recheck()); err != nil {
 			return err
 		}
 		if err := retainPreparationManifests(ctx, root, versions, checksums, options, environment, inputs); err != nil {
@@ -99,6 +99,21 @@ func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Conte
 		}
 		groups[index] = append(groups[index], Module{path: version.Path, selectedVersion: version.Version, sourcePath: effective.Path,
 			replacement: Replacement{path: effective.Path, version: effective.Version}})
+	}
+	if options.RetainManifestFiles != nil {
+		versions := make([]module.Version, len(groups))
+		for index, group := range groups {
+			versions[index] = sourceVersion(group[0])
+		}
+		graph := manifestGraph{
+			inputs: inputs, retainManifestFiles: options.RetainManifestFiles,
+			loadCache: func(ctx context.Context) (string, error) {
+				return preparationModuleCache(ctx, root, options, environment)
+			},
+		}
+		if err := graph.retainEffectiveManifestFiles(ctx, versions); err != nil {
+			return err
+		}
 	}
 	for _, group := range groups {
 		err := retainWarmPreparedSources(ctx, root, group, sourceChecksums, options, environment, inputs, retain)

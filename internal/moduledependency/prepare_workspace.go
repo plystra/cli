@@ -265,6 +265,7 @@ func (workspace *preparationWorkspace) prepare(ctx context.Context, root string,
 		versions[version.Path] = version.Version
 	}
 	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: selectionRoot, Environment: environment, OutputLimit: options.OutputLimit}, arguments...)
+	err = errors.Join(err, ctx.Err(), inputs.recheck())
 	if err != nil {
 		return errors.Join(ErrModuleUnavailable, err)
 	}

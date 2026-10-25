@@ -356,8 +356,8 @@ func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download" || mode == "ziphash-removed-after-download"
- requestedList := mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
- requestedGraph := mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
+ requestedList := mode == "fixed-manifest-identity-after-list" || mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
+ requestedGraph := mode == "manifest-identity-after-graph" || mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
  firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
@@ -701,6 +701,18 @@ func TestBuiltCLIChangePlanRetainsFixedRootInformationBeforeIncompleteSelection(
 		"manifest-only-fixed-root-information-identity-after-graph",
 		"no-authority-fixed-root-workspace-information-identity-after-graph",
 		"no-authority-fixed-root-workspace-unchanged",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
+func TestBuiltCLIChangePlanRetainsFixedRootManifestsBeforeSelection(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{
+		"no-authority-fixed-root-workspace-manifest-identity-after-graph",
+		"no-authority-fixed-root-workspace-prepared-fixed-manifest-identity-after-list",
 	} {
 		t.Run(mode, func(t *testing.T) {
 			testBuiltCLIChangePlanCacheInput(t, binary, mode)
