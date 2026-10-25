@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -34,6 +35,8 @@ type proxyRecord struct {
 	name   string
 	digest [sha256.Size]byte
 }
+
+var errProxyNotFound = errors.New("dependency acquisition origin not found")
 
 func (s *Stage) retainProxyFile(ctx context.Context, path, request string) ([]byte, error) {
 	return s.retainAcquisitionFile(ctx, path, request, "proxy")
@@ -67,21 +70,57 @@ func (s *Stage) RetainArchives(ctx context.Context, archives []ArchiveInput) err
 func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin string) (data []byte, resultErr error) {
 	defer s.lock()()
 	defer func() {
-		if resultErr != nil && s.proxyErr == nil {
+		if resultErr != nil && !errors.Is(resultErr, errProxyNotFound) && s.proxyErr == nil {
 			s.proxyErr = errors.Join(ErrStage, resultErr)
 		}
 	}()
 	if err := s.recheck(ctx); err != nil {
 		return nil, err
 	}
-	parent, err := s.captureDirectory(s.project, filepath.Dir(path))
-	if err != nil || within(s.temporary, parent) || within(parent, s.temporary) {
+	if !filepath.IsAbs(path) {
+		return nil, ErrStage
+	}
+	parentPath := filepath.Dir(path)
+	if origin == "proxy" {
+		// Preserve only the requested leaf's absence. Creating a previously
+		// missing parent for an unrelated sibling must remain permissible.
+		for {
+			if _, err := os.Lstat(parentPath); err == nil {
+				break
+			} else if !errors.Is(err, os.ErrNotExist) || filepath.Dir(parentPath) == parentPath {
+				return nil, ErrStage
+			}
+			parentPath = filepath.Dir(parentPath)
+		}
+	}
+	parent, err := s.captureDirectory(s.project, parentPath)
+	if err != nil {
+		return nil, ErrStage
+	}
+	name, err := filepath.Rel(parentPath, path)
+	if err != nil || !filepath.IsLocal(name) {
+		return nil, ErrStage
+	}
+	guarded := parent
+	if origin == "proxy" {
+		// A missing origin may share an existing ancestor with the private
+		// stage. Only the requested path must remain outside that stage.
+		guarded = filepath.Join(parent, name)
+	}
+	if within(s.temporary, guarded) || within(guarded, s.temporary) {
 		return nil, ErrStage
 	}
 	for _, artifact := range s.artifacts {
 		if artifact.origin == origin && artifact.request == request {
-			if artifact.file.parent != parent || artifact.file.name != filepath.Base(path) {
+			if filepath.Join(artifact.file.parent, artifact.file.name) != filepath.Join(parent, name) {
 				return nil, ErrConcurrentChange
+			}
+			s.inputs = s.captureInputs()
+			if err := s.recheck(ctx); err != nil {
+				return nil, err
+			}
+			if artifact.file.info == nil {
+				return nil, errProxyNotFound
 			}
 			return artifact.file.data, nil
 		}
@@ -94,7 +133,7 @@ func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin
 	if strings.HasSuffix(request, ".zip") {
 		limit = MaximumTotalBytes - used.bytes
 	}
-	file, err := readInputFile(parent, filepath.Base(path), false, limit)
+	file, err := readInputFile(parent, name, origin == "proxy", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +146,7 @@ func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin
 	index := len(s.artifacts)
 	s.artifacts = append(s.artifacts, artifact)
 	s.inputs = s.captureInputs()
-	if strings.HasSuffix(request, ".zip") {
+	if file.info != nil && strings.HasSuffix(request, ".zip") {
 		artifact.module, err = proxyModule(request, ".zip")
 		if err == nil {
 			err = s.checkProxyArchive(ctx, &artifact, used)
@@ -120,6 +159,9 @@ func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin
 	}
 	if err := s.recheck(ctx); err != nil {
 		return nil, err
+	}
+	if file.info == nil {
+		return nil, errProxyNotFound
 	}
 	return file.data, nil
 }

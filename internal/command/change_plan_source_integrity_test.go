@@ -378,7 +378,7 @@ func main() {
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download" || mode == "ziphash-removed-after-download"
  requestedList := mode == "fixed-manifest-identity-after-list" || mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
  requestedGraph := mode == "manifest-identity-after-graph" || mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "missing-origin-after-get" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -402,6 +402,18 @@ func main() {
  command := exec.Command(REAL_GO, os.Args[1:]...)
  command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
  err := command.Run()
+ if err == nil && mode == "missing-origin-after-get" && len(os.Args) > 1 && os.Args[1] == "get" {
+  marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
+  if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) {
+   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+   if _, pathErr := os.Lstat(path); !os.IsNotExist(pathErr) { os.Exit(12) }
+   _, version, ok := strings.Cut(os.Getenv("PLYSTRA_SOURCE_PREPARATION_QUERY"), "@")
+   if !ok { os.Exit(12) }
+   data := fmt.Sprintf("{\"Version\":%q,\"Time\":\"2026-07-17T00:00:00Z\",\"Private\":\"PRIVATE_NEW_LATEST\"}", version)
+   check(os.WriteFile(path, []byte(data), 0600))
+   check(os.WriteFile(marker, []byte("missing origin appeared after Go get\n"), 0600))
+  } else { check(markerErr) }
+ }
  if err == nil && os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE") == "checksum-after-list" && len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m" {
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) {

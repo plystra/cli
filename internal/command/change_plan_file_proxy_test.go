@@ -24,7 +24,12 @@ const fileProxyPreviewRequest = `{"schema":"plystra.change/v1","operations":[{"k
 
 func fileProxyPreviewFixture(t *testing.T) (root, proxy string, environment []string) {
 	t.Helper()
-	proxy = writeCommandDependencyProxy(t, []commandProxyModule{{path: fileProxyPreviewModule, version: "v1.0.0", ordinary: true}})
+	return fileProxyPreviewFixtureVersion(t, "v1.0.0")
+}
+
+func fileProxyPreviewFixtureVersion(t *testing.T, version string) (root, proxy string, environment []string) {
+	t.Helper()
+	proxy = writeCommandDependencyProxy(t, []commandProxyModule{{path: fileProxyPreviewModule, version: version, ordinary: true}})
 	root = writeImplementationSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 	environment = previewDependencyEnvironment(t, proxy)
@@ -112,6 +117,72 @@ func TestBuiltCLIChangePlanRejectsReplacedFileProxyOrigin(t *testing.T) {
 
 func TestBuiltCLIChangePlanRejectsReplacedCachedArchive(t *testing.T) {
 	assertBuiltCLIChangePlanRejectsArchiveReplacement(t, true)
+}
+
+func TestBuiltCLIChangePlanRetainsMissingFileProxyInput(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, changed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("changed=%t", changed), func(t *testing.T) {
+			t.Parallel()
+			root, proxy, environment := fileProxyPreviewFixtureVersion(t, "v0.0.0-20260717000000-0123456789ab")
+			path := filepath.Join(proxy, filepath.FromSlash(fileProxyPreviewModule), "@latest")
+			marker := filepath.Join(t.TempDir(), "missing-origin-created")
+			if changed {
+				wrapper := sourcePreparationGoWrapper(t)
+				goName := "go"
+				if runtime.GOOS == "windows" {
+					goName += ".exe"
+				}
+				if err := os.Rename(wrapper, filepath.Join(filepath.Dir(wrapper), goName)); err != nil {
+					t.Fatal(err)
+				}
+				for index, entry := range environment {
+					if key, value, _ := strings.Cut(entry, "="); strings.EqualFold(key, "PATH") {
+						environment[index] = key + "=" + filepath.Dir(wrapper) + string(os.PathListSeparator) + value
+					}
+				}
+				environment = append(environment,
+					"PLYSTRA_SOURCE_PREPARATION_PATH="+path,
+					"PLYSTRA_SOURCE_PREPARATION_MARKER="+marker,
+					"PLYSTRA_SOURCE_PREPARATION_QUERY="+fileProxyPreviewModule+"@v0.0.0-20260717000000-0123456789ab",
+					"PLYSTRA_SOURCE_PREPARATION_MODE=missing-origin-after-get")
+			}
+			before := commandTree(t, root)
+			request := strings.Replace(fileProxyPreviewRequest, "@v1.0.0", "@latest", 1)
+			process := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
+			process.Dir, process.Env, process.Stdin = filepath.Join(root, "reports"), environment, strings.NewReader(request)
+			var stdout, stderr bytes.Buffer
+			process.Stdout, process.Stderr = &stdout, &stderr
+			commandErr := process.Run()
+			var result scaffoldPlanDocument
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || stderr.Len() != 0 {
+				t.Fatal("missing-input preview did not return structured output", commandErr, err, stderr.String())
+			}
+			if changed {
+				if _, err := os.Stat(marker); err != nil {
+					t.Fatal("missing-input appearance was not exercised", commandErr, err)
+				}
+				var exited *exec.ExitError
+				if !errors.As(commandErr, &exited) || exited.ExitCode() != 3 || result.Status != "validation_failed" || result.Payload.PlanDigest != "" {
+					t.Fatal("public preview accepted changed negative evidence", commandErr, result.Status)
+				}
+			} else if commandErr != nil || result.Status != "success" || result.Payload.PlanDigest == "" {
+				t.Fatal("unchanged latest fallback failed", commandErr, result.Status)
+			}
+			for _, private := range []string{root, proxy, path, "PRIVATE_NEW_LATEST", "127.0.0.1"} {
+				for _, spelling := range []string{private, filepath.ToSlash(private)} {
+					encoded, err := json.Marshal(spelling)
+					if err != nil || bytes.Contains(stdout.Bytes(), encoded[1:len(encoded)-1]) {
+						t.Fatal("missing-input preview disclosed private origin evidence", err)
+					}
+				}
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("missing-input preview changed authored files")
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
 }
 
 func assertBuiltCLIChangePlanRejectsArchiveReplacement(t *testing.T, cached bool) {

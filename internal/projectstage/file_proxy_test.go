@@ -311,7 +311,15 @@ func TestFileProxyRetainsEarlierPayloadsAfterFailedGoCommand(t *testing.T) {
 		t.Fatal("missing module was accepted")
 	}
 	inputs := stage.Inputs()
-	if len(inputs.captured().artifacts) != 3 {
+	present, missing := 0, 0
+	for _, artifact := range inputs.captured().artifacts {
+		if artifact.file.info == nil {
+			missing++
+		} else {
+			present++
+		}
+	}
+	if present != 3 || missing == 0 {
 		t.Fatal("failed resolution discarded earlier demand captures")
 	}
 	if err := stage.Close(); err != nil {

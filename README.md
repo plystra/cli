@@ -1254,6 +1254,15 @@ The original file and directory path identities, native access state, and bytes
 remain private recheckable evidence after cleanup. Completed payloads survive
 later command, archive-validation, and checksum failures. Repeated capture
 does not refresh evidence, and a capture rejection remains fatal to the session.
+Requested missing files also retain their exact absence before a 404 reaches
+Go, including missing-version failures and `@latest` fallback. Each distinct
+negative request consumes one entry in the cumulative staging budget. Existing
+ancestor identities and native access state remain guarded after cleanup;
+creating unrelated siblings or previously missing parent directories remains
+allowed while the requested file stays absent. Later appearance of that exact
+file invalidates the original evidence instead of refreshing it. Cancellation,
+unreadable or non-directory ancestors, and budget failures remain fatal capture
+failures rather than ordinary missing-origin responses.
 These content identities grant no independent checksum authority or source
 authentication; ordinary Go checks and existing extracted-source retention
 remain required. Toolchain distributions keep their original file-proxy

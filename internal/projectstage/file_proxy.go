@@ -96,11 +96,11 @@ func (s *Stage) StartFileProxy(ctx context.Context, command string) (bool, error
 				return
 			}
 			source := filepath.Join(path, filepath.FromSlash(request))
-			if _, err := os.Lstat(source); errors.Is(err, os.ErrNotExist) {
+			data, err := s.retainProxyFile(r.Context(), source, request)
+			if errors.Is(err, errProxyNotFound) {
 				http.NotFound(w, r)
 				return
 			}
-			data, err := s.retainProxyFile(r.Context(), source, request)
 			if err != nil {
 				http.Error(w, "dependency acquisition rejected", http.StatusInternalServerError)
 				return
