@@ -48,6 +48,7 @@ func TestDiscoverBatchesSettledListingManifests(t *testing.T) {
 				defer cancel()
 				rejected := errors.New("listing capture rejected")
 				batches, callbacks := 0, 0
+				listed := false
 				retainFiles := func(captureCtx context.Context, files []projectstage.MetadataInput) error {
 					retain, inside := captureCtx.Value(batchKey{}).(projectstage.MetadataRetention)
 					if !inside || captureCtx.Err() != nil || captureCtx.Value(callerKey{}) != true {
@@ -69,9 +70,13 @@ func TestDiscoverBatchesSettledListingManifests(t *testing.T) {
 					GoCommand: command, Environment: environment,
 					MetadataBatch: func(captureCtx context.Context, capture func(context.Context) error) error {
 						before := string(readFile(t, trace))
-						if !strings.Contains(before, "mod download ") {
-							batches++ // Later exact acquisitions use separate metadata batches.
+						if listed {
+							return stage.WithMetadataBatch(captureCtx, func(retain projectstage.MetadataRetention) error {
+								return capture(context.WithValue(captureCtx, batchKey{}, retain))
+							})
 						}
+						listed = true
+						batches++ // Later exact acquisitions use separate metadata batches.
 						deadline, bounded := captureCtx.Deadline()
 						if !strings.Contains(before, "list -m ") || !bounded || time.Until(deadline) <= 0 || time.Until(deadline) > 30*time.Second {
 							t.Fatal("listing batch lost its settled-command boundary or fixed deadline")

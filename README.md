@@ -1113,6 +1113,14 @@ files appearing after phase initialization or an earlier completed-source callba
 It uses each phase's already resolved physical source without applying another
 replacement. This capture works independently of source-retention callbacks;
 rejection, cancellation, or original metadata drift prevents the command.
+The already-resolved information, authorized-manifest, and raw-manifest callbacks
+immediately before one exact download share complete before/after source checks,
+in that order, with caller cancellation and a maximum 30-second capture budget.
+Each file is still retained immediately, including its identity, content, access,
+and parent-path evidence. Cache selection and Go commands stay outside this
+closed local group; any rejection prevents acquisition without discarding
+earlier captures. When none of the known metadata paths exists, individual
+capture checks remain in use without adding an empty complete-tree batch.
 Every exact download also retains present effective-source `.mod` files as raw
 private concurrency evidence independently of original checksum authority or
 source-retention callbacks. This includes workspace checksum-only downloads.
