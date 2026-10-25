@@ -21,6 +21,7 @@ func TestInstalledCapabilityCatalogAgreesWithCommandParsers(t *testing.T) {
 		{id: "capability.create", invocations: [][]string{{"capability", "create", "records.read", "--plugin", "records", "--interactive", "--confirm", "--query", "--expose"}}},
 		{id: "capability.expose", invocations: [][]string{{"capability", "expose", "records.read/v1", "--env", "production"}, {"capability", "expose", "records.read/v1", "--config", "deploy/customer.yaml"}}},
 		{id: "capability.implement", invocations: [][]string{{"capability", "implement", "records.read/v1", "--plugin", "records", "--interactive"}}},
+		{id: "change.plan", invocations: [][]string{{"change", "plan", "--request", "-"}, {"change", "plan", "--request", "change.json", "--format", "json", "--env", "production"}, {"change", "plan", "--request", "change.json", "--config", "deploy/customer.yaml"}}},
 		{id: "check", invocations: [][]string{{"check", "--env", "production"}, {"check", "--config", "deploy/customer.yaml"}}},
 		{id: "explain.alias", invocations: [][]string{{"explain", "alias", "mail.send/v1", "--verbose", "--format", "json", "--env", "production"}}},
 		{id: "explain.capability", invocations: [][]string{{"explain", "capability", "email.send/v1", "--verbose", "--format", "json", "--config", "deploy/customer.yaml"}}},
@@ -120,6 +121,9 @@ func installedParserAccepts(t testing.TB, commandID string, arguments []string) 
 		return string(parsed.subjectKind) == kind
 	case "check":
 		_, ok := parseCheckArguments(arguments)
+		return ok
+	case "change.plan":
+		_, ok := parseChangePlanArguments(arguments)
 		return ok
 	case "generate":
 		_, ok := parseGenerateArguments(arguments)
