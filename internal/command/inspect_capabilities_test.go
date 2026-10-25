@@ -144,7 +144,7 @@ func TestRunInspectCapabilitiesHumanOutputIdentifiesOmissions(t *testing.T) {
 	for _, expected := range []string{
 		"Installed Plystra capabilities\n",
 		"Public schemas:\n  continuation: unavailable\n  diagnostic: unavailable\n  graph: plystra.graph/v1\n  inspection: plystra.inspect/v1\n  recovery: plystra.recovery/v1\n  result: plystra.result/v1\n",
-		"Command surface: 29 installed leaf commands\nSelectors: 2 installed\nEffect classes: 9 closed\n",
+		"Command surface: 30 installed leaf commands\nSelectors: 2 installed\nEffect classes: 9 closed\n",
 		"Defaults: interaction non_interactive, output human, startup 2m, invocation 0s\n",
 		"Invocation concurrency: default_limit 64, queue 0, maximum 65536\n",
 		"Invocation policy: schema 1, compiler 1, defaults 1; timeout 1ns through 2562047h47m16.854775807s (64 bytes); default attempts 1, circuit disabled\n",

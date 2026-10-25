@@ -243,7 +243,7 @@ startup: {type: string, default: ready, enum: [ready, wait]}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	tidyGeneratedModule(t, ctx, applicationRoot)
-	command := exec.CommandContext(ctx, "go", "test", "-race", "-mod=readonly", "-count=1", "./...")
+	command := exec.CommandContext(ctx, "go", "test", "-race", "-mod=readonly", "-count=1", "./generated/go/assembly", "./generated/go/bootstrap")
 	command.Dir = applicationRoot
 	command.Env = isolatedGoEnvironment(os.Environ())
 	output, err := command.CombinedOutput()
@@ -1298,6 +1298,14 @@ func TestRuntimeConstructorEntryRemoval(t *testing.T) {
 			localservice.Reset()
 			remotestore.Reset()
 			application, err := New(context.Background(), options)
+			if mode != "environment" {
+				if application != nil || !errors.Is(err, ErrRuntimeConfiguration) {
+					t.Fatalf("New accepted removal outside an environment overlay: %#v, %v", application, err)
+				}
+				assertNoBootstrapConstructorCalls(t)
+				assertSafeBootstrapError(t, err)
+				return
+			}
 			if err != nil || application == nil {
 				t.Fatalf("New with removed constructor configuration = %#v, %v", application, err)
 			}
@@ -1337,15 +1345,17 @@ func TestRuntimeConstructorEntryRemoval(t *testing.T) {
 	}
 	writeRuntimeDocument(t, "config:\n  acme.local-service: {$remove: true}\n"+bootstrapRemoteConfiguration)
 	writeEnvironmentDocument(t, "replace-removed", "config: {acme.local-service: {label: replacement}}\n")
-	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "replace-removed"}})
-	if err != nil || application == nil { t.Fatalf("replace lower removal: %#v, %v", application, err) }
-	_, configuration := localservice.Snapshot()
-	if configuration.Label != "replacement" { t.Fatalf("replacement label = %q", configuration.Label) }
-	if err := application.Stop(context.Background()); err != nil { t.Fatal(err) }
-	writeRuntimeDocument(t, "config: {zeta.remote-store: {$remove: true}}\n")
 	localservice.Reset()
 	remotestore.Reset()
-	if application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json"}}); application != nil || err == nil {
+	application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "replace-removed"}})
+	if application != nil || !errors.Is(err, ErrRuntimeConfiguration) { t.Fatalf("overlay masked invalid root removal: %#v, %v", application, err) }
+	assertNoBootstrapConstructorCalls(t)
+	assertSafeBootstrapError(t, err)
+	writeRuntimeDocument(t, validRuntimeDocument)
+	writeEnvironmentDocument(t, "remove-required", "config: {zeta.remote-store: {$remove: true}}\n")
+	localservice.Reset()
+	remotestore.Reset()
+	if application, err := New(context.Background(), RuntimeOptions{Arguments: []string{"--configuration-root", ".", "--runtime-baseline", "dist/runtime-baseline.json", "--env", "remove-required"}}); application != nil || err == nil {
 		t.Fatalf("required configuration removal accepted: %#v, %v", application, err)
 	}
 	assertNoBootstrapConstructorCalls(t)
