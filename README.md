@@ -2379,9 +2379,17 @@ CI prepares dependencies before offline generated-Project tests, including the
 older `logr` graph metadata and the telemetry SDK's test-only metric module.
 These fixtures also prepare their dependencies when run independently. Scaffold
 tests retain isolated module caches and file proxies while reusing Go's
-content-addressed build cache. CI package timeouts are 60 minutes on Windows
-and 20 minutes on Linux, macOS, and the Linux race job; these are cumulative
-package limits, not per-test limits.
+content-addressed build cache. Base CI jobs test every package except exactly
+`internal/command`, retaining the existing vet and JavaScript checks. Eight
+deterministic command shards run on each of Linux, macOS, Windows, and Linux
+with the race detector. Each invocation lists its compiled tests, fuzz seed
+targets, and examples (with `-race` for race shards), sorts names ordinally, and
+assigns name index modulo eight. Anchored patterns retain every selected
+target's subcases; empty shards run no tests. The runner's `-ListOnly` option
+prints membership and command arguments without executing tests. CI invocation
+timeouts remain 60 minutes on Windows and 20 minutes on Linux, macOS, and Linux
+race; these are cumulative package limits, not per-test limits. Partitioning
+does not establish that public-command performance acceptance is complete.
 
 Lifecycle smoke tests compare the configuration root with the child working
 directory by filesystem identity, including symbolic directory paths and a
