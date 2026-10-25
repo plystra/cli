@@ -99,17 +99,22 @@ func TestDiscoverRetainsEffectiveRootManifestsBeforeListing(t *testing.T) {
 			}
 			trace := filepath.Join(root, "commands")
 			env = append(env, "PLYSTRA_MODULE_DEPENDENCY_HELPER=root-manifests", "PLYSTRA_MODULE_REAL_GO="+realGo, "PLYSTRA_MODULE_COMMAND_TRACE="+trace)
-			called := false
+			calls := 0
 			rejected := errors.New("root manifest rejected")
 			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], Offline: mode == "offline", RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
-				called = true
+				calls++
 				if len(manifests) != 1 || manifests[0].Path != manifestPath || manifests[0].Checksum != expectedChecksum {
 					t.Fatalf("wrong effective root manifest: %v", manifests)
 				}
-				if commands := string(readFile(t, trace)); strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
-					t.Fatalf("root capture happened after resolution: %s", commands)
+				commands := string(readFile(t, trace))
+				if calls == 1 {
+					if strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
+						t.Fatalf("root capture happened after resolution: %s", commands)
+					}
+				} else if mode != "manifest-only" || !strings.Contains(commands, "list ") || strings.Contains(commands, "download ") != (calls == 3) {
+					t.Fatalf("unexpected acquisition manifest capture: call=%d, commands=%s", calls, commands)
 				}
-				if mode == "manifest-only" {
+				if mode == "manifest-only" && calls < 3 {
 					if _, err := os.Stat(cacheBase + ".zip"); !errors.Is(err, os.ErrNotExist) {
 						t.Fatal("root retention prefetched an archive")
 					}
@@ -138,9 +143,14 @@ func TestDiscoverRetainsEffectiveRootManifestsBeforeListing(t *testing.T) {
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			wantCall := mode != "local" && mode != "excluded" && mode != "missing-manifest" && mode != "missing-checksum"
-			if called != wantCall {
-				t.Fatalf("root capture callback=%v, want %v", called, wantCall)
+			wantCalls := 1
+			if mode == "local" || mode == "excluded" || mode == "missing-manifest" || mode == "missing-checksum" {
+				wantCalls = 0
+			} else if mode == "manifest-only" {
+				wantCalls = 3
+			}
+			if calls != wantCalls {
+				t.Fatalf("manifest capture callbacks=%d, want %d", calls, wantCalls)
 			}
 			if mode != "changed-module" && string(readFile(t, filepath.Join(app, "go.mod"))) != goMod || mode != "changed-sums" && !bytes.Equal(readFile(t, filepath.Join(app, "go.sum")), originalSums) {
 				t.Fatal("root retention changed Project metadata")

@@ -762,6 +762,18 @@ func TestBuiltCLIChangePlanRetainsUnchangedAcquiredSource(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRejectsChangedAcquisitionManifest(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{
+		"cold-manifests-cold-source-transitive-manifest-identity-after-download",
+		"cold-manifests-workspace-cold-source-transitive-manifest-identity-after-download",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
@@ -775,6 +787,8 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 
 func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
+	coldManifests := strings.HasPrefix(mode, "cold-manifests-")
+	mode = strings.TrimPrefix(mode, "cold-manifests-")
 	missingMetadata := ""
 	for _, prefix := range []string{"missing-manifest-", "missing-ziphash-", "archive-only-", "manifest-only-", "no-authority-"} {
 		if remaining, matches := strings.CutPrefix(mode, prefix); matches {
@@ -926,6 +940,18 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 			}
 		}
 	}
+	if coldManifests {
+		if !coldSource || !transitive {
+			t.Fatal("cold manifest acquisition requires missing selected source trees")
+		}
+		for _, modulePath := range []string{previewDependencyModule, transitivePath} {
+			for _, suffix := range []string{".mod", ".info"} {
+				if err := os.Remove(filepath.Join(cache, "cache", "download", filepath.FromSlash(modulePath), "@v", "v1.0.0"+suffix)); err != nil && !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
 	wrapper := sourcePreparationGoWrapper(t)
 	goName := "go"
 	if runtime.GOOS == "windows" {
@@ -951,7 +977,7 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	if strings.Contains(mode, "source-manifest-identity") {
 		path = filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"), "go.mod")
 	}
-	if transitive && !coldSource {
+	if transitive && (!coldSource || coldManifests) {
 		path = filepath.Join(cache, "cache", "download", filepath.FromSlash(transitivePath), "@v", "v1.0.0.mod")
 	}
 	marker := filepath.Join(t.TempDir(), "manifest-changed")

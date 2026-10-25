@@ -63,8 +63,8 @@ type Options struct {
 	RequireSourceChecksums bool
 	// RetainRootManifests captures existing checksummed root manifests before
 	// graph resolution, and requested effective manifests before preparation
-	// downloads or workspace selection. Exact preparation also captures present
-	// manifests after each download attempt under the original checksum authority.
+	// downloads or workspace selection. Discovery and exact preparation also
+	// capture present manifests around each download attempt under original authority.
 	// It does not initiate downloads or refresh previously retained evidence.
 	// Callbacks must use the supplied context, including bounded post-download
 	// retention after the operation context has been cancelled.
@@ -687,12 +687,27 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		}
 		return errors.Join(err, ctx.Err(), inputs.recheck())
 	}
+	var manifestChecksums map[module.Version]string
+	if options.RetainRootManifests != nil {
+		checksums, err := originalSourceChecksums(applicationRoot, workspace, inputs)
+		if err != nil {
+			return err
+		}
+		manifestChecksums = checksums.manifests
+	}
 	for _, version := range versions {
 		group := make([]Module, len(indices[version]))
 		for index, original := range indices[version] {
 			group[index] = modules[original]
 		}
-		if err := downloadPreparedSources(ctx, downloadRoot, group, nil, options, environment, retain, nil); err != nil {
+		retainMetadata, err := preparationManifestRetainer(ctx, downloadRoot, []module.Version{version}, manifestChecksums, options, environment, inputs)
+		if err != nil {
+			return err
+		}
+		if err := retainMetadata(ctx); err != nil {
+			return err
+		}
+		if err := downloadPreparedSources(ctx, downloadRoot, group, nil, options, environment, retain, retainMetadata); err != nil {
 			return err
 		}
 		for index, original := range indices[version] {
