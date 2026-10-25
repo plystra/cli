@@ -2365,7 +2365,7 @@ troubleshooting, and intentionally deferred roadmap work.
 ```powershell
 $env:GOWORK = "off"
 go mod download all
-go mod download github.com/go-logr/logr@v1.2.2 go.opentelemetry.io/otel/metric/x@v0.68.0
+go mod download connectrpc.com/connect@v1.20.0 github.com/go-logr/logr@v1.2.2 go.opentelemetry.io/otel/metric/x@v0.68.0
 go test -timeout=40m ./...
 go test -race -timeout=40m ./...
 go vet ./...
@@ -2375,8 +2375,9 @@ go test ./internal/clientgen -run '^$' -bench 'BenchmarkGenerated(CanonicalInvoc
 go test ./internal/httpgen -run '^$' -bench '^BenchmarkGeneratedHTTPInvocation$' -benchmem
 ```
 
-CI prepares dependencies before offline generated-Project tests, including the
-older `logr` graph metadata and the telemetry SDK's test-only metric module.
+CI prepares dependencies before offline generated-Project tests, including
+Connect (a generated runtime dependency outside the CLI's build graph), older
+`logr` graph metadata and the telemetry SDK's test-only metric module.
 These fixtures also prepare their dependencies when run independently. Scaffold
 tests retain isolated module caches and file proxies while reusing Go's
 content-addressed build cache. Base CI jobs test every package except exactly
@@ -2390,6 +2391,10 @@ prints membership and command arguments without executing tests. CI invocation
 timeouts remain 60 minutes on Windows and 20 minutes on Linux, macOS, and Linux
 race; these are cumulative package limits, not per-test limits. Partitioning
 does not establish that public-command performance acceptance is complete.
+Rollback regressions inject ordinary source compilation failures at the final
+build gate. Cold acquisition drift fixtures use the actual `Dir` or `GoMod`
+returned by Go, including private acquisition caches, while preserving the
+separate original-input retention checks.
 
 Lifecycle smoke tests compare the configuration root with the child working
 directory by filesystem identity, including symbolic directory paths and a

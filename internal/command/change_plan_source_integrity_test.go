@@ -347,7 +347,10 @@ func sourcePreparationGoWrapper(t *testing.T) string {
 	root := t.TempDir()
 	source := `package main
 import (
+ "bytes"
+ "encoding/json"
  "fmt"
+ "io"
  "os"
  "os/exec"
  "path/filepath"
@@ -376,6 +379,7 @@ func main() {
   }
  }
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download" || mode == "ziphash-removed-after-download"
+ acquiredManifest := mode == "manifest-acquired-after-download"
  requestedList := mode == "fixed-manifest-identity-after-list" || mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
  requestedGraph := mode == "manifest-identity-after-graph" || mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
  isolatedDownload := false
@@ -423,7 +427,7 @@ func main() {
    check(os.WriteFile(marker, []byte("runtime get started without preparation\n"), 0600)); os.Exit(12)
   }
  }
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && !strings.HasPrefix(mode, "runtime-") && mode != "unchanged" && mode != "isolated-acquisition" && mode != "missing-origin-after-get" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && !strings.HasPrefix(mode, "runtime-") && mode != "unchanged" && mode != "isolated-acquisition" && mode != "missing-origin-after-get" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !acquiredManifest && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -446,7 +450,33 @@ func main() {
  }
  command := exec.Command(REAL_GO, os.Args[1:]...)
  command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
+ var output bytes.Buffer
+ observeQuery := os.Getenv("PLYSTRA_SOURCE_PREPARATION_OBSERVE_QUERY")
+ observeDownload := observeQuery != "" && len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download"
+ if observeDownload { command.Stdout = &output }
  err := command.Run()
+ if observeDownload {
+  if err == nil {
+   decoder := json.NewDecoder(bytes.NewReader(output.Bytes()))
+   for {
+    var downloaded struct { Path, Version, Dir, GoMod string }
+    decodeErr := decoder.Decode(&downloaded)
+    if decodeErr == io.EOF { break }; check(decodeErr)
+    if downloaded.Path + "@" + downloaded.Version != observeQuery { continue }
+    path := downloaded.GoMod
+    if relative := os.Getenv("PLYSTRA_SOURCE_PREPARATION_OBSERVE_RELATIVE"); relative != "" {
+     if downloaded.Dir == "" || filepath.IsAbs(relative) || strings.HasPrefix(relative, "..") { os.Exit(12) }
+     path = filepath.Join(downloaded.Dir, filepath.FromSlash(relative))
+    }
+    if !filepath.IsAbs(path) { os.Exit(12) }
+    recorded := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER") + ".acquired-input"
+    if _, recordErr := os.Stat(recorded); os.IsNotExist(recordErr) {
+     check(os.WriteFile(recorded, []byte(path), 0600))
+    } else { check(recordErr) }
+   }
+  }
+  _, writeErr := os.Stdout.Write(output.Bytes()); check(writeErr)
+ }
  if err == nil && runtimePreparation && (mode == "runtime-order" || mode == "runtime-preparation-failure") {
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   if mode == "runtime-preparation-failure" {
@@ -503,7 +533,7 @@ func main() {
  }
  afterList := len(os.Args) > 2 && os.Args[1] == "list" && os.Args[2] == "-m"
  afterDownload := len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download"
- if requestedDownload {
+ if requestedDownload || acquiredManifest {
   matched := false
   for _, argument := range os.Args[1:] {
    if argument == os.Getenv("PLYSTRA_SOURCE_PREPARATION_QUERY") { matched = true }
@@ -522,10 +552,14 @@ func main() {
   for _, argument := range os.Args[1:] { if argument == "all" { matched = true } }
   afterList = afterList && matched
  }
- if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list" || requestedList || requestedGraph) && afterList || (mode == "manifest-after-download" || requestedDownload) && afterDownload) {
+ if err == nil && ((mode == "manifest-after-list" || mode == "manifest-identity-after-list" || requestedList || requestedGraph) && afterList || (mode == "manifest-after-download" || requestedDownload || acquiredManifest) && afterDownload) {
   if (requestedDownload || requestedList || requestedGraph) && os.Getenv("PLYSTRA_SOURCE_PREPARATION_WORKSPACE") != "" && (os.Getenv("GOWORK") == "" || os.Getenv("GOWORK") == "off") { os.Exit(11) }
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+  if observeQuery != "" {
+   recorded, recordErr := os.ReadFile(marker + ".acquired-input"); check(recordErr)
+   path = string(recorded)
+  }
   _, pathErr := os.Stat(path)
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) && pathErr == nil {
    data, readErr := os.ReadFile(path); check(readErr)
@@ -675,6 +709,12 @@ func TestScaffoldPreviewRejectsChangedModuleManifestBeforeRetention(t *testing.T
 			}
 			if identity {
 				race = "manifest-identity-after-list"
+			}
+			if mode == "prepared" {
+				// Cold exact acquisition may consume a private cache. Corrupt the
+				// returned manifest, not a later unconsumed original-cache file.
+				race = "manifest-acquired-after-download"
+				environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_QUERY="+required+"@v1.0.0", "PLYSTRA_SOURCE_PREPARATION_OBSERVE_QUERY="+required+"@v1.0.0")
 			}
 			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+race)
 			data := []byte(`{"schema":"plystra.change/v1","operations":[{"kind":"interface_create","name":"todo.add","semantics":"command"}]}`)
@@ -1008,6 +1048,15 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 			t.Fatal("cold acquisition race requires a later selected source")
 		}
 		environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_QUERY="+transitivePath+"@v1.0.0")
+		if !coldManifests {
+			// Retain the first actual root acquisition; the later transitive
+			// download must not hide drift in that already consumed source.
+			relative := "remote/implementation.go"
+			if strings.Contains(mode, "source-manifest-identity") {
+				relative = "go.mod"
+			}
+			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_OBSERVE_QUERY="+previewDependencyModule+"@v1.0.0", "PLYSTRA_SOURCE_PREPARATION_OBSERVE_RELATIVE="+relative)
+		}
 	}
 	workspaceRoot, initialLocal := "", ""
 	if workspaceMode, workspace := strings.CutPrefix(mode, "workspace-"); workspace {
@@ -1202,7 +1251,15 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 			t.Fatalf("compiled CLI accepted cache-input drift: error=%v, decode=%v, status=%q, plan-present=%t, stderr-bytes=%d", err, decodeErr, result.Status, result.Payload.PlanDigest != "", stderr.Len())
 		}
 	}
-	for _, private := range []string{cache, root, workspaceRoot, initialLocal, "changed after verified Go output"} {
+	privateInputs := []string{cache, root, workspaceRoot, initialLocal, "changed after verified Go output"}
+	if coldSource && !coldManifests {
+		observed, err := os.ReadFile(marker + ".acquired-input")
+		if err != nil || !filepath.IsAbs(string(observed)) {
+			t.Fatal("missing actual acquired source evidence", err)
+		}
+		privateInputs = append(privateInputs, string(observed), filepath.Dir(string(observed)))
+	}
+	for _, private := range privateInputs {
 		if private == "" {
 			continue
 		}
