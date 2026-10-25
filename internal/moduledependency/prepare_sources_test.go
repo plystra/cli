@@ -163,7 +163,7 @@ func TestDiscoverRetainsEligibleWarmSelectedSources(t *testing.T) {
 				calls, listedCalls, acquiredCalls := 0, 0, 0
 				_, err = moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{
 					Environment: environment, GoCommand: command, Offline: mode == "offline",
-					RetainSelectedSources: func(sources []moduledependency.Module) error {
+					RetainSelectedSources: func(_ context.Context, sources []moduledependency.Module) error {
 						if commands := string(readFile(t, trace)); strings.Contains(commands, "download ") {
 							acquiredCalls++
 						} else if strings.Contains(commands, "list ") {
@@ -269,7 +269,7 @@ func TestPrepareSourcesWarmWorkspaceChecksumAuthority(t *testing.T) {
 				command, environment, trace := tracePreparation(t, fixture.root, fixture.environment)
 				calls := 0
 				rejected := errors.New("independent warm checksum rejected")
-				err := moduledependency.PrepareSources(t.Context(), locate(t, fixture.app), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment, GoCommand: command}, func(sources []moduledependency.Module) error {
+				err := moduledependency.PrepareSources(t.Context(), locate(t, fixture.app), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 					if len(sources) == 0 {
 						return nil
 					}
@@ -356,7 +356,7 @@ func TestPrepareSourcesRetainsWorkspaceSourcesBeforeSelection(t *testing.T) {
 			environment = append(environment, "PLYSTRA_MODULE_METADATA_PATH="+path, "PLYSTRA_MODULE_METADATA_MARKER="+marker)
 			err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{
 				Environment: environment, GoCommand: command,
-			}, func(sources []moduledependency.Module) error {
+			}, func(_ context.Context, sources []moduledependency.Module) error {
 				return retainWarmBundle(t, stage, t.Context(), sources)
 			})
 			if _, markerErr := os.Stat(marker); markerErr != nil {
@@ -499,7 +499,7 @@ func TestPrepareSourcesRetainsWarmBundlesBeforeDownloads(t *testing.T) {
 				calls := 0
 				wantEarly := mode != "partial" && mode != "missing-tree" && mode != "manifest-only"
 				wantSelection := phase == "workspace" && wantEarly
-				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command, Offline: mode == "offline"}, func(sources []moduledependency.Module) error {
+				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command, Offline: mode == "offline"}, func(_ context.Context, sources []moduledependency.Module) error {
 					if len(sources) == 0 {
 						return nil
 					}

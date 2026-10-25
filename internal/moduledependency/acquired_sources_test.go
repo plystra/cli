@@ -137,7 +137,7 @@ func TestDiscoverRetainsAcquiredSourcesBeforeValidation(t *testing.T) {
 						}
 						return err
 					},
-					RetainSelectedSources: func(sources []moduledependency.Module) error {
+					RetainSelectedSources: func(_ context.Context, sources []moduledependency.Module) error {
 						calls++
 						commands := string(readFile(t, trace))
 						if !strings.Contains(commands, "mod download -json "+warmSourceModule+"@v1.0.0") || calls == 1 && strings.Contains(commands, "mod download -json "+later+"@v1.0.0") {

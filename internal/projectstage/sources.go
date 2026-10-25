@@ -64,15 +64,29 @@ func (s *Stage) CheckSources(ctx context.Context) error {
 }
 
 func (s *Stage) retainSources(ctx context.Context, sources []Source, authenticate bool, metadata ...MetadataInput) (resultErr error) {
-	defer s.lock()()
+	resultErr = s.WithSourceBatch(ctx, func(retain SourceRetention) error {
+		if authenticate {
+			return retain.Sources(sources, metadata...)
+		}
+		directories := make([]string, len(sources))
+		for index, source := range sources {
+			directories[index] = source.Directory
+		}
+		return retain.Trees(directories)
+	})
+	if resultErr != nil {
+		resultErr = errors.Join(ErrSourceIntegrity, resultErr)
+	}
+	return resultErr
+}
+
+func (s *Stage) captureSources(ctx context.Context, sources []Source, authenticate bool, metadata ...MetadataInput) (resultErr error) {
 	defer func() {
+		s.inputs = s.captureInputs()
 		if resultErr != nil {
 			resultErr = errors.Join(ErrSourceIntegrity, resultErr)
 		}
 	}()
-	if err := s.recheck(ctx); err != nil {
-		return err
-	}
 	if len(metadata) != 0 {
 		if err := s.retainMetadata(ctx, metadata); err != nil {
 			return err
@@ -140,8 +154,7 @@ func (s *Stage) retainSources(ctx context.Context, sources []Source, authenticat
 			s.sources[index].module, s.sources[index].checksum = source.Module, source.Checksum
 		}
 	}
-	s.inputs = s.captureInputs()
-	return s.recheck(ctx)
+	return nil
 }
 
 func (tree treeSnapshot) checkSource(ctx context.Context, source Source) error {

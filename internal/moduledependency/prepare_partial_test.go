@@ -108,7 +108,7 @@ func TestPrepareSourcesRetainsMaterializedManifest(t *testing.T) {
 						}
 						return nil
 					},
-				}, func(sources []moduledependency.Module) error {
+				}, func(_ context.Context, sources []moduledependency.Module) error {
 					if len(sources) != 0 {
 						if !strings.HasSuffix(mode, "unrecorded") && captures == 0 {
 							t.Fatal("completed source preceded independent manifest capture")
@@ -241,7 +241,7 @@ func TestPrepareSourcesRechecksWarmManifestAfterAcquisition(t *testing.T) {
 						}
 						return stage.RetainMetadata(t.Context(), []projectstage.MetadataInput{{Path: manifests[0].Path, GoModChecksum: manifests[0].Checksum}})
 					},
-				}, func(sources []moduledependency.Module) error {
+				}, func(_ context.Context, sources []moduledependency.Module) error {
 					if _, err := os.Stat(marker); len(sources) != 0 && err == nil {
 						t.Fatal("changed manifest delivered a completed source")
 					}

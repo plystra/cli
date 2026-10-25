@@ -125,7 +125,7 @@ func TestExactAcquisitionRetainsCachedArchives(t *testing.T) {
 				if discovery {
 					_, err = moduledependency.Discover(ctx, locate(t, stage.Root()), options)
 				} else {
-					err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options, func([]moduledependency.Module) error { return nil })
+					err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options, func(context.Context, []moduledependency.Module) error { return nil })
 				}
 				if strings.HasSuffix(mode, "identity") {
 					if _, markerErr := os.Stat(filepath.Join(fixture.root, "replaced")); markerErr != nil || !errors.Is(err, projectstage.ErrConcurrentChange) {
@@ -229,7 +229,7 @@ func TestPreparationArchivesSurviveInFlightCancellation(t *testing.T) {
 			}
 			return stage.RetainArchives(captureCtx, []projectstage.ArchiveInput{{Path: archives[0].Path, Module: archives[0].Module}})
 		},
-	}, func([]moduledependency.Module) error {
+	}, func(context.Context, []moduledependency.Module) error {
 		t.Fatal("cancelled acquisition delivered a source")
 		return nil
 	})

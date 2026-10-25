@@ -33,8 +33,10 @@ import (
 // RetainSourceTrees additionally preserves existing trees without original
 // archive authority as private pending evidence before selection and acquisition;
 // consumers authenticate that same evidence using the completed source callback.
+// Retain must honor its supplied context, including the independent bounded
+// context used to retain evidence after a settled download.
 // Mutable queries and cold resolution reads remain outside this boundary.
-func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func([]Module) error) (resultErr error) {
+func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func(context.Context, []Module) error) (resultErr error) {
 	if ctx == nil || application.Path() == "" || len(requested) > 1_024 || retain == nil {
 		return ErrInvalidOutput
 	}
@@ -156,7 +158,7 @@ func preparationEnvironment(options Options) []string {
 	return environment
 }
 
-func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
+func downloadAndRetainSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func(context.Context, []Module) error) error {
 	if callback := options.RetainSourceTrees; callback != nil {
 		options.RetainSourceTrees = func(retainCtx context.Context, directories []string) error {
 			return errors.Join(callback(retainCtx, directories), retainCtx.Err(), inputs.recheck())
@@ -168,7 +170,7 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		}
 	}
 	if len(sources) == 0 {
-		return errors.Join(retain(sources), ctx.Err(), inputs.recheck())
+		return errors.Join(retain(ctx, sources), ctx.Err(), inputs.recheck())
 	}
 	indices := map[module.Version]int{}
 	var groups [][]Module
@@ -190,8 +192,8 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 		if err != nil {
 			return err
 		}
-		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment, func(acquired []Module) error {
-			return errors.Join(retain(acquired), ctx.Err(), inputs.recheck())
+		if err := downloadPreparedSources(ctx, root, group, checksums.archives, options, environment, func(retainCtx context.Context, acquired []Module) error {
+			return errors.Join(retain(retainCtx, acquired), ctx.Err(), inputs.recheck())
 		}, retainMetadata); err != nil {
 			return err
 		}
@@ -199,7 +201,7 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 	return nil
 }
 
-func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error, retainMetadata func(context.Context) error) error {
+func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func(context.Context, []Module) error, retainMetadata func(context.Context) error) error {
 	cache := ""
 	if len(result) != 0 {
 		cache = result[0].acquisitionCache
@@ -304,6 +306,56 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		return err
 	}
 	output, started, downloadErr := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
+	var acquired []Module
+	retainAcquired := func(retainCtx context.Context) error {
+		acquired = append([]Module(nil), result...)
+		decoder := json.NewDecoder(bytes.NewReader(output))
+		for {
+			if err := retainCtx.Err(); err != nil {
+				return err
+			}
+			var downloaded downloadedModule
+			if err := decoder.Decode(&downloaded); errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				return ErrInvalidOutput
+			}
+			version := module.Version{Path: downloaded.Path, Version: downloaded.Version}
+			indices, exists := queries[version]
+			if !exists || downloaded.Error != "" || !filepath.IsAbs(downloaded.Dir) || !filepath.IsAbs(downloaded.GoMod) || !validSourceChecksum(downloaded.Checksum) || !validSourceChecksum(downloaded.GoModSum) || checksums[version] != "" && checksums[version] != downloaded.Checksum {
+				return ErrSourceIntegrity
+			}
+			canonical, err := filepath.EvalSymlinks(filepath.Clean(downloaded.Dir))
+			if err != nil {
+				return fmt.Errorf("%w: %w: resolve source for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, version.Path, err)
+			}
+			for _, index := range indices {
+				if result[index].checksum != "" && result[index].checksum != downloaded.Checksum || result[index].goModChecksum != "" && result[index].goModChecksum != downloaded.GoModSum {
+					return errors.Join(ErrSourceIntegrity, ErrConcurrentChange)
+				}
+				acquired[index].root, acquired[index].goMod, acquired[index].goModChecksum = canonical, nil, downloaded.GoModSum
+				acquired[index].sourceDirectory, acquired[index].checksum = downloaded.Dir, downloaded.Checksum
+				acquired[index].acquisitionCache = cache
+				acquired[index].goModFile = downloaded.GoMod
+				acquired[index].incompleteSourceMetadata = false
+			}
+			delete(queries, version)
+		}
+		if len(queries) != 0 {
+			return ErrInvalidOutput
+		}
+		// Decode the entire acquisition before retaining it, but do not read an
+		// extracted manifest until its source evidence has been retained.
+		if retain != nil {
+			if err := retain(retainCtx, append([]Module(nil), acquired...)); err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		return ctx.Err()
+	}
 	var retentionErr error
 	if started && !errors.Is(downloadErr, gocommand.ErrProcessUnsettled) {
 		// Capture only local evidence after the process has stopped. Cancellation
@@ -322,7 +374,19 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 				retainPresentModuleFiles(captureCtx, manifests, options.RetainManifestFiles),
 				retainPresentModuleFiles(captureCtx, information, options.RetainModuleInformation), captureCtx.Err())
 		}
-		retentionErr = captureMetadataBatch(captureCtx, options.MetadataBatch, capture)
+		batch := options.MetadataBatch
+		if options.SourceBatch != nil {
+			batch = options.SourceBatch
+			metadataCapture := capture
+			capture = func(retainCtx context.Context) error {
+				err := metadataCapture(retainCtx)
+				if err != nil || downloadErr != nil || ctx.Err() != nil {
+					return errors.Join(err, ctx.Err())
+				}
+				return retainAcquired(retainCtx)
+			}
+		}
+		retentionErr = captureMetadataBatch(captureCtx, batch, capture)
 		retentionErr = errors.Join(retentionErr, captureCtx.Err())
 	}
 	retentionErr = errors.Join(retentionErr, ctx.Err())
@@ -332,46 +396,8 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	if retentionErr != nil {
 		return retentionErr
 	}
-	acquired := append([]Module(nil), result...)
-	decoder := json.NewDecoder(bytes.NewReader(output))
-	for {
-		var downloaded downloadedModule
-		if err := decoder.Decode(&downloaded); errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			return ErrInvalidOutput
-		}
-		version := module.Version{Path: downloaded.Path, Version: downloaded.Version}
-		indices, exists := queries[version]
-		if !exists || downloaded.Error != "" || !filepath.IsAbs(downloaded.Dir) || !filepath.IsAbs(downloaded.GoMod) || !validSourceChecksum(downloaded.Checksum) || !validSourceChecksum(downloaded.GoModSum) || checksums[version] != "" && checksums[version] != downloaded.Checksum {
-			return ErrSourceIntegrity
-		}
-		canonical, err := filepath.EvalSymlinks(filepath.Clean(downloaded.Dir))
-		if err != nil {
-			return fmt.Errorf("%w: %w: resolve source for module %q: %v", ErrInvalidOutput, ErrModuleUnavailable, version.Path, err)
-		}
-		for _, index := range indices {
-			if result[index].checksum != "" && result[index].checksum != downloaded.Checksum || result[index].goModChecksum != "" && result[index].goModChecksum != downloaded.GoModSum {
-				return errors.Join(ErrSourceIntegrity, ErrConcurrentChange)
-			}
-			acquired[index].root, acquired[index].goMod, acquired[index].goModChecksum = canonical, nil, downloaded.GoModSum
-			acquired[index].sourceDirectory, acquired[index].checksum = downloaded.Dir, downloaded.Checksum
-			acquired[index].acquisitionCache = cache
-			acquired[index].goModFile = downloaded.GoMod
-			acquired[index].incompleteSourceMetadata = false
-		}
-		delete(queries, version)
-	}
-	if len(queries) != 0 {
-		return ErrInvalidOutput
-	}
-	// Decode the entire acquisition before retaining it, but do not read an
-	// extracted manifest until its source evidence has been retained.
-	if retain != nil {
-		if err := retain(append([]Module(nil), acquired...)); err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
+	if options.SourceBatch == nil {
+		if err := retainAcquired(ctx); err != nil {
 			return err
 		}
 	}
@@ -419,4 +445,15 @@ func captureMetadataBatch(ctx context.Context, batch func(context.Context, func(
 		batchErr = ErrSourceIntegrity
 	}
 	return errors.Join(batchErr, captureErr)
+}
+
+// captureSourceBatch never spans Go work. Ordinary captures keep caller
+// cancellation; settled-download cleanup supplies its own independent context.
+func captureSourceBatch(ctx context.Context, batch func(context.Context, func(context.Context) error) error, capture func(context.Context) error) error {
+	if batch == nil {
+		return capture(ctx)
+	}
+	captureCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return errors.Join(captureMetadataBatch(captureCtx, batch, capture), captureCtx.Err(), ctx.Err())
 }

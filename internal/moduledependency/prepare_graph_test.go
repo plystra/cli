@@ -99,7 +99,7 @@ func TestPrepareSourcesWorkspaceSelectedGraph(t *testing.T) {
 				}
 				return stage.RetainMetadata(ctx, metadata)
 			}
-			err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options, func(sources []moduledependency.Module) error {
+			err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options, func(_ context.Context, sources []moduledependency.Module) error {
 				for _, source := range sources {
 					if source.Path() != warmRequestedModule || source.SelectedVersion() != "v1.0.0" || source.SourceDirectory() != downloaded.Dir {
 						t.Fatal("source capture lost requested identity or captured an unqueried tree")
@@ -227,7 +227,7 @@ func TestPrepareSourcesWorkspaceSelectedGraphUpgrade(t *testing.T) {
 			t.Cleanup(func() { _ = stage.Close() })
 			command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
 			selected := 0
-			err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}, {Path: other, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment, GoCommand: command}, func(sources []moduledependency.Module) error {
+			err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}, {Path: other, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 				for _, source := range sources {
 					if source.Path() != warmRequestedModule {
 						continue

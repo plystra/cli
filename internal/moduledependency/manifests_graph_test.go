@@ -352,7 +352,7 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 			}
 			var sources []module.Version
 			if test.wantSources != nil {
-				options.RetainSelectedSources = func(group []moduledependency.Module) error {
+				options.RetainSelectedSources = func(_ context.Context, group []moduledependency.Module) error {
 					commands := string(readFile(t, trace))
 					early := !strings.Contains(commands, "list ") && !strings.Contains(commands, "download ")
 					var metadata []projectstage.MetadataInput

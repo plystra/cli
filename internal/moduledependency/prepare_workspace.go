@@ -245,7 +245,7 @@ func preparationReplacements(replacements []*modfile.Replace, base string) strin
 	return output.String()
 }
 
-func (workspace *preparationWorkspace) prepare(ctx context.Context, root string, requested []module.Version, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
+func (workspace *preparationWorkspace) prepare(ctx context.Context, root string, requested []module.Version, options Options, environment []string, inputs preparationInputs, retain func(context.Context, []Module) error) error {
 	if len(requested) == 0 {
 		return nil
 	}

@@ -133,7 +133,7 @@ func TestAcquisitionRetainsManifestFiles(t *testing.T) {
 				if discovery {
 					_, err = moduledependency.Discover(ctx, locate(t, stage.Root()), options)
 				} else {
-					err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options, func([]moduledependency.Module) error { return stage.Recheck(ctx) })
+					err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options, func(context.Context, []moduledependency.Module) error { return stage.Recheck(ctx) })
 				}
 				if strings.HasSuffix(mode, "identity") {
 					if _, markerErr := os.Stat(marker); markerErr != nil {

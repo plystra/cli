@@ -68,7 +68,7 @@ func TestPrepareSourcesRetainsCompletedAcquisitions(t *testing.T) {
 				var retained []moduledependency.Module
 				err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), []module.Version{
 					{Path: first, Version: "v1.0.0"}, {Path: missing, Version: "v1.0.0"},
-				}, moduledependency.Options{Environment: env, GoCommand: command}, func(sources []moduledependency.Module) error {
+				}, moduledependency.Options{Environment: env, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 					if len(sources) == 0 {
 						return stage.Recheck(t.Context())
 					}
@@ -214,7 +214,7 @@ func TestPrepareSourcesRetainsAcquiredSourcesBeforeValidation(t *testing.T) {
 				if mode == "offline" {
 					requested = requested[:1]
 				}
-				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command, Offline: mode == "offline"}, func(sources []moduledependency.Module) error {
+				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command, Offline: mode == "offline"}, func(_ context.Context, sources []moduledependency.Module) error {
 					if len(sources) == 0 {
 						return nil
 					}
@@ -335,7 +335,7 @@ func TestPrepareSourcesStopsAfterEmptyRetention(t *testing.T) {
 					defer cancel()
 					rejected := errors.New("empty retention rejected")
 					calls := 0
-					err := moduledependency.PrepareSources(ctx, locate(t, app), versions, moduledependency.Options{Environment: environment, GoCommand: command}, func(sources []moduledependency.Module) error {
+					err := moduledependency.PrepareSources(ctx, locate(t, app), versions, moduledependency.Options{Environment: environment, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 						calls++
 						if len(sources) != 0 {
 							t.Fatal("empty retention acquired a source")
@@ -401,7 +401,7 @@ func TestPrepareSourcesStopsAtAcquisitionBoundary(t *testing.T) {
 			rejected := errors.New("retention rejected")
 			var retained []moduledependency.Module
 			calls := 0
-			err := moduledependency.PrepareSources(ctx, locate(t, app), requested, moduledependency.Options{Environment: env, GoCommand: command}, func(sources []moduledependency.Module) error {
+			err := moduledependency.PrepareSources(ctx, locate(t, app), requested, moduledependency.Options{Environment: env, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 				calls++
 				want := 1
 				if mode == "shared-source" {
@@ -479,7 +479,7 @@ func TestPrepareSourcesPreservesWorkspaceAcquisitionFailures(t *testing.T) {
 			var retained []string
 			err := moduledependency.PrepareSources(ctx, locate(t, app), []module.Version{
 				{Path: preparedOriginal, Version: "v1.0.0"}, {Path: second, Version: "v1.0.0"},
-			}, moduledependency.Options{Environment: env, GoCommand: command}, func(sources []moduledependency.Module) error {
+			}, moduledependency.Options{Environment: env, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 				if len(sources) != 1 {
 					t.Fatalf("unexpected source group: %v", sources)
 				}
@@ -539,7 +539,7 @@ func TestPrepareSourcesReverifiesSharedSourceUnderWorkspaceAuthority(t *testing.
 	writeFile(t, paths["member-sum"], preparedReplacement+" v1.1.0 h1:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=\n")
 	command, env, trace := tracePreparation(t, filepath.Dir(app), env)
 	calls := 0
-	err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command}, func(sources []moduledependency.Module) error {
+	err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 		calls++
 		if len(sources) != 1 || sources[0].Checksum() != downloaded.Sum {
 			t.Fatalf("original authority source not retained: %v", sources)

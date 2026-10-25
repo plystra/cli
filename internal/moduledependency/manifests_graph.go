@@ -37,7 +37,8 @@ type manifestGraph struct {
 	retain              func(context.Context, []RootManifest) error
 	retainManifestFiles func(context.Context, []string) error
 	retainInformation   func(context.Context, []string) error
-	retainSources       func([]Module) error
+	retainSources       func(context.Context, []Module) error
+	sourceBatch         func(context.Context, func(context.Context) error) error
 	retainTrees         func(context.Context, []string) error
 	archives            map[module.Version]string
 	queryPaths          map[string]bool // Nil queries all selected modules; graph traversal remains unfiltered.
@@ -352,16 +353,21 @@ func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected 
 		groups[effective] = append(groups[effective], source)
 	}
 	checksums := preparationChecksums{archives: graph.archives, manifests: graph.checksums}
-	for _, effective := range versions {
-		cache, err := graph.moduleCache(ctx)
-		if err != nil {
-			return err
-		}
-		if err := retainWarmSourceBundle(ctx, cache, groups[effective], checksums, graph.inputs, graph.retainSources, graph.retainTrees); err != nil {
-			return err
-		}
+	if len(versions) == 0 {
+		return nil
 	}
-	return nil
+	cache, err := graph.moduleCache(ctx)
+	if err != nil {
+		return err
+	}
+	return captureSourceBatch(ctx, graph.sourceBatch, func(captureCtx context.Context) error {
+		for _, effective := range versions {
+			if err := retainWarmSourceBundle(captureCtx, cache, groups[effective], checksums, graph.inputs, graph.retainSources, graph.retainTrees); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (graph *manifestGraph) retainEffectiveManifestFiles(ctx context.Context, versions []module.Version) error {

@@ -107,7 +107,7 @@ func TestPrepareSourcesRetainsModuleInformation(t *testing.T) {
 						}
 						return nil
 					},
-				}, func([]moduledependency.Module) error { return nil })
+				}, func(context.Context, []moduledependency.Module) error { return nil })
 				commands := string(readFile(t, trace))
 				switch {
 				case mode == "post-error":
@@ -444,7 +444,7 @@ func TestPrepareSourcesInformationExcludesWorkspaceLocalSources(t *testing.T) {
 						return nil
 					}
 				}
-				err := moduledependency.PrepareSources(t.Context(), locate(t, fixture.app), requested, options, func([]moduledependency.Module) error { return nil })
+				err := moduledependency.PrepareSources(t.Context(), locate(t, fixture.app), requested, options, func(context.Context, []moduledependency.Module) error { return nil })
 				if err != nil || mode == "mixed" && calls != 3 || mode != "mixed" && calls != 0 {
 					t.Fatalf("workspace source kind changed preparation: %v, callbacks=%d", err, calls)
 				}

@@ -76,7 +76,7 @@ func TestPrepareSourcesRetainsTreesBeforeChecksumAcquisition(t *testing.T) {
 					},
 				}
 				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options,
-					func(sources []moduledependency.Module) error {
+					func(_ context.Context, sources []moduledependency.Module) error {
 						if len(sources) != 0 {
 							authenticatedCalls++
 						}

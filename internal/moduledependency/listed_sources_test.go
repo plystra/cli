@@ -98,7 +98,7 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 				calls, acquiredCalls := 0, 0
 				index, err := moduledependency.Discover(ctx, locate(t, stage.Root()), moduledependency.Options{
 					Environment: environment, GoCommand: command, RequireSourceChecksums: true,
-					RetainSelectedSources: func(sources []moduledependency.Module) error {
+					RetainSelectedSources: func(_ context.Context, sources []moduledependency.Module) error {
 						commands := string(readFile(t, trace))
 						if !strings.Contains(commands, "list -m ") {
 							t.Fatal("source retention did not precede post-list acquisition")

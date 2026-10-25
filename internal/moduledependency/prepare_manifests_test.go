@@ -80,7 +80,7 @@ func TestPrepareSourcesRetainsWarmRequestedManifestOnFailure(t *testing.T) {
 					}
 					return stage.RetainMetadata(t.Context(), []projectstage.MetadataInput{{Path: path, GoModChecksum: checksum}})
 				},
-			}, func(sources []moduledependency.Module) error {
+			}, func(_ context.Context, sources []moduledependency.Module) error {
 				if len(sources) != 0 {
 					t.Fatal("unavailable archive accepted as a prepared source")
 				}
@@ -215,7 +215,7 @@ func TestPrepareSourcesManifestCaptureBoundaries(t *testing.T) {
 					}
 					return nil
 				},
-			}, func(sources []moduledependency.Module) error {
+			}, func(_ context.Context, sources []moduledependency.Module) error {
 				if len(sources) != 0 {
 					t.Fatal("failed acquisition reported completed source")
 				}
@@ -344,7 +344,7 @@ func TestPrepareSourcesWorkspaceManifestAuthority(t *testing.T) {
 					}
 					return nil
 				},
-			}, func(sources []moduledependency.Module) error {
+			}, func(_ context.Context, sources []moduledependency.Module) error {
 				if len(sources) != 0 {
 					t.Fatal("unavailable versioned source reported as complete")
 				}

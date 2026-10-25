@@ -38,13 +38,13 @@ func originalSourceChecksums(root string, workspace *preparationWorkspace, input
 	return preparationChecksums{archives: archives, manifests: manifests}, err
 }
 
-func retainSelectedSourcesOnce(retain func([]Module) error) func([]Module) error {
+func retainSelectedSourcesOnce(retain func(context.Context, []Module) error) func(context.Context, []Module) error {
 	type key struct {
 		version                                                      module.Version
 		path, selected, directory, manifest, archiveSum, manifestSum string
 	}
 	retained := map[key]bool{}
-	return func(sources []Module) error {
+	return func(ctx context.Context, sources []Module) error {
 		keys := make([]key, len(sources))
 		metadataComplete := make([]bool, len(sources))
 		complete := true
@@ -56,7 +56,7 @@ func retainSelectedSourcesOnce(retain func([]Module) error) func([]Module) error
 		if complete {
 			return nil
 		}
-		if err := retain(sources); err != nil {
+		if err := retain(ctx, sources); err != nil {
 			return err
 		}
 		for index, key := range keys {
@@ -68,7 +68,7 @@ func retainSelectedSourcesOnce(retain func([]Module) error) func([]Module) error
 	}
 }
 
-func retainListedSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, inputs preparationInputs, retain func([]Module) error) error {
+func retainListedSources(ctx context.Context, root string, sources []Module, checksums preparationChecksums, options Options, inputs preparationInputs, retain func(context.Context, []Module) error) error {
 	type key struct {
 		version             module.Version
 		directory, manifest string
@@ -89,39 +89,57 @@ func retainListedSources(ctx context.Context, root string, sources []Module, che
 		}
 		groups[index] = append(groups[index], source)
 	}
+	if len(groups) == 0 {
+		return errors.Join(ctx.Err(), inputs.recheck())
+	}
 	var cache string
-	for _, group := range groups {
-		directory, manifest := group[0].sourceDirectory, group[0].goModFile
-		if directory == "" || manifest == "" {
-			if cache == "" {
-				var err error
-				cache, err = preparationModuleCache(ctx, root, options, options.Environment)
-				if err != nil {
-					return err
+	captureGroups := func(groups [][]Module) error {
+		if len(groups) == 0 {
+			return errors.Join(ctx.Err(), inputs.recheck())
+		}
+		return captureSourceBatch(ctx, options.SourceBatch, func(ctx context.Context) error {
+			for _, group := range groups {
+				directory, manifest := group[0].sourceDirectory, group[0].goModFile
+				if directory == "" || manifest == "" {
+					cachedDirectory, cachedManifest, err := cachedSourcePaths(cache, sourceVersion(group[0]))
+					if err != nil {
+						return err
+					}
+					if directory == "" {
+						directory = cachedDirectory
+					}
+					if manifest == "" {
+						manifest = cachedManifest
+					}
+				}
+				if !validSourceChecksum(checksums.archives[sourceVersion(group[0])]) {
+					if err := retainUnverifiedSourceTree(ctx, directory, manifest, options.RetainSourceTrees); err != nil {
+						return err
+					}
+				} else if retain != nil {
+					if err := retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain); err != nil {
+						return err
+					}
 				}
 			}
-			cachedDirectory, cachedManifest, err := cachedSourcePaths(cache, sourceVersion(group[0]))
+			return errors.Join(ctx.Err(), inputs.recheck())
+		})
+	}
+	for index, group := range groups {
+		if group[0].sourceDirectory == "" || group[0].goModFile == "" {
+			// Preserve captures preceding this Go query; a batch never crosses it.
+			if err := captureGroups(groups[:index]); err != nil {
+				return err
+			}
+			var err error
+			cache, err = preparationModuleCache(ctx, root, options, options.Environment)
 			if err != nil {
 				return err
 			}
-			if directory == "" {
-				directory = cachedDirectory
-			}
-			if manifest == "" {
-				manifest = cachedManifest
-			}
-		}
-		if !validSourceChecksum(checksums.archives[sourceVersion(group[0])]) {
-			if err := retainUnverifiedSourceTree(ctx, directory, manifest, options.RetainSourceTrees); err != nil {
-				return err
-			}
-		} else if retain != nil {
-			if err := retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain); err != nil {
-				return err
-			}
+			return captureGroups(groups[index:])
 		}
 	}
-	return errors.Join(ctx.Err(), inputs.recheck())
+	return captureGroups(groups)
 }
 
 func retainUnverifiedPreparedSources(ctx context.Context, root string, versions []module.Version, checksums map[module.Version]string, options Options, environment []string) error {
@@ -175,7 +193,7 @@ func existingSourceTree(directory, manifest string) (bool, error) {
 	return true, nil
 }
 
-func retainWarmPreparedSources(ctx context.Context, root string, group []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
+func retainWarmPreparedSources(ctx context.Context, root string, group []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func(context.Context, []Module) error) error {
 	version := sourceVersion(group[0])
 	if !validSourceChecksum(checksums.archives[version]) && options.RetainSourceTrees == nil {
 		return inputs.recheck()
@@ -187,7 +205,7 @@ func retainWarmPreparedSources(ctx context.Context, root string, group []Module,
 	return retainWarmSourceBundle(ctx, cache, group, checksums, inputs, retain, options.RetainSourceTrees)
 }
 
-func retainWarmSourceBundle(ctx context.Context, cache string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error, retainTrees func(context.Context, []string) error) error {
+func retainWarmSourceBundle(ctx context.Context, cache string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func(context.Context, []Module) error, retainTrees func(context.Context, []string) error) error {
 	directory, manifest, err := cachedSourcePaths(cache, sourceVersion(group[0]))
 	if err != nil {
 		return err
@@ -212,7 +230,7 @@ func cachedSourcePaths(cache string, version module.Version) (string, string, er
 	return directory, manifest, nil
 }
 
-func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error) error {
+func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func(context.Context, []Module) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -248,7 +266,7 @@ func retainWarmSourceAt(ctx context.Context, directory, manifestPath string, gro
 		warm[index].checksum = archive
 		warm[index].incompleteSourceMetadata = incomplete
 	}
-	if err := retain(warm); err != nil {
+	if err := retain(ctx, warm); err != nil {
 		return err
 	}
 	return errors.Join(ctx.Err(), inputs.recheck())
