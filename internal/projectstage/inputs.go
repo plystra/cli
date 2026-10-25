@@ -121,7 +121,7 @@ func (s *Stage) captureInputs() Inputs {
 	return Inputs{state: &state}
 }
 
-// Recheck rejects original byte, mode, identity, alias and membership drift.
+// Recheck rejects original byte, mode, native access, identity, alias and membership drift.
 // It does not inspect the temporary candidate or establish a mutation lock.
 func (i Inputs) Recheck(ctx context.Context) error {
 	state := i.captured()
@@ -141,8 +141,8 @@ func (i Inputs) Recheck(ctx context.Context) error {
 		if err != nil || current != alias.target {
 			return ErrConcurrentChange
 		}
-		info, err := os.Lstat(current)
-		if err != nil || !sameFile(alias.info, info) {
+		info, access, err := directoryAccess(current)
+		if err != nil || !sameFile(alias.info, info) || alias.access != access {
 			return ErrConcurrentChange
 		}
 	}
@@ -150,6 +150,17 @@ func (i Inputs) Recheck(ctx context.Context) error {
 		current, err := os.Lstat(path.path)
 		if ctx.Err() != nil || err != nil && !errors.Is(err, os.ErrNotExist) || !sameFile(path.info, current) {
 			return ErrConcurrentChange
+		}
+		if current != nil {
+			root, err := os.OpenRoot(filepath.Dir(path.path))
+			if err != nil {
+				return ErrConcurrentChange
+			}
+			opened, access, err := readAccessInfo(root, filepath.Base(path.path))
+			root.Close()
+			if err != nil || !sameFile(current, opened) || path.access != access {
+				return ErrConcurrentChange
+			}
 		}
 	}
 	var used budget
@@ -182,7 +193,7 @@ func projectFilePath(path string) bool {
 
 // ProjectFile reads an original Project-relative slash path against the captured
 // inventory, never the relocated candidate. Missing paths must still be absent;
-// present paths must retain their captured bytes, identity and mode.
+// present paths must retain captured bytes, identity, mode and native access.
 func (i Inputs) ProjectFile(ctx context.Context, path string) (FileImage, error) {
 	state := i.captured()
 	if ctx == nil || ctx.Err() != nil || state == nil || state.project == "" || !projectFilePath(path) {
@@ -257,6 +268,10 @@ func (t inputTree) checkPath(ctx context.Context, root *os.Root, path string) er
 			continue
 		}
 		if err != nil || !sameFile(before.info, current) || index < len(parts)-1 && !current.IsDir() {
+			return ErrConcurrentChange
+		}
+		opened, access, err := readAccessInfo(root, relative)
+		if err != nil || !sameFile(before.info, opened) || before.access != access {
 			return ErrConcurrentChange
 		}
 	}

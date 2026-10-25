@@ -1130,8 +1130,19 @@ Unrelated cache entries are excluded; retained-input rechecks never download or
 repair modules. These read-only roots share the staging tree's cumulative
 bounds. Complete capture before first use, including workspace MVS upgrades,
 mutable-query, transitive, and intermediate resolution sources, complete
-module-resolution metadata, and native permission capture remain unfinished; previews remain
+module-resolution metadata remain unfinished; previews remain
 `non_exact`.
+Private staging snapshots also bind native owner and access-control state on
+captured files and directories. Windows retains owner, group, DACL control and
+entries, and mandatory integrity labels; Linux retains UID, GID, and access and
+default POSIX ACLs; macOS retains UID, GID, file flags, and extended security.
+Permission evidence is a fixed-size private digest, never public plan identity.
+ACL-only changes reject live-stage checks, retained-input checks after cleanup,
+and original Project file reads even when bytes, modes, and timestamps match.
+Temporary roots, relocated module roots, and the frozen Go environment file
+also reject native permission drift. Captured source permissions are not
+copied into the owner-private candidate. Unreadable native permission state
+fails closed; these checks confer no installation authority or filesystem lock.
 Destination writes and cleanup use opened directory roots. Copies are bounded
 to 1,024 module roots and directory-alias inputs, 65,536 entries, 64 MiB per
 file, and 512 MiB of captured contents. Main-module, workspace, and vendor metadata

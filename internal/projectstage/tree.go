@@ -43,6 +43,7 @@ type treeSnapshot struct {
 
 type treeEntry struct {
 	info   os.FileInfo
+	access accessState
 	digest [sha256.Size]byte
 }
 
@@ -80,44 +81,34 @@ func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative stri
 		return ErrStage
 	}
 	info, err := root.Lstat(relative)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+	if err != nil || !info.IsDir() && !info.Mode().IsRegular() {
 		return ErrStage
 	}
 	entry := treeEntry{info: info}
+	file, err := root.Open(relative)
+	if err != nil {
+		return ErrStage
+	}
+	defer file.Close()
+	entry.access, err = fileAccess(file, info)
+	if err != nil {
+		return err
+	}
+	var children []os.DirEntry
 	if info.IsDir() {
 		if s.output != nil {
 			if err := s.output.MkdirAll(filepath.Join(s.outputPath, relative), 0o700); err != nil {
 				return ErrStage
 			}
 		}
-		directory, err := root.Open(relative)
+		children, err = boundedChildren(ctx, file, MaximumEntries-used.entries, s.allFiles)
 		if err != nil {
-			return ErrStage
-		}
-		opened, statErr := directory.Stat()
-		children, readErr := boundedChildren(ctx, directory, MaximumEntries-used.entries, s.allFiles)
-		closeErr := directory.Close()
-		if statErr != nil || readErr != nil || closeErr != nil || !os.SameFile(info, opened) {
 			return ErrConcurrentChange
 		}
 		sort.Slice(children, func(i, j int) bool { return children[i].Name() < children[j].Name() })
-		for _, child := range children {
-			if err := s.capture(ctx, root, filepath.Join(relative, child.Name()), used); err != nil {
-				return err
-			}
-		}
 	} else if info.Mode().IsRegular() {
 		if info.Size() > MaximumFileBytes {
 			return ErrStage
-		}
-		file, err := root.Open(relative)
-		if err != nil {
-			return ErrStage
-		}
-		opened, err := file.Stat()
-		if err != nil || !os.SameFile(info, opened) {
-			file.Close()
-			return ErrConcurrentChange
 		}
 		hash := sha256.New()
 		var output *os.File
@@ -132,7 +123,7 @@ func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative stri
 		}
 		count, copyErr := io.Copy(writer, io.LimitReader(file, min(MaximumFileBytes, MaximumTotalBytes-used.bytes)+1))
 		used.bytes += count
-		closeErr := file.Close()
+		var closeErr error
 		if output != nil {
 			closeErr = errors.Join(closeErr, output.Close())
 		}
@@ -143,9 +134,25 @@ func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative stri
 	} else {
 		return ErrStage
 	}
+	access, accessErr := fileAccess(file, info)
+	closeErr := file.Close()
+	if accessErr != nil || closeErr != nil || access != entry.access {
+		return ErrConcurrentChange
+	}
 	after, err := root.Lstat(relative)
 	if err != nil || !sameFile(info, after) {
 		return ErrConcurrentChange
+	}
+	for _, child := range children {
+		if err := s.capture(ctx, root, filepath.Join(relative, child.Name()), used); err != nil {
+			return err
+		}
+	}
+	if info.IsDir() {
+		current, access, err := readAccessInfo(root, relative)
+		if err != nil || !sameFile(info, current) || entry.access != access {
+			return ErrConcurrentChange
+		}
 	}
 	s.entries[relative] = entry
 	return nil
@@ -192,7 +199,7 @@ func sameTree(left, right treeSnapshot) bool {
 	}
 	for path, before := range left.entries {
 		after, found := right.entries[path]
-		if !found || !sameFile(before.info, after.info) || before.digest != after.digest {
+		if !found || !sameFile(before.info, after.info) || before.access != after.access || before.digest != after.digest {
 			return false
 		}
 	}

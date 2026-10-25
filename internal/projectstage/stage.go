@@ -71,6 +71,7 @@ type Stage struct {
 	temporary     string
 	parent        *os.Root
 	identity      os.FileInfo
+	access        accessState
 	files         *os.Root
 	environment   []string
 	trees         []treeSnapshot
@@ -149,6 +150,16 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 				return nil, ErrStage
 			}
 			vendorSource = vendor
+			parent, err := os.OpenRoot(filepath.Dir(vendor))
+			if err != nil {
+				return nil, ErrStage
+			}
+			opened, access, accessErr := readAccessInfo(parent, filepath.Base(vendor))
+			parent.Close()
+			if accessErr != nil || !sameFile(info, opened) {
+				return nil, ErrConcurrentChange
+			}
+			s.paths[len(s.paths)-1].access = access
 		}
 	}
 	parent := options.TemporaryParent
@@ -179,7 +190,7 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	if options.Observe != nil {
 		options.Observe(TemporaryTreeCreated)
 	}
-	s.identity, err = s.parent.Lstat(filepath.Base(s.temporary))
+	s.identity, s.access, err = readAccessInfo(s.parent, filepath.Base(s.temporary))
 	if err != nil || !s.identity.IsDir() {
 		return nil, ErrStage
 	}
@@ -216,11 +227,11 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 		if err != nil {
 			return nil, ErrStage
 		}
-		info, err := s.files.Lstat(relative)
+		info, access, err := readAccessInfo(s.files, relative)
 		if err != nil || !info.IsDir() {
 			return nil, ErrStage
 		}
-		s.stagedPaths = append(s.stagedPaths, pathSnapshot{path: relative, info: info})
+		s.stagedPaths = append(s.stagedPaths, pathSnapshot{path: relative, info: info, access: access})
 	}
 	for _, root := range modules {
 		if err := s.relocateModule(root); err != nil {
@@ -245,8 +256,8 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	return s, nil
 }
 
-// Recheck rejects changed bytes, membership, modes, and path identities. It does
-// not grant a mutation lock or replace installation-time preimage checks.
+// Recheck rejects changed bytes, membership, modes, native access state, and path
+// identities. It does not grant a lock or replace installation-time checks.
 func (s *Stage) Recheck(ctx context.Context) error {
 	if ctx == nil || s == nil || s.closed {
 		return ErrConcurrentChange
@@ -254,13 +265,17 @@ func (s *Stage) Recheck(ctx context.Context) error {
 	if s.files == nil {
 		return ErrConcurrentChange
 	}
-	temporary, err := os.Lstat(s.temporary)
-	if err != nil || !temporary.IsDir() || !os.SameFile(temporary, s.identity) {
+	temporary, access, err := readAccessInfo(s.parent, filepath.Base(s.temporary))
+	if err != nil || !temporary.IsDir() || !os.SameFile(temporary, s.identity) || access != s.access {
+		return ErrConcurrentChange
+	}
+	current, err := os.Lstat(s.temporary)
+	if err != nil || !sameFile(temporary, current) {
 		return ErrConcurrentChange
 	}
 	for _, staged := range s.stagedPaths {
-		current, err := s.files.Lstat(staged.path)
-		if err != nil || !sameFile(staged.info, current) {
+		current, access, err := readAccessInfo(s.files, staged.path)
+		if err != nil || !sameFile(staged.info, current) || staged.access != access {
 			return ErrConcurrentChange
 		}
 		for path := staged.path; path != "."; path = filepath.Dir(path) {
@@ -319,6 +334,7 @@ type fileSnapshot struct {
 	parent string
 	name   string
 	info   os.FileInfo
+	access accessState
 	digest [sha256.Size]byte
 	data   []byte
 }
@@ -327,11 +343,13 @@ type directorySnapshot struct {
 	path   string
 	target string
 	info   os.FileInfo
+	access accessState
 }
 
 type pathSnapshot struct {
-	path string
-	info os.FileInfo
+	path   string
+	info   os.FileInfo
+	access accessState
 }
 
 func (s *Stage) captureDirectory(base, path string) (string, error) {
@@ -343,13 +361,13 @@ func (s *Stage) captureDirectory(base, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Lstat(target)
+	info, access, err := directoryAccess(target)
 	if err != nil {
 		return "", ErrStage
 	}
 	for _, alias := range s.aliases {
 		if alias.path == path {
-			if alias.target != target || !sameFile(alias.info, info) {
+			if alias.target != target || !sameFile(alias.info, info) || alias.access != access {
 				return "", ErrConcurrentChange
 			}
 			return target, nil
@@ -358,7 +376,7 @@ func (s *Stage) captureDirectory(base, path string) (string, error) {
 	if len(s.aliases) == MaximumRoots {
 		return "", ErrStage
 	}
-	s.aliases = append(s.aliases, directorySnapshot{path: path, target: target, info: info})
+	s.aliases = append(s.aliases, directorySnapshot{path: path, target: target, info: info, access: access})
 	return target, nil
 }
 
@@ -380,21 +398,22 @@ func readMetadata(parent, name string, optional bool) (fileSnapshot, error) {
 		return fileSnapshot{}, ErrStage
 	}
 	defer f.Close()
-	opened, err := f.Stat()
-	if err != nil || !os.SameFile(info, opened) {
+	access, err := fileAccess(f, info)
+	if err != nil {
 		return fileSnapshot{}, ErrConcurrentChange
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maximumMetadataBytes+1))
+	afterAccess, accessErr := fileAccess(f, info)
 	after, statErr := r.Lstat(name)
-	if err != nil || statErr != nil || len(data) > maximumMetadataBytes || !sameFile(info, after) {
+	if err != nil || statErr != nil || accessErr != nil || access != afterAccess || len(data) > maximumMetadataBytes || !sameFile(info, after) {
 		return fileSnapshot{}, ErrConcurrentChange
 	}
-	return fileSnapshot{parent: parent, name: name, info: info, digest: sha256.Sum256(data), data: data}, nil
+	return fileSnapshot{parent: parent, name: name, info: info, access: access, digest: sha256.Sum256(data), data: data}, nil
 }
 
 func (f fileSnapshot) recheck() error {
 	after, err := readMetadata(f.parent, f.name, f.info == nil)
-	if err != nil || !sameFile(f.info, after.info) || f.digest != after.digest {
+	if err != nil || !sameFile(f.info, after.info) || f.access != after.access || f.digest != after.digest {
 		return ErrConcurrentChange
 	}
 	return nil
