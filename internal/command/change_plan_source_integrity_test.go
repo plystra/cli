@@ -695,6 +695,19 @@ func TestBuiltCLIChangePlanRetainsFixedRootTreesBeforeIncompleteSelection(t *tes
 	}
 }
 
+func TestBuiltCLIChangePlanRetainsFixedRootInformationBeforeIncompleteSelection(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{
+		"manifest-only-fixed-root-information-identity-after-graph",
+		"no-authority-fixed-root-workspace-information-identity-after-graph",
+		"no-authority-fixed-root-workspace-unchanged",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {

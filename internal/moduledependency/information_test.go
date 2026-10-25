@@ -218,6 +218,167 @@ func TestPrepareSourcesRetainsModuleInformation(t *testing.T) {
 	}
 }
 
+func TestDiscoverRetainsFixedRootInformationBeforeListing(t *testing.T) {
+	for _, workspace := range []bool{false, true} {
+		for _, mode := range []string{"identity", "unchanged", "missing", "no-tree", "partial", "noncanonical", "rejected", "cancelled", "metadata-drift", "rejected-cancelled-drift", "selection-failure", "shared", "replacement-once", "exact-different", "unused", "directory", "no-authority", "known-go-version"} {
+			t.Run(fmt.Sprintf("workspace=%t/%s", workspace, mode), func(t *testing.T) {
+				t.Parallel()
+				fixture := warmPreparation(t, workspace, false)
+				project := filepath.Join(fixture.app, "go.mod")
+				writeFile(t, project, string(readFile(t, project))+"require "+warmRequestedModule+" v1.0.0\n")
+				replacements := project
+				if workspace {
+					replacements = fixture.work
+				}
+				switch mode {
+				case "shared":
+					writeFile(t, project, string(readFile(t, project))+"require example.com/shared v1.0.0\n")
+					writeFile(t, replacements, string(readFile(t, replacements))+"replace example.com/shared => "+warmSourceModule+" v1.0.0\n")
+				case "replacement-once":
+					writeFile(t, replacements, string(readFile(t, replacements))+"replace "+warmSourceModule+" => example.com/unused v1.0.0\n")
+				case "exact-different":
+					writeFile(t, replacements, string(readFile(t, replacements))+"replace "+warmRequestedModule+" v1.1.0 => "+warmSourceModule+" v1.1.0\n")
+				case "unused":
+					writeFile(t, project, strings.ReplaceAll(string(readFile(t, project)), "require "+warmRequestedModule+" v1.0.0\n", ""))
+				case "known-go-version":
+					writeFile(t, project, string(readFile(t, project))+"require example.com/unavailable v1.0.0\n")
+				}
+				sums := ""
+				if !workspace || mode == "known-go-version" {
+					sums = warmSourceModule + " v1.0.0/go.mod " + fixture.downloaded.GoModSum + "\n"
+					if mode != "known-go-version" {
+						if err := os.Remove(fixture.downloaded.GoMod); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if mode == "no-authority" {
+					sums = ""
+				}
+				writeFile(t, fixture.authority, sums)
+				path := strings.TrimSuffix(fixture.downloaded.GoMod, ".mod") + ".info"
+				switch mode {
+				case "missing", "directory":
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
+					if mode == "directory" {
+						if err := os.Mkdir(path, 0o700); err != nil {
+							t.Fatal(err)
+						}
+					}
+				case "noncanonical":
+					writeFile(t, path, string(readFile(t, path))+"\n")
+				case "no-tree":
+					relative, err := filepath.Rel(fixture.cache, fixture.downloaded.Dir)
+					if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+						t.Fatal("source removal escaped isolated cache")
+					}
+					if err := os.RemoveAll(fixture.downloaded.Dir); err != nil {
+						t.Fatal(err)
+					}
+				case "partial":
+					writeFile(t, strings.TrimSuffix(fixture.downloaded.GoMod, ".mod")+".partial", "")
+				}
+				stage, err := projectstage.Create(t.Context(), projectstage.Options{Start: fixture.app, Environment: fixture.environment})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = stage.Close() })
+				command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
+				marker := filepath.Join(fixture.root, "information-replaced")
+				if mode == "identity" {
+					environment = append(environment, "PLYSTRA_MODULE_METADATA_PATH="+path, "PLYSTRA_MODULE_METADATA_MARKER="+marker)
+				} else if mode == "selection-failure" {
+					environment = append(environment, "PLYSTRA_MODULE_LIST_SUFFIX={")
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				rejected := errors.New("fixed information rejected")
+				calls, early := 0, false
+				_, err = moduledependency.Discover(ctx, locate(t, stage.Root()), moduledependency.Options{Environment: environment, GoCommand: command,
+					RetainModuleInformation: func(ctx context.Context, paths []string) error {
+						calls++
+						if len(paths) != 1 || paths[0] != path {
+							t.Fatal("fixed information lost its effective identity")
+						}
+						early = early || !strings.Contains(string(readFile(t, trace)), "list -m ")
+						if err := stage.RetainMetadata(ctx, []projectstage.MetadataInput{{Path: path}}); err != nil {
+							return err
+						}
+						if mode == "metadata-drift" || mode == "rejected-cancelled-drift" {
+							writeFile(t, filepath.Join(stage.Root(), "go.sum"), "\n")
+						}
+						if mode == "cancelled" || mode == "rejected-cancelled-drift" {
+							cancel()
+						}
+						if mode == "rejected" || mode == "rejected-cancelled-drift" || mode == "known-go-version" || mode == "no-authority" {
+							return rejected
+						}
+						return nil
+					},
+				})
+				commands := string(readFile(t, trace))
+				switch mode {
+				case "identity":
+					if _, err := os.Stat(marker); err != nil {
+						t.Fatal("real Go listing did not exercise information replacement")
+					}
+					if !errors.Is(err, moduledependency.ErrConcurrentChange) {
+						t.Fatalf("fixed information replacement was accepted: %v", err)
+					}
+				case "directory":
+					if err == nil || calls != 0 || strings.Contains(commands, "list -m ") {
+						t.Fatalf("unsafe fixed information reached listing: %v", err)
+					}
+					return
+				case "selection-failure":
+					if !errors.Is(err, moduledependency.ErrInvalidOutput) {
+						t.Fatalf("failed listing lost its original error: %v", err)
+					}
+				case "noncanonical":
+					if !errors.Is(err, moduledependency.ErrConcurrentChange) {
+						t.Fatalf("Go information rewrite refreshed the original snapshot: %v", err)
+					}
+				case "rejected", "known-go-version", "no-authority", "cancelled", "metadata-drift", "rejected-cancelled-drift":
+					if (mode == "rejected" || mode == "known-go-version" || mode == "no-authority" || mode == "rejected-cancelled-drift") && !errors.Is(err, rejected) ||
+						(mode == "cancelled" || mode == "rejected-cancelled-drift") && !errors.Is(err, context.Canceled) ||
+						(mode == "metadata-drift" || mode == "rejected-cancelled-drift") && !errors.Is(err, moduledependency.ErrConcurrentChange) || strings.Contains(commands, "list -m ") {
+						t.Fatalf("failed fixed information retention reached listing or lost errors: %v", err)
+					}
+				case "shared":
+					// Go may reject two logical paths using the same physical module.
+				default:
+					if err != nil {
+						t.Fatalf("unchanged fixed information failed: calls=%d error=%v", calls, err)
+					}
+				}
+				wantEarly := mode != "missing" && mode != "unused" && mode != "exact-different"
+				if early != wantEarly || calls > 1 || wantEarly && calls != 1 {
+					t.Fatalf("fixed information retention boundary: calls=%d early=%t want=%t", calls, early, wantEarly)
+				}
+				inputs := stage.Inputs()
+				if err := stage.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "identity" || mode == "noncanonical" {
+					if !errors.Is(inputs.Recheck(t.Context()), projectstage.ErrConcurrentChange) {
+						t.Fatal("information drift was discarded after cleanup")
+					}
+					return
+				}
+				if err := inputs.Recheck(t.Context()); err != nil {
+					t.Fatal("fixed information evidence was lost after cleanup", err)
+				}
+				writeFile(t, path, "changed after fixed information cleanup\n")
+				if calls != 0 && !errors.Is(inputs.Recheck(t.Context()), projectstage.ErrConcurrentChange) || calls == 0 && inputs.Recheck(t.Context()) != nil {
+					t.Fatal("fixed information capture disagreed with consumed paths")
+				}
+			})
+		}
+	}
+}
+
 func TestPrepareSourcesInformationExcludesWorkspaceLocalSources(t *testing.T) {
 	for _, mode := range []string{"workfile-local", "member-local", "workfile-exact-local", "member-exact-local", "workfile-different-local", "member-different-local", "local-proof-budget", "mixed", "workspace-main"} {
 		for _, manifests := range []bool{false, true} {

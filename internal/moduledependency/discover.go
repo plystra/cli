@@ -74,6 +74,9 @@ type Options struct {
 	// before workspace selection for inferable requested effective versions.
 	// A completely inferred graph also retains selected effective information
 	// before graph listing, independently of manifest Go-version shortcuts.
+	// Incomplete discovery graphs retain fixed-root effective information when
+	// all-version replacement proofs establish the same physical source.
+	// Information retention does not require a source-tree callback or directory.
 	// These files have no independent Go checksum authority.
 	// Callbacks honor the supplied context, including post-cancellation retention.
 	RetainModuleInformation func(context.Context, []string) error

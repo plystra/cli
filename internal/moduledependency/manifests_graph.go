@@ -243,15 +243,15 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 			}
 		}
 	} else if graph.queryPaths == nil {
-		if err := graph.retainFixedRootTrees(ctx); err != nil {
+		if err := graph.retainFixedRootInputs(ctx); err != nil {
 			return err
 		}
 	}
 	return graph.inputs.recheck()
 }
 
-func (graph *manifestGraph) retainFixedRootTrees(ctx context.Context) error {
-	if graph.retainTrees == nil {
+func (graph *manifestGraph) retainFixedRootInputs(ctx context.Context) error {
+	if graph.retainTrees == nil && graph.retainInformation == nil {
 		return nil
 	}
 	mains := map[string]bool{}
@@ -277,13 +277,23 @@ func (graph *manifestGraph) retainFixedRootTrees(ctx context.Context) error {
 	}
 	module.Sort(roots)
 	budget := 65_536
-	retained := map[module.Version]bool{}
+	seenSources := map[module.Version]bool{}
+	var sources []module.Version
 	for _, root := range roots {
 		effective, fixed := uniformReplacementSource(ctx, root.Path, replacements, graph.effectiveVersion, &budget)
-		if !fixed || effective.Version == "" || retained[effective] {
+		if !fixed || effective.Version == "" || seenSources[effective] {
 			continue
 		}
-		retained[effective] = true
+		seenSources[effective] = true
+		sources = append(sources, effective)
+	}
+	if err := graph.retainEffectiveInformation(ctx, sources); err != nil {
+		return err
+	}
+	if graph.retainTrees == nil {
+		return errors.Join(ctx.Err(), graph.inputs.recheck())
+	}
+	for _, effective := range sources {
 		cache, err := graph.moduleCache(ctx)
 		if err != nil {
 			return err
@@ -512,17 +522,28 @@ func (graph *manifestGraph) retainSelectedInformation(ctx context.Context, mods 
 	if graph.retainInformation == nil {
 		return nil
 	}
-	var paths []string
-	seen := map[string]bool{}
+	var effective []module.Version
 	for _, mod := range mods {
-		effective, err := graph.effectiveVersion(mod)
+		version, err := graph.effectiveVersion(mod)
 		if err != nil {
 			return err
 		}
-		if effective.Version == "" {
+		effective = append(effective, version)
+	}
+	return graph.retainEffectiveInformation(ctx, effective)
+}
+
+func (graph *manifestGraph) retainEffectiveInformation(ctx context.Context, mods []module.Version) error {
+	if graph.retainInformation == nil {
+		return nil
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, mod := range mods {
+		if mod.Version == "" {
 			continue
 		}
-		path, err := graph.manifestPath(ctx, effective)
+		path, err := graph.manifestPath(ctx, mod)
 		if err != nil {
 			return err
 		}

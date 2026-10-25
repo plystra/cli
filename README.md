@@ -902,9 +902,16 @@ Local replacements and versionless workspace mains introduce no cache input;
 a versioned replacement target still does, even when its path names a workspace
 main. Unselected historical versions and unused replacements remain excluded.
 The queried filenames provide raw private evidence without parsing their JSON
-or claiming checksum authority. Missing files may materialize normally; an
-uncertain graph introduces no provisional information set. Cold reads, proxy
-metadata, and earlier authored-query normalization remain outside this boundary.
+or claiming checksum authority. Missing files may materialize normally. An
+incomplete discovery graph can still retain existing raw-root information when
+wildcard and every exact replacement alternative fix the same versioned physical
+source. This uses the same bounded proof as early pending-tree retention, but
+works independently of a source-tree callback, directory, or checksum authority.
+A learned module Go version does not suppress information capture. Shared
+physical files are captured in one batch during this phase; replacements
+resolve only once. Uncertain alternatives introduce no provisional information
+set. Cold reads, proxy metadata, and earlier authored-query normalization remain
+outside this boundary.
 The same complete selection also retains eligible warm source bundles before
 listing or extracted-manifest validation. Each effective version requires
 original archive checksum authority, an extracted tree, and no `.partial`
