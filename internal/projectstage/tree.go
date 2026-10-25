@@ -62,7 +62,7 @@ func captureTree(ctx context.Context, source, destination string, output *os.Roo
 		return treeSnapshot{}, ErrStage
 	}
 	defer root.Close()
-	if err := result.capture(ctx, root, ".", used); err != nil {
+	if err := result.capture(ctx, root, ".", ".", used); err != nil {
 		return treeSnapshot{}, err
 	}
 	after, err := os.Lstat(source)
@@ -73,7 +73,7 @@ func captureTree(ctx context.Context, source, destination string, output *os.Roo
 	return result, nil
 }
 
-func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative string, used *budget) error {
+func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, path, relative string, used *budget) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -81,12 +81,12 @@ func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative stri
 	if used.entries > MaximumEntries {
 		return ErrStage
 	}
-	info, err := root.Lstat(relative)
+	info, err := root.Lstat(path)
 	if err != nil || !info.IsDir() && !info.Mode().IsRegular() {
 		return ErrStage
 	}
 	entry := treeEntry{info: info}
-	file, err := root.Open(relative)
+	file, err := root.Open(path)
 	if err != nil {
 		return ErrStage
 	}
@@ -140,17 +140,29 @@ func (s *treeSnapshot) capture(ctx context.Context, root *os.Root, relative stri
 	if accessErr != nil || closeErr != nil || access != entry.access {
 		return ErrConcurrentChange
 	}
-	after, err := root.Lstat(relative)
+	after, err := root.Lstat(path)
 	if err != nil || !sameFile(info, after) {
 		return ErrConcurrentChange
 	}
-	for _, child := range children {
-		if err := s.capture(ctx, root, filepath.Join(relative, child.Name()), used); err != nil {
-			return err
+	if len(children) != 0 {
+		directory, err := root.OpenRoot(path)
+		if err != nil {
+			return ErrConcurrentChange
+		}
+		defer directory.Close()
+		opened, err := directory.Lstat(".")
+		if err != nil || !sameFile(info, opened) {
+			return ErrConcurrentChange
+		}
+		for _, child := range children {
+			if err := s.capture(ctx, directory, child.Name(), filepath.Join(relative, child.Name()), used); err != nil {
+				return err
+			}
 		}
 	}
 	if info.IsDir() {
-		current, access, err := readAccessInfo(root, relative)
+		// Validate the original parent binding after walking the held directory.
+		current, access, err := readAccessInfo(root, path)
 		if err != nil || !sameFile(info, current) || entry.access != access {
 			return ErrConcurrentChange
 		}
