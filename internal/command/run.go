@@ -3,12 +3,14 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/plystra/cli/internal/applicationresolve"
 	"github.com/plystra/cli/internal/dependencyadd"
 	"github.com/plystra/cli/internal/dependencyremove"
 	"github.com/plystra/cli/internal/dependencyupdate"
@@ -685,6 +687,12 @@ func runIn(arguments []string, stdout, stderr io.Writer, workingDirectory string
 		})
 		if err != nil {
 			writeCommandFailure(stderr, "", err, commandRecoveryContext(check.configurationPath, check.environmentName, environment))
+			if errors.Is(err, applicationresolve.ErrPolicyNotEnforced) {
+				return 3
+			}
+			if errors.Is(err, applicationresolve.ErrPolicySupportUnverified) {
+				return 8
+			}
 			return 1
 		}
 		if !result.Clean() {

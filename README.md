@@ -122,6 +122,21 @@ and permits 2 through 16 (default 2), while `backoff` defaults to 0s and permits
 0s through 2562047h47m16.854775807s. The outermost retry-enabled binding owns
 replay, with fresh request copies and no overlapping attempts.
 
+Executable policy validation reads the compiler exports of the application's
+Go-selected `github.com/plystra/kernel/invocation` package, including workspace
+and replacement selection. It checks the exported policy representation,
+schema/compiler/default identities, and the normalized timeout and retry bounds.
+The CLI's own Kernel pin does not establish application compatibility. Missing
+or incompatible support reports `PLYSTRA_POLICY_NOT_ENFORCED` with the exact
+Interface, field, selected Kernel identity, safe declaration sources, and recovery.
+Compiler, dependency, or export I/O failures leave support unverified instead.
+Loading exports may run the Go toolchain and populate caches; it executes no
+package initialization or business methods and uses private module or workspace
+checksum files. Generation and staged source-preview results retain observed
+support-query execution and temporary-file effects, including failures.
+Pure configuration and selection previews still require their final policy gate;
+the complete policy-support acceptance outcome remains unfinished.
+
 `generated/compatibility/interfaces.json` is the committed, CLI-owned
 replaceable shape working record for every visible authored Interface, whether
 or not it is selected or exposed. It records each Interface package and method,

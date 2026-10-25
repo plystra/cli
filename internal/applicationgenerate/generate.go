@@ -108,6 +108,7 @@ type ModuleMutation func(context.Context, string, []ModuleRequirement, func() er
 // non-nil. RejectUnexpected makes compound mutating commands fail and roll
 // back rather than commit beside unowned generated output.
 type Options struct {
+	ObservePolicySupport  func(interfaceinventory.PackageLoadEvent)
 	Start                 string
 	Check                 bool
 	Offline               bool
@@ -128,18 +129,18 @@ type Options struct {
 // output comparison. A successful installation can retain unexpected unowned
 // files, which remain visible in Report rather than being overwritten.
 type Result struct {
-	module                   modulelocate.Module
-	report                   generatedfiles.Report
-	checked                  bool
-	installed                bool
-	configurationPath        string
-	configurationSelection   applicationresolve.ConfigurationSelection
-	interfaceComparison      interfacecompatibility.Comparison
-	metadataComparison       interfacecompatibility.MetadataComparison
-	transportComparison      interfacecompatibility.TransportComparison
-	javaScriptComparison     interfacecompatibility.JavaScriptComparison
-	documentationComparison  interfacecompatibility.DocumentationComparison
-	evolutionAssessment      interfacecompatibility.EvolutionAssessment
+	module                  modulelocate.Module
+	report                  generatedfiles.Report
+	checked                 bool
+	installed               bool
+	configurationPath       string
+	configurationSelection  applicationresolve.ConfigurationSelection
+	interfaceComparison     interfacecompatibility.Comparison
+	metadataComparison      interfacecompatibility.MetadataComparison
+	transportComparison     interfacecompatibility.TransportComparison
+	javaScriptComparison    interfacecompatibility.JavaScriptComparison
+	documentationComparison interfacecompatibility.DocumentationComparison
+	evolutionAssessment     interfacecompatibility.EvolutionAssessment
 }
 
 // Module returns the nearest enclosing Go Module.
@@ -236,17 +237,17 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 			return partialResult(prepared.resolved), fmt.Errorf("%w: %w", ErrGenerate, err)
 		}
 		return Result{
-			module:                   prepared.resolved.Module(),
-			report:                   report,
-			checked:                  true,
-			configurationPath:        prepared.resolved.ConfigurationSelection().Path(),
-			configurationSelection:   prepared.resolved.ConfigurationSelection(),
-			interfaceComparison:      prepared.interfaceComparison,
-			metadataComparison:       prepared.metadataComparison,
-			transportComparison:      prepared.transportComparison,
-			javaScriptComparison:     prepared.javaScriptComparison,
-			documentationComparison:  prepared.documentationComparison,
-			evolutionAssessment:      prepared.evolutionAssessment,
+			module:                  prepared.resolved.Module(),
+			report:                  report,
+			checked:                 true,
+			configurationPath:       prepared.resolved.ConfigurationSelection().Path(),
+			configurationSelection:  prepared.resolved.ConfigurationSelection(),
+			interfaceComparison:     prepared.interfaceComparison,
+			metadataComparison:      prepared.metadataComparison,
+			transportComparison:     prepared.transportComparison,
+			javaScriptComparison:    prepared.javaScriptComparison,
+			documentationComparison: prepared.documentationComparison,
+			evolutionAssessment:     prepared.evolutionAssessment,
 		}, nil
 	}
 
@@ -305,25 +306,25 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 		return partialResult(prepared.resolved), fmt.Errorf("%w: %w", ErrGenerate, err)
 	}
 	return Result{
-		module:                   prepared.resolved.Module(),
-		report:                   outcome.Report(),
-		installed:                outcome.Changed(),
-		configurationPath:        prepared.resolved.ConfigurationSelection().Path(),
-		configurationSelection:   prepared.resolved.ConfigurationSelection(),
-		interfaceComparison:      prepared.interfaceComparison,
-		metadataComparison:       prepared.metadataComparison,
-		transportComparison:      prepared.transportComparison,
-		javaScriptComparison:     prepared.javaScriptComparison,
-		documentationComparison:  prepared.documentationComparison,
-		evolutionAssessment:      prepared.evolutionAssessment,
+		module:                  prepared.resolved.Module(),
+		report:                  outcome.Report(),
+		installed:               outcome.Changed(),
+		configurationPath:       prepared.resolved.ConfigurationSelection().Path(),
+		configurationSelection:  prepared.resolved.ConfigurationSelection(),
+		interfaceComparison:     prepared.interfaceComparison,
+		metadataComparison:      prepared.metadataComparison,
+		transportComparison:     prepared.transportComparison,
+		javaScriptComparison:    prepared.javaScriptComparison,
+		documentationComparison: prepared.documentationComparison,
+		evolutionAssessment:     prepared.evolutionAssessment,
 	}, nil
 }
 
 func partialResult(resolved applicationresolve.Result) Result {
 	return Result{
-		module:                   resolved.Module(),
-		configurationPath:        resolved.ConfigurationSelection().Path(),
-		configurationSelection:   resolved.ConfigurationSelection(),
+		module:                 resolved.Module(),
+		configurationPath:      resolved.ConfigurationSelection().Path(),
+		configurationSelection: resolved.ConfigurationSelection(),
 	}
 }
 
@@ -486,6 +487,7 @@ type preparedGeneration struct {
 
 func prepare(ctx context.Context, options Options, start string) (preparedGeneration, error) {
 	resolved, err := applicationresolve.Resolve(ctx, applicationresolve.Options{
+		ObservePolicySupport:      options.ObservePolicySupport,
 		RequireExecutablePolicies: true,
 		Start:                     start,
 		Offline:                   options.Offline,

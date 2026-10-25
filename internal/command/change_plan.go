@@ -115,6 +115,25 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		}
 		return writeChangePlanResult(output, result, message)
 	}
+	failCandidate := func(cause error, message string) int {
+		var policy *applicationresolve.PolicyNotEnforcedError
+		if !errors.As(cause, &policy) || policy == nil {
+			if errors.Is(cause, applicationresolve.ErrPolicySupportUnverified) {
+				return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The selected Kernel's policy support could not be verified; no Project changes were installed.")
+			}
+			return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, message)
+		}
+		recoveryContext := commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment)
+		result, err := newChangePlanPolicyFailure(invocationID, emptyEffects, policy, recoveryContext)
+		if err != nil {
+			return 8
+		}
+		if output.format == commandFormatJSON {
+			return writeChangePlanResult(output, result, policy.Error())
+		}
+		writeCommandFailure(output.diagnosticWriter(), "", policy, recoveryContext)
+		return result.ExitClass()
+	}
 	requestBytes, err := readChangeRequest(workingDirectory, parsed.request)
 	if err != nil {
 		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanRequestInvalid, "The change request could not be read.")
@@ -139,7 +158,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			emptyEffects = planned.Effects()
 		}
 		if err != nil {
-			return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The complete staged candidate could not be validated; no Project changes were installed.")
+			return failCandidate(err, "The complete staged candidate could not be validated; no Project changes were installed.")
 		}
 		payload, effects, err := buildScaffoldChangePlanPayload(request, planned)
 		if err != nil {
@@ -237,7 +256,7 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 		Environment: environment,
 	})
 	if err != nil {
-		return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, "The change could not be planned against the selected Project.")
+		return failCandidate(err, "The change could not be planned against the selected Project.")
 	}
 	payload, effects, err := buildChangePlanPayload(request, planned)
 	if err != nil {
@@ -520,6 +539,34 @@ func newChangePlanFailure(invocationID string, effects commandschema.Effects, st
 		return commandschema.Result{}, err
 	}
 	return commandschema.NewResult(commandschema.ResultInput{Operation: "change.plan", InvocationID: invocationID, Status: status, Diagnostics: []commandschema.Diagnostic{diagnostic}, Effects: effects})
+}
+
+func newChangePlanPolicyFailure(invocationID string, effects commandschema.Effects, policy *applicationresolve.PolicyNotEnforcedError, context recoveryContext) (commandschema.Result, error) {
+	locations := actionableDiagnosticSources(policy, diagnosticPolicyNotEnforced)
+	diagnostic, err := commandschema.NewDiagnostic(commandschema.DiagnosticInput{
+		Code: diagnosticPolicyNotEnforced, Severity: diagnosticjson.SeverityError, Message: policy.Error(), Locations: locations,
+	})
+	if err != nil {
+		return commandschema.Result{}, err
+	}
+	selector, arguments, valid := explainRecoverySelectorFromContext(context)
+	input := commandschema.RecoveryInput{
+		ID: "resolve-policy-support", Kind: commandschema.RecoveryManual,
+		Target:     commandschema.RecoveryTarget{Kind: "configuration_field", ID: fmt.Sprintf("interfaces.policies[%q].%s", policy.InterfaceID(), policy.Field())},
+		Provenance: recoverySources(locations), Preconditions: []commandschema.RecoveryFact{{Kind: "compatible_policy_support"}},
+		Verification: commandschema.Verification{WorkingDirectory: ".", Argv: append([]string{"plystra", "check"}, arguments...)},
+	}
+	if valid {
+		input.Selector = selector
+	}
+	recovery, err := commandschema.NewRecovery(input)
+	if err != nil {
+		return commandschema.Result{}, err
+	}
+	return commandschema.NewResult(commandschema.ResultInput{
+		Operation: "change.plan", InvocationID: invocationID, Status: commandschema.StatusValidationFailed,
+		Diagnostics: []commandschema.Diagnostic{diagnostic}, Recovery: []commandschema.Recovery{recovery}, Effects: effects,
+	})
 }
 
 func writeChangePlanResult(output commandOutput, result commandschema.Result, human string) int {

@@ -124,6 +124,7 @@ func (*UnownedConstructorConfigurationError) Unwrap() error {
 // discovery plus selected legacy generation compilation so each observes the
 // same Go workspace state during the architecture transition.
 type Options struct {
+	ObservePolicySupport func(interfaceinventory.PackageLoadEvent)
 	// RequireExecutablePolicies rejects active policy fields that the installed
 	// CLI/Kernel pair cannot enforce. Read-only inspection leaves it false.
 	RequireExecutablePolicies bool
@@ -318,7 +319,7 @@ func Resolve(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 	}
 	if options.RequireExecutablePolicies {
-		if err := validateExecutablePolicies(manifest, interfaceResolution, resolution.Context(), sourceContext); err != nil {
+		if err := validateExecutablePolicies(ctx, module, dependencies, options, manifest, interfaceResolution, resolution.Context(), sourceContext); err != nil {
 			return Result{}, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 	}

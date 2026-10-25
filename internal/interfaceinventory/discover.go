@@ -72,6 +72,15 @@ type Options struct {
 	// Offline prevents package loading and private checksum preparation from
 	// contacting a proxy or switching toolchains.
 	Offline bool
+	// ObserveLoad retains selected-package preparation effects on failure too.
+	ObserveLoad func(PackageLoadEvent)
+}
+
+// PackageLoadEvent reports effects of compiler-export loading, without private paths.
+type PackageLoadEvent struct {
+	Module           string
+	GoStarted        bool
+	TemporaryCreated bool
 }
 
 // ExactInterfacePackages identifies an explicit bounded set of canonical
@@ -1076,24 +1085,26 @@ func hasDirectiveComment(filename string, source []byte, prefixes ...string) boo
 }
 
 type listedPackage struct {
-	Dir        string                `json:"Dir"`
-	ImportPath string                `json:"ImportPath"`
-	Name       string                `json:"Name"`
-	Export     string                `json:"Export"`
-	GoFiles    []string              `json:"GoFiles"`
-	CgoFiles   []string              `json:"CgoFiles"`
-	CFiles     []string              `json:"CFiles"`
-	CXXFiles   []string              `json:"CXXFiles"`
-	MFiles     []string              `json:"MFiles"`
-	HFiles     []string              `json:"HFiles"`
-	FFiles     []string              `json:"FFiles"`
-	SFiles     []string              `json:"SFiles"`
-	Imports    []string              `json:"Imports"`
-	ImportMap  map[string]string     `json:"ImportMap"`
-	Incomplete bool                  `json:"Incomplete"`
-	Error      *listedPackageError   `json:"Error"`
-	DepsErrors []*listedPackageError `json:"DepsErrors"`
-	Module     *listedModule         `json:"Module"`
+	Dir            string                `json:"Dir"`
+	ImportPath     string                `json:"ImportPath"`
+	Name           string                `json:"Name"`
+	Export         string                `json:"Export"`
+	GoFiles        []string              `json:"GoFiles"`
+	IgnoredGoFiles []string              `json:"IgnoredGoFiles"`
+	InvalidGoFiles []string              `json:"InvalidGoFiles"`
+	CgoFiles       []string              `json:"CgoFiles"`
+	CFiles         []string              `json:"CFiles"`
+	CXXFiles       []string              `json:"CXXFiles"`
+	MFiles         []string              `json:"MFiles"`
+	HFiles         []string              `json:"HFiles"`
+	FFiles         []string              `json:"FFiles"`
+	SFiles         []string              `json:"SFiles"`
+	Imports        []string              `json:"Imports"`
+	ImportMap      map[string]string     `json:"ImportMap"`
+	Incomplete     bool                  `json:"Incomplete"`
+	Error          *listedPackageError   `json:"Error"`
+	DepsErrors     []*listedPackageError `json:"DepsErrors"`
+	Module         *listedModule         `json:"Module"`
 }
 
 type listedPackageError struct {

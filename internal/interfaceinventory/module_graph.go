@@ -41,12 +41,21 @@ func loadProjectCandidates(ctx context.Context, application modulelocate.Module,
 	if len(candidates) == 0 {
 		return loadedInventory{}, nil
 	}
-	work, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: application.Path(), Environment: options.Environment}, "env", "GOWORK")
+	return loadProjectPackages(ctx, application, dependencies, options, func(options Options, flags ...string) (loadedInventory, error) {
+		return loadCandidatesAt(ctx, candidates, options, application.Path(), flags...)
+	})
+}
+
+func loadProjectPackages(ctx context.Context, application modulelocate.Module, dependencies moduledependency.Index, options Options, load func(Options, ...string) (loadedInventory, error)) (result loadedInventory, err error) {
+	work, started, err := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: application.Path(), Environment: options.Environment}, "env", "GOWORK")
+	if started && options.ObserveLoad != nil {
+		options.ObserveLoad(PackageLoadEvent{Module: application.ModulePath(), GoStarted: true})
+	}
 	if err != nil {
 		return loadedInventory{}, err
 	}
 	if selected := strings.TrimSpace(string(work)); selected != "" && selected != "off" {
-		return loadCandidatesAt(ctx, candidates, options, application.Path())
+		return loadPrivateWorkspace(application, selected, options, load)
 	}
 	data, err := readRegularFile(filepath.Join(application.Path(), "go.mod"), 1<<20)
 	if err != nil {
@@ -72,6 +81,9 @@ func loadProjectCandidates(ctx context.Context, application modulelocate.Module,
 	directory, err := os.MkdirTemp("", "plystra-discovery-")
 	if err != nil {
 		return loadedInventory{}, fmt.Errorf("create private discovery module directory")
+	}
+	if options.ObserveLoad != nil {
+		options.ObserveLoad(PackageLoadEvent{Module: application.ModulePath(), TemporaryCreated: true})
 	}
 	defer func() {
 		if cleanupErr := os.RemoveAll(directory); cleanupErr != nil {
@@ -107,13 +119,87 @@ func loadProjectCandidates(ctx context.Context, application modulelocate.Module,
 		arguments = append(arguments, modulePath+"@"+version)
 	}
 	if len(arguments) > 3 {
-		if err := gocommand.Run(ctx, gocommand.Options{
+		started, err := gocommand.RunObserved(ctx, gocommand.Options{
 			Command: options.GoCommand, Directory: application.Path(), Environment: options.Environment,
-		}, arguments...); err != nil {
+		}, arguments...)
+		if started && options.ObserveLoad != nil {
+			options.ObserveLoad(PackageLoadEvent{Module: application.ModulePath(), GoStarted: true})
+		}
+		if err != nil {
 			return loadedInventory{}, fmt.Errorf("prepare private discovery checksums: %w", err)
 		}
 	}
-	return loadCandidatesAt(ctx, candidates, options, application.Path(), "-modfile="+path)
+	return load(options, "-modfile="+path)
+}
+
+func loadPrivateWorkspace(application modulelocate.Module, workPath string, options Options, load func(Options, ...string) (loadedInventory, error)) (result loadedInventory, err error) {
+	data, err := readRegularFile(workPath, maximumSourceSize)
+	if err != nil {
+		return result, errors.New("read selected workspace for package loading")
+	}
+	work, err := modfile.ParseWork("go.work", data, nil)
+	if err != nil {
+		return result, errors.New("parse selected workspace for package loading")
+	}
+	for _, use := range work.Use {
+		path := use.Path
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(workPath), path)
+		}
+		use.Path = filepath.ToSlash(path)
+		use.Syntax.Token[len(use.Syntax.Token)-1] = modfile.AutoQuote(use.Path)
+	}
+	for _, replacement := range work.Replace {
+		if replacement.New.Version == "" && !filepath.IsAbs(replacement.New.Path) {
+			replacement.New.Path = filepath.ToSlash(filepath.Join(filepath.Dir(workPath), replacement.New.Path))
+			for index, token := range replacement.Syntax.Token {
+				if token == "=>" {
+					replacement.Syntax.Token[index+1] = modfile.AutoQuote(replacement.New.Path)
+					break
+				}
+			}
+		}
+	}
+	directory, err := os.MkdirTemp("", "plystra-package-workspace-")
+	if err != nil {
+		return result, errors.New("create private package workspace")
+	}
+	defer func() {
+		if cleanupErr := os.RemoveAll(directory); cleanupErr != nil {
+			err = errors.Join(err, errors.New("remove private package workspace"))
+		}
+		if err != nil {
+			err = &discoveryModuleError{cause: err, message: gocommand.SanitizeOutput(err.Error(), directory)}
+		}
+	}()
+	if options.ObserveLoad != nil {
+		options.ObserveLoad(PackageLoadEvent{Module: application.ModulePath(), TemporaryCreated: true})
+	}
+	privateWork := filepath.Join(directory, "go.work")
+	if err := os.WriteFile(privateWork, modfile.Format(work.Syntax), 0o600); err != nil {
+		return result, errors.New("write private package workspace")
+	}
+	sums, err := readRegularFile(workPath+".sum", maximumSourceSize)
+	if err == nil {
+		if err := os.WriteFile(privateWork+".sum", sums, 0o600); err != nil {
+			return result, errors.New("write private workspace checksums")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return result, errors.New("read selected workspace checksums")
+	}
+	environment := options.Environment
+	if environment == nil {
+		environment = os.Environ()
+	}
+	options.Environment = make([]string, 0, len(environment)+1)
+	for _, entry := range environment {
+		key, _, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(key, "GOWORK") {
+			options.Environment = append(options.Environment, entry)
+		}
+	}
+	options.Environment = append(options.Environment, "GOWORK="+privateWork)
+	return load(options)
 }
 
 type discoveryModuleError struct {

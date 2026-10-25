@@ -1122,6 +1122,19 @@ output, or module metadata.
 Authored static Interface timeout and replay-safe retry policies execute through the selected binding. Retry requires timeout and the explicit eligibility: replay_safe assertion about the binding and its downstream effects; safety is never inferred. max_attempts counts the first attempt, defaults to 2, and permits 2 through 16; backoff defaults to 0s and accepts nonnegative Go durations. One total budget starts before request validation and copying, is capped by an earlier caller deadline, and includes all attempts, backoff, and response processing. Each attempt receives a fresh copy of the original request snapshot and starts only after the previous target terminates. The outermost retry-enabled binding owns replay; nested bindings suppress their own retries. Only not_started resource exhaustion and result_known unavailable or resource exhaustion can retry. Semantic errors, cancellation, deadlines, internal or validation failures, and result_unknown never replay; exhaustion retains the final safe category, completion, and bounded attempt count. Without retry there is one attempt; without timeout there is no added deadline. Complete compiled policy values and literal schema/compiler/defaults versions are frozen before runtime; mismatches fail closed. Dormant policies remain intent outside executable identity until activation. Inspect capabilities reports support stages, exact defaults, and duration bounds. Authored concurrency, queue, and circuit forms remain unsupported. Transitional legacy Capability wrappers do not include preparation and completion in the Kernel budget; active authored policies on that path still fail with PLYSTRA_POLICY_NOT_ENFORCED. Capability discovery reports that exception as legacy.capability-timeout with executed=no and accepted=no.
 This applies to the root, selected environment, and complete replacement
 current-Project layers.
+
+Executable checks inspect the application's Go-selected Kernel policy exports,
+including workspace and replacement selection, rather than relying on the
+CLI's own Kernel pin. Missing or incompatible policy types, version identities,
+or normalized bounds fail with `PLYSTRA_POLICY_NOT_ENFORCED`, the exact field,
+selected Kernel identity, declaration sources, and recovery. Compilation or
+export-loading failures leave support unverified and return an execution
+failure. Inspection runs Go tooling without running Kernel initialization or
+business methods; it isolates module and workspace checksum writes. Generation
+and staged source previews report observed tooling and temporary-file effects
+on failure too. Pure configuration and selection previews still need the final
+policy gate; this is not complete policy-support acceptance.
+
 Regenerate and rebuild after changing an active timeout or retry; startup rejects a
 changed active policy before any Implementation constructor runs.
 

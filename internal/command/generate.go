@@ -13,6 +13,7 @@ import (
 	"github.com/plystra/cli/internal/diagnosticcode"
 	"github.com/plystra/cli/internal/diagnosticjson"
 	"github.com/plystra/cli/internal/generatedfiles"
+	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/projectlocate"
@@ -27,15 +28,16 @@ var (
 )
 
 type generateResultEncoder struct {
-	invocationID string
-	emptyEffects commandschema.Effects
+	invocationID  string
+	emptyEffects  commandschema.Effects
+	policyEffects *policySupportEffects
 }
 
 type generateFailureInput struct {
-	err          error
-	result       applicationgenerate.Result
-	context      recoveryContext
-	report       *generatedfiles.Report
+	err     error
+	result  applicationgenerate.Result
+	context recoveryContext
+	report  *generatedfiles.Report
 }
 
 type generateFailureClassification struct {
@@ -80,7 +82,8 @@ func runGenerate(arguments []string, stdout, stderr io.Writer, workingDirectory 
 
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
-	result, generateErr := executeGenerate(ctx, parsed, workingDirectory, environment)
+	encoder.policyEffects = &policySupportEffects{}
+	result, generateErr := executeGenerate(ctx, parsed, workingDirectory, environment, encoder.policyEffects.observe)
 	if generateErr != nil {
 		return emitGenerateFailure(output, encoder, generateFailureInput{err: generateErr, result: result, context: recovery}, func() error {
 			writeCommandFailure(output.diagnosticWriter(), "", generateErr, recovery)
@@ -89,9 +92,9 @@ func runGenerate(arguments []string, stdout, stderr io.Writer, workingDirectory 
 	}
 	if !result.Report().Clean() {
 		return emitGenerateFailure(output, encoder, generateFailureInput{
-			result:       result,
-			context:      recovery,
-			report:       reportPointer(result.Report()),
+			result:  result,
+			context: recovery,
+			report:  reportPointer(result.Report()),
 		}, func() error {
 			heading := "generated output remains inconsistent after installation"
 			if result.Checked() {
@@ -116,14 +119,15 @@ func runGenerate(arguments []string, stdout, stderr io.Writer, workingDirectory 
 	})
 }
 
-func executeGenerate(ctx context.Context, arguments generateArguments, workingDirectory string, environment []string) (applicationgenerate.Result, error) {
+func executeGenerate(ctx context.Context, arguments generateArguments, workingDirectory string, environment []string, observe func(interfaceinventory.PackageLoadEvent)) (applicationgenerate.Result, error) {
 	options := applicationgenerate.Options{
-		Start:             workingDirectory,
-		Check:             arguments.check,
-		Offline:           arguments.offline,
-		ConfigurationPath: arguments.configurationPath,
-		EnvironmentName:   arguments.environmentName,
-		Environment:       environment,
+		ObservePolicySupport: observe,
+		Start:                workingDirectory,
+		Check:                arguments.check,
+		Offline:              arguments.offline,
+		ConfigurationPath:    arguments.configurationPath,
+		EnvironmentName:      arguments.environmentName,
+		Environment:          environment,
 	}
 	if arguments.check || arguments.offline {
 		result, err := applicationgenerate.Generate(ctx, options)
@@ -185,6 +189,10 @@ func (e generateResultEncoder) success(result applicationgenerate.Result) (comma
 		status = commandschema.StatusNoOp
 		effects = e.emptyEffects
 	}
+	effects, err = e.policyEffects.merge(effects)
+	if err != nil {
+		return commandschema.Result{}, err
+	}
 	return commandschema.NewResult(commandschema.ResultInput{
 		Operation:    "generate",
 		InvocationID: e.invocationID,
@@ -211,6 +219,10 @@ func (e generateResultEncoder) failure(input generateFailureInput) (commandschem
 		return commandschema.Result{}, err
 	}
 	effects, err := generateEffects(input.result, input.err, false)
+	if err != nil {
+		return commandschema.Result{}, err
+	}
+	effects, err = e.policyEffects.merge(effects)
 	if err != nil {
 		return commandschema.Result{}, err
 	}
@@ -272,9 +284,20 @@ func classifyGenerateFailure(input generateFailureInput) generateFailureClassifi
 			locations: nil,
 		}
 	}
+	if errors.Is(input.err, applicationresolve.ErrPolicySupportUnverified) {
+		return generateFailureClassification{
+			status: commandschema.StatusExecutionFailed, code: diagnosticcode.GenerateFailed,
+			message:  "The selected Kernel's policy support could not be verified.",
+			recovery: "Make the selected Kernel invocation package and Go compiler exports available, then rerun `plystra generate" + input.context.selectorSuffix() + "`.",
+		}
+	}
 	if actionable, found := primaryActionableDiagnostic(input.err, input.context); found {
 		status := generateStatusForDiagnostic(actionable.code)
 		message := generateFailureMessage(status)
+		var policy *applicationresolve.PolicyNotEnforcedError
+		if errors.As(input.err, &policy) {
+			message = policy.Error()
+		}
 		return generateFailureClassification{
 			status:    status,
 			code:      actionable.code,
@@ -454,6 +477,9 @@ func emitGenerateFailure(output commandOutput, encoder generateResultEncoder, in
 	}
 	exitCode := writeGenerateResult(output, result, human)
 	if output.format == commandFormatHuman {
+		if errors.Is(input.err, applicationresolve.ErrPolicyNotEnforced) || errors.Is(input.err, applicationresolve.ErrPolicySupportUnverified) {
+			return exitCode
+		}
 		if errors.Is(input.err, errGenerateInvocation) {
 			return 2
 		}

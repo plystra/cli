@@ -1178,6 +1178,10 @@ func concurrentFailure(err error) bool {
 }
 
 func primaryFailureMessage(err error) string {
+	var policy *applicationresolve.PolicyNotEnforcedError
+	if errors.As(err, &policy) && policy != nil {
+		return policy.Error()
+	}
 	if errors.Is(err, newproject.ErrInvalidTemplate) {
 		if problem, _, found := splitEmbeddedRecovery(err.Error()); found {
 			return problem
