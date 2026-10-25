@@ -53,6 +53,13 @@ type ArchiveInput struct {
 // Evidence survives failed validation and Stage.Close without refreshing a prior
 // capture. Proxy origins and cache files remain distinct original inputs.
 func (s *Stage) RetainArchives(ctx context.Context, archives []ArchiveInput) error {
+	return s.WithMetadataBatch(ctx, func(retain MetadataRetention) error { return retain.Archives(archives) })
+}
+
+func (s *Stage) retainArchives(ctx context.Context, archives []ArchiveInput) error {
+	if len(archives) > MaximumEntries {
+		return ErrStage
+	}
 	for _, archive := range archives {
 		path, pathErr := module.EscapePath(archive.Module.Path)
 		version, versionErr := module.EscapeVersion(archive.Module.Version)
@@ -60,11 +67,11 @@ func (s *Stage) RetainArchives(ctx context.Context, archives []ArchiveInput) err
 			module.CanonicalVersion(archive.Module.Version) != archive.Module.Version || !filepath.IsAbs(archive.Path) {
 			return ErrSourceIntegrity
 		}
-		if _, err := s.retainAcquisitionFile(ctx, archive.Path, path+"/@v/"+version+".zip", "cache"); err != nil {
+		if _, err := s.captureAcquisitionFile(ctx, archive.Path, path+"/@v/"+version+".zip", "cache"); err != nil {
 			return err
 		}
 	}
-	return s.Recheck(ctx)
+	return nil
 }
 
 func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin string) (data []byte, resultErr error) {
@@ -77,6 +84,23 @@ func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin
 	if err := s.recheck(ctx); err != nil {
 		return nil, err
 	}
+	data, resultErr = s.captureAcquisitionFile(ctx, path, request, origin)
+	if resultErr != nil && !errors.Is(resultErr, errProxyNotFound) {
+		return nil, resultErr
+	}
+	if err := s.recheck(ctx); err != nil {
+		return nil, err
+	}
+	return data, resultErr
+}
+
+// The caller holds the Stage lock and owns the surrounding complete rechecks.
+func (s *Stage) captureAcquisitionFile(ctx context.Context, path, request, origin string) (data []byte, resultErr error) {
+	defer func() {
+		if resultErr != nil && !errors.Is(resultErr, errProxyNotFound) && s.proxyErr == nil {
+			s.proxyErr = errors.Join(ErrStage, resultErr)
+		}
+	}()
 	if !filepath.IsAbs(path) {
 		return nil, ErrStage
 	}
@@ -116,9 +140,6 @@ func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin
 				return nil, ErrConcurrentChange
 			}
 			s.inputs = s.captureInputs()
-			if err := s.recheck(ctx); err != nil {
-				return nil, err
-			}
 			if artifact.file.info == nil {
 				return nil, errProxyNotFound
 			}
@@ -156,9 +177,6 @@ func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin
 		}
 		s.artifacts[index] = artifact
 		s.inputs = s.captureInputs()
-	}
-	if err := s.recheck(ctx); err != nil {
-		return nil, err
 	}
 	if file.info == nil {
 		return nil, errProxyNotFound

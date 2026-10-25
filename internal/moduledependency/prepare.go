@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/plystra/cli/internal/gocommand"
@@ -309,15 +310,20 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		// must not discard consumed metadata or start new Go work during cleanup.
 		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if retainMetadata != nil {
-			retentionErr = retainMetadata(captureCtx)
+		capture := func(captureCtx context.Context) error {
+			var captureErr error
+			if retainMetadata != nil {
+				captureErr = retainMetadata(captureCtx)
+			}
+			if retainArchives != nil {
+				captureErr = errors.Join(captureErr, retainArchives(captureCtx))
+			}
+			return errors.Join(captureErr,
+				retainPresentModuleFiles(captureCtx, manifests, options.RetainManifestFiles),
+				retainPresentModuleFiles(captureCtx, information, options.RetainModuleInformation), captureCtx.Err())
 		}
-		if retainArchives != nil {
-			retentionErr = errors.Join(retentionErr, retainArchives(captureCtx))
-		}
-		retentionErr = errors.Join(retentionErr,
-			retainPresentModuleFiles(captureCtx, manifests, options.RetainManifestFiles),
-			retainPresentModuleFiles(captureCtx, information, options.RetainModuleInformation), captureCtx.Err())
+		retentionErr = captureMetadataBatch(captureCtx, options.MetadataBatch, capture)
+		retentionErr = errors.Join(retentionErr, captureCtx.Err())
 	}
 	retentionErr = errors.Join(retentionErr, ctx.Err())
 	if downloadErr != nil {
@@ -379,4 +385,38 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	}
 	copy(result, acquired)
 	return nil
+}
+
+func captureMetadataBatch(ctx context.Context, batch func(context.Context, func(context.Context) error) error, capture func(context.Context) error) error {
+	if batch == nil {
+		return capture(ctx)
+	}
+	var mu sync.Mutex
+	active, called := true, false
+	var captureErr error
+	batchErr := batch(ctx, func(derived context.Context) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if !active || called {
+			captureErr = errors.Join(captureErr, ErrSourceIntegrity)
+			return ErrSourceIntegrity
+		}
+		called = true
+		deadline, _ := ctx.Deadline()
+		if derived == nil {
+			captureErr = ErrSourceIntegrity
+		} else if bounded, ok := derived.Deadline(); !ok || bounded.After(deadline) {
+			captureErr = ErrSourceIntegrity
+		} else {
+			captureErr = capture(derived)
+		}
+		return captureErr
+	})
+	mu.Lock()
+	defer mu.Unlock()
+	active = false
+	if !called && batchErr == nil {
+		batchErr = ErrSourceIntegrity
+	}
+	return errors.Join(batchErr, captureErr)
 }

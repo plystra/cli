@@ -20,6 +20,7 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	}
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
+		MetadataBatch:     metadataBatch(stage),
 		AcquisitionCache:  stage.AcquisitionCache,
 		RetainSourceTrees: stage.RetainSourceTrees,
 		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
@@ -33,7 +34,7 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 			for index, manifest := range manifests {
 				inputs[index] = projectstage.MetadataInput{Path: manifest.Path, GoModChecksum: manifest.Checksum}
 			}
-			return stage.RetainMetadata(ctx, inputs)
+			return retainStageMetadata(ctx, stage, inputs)
 		},
 	})
 	if err != nil {
@@ -54,6 +55,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 		return err
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
+		MetadataBatch:     metadataBatch(stage),
 		AcquisitionCache:  stage.AcquisitionCache,
 		RetainSourceTrees: stage.RetainSourceTrees,
 		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
@@ -66,7 +68,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 			for index, manifest := range manifests {
 				inputs[index] = projectstage.MetadataInput{Path: manifest.Path, GoModChecksum: manifest.Checksum}
 			}
-			return stage.RetainMetadata(ctx, inputs)
+			return retainStageMetadata(ctx, stage, inputs)
 		},
 	}, func(dependencies []moduledependency.Module) error {
 		return retainSources(ctx, stage, dependencies)
@@ -126,13 +128,38 @@ func retainMetadataFiles(ctx context.Context, stage *projectstage.Stage, paths [
 	for index, path := range paths {
 		metadata[index] = projectstage.MetadataInput{Path: path}
 	}
-	return stage.RetainMetadata(ctx, metadata)
+	return retainStageMetadata(ctx, stage, metadata)
+}
+
+type metadataBatchKey struct{}
+
+type stageMetadataBatch struct {
+	stage  *projectstage.Stage
+	retain projectstage.MetadataRetention
+}
+
+func metadataBatch(stage *projectstage.Stage) func(context.Context, func(context.Context) error) error {
+	return func(ctx context.Context, capture func(context.Context) error) error {
+		return stage.WithMetadataBatch(ctx, func(retain projectstage.MetadataRetention) error {
+			return capture(context.WithValue(ctx, metadataBatchKey{}, stageMetadataBatch{stage, retain}))
+		})
+	}
+}
+
+func retainStageMetadata(ctx context.Context, stage *projectstage.Stage, inputs []projectstage.MetadataInput) error {
+	if batch, ok := ctx.Value(metadataBatchKey{}).(stageMetadataBatch); ok && batch.stage == stage {
+		return batch.retain.Files(inputs)
+	}
+	return stage.RetainMetadata(ctx, inputs)
 }
 
 func retainArchives(ctx context.Context, stage *projectstage.Stage, archives []moduledependency.ModuleArchive) error {
 	inputs := make([]projectstage.ArchiveInput, len(archives))
 	for index, archive := range archives {
 		inputs[index] = projectstage.ArchiveInput{Path: archive.Path, Module: archive.Module}
+	}
+	if batch, ok := ctx.Value(metadataBatchKey{}).(stageMetadataBatch); ok && batch.stage == stage {
+		return batch.retain.Archives(inputs)
 	}
 	return stage.RetainArchives(ctx, inputs)
 }

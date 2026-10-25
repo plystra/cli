@@ -3,6 +3,8 @@ package command_test
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -11,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/plystra/cli/internal/applicationgenerate"
@@ -19,6 +22,43 @@ import (
 )
 
 const previewDependencyModule = "example.com/preview/remote"
+
+func TestRunChangePlanRejectsInvalidAcquisitionManifest(t *testing.T) {
+	const dependency = "example.com/batch/dependency"
+	proxy := writeCommandDependencyProxy(t, []commandProxyModule{{
+		path: dependency, version: "v1.0.0", manifest: "{}\n",
+		goMod: "module example.com/wrong\ngo 1.26\n",
+	}})
+	var acquired atomic.Bool
+	files := http.FileServer(http.Dir(proxy))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/"+dependency+"/@v/v1.0.0.zip" {
+			acquired.Store(true)
+		}
+		files.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	root := t.TempDir()
+	writeCommandFile(t, filepath.Join(root, "go.mod"), "module example.com/batch/app\ngo 1.26\n")
+	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
+	writeCommandFile(t, filepath.Join(root, "app.go"), "package app\n")
+	writeCommandFile(t, filepath.Join(root, "change.json"), `{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"add","module":"`+dependency+`@v1.0.0"}]}`)
+	before := commandTree(t, root)
+	environment := append(commandDependencyEnvironment(t, proxy), "GOMODCACHE="+t.TempDir(), "GOPROXY="+server.URL)
+	code, stdout, stderr := runCommand(t, []string{"change", "plan", "--request", "change.json", "--format", "json"}, root, environment)
+	if code == 0 || stderr != "" || !strings.Contains(stdout, "PLYSTRA_CHANGE_PLAN_FAILED") {
+		t.Fatalf("invalid acquired module accepted: exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !reflect.DeepEqual(before, commandTree(t, root)) {
+		t.Fatal("rejected acquisition changed the original Project")
+	}
+	// This fixture has no Kernel dependency or transitive graph. Acquiring its
+	// complete ZIP exercises settled metadata capture before manifest rejection.
+	if !acquired.Load() {
+		t.Fatal("public preview did not reach exact source acquisition")
+	}
+	assertNoCommandTransactions(t, root)
+}
 
 func TestRunChangePlanDependenciesResolveCompleteCandidate(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
