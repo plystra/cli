@@ -161,7 +161,7 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 					},
 				})
 				wantCalls := 1
-				if mode == "manifest-only" || mode == "archive-only" && !workspace {
+				if mode == "manifest-only" || mode == "archive-only" && !workspace || mode == "listed-sum-identity" {
 					wantCalls = 0
 				}
 				if mode == "trailing-json" || mode == "duplicate-main" || mode == "listed-error" {
@@ -193,6 +193,9 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 					if !errors.Is(err, moduledependency.ErrConcurrentChange) {
 						t.Fatalf("changed original sums accepted: %v", err)
 					}
+					if mode == "listed-sum-identity" && (!errors.Is(err, moduledependency.ErrSourceIntegrity) || len(index.Modules()) != 0) {
+						t.Fatal("settled-listing identity drift reached source validation")
+					}
 				case "invalid-manifest":
 					if !errors.Is(err, moduledependency.ErrInvalidOutput) {
 						t.Fatalf("extracted-manifest validation failure lost: %v", err)
@@ -213,7 +216,7 @@ func TestDiscoverRetainsListedSourcesBeforeValidation(t *testing.T) {
 						t.Fatal("discovery result lost Go-selected source provenance")
 					}
 				}
-				if strings.Contains(mode, "rejected") || mode == "cancelled" || mode == "changed-sums" || mode == "invalid-manifest" || mode == "unparsed-manifest" {
+				if strings.Contains(mode, "rejected") || mode == "cancelled" || mode == "changed-sums" || mode == "listed-sum-identity" || mode == "invalid-manifest" || mode == "unparsed-manifest" {
 					if strings.Contains(string(readFile(t, trace)), "mod download ") {
 						t.Fatal("failed retention or manifest validation continued to checksum acquisition")
 					}
