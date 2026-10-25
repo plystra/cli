@@ -188,6 +188,9 @@ func TestFixedRootManifestsRetainedBeforeSelection(t *testing.T) {
 				if mode == "missing" || mode == "exact-different" || mode == "unused" || mode == "no-callback" {
 					wantEarly = 0
 				}
+				if phase == "discovery" && mode == "exact-different" {
+					wantEarly = 1 // The exact raw requirement is consumed before selection.
+				}
 				if mode == "unused" || mode == "no-callback" {
 					wantCalls = 0
 				}

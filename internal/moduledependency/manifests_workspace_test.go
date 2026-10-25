@@ -33,6 +33,15 @@ func TestWorkspaceGraphReadsHistoricalMainModuleManifest(t *testing.T) {
 }
 
 func TestDiscoverRetainsEffectiveWorkspaceRootManifests(t *testing.T) {
+	testDiscoverRetainsEffectiveWorkspaceRootManifests(t, false)
+}
+
+func TestDiscoverRetainsRawWorkspaceRootManifestFiles(t *testing.T) {
+	testDiscoverRetainsEffectiveWorkspaceRootManifests(t, true)
+}
+
+func testDiscoverRetainsEffectiveWorkspaceRootManifests(t *testing.T, rawOnly bool) {
+	t.Helper()
 	const path, first, second = "example.com/original", "example.com/first", "example.com/second"
 	exact := func(target string) string { return "replace " + path + " v1.0.0 => " + target + " v1.0.0\n" }
 	wildcard := func(target string) string { return "replace " + path + " => " + target + " v1.0.0\n" }
@@ -115,6 +124,9 @@ func TestDiscoverRetainsEffectiveWorkspaceRootManifests(t *testing.T) {
 				memberPath = path
 			}
 			writeFile(t, filepath.Join(member, "go.mod"), "module "+memberPath+"\ngo 1.26\n"+test.member)
+			if rawOnly {
+				sums.Reset()
+			}
 			writeFile(t, filepath.Join(app, "go.sum"), sums.String())
 			use := "./app\n./member\n"
 			if test.reverse {
@@ -135,7 +147,10 @@ func TestDiscoverRetainsEffectiveWorkspaceRootManifests(t *testing.T) {
 			trace := filepath.Join(root, "commands")
 			env = append(env, "PLYSTRA_MODULE_DEPENDENCY_HELPER=root-manifests", "PLYSTRA_MODULE_REAL_GO="+realGo, "PLYSTRA_MODULE_COMMAND_TRACE="+trace)
 			called := false
-			index, err := moduledependency.Discover(t.Context(), locate(t, app), moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
+			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
+				if rawOnly {
+					t.Fatal("raw workspace manifests acquired checksum authority")
+				}
 				called = true
 				if len(manifests) != len(test.want) {
 					t.Fatalf("wrong root capture: %v, want %v", manifests, test.want)
@@ -153,9 +168,34 @@ func TestDiscoverRetainsEffectiveWorkspaceRootManifests(t *testing.T) {
 					t.Fatalf("workspace capture happened after resolution: %s", commands)
 				}
 				return nil
-			}})
+			}}
+			if rawOnly {
+				options.RetainManifestFiles = func(_ context.Context, paths []string) error {
+					called = true
+					if len(paths) != len(test.want) {
+						t.Fatalf("wrong raw workspace root capture: %v, want %v", paths, test.want)
+					}
+					for _, key := range test.want {
+						found := false
+						for _, path := range paths {
+							found = found || path == expected[key].Path
+						}
+						if !found {
+							t.Fatalf("raw workspace root %s not retained: %v", key, paths)
+						}
+					}
+					if commands := string(readFile(t, trace)); strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
+						t.Fatalf("raw workspace root capture happened after consumption: %s", commands)
+					}
+					return nil
+				}
+			}
+			index, err := moduledependency.Discover(t.Context(), locate(t, app), options)
 			if (err != nil) != test.fail || called != (len(test.want) != 0) {
 				t.Fatalf("capture=%v, error=%v; want roots=%v, error=%v", called, err, test.want, test.fail)
+			}
+			if rawOnly && string(readFile(t, filepath.Join(app, "go.sum"))) != "" {
+				t.Fatal("raw workspace root capture changed original checksum authority")
 			}
 			if err == nil && !test.main && len(test.want) == 1 {
 				requiredPath, _, _ := strings.Cut(requirement, " ")

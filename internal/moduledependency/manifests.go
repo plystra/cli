@@ -83,7 +83,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 	var versions []module.Version
 	for _, parsed := range manifests {
 		for _, required := range parsed.Require {
-			if excluded[required.Mod] {
+			if required.Mod.Path == "go" || required.Mod.Path == "toolchain" || excluded[required.Mod] {
 				continue
 			}
 			version := required.Mod
@@ -95,7 +95,10 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 			} else if replacement := rootManifestReplacement(version, parsed.Replace); replacement != nil {
 				version = replacement.New
 			}
-			if version.Version == "" || !validSourceChecksum(checksums[version]) || seen[version] {
+			// Readonly single-module listing rejects absent h1 rows before reading
+			// the manifest. Workspace listing can read it without an original sum.
+			raw := options.RetainManifestFiles != nil && (workspace != nil || strings.HasPrefix(checksums[version], "h1:"))
+			if version.Version == "" || seen[version] || !raw && !validSourceChecksum(checksums[version]) {
 				continue
 			}
 			seen[version] = true
@@ -111,6 +114,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		return ErrInvalidOutput
 	}
 	var retained []RootManifest
+	var manifestFiles []string
 	for _, version := range versions {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -121,12 +125,47 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 			return ErrInvalidGoMod
 		}
 		name := filepath.Join(selected.GOMODCACHE, "cache", "download", filepath.FromSlash(path), "@v", value+".mod")
+		if options.RetainManifestFiles != nil {
+			manifestFiles = append(manifestFiles, name)
+		}
+		if !validSourceChecksum(checksums[version]) {
+			continue
+		}
 		if _, err := os.Lstat(name); errors.Is(err, os.ErrNotExist) {
 			continue // Go may materialize a missing manifest during resolution.
 		} else if err != nil {
 			return err
 		}
 		retained = append(retained, RootManifest{Path: name, Checksum: checksums[version]})
+	}
+	capturedFiles := map[string]bool{}
+	retainFiles := func() error {
+		if options.RetainManifestFiles == nil {
+			return nil
+		}
+		for {
+			previous := len(capturedFiles)
+			err := retainPresentModuleFiles(ctx, manifestFiles, func(ctx context.Context, paths []string) error {
+				if err := options.RetainManifestFiles(ctx, paths); err != nil {
+					return err
+				}
+				for _, path := range paths {
+					capturedFiles[path] = true
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			// A callback may materialize another known root. Drain those paths
+			// before listing, without refreshing existing evidence.
+			if len(capturedFiles) == previous {
+				return errors.Join(ctx.Err(), inputs.recheck())
+			}
+		}
+	}
+	if err := retainFiles(); err != nil {
+		return err
 	}
 	if len(retained) != 0 && options.RetainRootManifests != nil {
 		if err := options.RetainRootManifests(ctx, retained); err != nil {
@@ -148,7 +187,10 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 	for _, manifest := range retained {
 		graph.retained[manifest.Path] = true
 	}
-	return graph.capture(ctx)
+	if err := graph.capture(ctx); err != nil {
+		return err
+	}
+	return retainFiles()
 }
 
 func rootManifestChecksums(primary []byte, members [][]byte) (map[module.Version]string, error) {

@@ -871,6 +871,22 @@ versions of one path and historical versions of workspace main modules. Go's
 workfile precedence, member order, per-file exact-over-wildcard replacement
 lookup, and conflict rules are preserved. Exclusions from any member filter
 original requirements; local replacements do not introduce cache inputs.
+Synthetic `go` and `toolchain` requirements introduce no cache manifest, even
+when a workspace member declares a replacement for them.
+The same raw root identities also retain present cache `.mod` files as private
+concurrency evidence before listing, independently of valid checksum authority.
+Workspace roots require no original checksum. Single-module readonly discovery
+retains this raw evidence only when an original non-sentinel `h1:` row lets Go
+proceed to the manifest read; an invalid `h1:` value still grants no checksum
+authority. Missing or unknown-algorithm rows add no raw input in that lane.
+Shared paths deduplicate within each present batch. Capture drains newly present
+known roots before authorized-manifest callbacks and again after graph callbacks,
+including files materialized by another retention callback, without refreshing
+existing evidence.
+Rejection, cancellation, or changed inputs prevent listing; listing-return
+rechecks prevent acquisition after file or parent identity drift. Raw capture
+never supplies parsed graph summaries or source authentication, and its original
+evidence remains recheckable after failed listing and stage cleanup.
 Capture uses the first applicable primary `h1:` row, ignoring Go's historical
 empty-manifest sentinel; without primary authority, all applicable member rows
 must agree. Unknown checksum algorithms supply no authority, and malformed sum

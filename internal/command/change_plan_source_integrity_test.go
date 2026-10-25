@@ -818,6 +818,13 @@ func TestBuiltCLIChangePlanRejectsUnrecordedAcquisitionManifest(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRetainsRawRootManifestBeforeListing(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"warm-cache-no-authority-workspace-manifest-identity-after-graph", "warm-cache-no-authority-workspace-unchanged"} {
+		t.Run(mode, func(t *testing.T) { testBuiltCLIChangePlanCacheInput(t, binary, mode) })
+	}
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
@@ -831,6 +838,8 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 
 func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
+	warmCache := strings.HasPrefix(mode, "warm-cache-")
+	mode = strings.TrimPrefix(mode, "warm-cache-")
 	lateManifest := strings.HasPrefix(mode, "late-manifest-")
 	mode = strings.TrimPrefix(mode, "late-manifest-")
 	coldManifests := strings.HasPrefix(mode, "cold-manifests-")
@@ -867,6 +876,13 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	root := writeImplementationSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 	seedPreviewDependency(t, root, environment, "v1.0.0")
+	if warmCache {
+		// These cases target warm root manifests. Populate unrelated runtime
+		// dependencies before removing the target's original checksum authority.
+		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "download", "all"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if fixedRoot {
 		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+previewDependencyModule+"="+previewDependencyModule+"@v1.0.0"); err != nil {
 			t.Fatal(err)

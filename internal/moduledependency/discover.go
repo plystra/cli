@@ -70,11 +70,13 @@ type Options struct {
 	// retention after the operation context has been cancelled.
 	RetainRootManifests func(context.Context, []RootManifest) error
 	// RetainManifestFiles preserves present cache .mod files as private concurrency
-	// evidence when all-version replacement proofs fix their physical source before
+	// evidence for exact raw root requirements before discovery graph listing,
+	// when all-version replacement proofs fix their physical source before
 	// discovery or workspace preparation selection, and around every exact source
 	// download including checksum-only workspace downloads. It is independent of
-	// source-tree availability and original checksums, and supplies no graph-reading
-	// authority. Callbacks honor the supplied context, including bounded retention
+	// source-tree availability and valid checksum authority. Raw-root capture obeys
+	// Go's readonly sum-presence check and supplies no graph-reading authority.
+	// Callbacks honor the supplied context, including bounded retention
 	// after a started download has terminated under cancellation.
 	RetainManifestFiles func(context.Context, []string) error
 	// RetainModuleInformation captures present cache .info files before and
