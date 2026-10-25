@@ -39,6 +39,8 @@ type Options struct {
 	Name        string
 	GoCommand   string
 	Environment []string
+	// Validate overrides application generation's default installation validator.
+	Validate applicationgenerate.Validator
 }
 
 // Result identifies one committed plugin scaffold.
@@ -109,6 +111,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 				Start:            updatedRoot,
 				GoCommand:        options.GoCommand,
 				Environment:      options.Environment,
+				Validate:         options.Validate,
 				MutateModule:     mutate,
 				RejectUnexpected: true,
 			})

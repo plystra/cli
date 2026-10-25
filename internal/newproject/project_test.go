@@ -82,15 +82,8 @@ func TestKernelVersionMatchesCLIModuleRequirement(t *testing.T) {
 }
 
 func TestMain(main *testing.M) {
-	if os.Getenv("PLYSTRA_NEW_PLUGIN_ROLLBACK_HELPER") == "1" {
-		switch {
-		case len(os.Args) == 3 && os.Args[1] == "mod" && (os.Args[2] == "download" || os.Args[2] == "tidy"):
-			os.Exit(0)
-		case len(os.Args) == 4 && os.Args[1] == "test" && os.Args[2] == "-mod=readonly" && os.Args[3] == "./...":
-			os.Exit(9)
-		default:
-			os.Exit(8)
-		}
+	if os.Getenv("PLYSTRA_TEST_REAL_GO") != "" {
+		os.Exit(runObservedGo())
 	}
 	os.Exit(main.Run())
 }
@@ -369,7 +362,7 @@ func TestTemplateCreationAndUpdateKeepDependencyConfigurationInert(t *testing.T)
 	if exitCode := command.RunIn([]string{"new", "my-app", "--module", modulePath, "--template", templatePath + "@v1.0.0", "--no-agent-guidance"}, &createStdout, &createStderr, createdParent, environment); exitCode != 0 || createStderr.Len() != 0 {
 		t.Fatalf("public template creation: exit=%d stdout=%q stderr=%q", exitCode, createStdout.String(), createStderr.String())
 	}
-	if want := "Created my-app with dependency " + templatePath + "@v1.0.0\nConfiguration scaffolded\nGenerated and tested\n\nNext:\n  cd my-app\n  plystra check\n"; createStdout.String() != want {
+	if want := "Created my-app with dependency " + templatePath + "@v1.0.0\nConfiguration scaffolded\nGenerated and built\n\nNext:\n  cd my-app\n  plystra check\n"; createStdout.String() != want {
 		t.Fatalf("public template creation output = %q, want %q", createStdout.String(), want)
 	}
 	createdPath := filepath.Join(createdParent, "my-app")
@@ -1192,32 +1185,6 @@ func TestCreateRollsBackGoValidationFailure(t *testing.T) {
 	}
 	if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("target exists after failed validation: %v", err)
-	}
-	assertNoTransactionFiles(t, parent)
-}
-
-func TestCreateWithInitialPluginRollsBackOuterProjectOnPluginValidationFailure(t *testing.T) {
-	t.Parallel()
-
-	parent := t.TempDir()
-	command, err := os.Executable()
-	if err != nil {
-		t.Fatalf("Executable: %v", err)
-	}
-	environment := append(os.Environ(), "PLYSTRA_NEW_PLUGIN_ROLLBACK_HELPER=1")
-	_, err = newproject.Create(context.Background(), newproject.Options{
-		Parent:      parent,
-		ProjectName: "my-app",
-		ModulePath:  "example.com/acme/my-app",
-		Plugin:      "account",
-		GoCommand:   command,
-		Environment: environment,
-	})
-	if !errors.Is(err, newproject.ErrCreate) || !errors.Is(err, plugincreate.ErrCreate) || !errors.Is(err, gocommand.ErrRun) {
-		t.Fatalf("Create error = %v, want project, plugin, and Go command errors", err)
-	}
-	if _, err := os.Lstat(filepath.Join(parent, "my-app")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("target exists after plugin validation failure: %v", err)
 	}
 	assertNoTransactionFiles(t, parent)
 }

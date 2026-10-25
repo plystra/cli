@@ -3,7 +3,7 @@
   "cli_version": "0.1.0",
   "kernel_version": "v0.0.0-20261004024423-1e554d6f14ac",
   "specification_revision": "5eff10a43cc8bcf426deeb4f0b520a4968e552be",
-  "catalog_digest": "sha256:f7862e464c29046a02bc08163cf0346eb4f543d0e56f8b70265a82b46db20cff",
+  "catalog_digest": "sha256:55b9ad80c24f6bce98e6859a9af2620f8d2428348621f8c553f0f6b2b886687c",
   "files": [
     {
       "path": ".agents/skills/plystra/SKILL.md",
@@ -23,7 +23,7 @@
     },
     {
       "path": ".agents/skills/plystra/tasks/project-and-dependencies.md",
-      "sha256": "sha256:f1a0d4b234f7392e745f2a2645033650888068c51dbd4ee3ab7bd5d921dce014"
+      "sha256": "sha256:a84027583f76e3e1be075f179f2017a3ce40c2222004fa0d5b7f07e496f6106d"
     },
     {
       "path": ".agents/skills/plystra/tasks/resources.md",
