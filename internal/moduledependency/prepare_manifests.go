@@ -18,9 +18,9 @@ func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Conte
 	root := selection.members[0].root
 	var memberSums [][]byte
 	mainPaths := map[string]bool{}
-	replacementCount := len(workspace.work.Replace)
+	replacements := [][]*modfile.Replace{workspace.work.Replace}
 	for _, member := range workspace.members {
-		replacementCount += len(member.mod.Replace)
+		replacements = append(replacements, member.mod.Replace)
 		original, exists := inputs[filepath.Join(member.root, "go.mod")]
 		if !exists {
 			return ErrInvalidGoMod
@@ -83,7 +83,7 @@ func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Conte
 		if mainPaths[version.Path] {
 			continue
 		}
-		effective, uniform := workspace.uniformPreparationSource(ctx, version.Path, replacementCount, &proofBudget)
+		effective, uniform := uniformReplacementSource(ctx, version.Path, replacements, workspace.rootManifestVersion, &proofBudget)
 		if !uniform {
 			pending[version.Path] = true
 			continue
@@ -143,9 +143,13 @@ func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Conte
 // A wildcard must map every possible MVS choice to the same versioned source,
 // or keep every choice local. Exact rules partition that mapping; an unresolved
 // partition does not establish whether a cache source participates in selection.
-func (workspace *preparationWorkspace) uniformPreparationSource(ctx context.Context, path string, replacementCount int, budget *int) (module.Version, bool) {
+func uniformReplacementSource(ctx context.Context, path string, replacements [][]*modfile.Replace, resolve func(module.Version) (module.Version, error), budget *int) (module.Version, bool) {
+	if *budget == 0 || ctx.Err() != nil {
+		return module.Version{}, false
+	}
 	spend := func(count int) bool {
 		if ctx.Err() != nil || count > *budget {
+			*budget = 0
 			return false
 		}
 		*budget -= count
@@ -153,18 +157,22 @@ func (workspace *preparationWorkspace) uniformPreparationSource(ctx context.Cont
 	}
 	// Existing precedence lookup may inspect every declaration. Bound the whole
 	// batch conservatively rather than duplicating that resolver for inference.
+	replacementCount := len(replacements)
+	for _, group := range replacements {
+		replacementCount += len(group)
+	}
 	if !spend(replacementCount) {
 		return module.Version{}, false
 	}
-	effective, err := workspace.rootManifestVersion(module.Version{Path: path})
+	effective, err := resolve(module.Version{Path: path})
 	if err != nil || effective.Version == "" && !filepath.IsAbs(effective.Path) {
 		return module.Version{}, false
 	}
 	seen := map[string]bool{}
-	check := func(replacements []*modfile.Replace) bool {
-		for _, replacement := range replacements {
+	for _, group := range replacements {
+		for _, replacement := range group {
 			if !spend(1) {
-				return false
+				return module.Version{}, false
 			}
 			version := replacement.Old
 			if version.Path != path || version.Version == "" || seen[version.Version] {
@@ -172,21 +180,12 @@ func (workspace *preparationWorkspace) uniformPreparationSource(ctx context.Cont
 			}
 			seen[version.Version] = true
 			if !spend(replacementCount) {
-				return false
+				return module.Version{}, false
 			}
-			selected, err := workspace.rootManifestVersion(version)
+			selected, err := resolve(version)
 			if err != nil || selected != effective && (selected.Version != "" || effective.Version != "") {
-				return false
+				return module.Version{}, false
 			}
-		}
-		return true
-	}
-	if !check(workspace.work.Replace) {
-		return module.Version{}, false
-	}
-	for _, member := range workspace.members {
-		if !check(member.mod.Replace) {
-			return module.Version{}, false
 		}
 	}
 	return effective, true

@@ -242,8 +242,64 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 				return err
 			}
 		}
+	} else if graph.queryPaths == nil {
+		if err := graph.retainFixedRootTrees(ctx); err != nil {
+			return err
+		}
 	}
 	return graph.inputs.recheck()
+}
+
+func (graph *manifestGraph) retainFixedRootTrees(ctx context.Context) error {
+	if graph.retainTrees == nil {
+		return nil
+	}
+	mains := map[string]bool{}
+	var replacements [][]*modfile.Replace
+	if graph.workspace != nil {
+		replacements = append(replacements, graph.workspace.work.Replace)
+	}
+	for _, main := range graph.mains {
+		mains[main.Module.Mod.Path] = true
+		replacements = append(replacements, main.Replace)
+	}
+	seenPaths := map[string]bool{}
+	var roots []module.Version
+	for _, main := range graph.mains {
+		for _, required := range main.Require {
+			path := required.Mod.Path
+			if mains[path] || path == "go" || path == "toolchain" || graph.excluded[required.Mod] || seenPaths[path] {
+				continue
+			}
+			seenPaths[path] = true
+			roots = append(roots, module.Version{Path: path})
+		}
+	}
+	module.Sort(roots)
+	budget := 65_536
+	retained := map[module.Version]bool{}
+	for _, root := range roots {
+		effective, fixed := uniformReplacementSource(ctx, root.Path, replacements, graph.effectiveVersion, &budget)
+		if !fixed || effective.Version == "" || retained[effective] {
+			continue
+		}
+		retained[effective] = true
+		cache, err := graph.moduleCache(ctx)
+		if err != nil {
+			return err
+		}
+		directory, manifest, err := cachedSourcePaths(cache, effective)
+		if err != nil {
+			return err
+		}
+		// The physical source is fixed, but the logical selected version is
+		// still unknown. Retain only pending evidence, without source provenance.
+		err = retainUnverifiedSourceTree(ctx, directory, manifest, graph.retainTrees)
+		if err := errors.Join(err, ctx.Err(), graph.inputs.recheck()); err != nil {
+			return err
+		}
+	}
+	return errors.Join(ctx.Err(), graph.inputs.recheck())
 }
 
 func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected []module.Version) error {

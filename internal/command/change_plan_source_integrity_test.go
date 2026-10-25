@@ -682,6 +682,19 @@ func TestBuiltCLIChangePlanRetainsPendingSourcesBeforeSelection(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRetainsFixedRootTreesBeforeIncompleteSelection(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{
+		"manifest-only-fixed-root-source-identity-after-graph",
+		"no-authority-fixed-root-workspace-source-identity-after-graph",
+		"manifest-only-fixed-root-unchanged",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {
@@ -756,6 +769,8 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 			break
 		}
 	}
+	fixedRoot := strings.Contains(mode, "fixed-root-")
+	mode = strings.ReplaceAll(mode, "fixed-root-", "")
 	selectedGraph := strings.Contains(mode, "selected-graph-")
 	mode = strings.ReplaceAll(mode, "selected-graph-", "")
 	coldGraph := strings.Contains(mode, "cold-graph-")
@@ -779,6 +794,11 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	root := writeImplementationSelectionCommandProject(t)
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 	seedPreviewDependency(t, root, environment, "v1.0.0")
+	if fixedRoot {
+		if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "edit", "-replace="+previewDependencyModule+"="+previewDependencyModule+"@v1.0.0"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if duplicateSum {
 		path := filepath.Join(root, "go.sum")
 		sums, err := os.ReadFile(path)
@@ -871,6 +891,11 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 			}
 		}
 		writeCommandFile(t, path, strings.Join(retained, "\n"))
+	}
+	if fixedRoot && workspaceRoot == "" {
+		if err := os.Remove(filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if coldGraph {
 		if err := os.Remove(filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule), "@v", "v1.0.0.mod")); err != nil {

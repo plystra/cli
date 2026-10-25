@@ -937,7 +937,14 @@ warm-source boundary before the CLI's first extracted-manifest read.
 When an existing extracted tree has no original archive checksum, discovery
 retains its complete inventory, file identities, modes, and content digests as
 private pending evidence before listing when checked summaries prove complete
-selection, and otherwise after complete module listing. Exact source acquisitions
+selection, and otherwise after complete module listing. When graph inference is
+incomplete, non-excluded external raw root paths also retain existing pending
+trees before listing if wildcard and every exact replacement alternative fix
+the same versioned physical source. Workfile and member precedence, one-step
+replacements, main-module identity, and a shared proof budget constrain this
+inference. Shared physical destinations are retained once in this early phase.
+Local, uncertain, and unused sources are excluded; Go still selects the logical
+version, and this paths-only evidence does not predict its provenance. Exact source acquisitions
 also capture such existing trees before starting Go. A `.partial` marker excludes
 the old tree because Go discards it. Pending capture supplies no expected checksum
 and does not authenticate source. The same original snapshot must later match the

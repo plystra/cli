@@ -83,6 +83,9 @@ type Options struct {
 	// resolved checksums before accepting them. Partial extractions are excluded.
 	// Complete checked selection proofs retain these trees before graph listing
 	// or workspace preparation selection, without requiring archive authority.
+	// When graph inference is incomplete, raw root paths whose wildcard and exact
+	// replacements fix one versioned source retain pending trees before listing
+	// without predicting the logical selected version.
 	RetainSourceTrees func(context.Context, []string) error
 	// RetainSelectedSources captures warm and newly acquired source bundles before
 	// extracted-manifest validation. A completely inferred selected graph is

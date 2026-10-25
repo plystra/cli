@@ -156,6 +156,12 @@ func TestDiscoverPendingTreeRejectsMetadataDriftBeforeAcquisition(t *testing.T) 
 			fixture := warmPreparation(t, workspace, false)
 			path := filepath.Join(fixture.app, "go.mod")
 			writeFile(t, path, string(readFile(t, path))+"require "+warmRequestedModule+" v1.0.0\n")
+			replacements := path
+			if workspace {
+				replacements = fixture.work
+			}
+			// An unused differing exact rule prevents a fixed-source proof.
+			writeFile(t, replacements, string(readFile(t, replacements))+"replace "+warmRequestedModule+" v1.1.0 => "+warmSourceModule+" v1.1.0\n")
 			// Missing graph metadata leaves this regression on the post-list boundary.
 			if err := os.Remove(fixture.downloaded.GoMod); err != nil {
 				t.Fatal(err)
@@ -200,6 +206,12 @@ func TestDiscoverRetainsListedTreesBeforeChecksumResolution(t *testing.T) {
 				fixture := warmPreparation(t, workspace, false)
 				project := filepath.Join(fixture.app, "go.mod")
 				writeFile(t, project, string(readFile(t, project))+"require "+warmRequestedModule+" v1.0.0\n")
+				replacements := project
+				if workspace {
+					replacements = fixture.work
+				}
+				// An unused differing exact rule prevents a fixed-source proof.
+				writeFile(t, replacements, string(readFile(t, replacements))+"replace "+warmRequestedModule+" v1.1.0 => "+warmSourceModule+" v1.1.0\n")
 				// Go restores this missing manifest after early inference declines.
 				if err := os.Remove(fixture.downloaded.GoMod); err != nil {
 					t.Fatal(err)
