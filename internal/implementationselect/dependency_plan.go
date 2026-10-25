@@ -126,7 +126,7 @@ func PreviewDependencyConfigurations(ctx context.Context, previous, current appl
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: compose cleaned dependency candidate: %w", ErrSelect, err)
 	}
-	if err := current.ValidateCandidate(candidate); err != nil {
+	if err := current.ValidateExecutableCandidate(ctx, candidate); err != nil {
 		return PlanResult{}, fmt.Errorf("%w: validate cleaned dependency candidate: %w", ErrSelect, err)
 	}
 	input := authoredResourceConfigurationImpact(oldLayers, candidate.CurrentLayers(), current.ConfigurationSelection().Path())

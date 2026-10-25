@@ -15,6 +15,7 @@ import (
 	"github.com/plystra/cli/internal/configurationimpact"
 	"github.com/plystra/cli/internal/constructorsymbol"
 	"github.com/plystra/cli/internal/interfaceid"
+	"github.com/plystra/cli/internal/interfaceinventory"
 	"github.com/plystra/cli/internal/interfaceresolution"
 	"github.com/plystra/cli/internal/modulemutation"
 	"github.com/plystra/cli/internal/resourcename"
@@ -43,6 +44,7 @@ var (
 // Options contains the Project location, selected configuration, and bounded
 // generation settings for one complete selection transaction.
 type Options struct {
+	ObservePolicySupport  func(interfaceinventory.PackageLoadEvent)
 	Start                 string
 	Target                string
 	Constructor           string
@@ -103,13 +105,14 @@ func Select(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w: parse fully qualified Implementation constructor: %w", ErrSelect, ErrInvalidConstructor, err)
 	}
 	inputs, err := applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
-		Start: options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+		ObservePolicySupport: options.ObservePolicySupport,
+		Start:                options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 		GoCommand: options.GoCommand, Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
 	})
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, false, false)
+	updated, kind, impact, err := planSelection(ctx, inputs, id, options.Target, constructor, false, false)
 	if err != nil {
 		var missing *interfaceresolution.UnknownInterfaceError
 		if errors.As(err, &missing) && missing.InterfaceID() == id {

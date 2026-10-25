@@ -577,3 +577,24 @@ func TestPreviewDependencyConfigurationsKeepsTypedLowerValidation(t *testing.T) 
 		t.Fatalf("owner cleanup relaxed known lower-layer validation: %v", err)
 	}
 }
+
+func TestPreviewDependencyConfigurationsGatesCurrentPolicyState(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		t.Run(fmt.Sprintf("current-active=%v", active), func(t *testing.T) {
+			plain := dependencyDocument() + "config: {" + dependencyOwner + ": {name: PRIVATE_NAME}}\n"
+			policy := strings.Replace(plain, "interfaces: {", "interfaces: {policies: {app.main/v1: {timeout: 5s}}, ", 1)
+			oldDocument, currentDocument := policy, plain
+			if active {
+				oldDocument, currentDocument = plain, policy
+			}
+			fixture := dependencyFixtureOptions{fields: "Name string `yaml:\"name\"`", document: oldDocument}
+			old := dependencyInputs(t, fixture)
+			fixture.document = currentDocument
+			current := dependencyInputs(t, fixture)
+			_, err := implementationselect.PreviewDependencyConfigurations(t.Context(), old, current, dependencyRequest(t, dependencyOperation))
+			if active && !errors.Is(err, applicationresolve.ErrPolicyNotEnforced) || !active && err != nil {
+				t.Fatalf("current policy active=%v, preview error=%v", active, err)
+			}
+		})
+	}
+}

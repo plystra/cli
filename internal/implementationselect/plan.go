@@ -98,7 +98,7 @@ func PreviewResourceRemoval(ctx context.Context, options Options) (PlanResult, e
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	if err := inputs.ValidateCandidate(candidate); err != nil {
+	if err := inputs.ValidateExecutableCandidate(ctx, candidate); err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
 	input := authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())
@@ -136,7 +136,7 @@ func PreviewInterfaceRoot(ctx context.Context, options Options, root string, pre
 			return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 		}
 	}
-	updated, kind, impact, err := planEditedSelection(inputs, updated, "interface_root", options.Target, constructorsymbol.Symbol{}, true)
+	updated, kind, impact, err := planEditedSelection(ctx, inputs, updated, "interface_root", options.Target, constructorsymbol.Symbol{}, true)
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
@@ -145,7 +145,8 @@ func PreviewInterfaceRoot(ctx context.Context, options Options, root string, pre
 
 func discoverPlanInputs(ctx context.Context, options Options) (applicationresolve.SelectionInputs, error) {
 	return applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
-		Start: options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+		ObservePolicySupport: options.ObservePolicySupport,
+		Start:                options.Start, ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 		GoCommand: options.GoCommand, Environment: options.Environment, DependencyOutputLimit: options.DependencyOutputLimit,
 	})
 }
@@ -174,7 +175,7 @@ func plan(ctx context.Context, options Options, allowIncomplete, remove bool) (P
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	updated, kind, impact, err := planSelection(inputs, id, options.Target, constructor, allowIncomplete, remove)
+	updated, kind, impact, err := planSelection(ctx, inputs, id, options.Target, constructor, allowIncomplete, remove)
 	if err != nil {
 		var missing *interfaceresolution.UnknownInterfaceError
 		if errors.As(err, &missing) && missing.InterfaceID() == id {
@@ -210,7 +211,7 @@ func (p PlanResult) Changed() bool                                   { return p.
 func (p PlanResult) ConfigurationImpact() configurationimpact.Impact { return p.impact }
 func (p PlanResult) CompositionDigest() string                       { return p.compositionHash }
 
-func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol, allowIncomplete, remove bool) ([]byte, string, configurationimpact.Impact, error) {
+func planSelection(ctx context.Context, inputs applicationresolve.SelectionInputs, id interfaceid.Identifier, target string, constructor constructorsymbol.Symbol, allowIncomplete, remove bool) ([]byte, string, configurationimpact.Impact, error) {
 	original := inputs.SelectedSnapshot().Data()
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	var updated []byte
@@ -240,10 +241,10 @@ func planSelection(inputs applicationresolve.SelectionInputs, id interfaceid.Ide
 	if err != nil {
 		return nil, kind, configurationimpact.Impact{}, err
 	}
-	return planEditedSelection(inputs, updated, kind, target, constructor, allowIncomplete)
+	return planEditedSelection(ctx, inputs, updated, kind, target, constructor, allowIncomplete)
 }
 
-func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []byte, kind, target string, constructor constructorsymbol.Symbol, allowIncomplete bool) ([]byte, string, configurationimpact.Impact, error) {
+func planEditedSelection(ctx context.Context, inputs applicationresolve.SelectionInputs, updated []byte, kind, target string, constructor constructorsymbol.Symbol, allowIncomplete bool) ([]byte, string, configurationimpact.Impact, error) {
 	original := inputs.SelectedSnapshot().Data()
 	overlay := inputs.ConfigurationSelection().Mode() == "environment"
 	var before applicationmeta.Composition
@@ -268,7 +269,7 @@ func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []by
 	}
 	// Planning checks the complete remaining binding graph before any live write.
 	// Preview retains only bounded, final-state-validated decisions.
-	validationErr := inputs.ValidateCandidate(candidate)
+	validationErr := inputs.ValidateExecutableCandidate(ctx, candidate)
 	var missingImplementation *applicationmeta.ConstructorConfigurationValueError
 	var missingResource *applicationmeta.ResourceConfigurationError
 	var unresolvedBinding *constructorgraph.ResourceBindingError
@@ -297,12 +298,9 @@ func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []by
 	}
 	impactBefore := before
 	impactInput := authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())
-	previousStateValid := false
-	if composed, composeErr := inputs.ComposeCandidate(original); composeErr == nil {
-		impactBefore = composed
-		if allowIncomplete {
-			previousStateValid = inputs.ValidateCandidate(composed) == nil
-		}
+	previous, previousComposeErr := inputs.ComposeCandidate(original)
+	if previousComposeErr == nil {
+		impactBefore = previous
 	} else if kind == "resource" {
 		if ownership, ownershipErr := inputs.ComposeResourceOwnershipCandidate(original); ownershipErr == nil {
 			impactBefore = ownership
@@ -315,7 +313,7 @@ func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []by
 		}
 		if unresolvedBinding != nil {
 			// New assignments prove final viability, not validity of the old provider.
-			decisions, missing, decisionErr := viableResourceBindingDecisions(inputs, updated, target, constructor)
+			decisions, missing, decisionErr := viableResourceBindingDecisions(ctx, inputs, updated, target, constructor)
 			if decisionErr != nil {
 				return nil, kind, configurationimpact.Impact{}, decisionErr
 			}
@@ -325,6 +323,14 @@ func planEditedSelection(inputs applicationresolve.SelectionInputs, updated []by
 			impactInput.UnresolvedDecisions = append(impactInput.UnresolvedDecisions, decisions...)
 			missingResource = missing
 		}
+	}
+	previousStateValid := false
+	if allowIncomplete && previousComposeErr == nil && (missingImplementation != nil || missingResource != nil) {
+		previousErr := inputs.ValidateExecutableCandidate(ctx, previous)
+		if errors.Is(previousErr, applicationresolve.ErrPolicySupportUnverified) || errors.Is(previousErr, context.Canceled) || errors.Is(previousErr, context.DeadlineExceeded) || errors.Is(previousErr, applicationresolve.ErrConcurrentChange) {
+			return nil, kind, configurationimpact.Impact{}, previousErr
+		}
+		previousStateValid = previousErr == nil
 	}
 	if missingResource != nil {
 		if err := inputs.ValidateOtherResourceRequiredConfiguration(candidate, target); err != nil {

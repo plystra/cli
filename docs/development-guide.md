@@ -1132,8 +1132,17 @@ export-loading failures leave support unverified and return an execution
 failure. Inspection runs Go tooling without running Kernel initialization or
 business methods; it isolates module and workspace checksum writes. Generation
 and staged source previews report observed tooling and temporary-file effects
-on failure too. Pure configuration and selection previews still need the final
-policy gate; this is not complete policy-support acceptance.
+on failure too. Complete static Interface candidates in configuration,
+selection, and root previews use that gate as well, including complete Resource
+binding alternatives. The final candidate determines reachability: removing
+the last root makes its policy dormant and avoids the export query. A previous
+state is offered as a retention alternative only if it also passes the gate;
+operational query failures cannot become ordinary binding ambiguity. Inputs
+are rechecked after policy tooling; invalidation replaces an old compatibility
+verdict. Observed effects remain in the result and plan payload, outside stable
+plan requirements. Incomplete repair projections, legacy-only reachability,
+complete compiler-export input retention, and full policy-support acceptance
+remain unfinished.
 
 Regenerate and rebuild after changing an active timeout or retry; startup rejects a
 changed active policy before any Implementation constructor runs.

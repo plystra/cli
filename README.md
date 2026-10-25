@@ -134,8 +134,16 @@ Loading exports may run the Go toolchain and populate caches; it executes no
 package initialization or business methods and uses private module or workspace
 checksum files. Generation and staged source-preview results retain observed
 support-query execution and temporary-file effects, including failures.
-Pure configuration and selection previews still require their final policy gate;
-the complete policy-support acceptance outcome remains unfinished.
+Complete static Interface candidates in configuration, selection, and root
+previews use the same selected-Kernel policy gate, including complete Resource
+binding alternatives. Removing the final reachable root leaves its policy
+dormant without querying Kernel exports. Unsupported previous states are not
+offered as retention alternatives; operational query failures remain failures.
+Inputs are rechecked after policy tooling, and invalidation supersedes an old
+compatibility verdict. Preview results retain observed query effects without
+adding those invocation effects to stable plan requirements. Incomplete repair
+projections, legacy-only reachability, complete compiler-export input retention,
+and the full policy-support acceptance outcome remain unfinished.
 
 `generated/compatibility/interfaces.json` is the committed, CLI-owned
 replaceable shape working record for every visible authored Interface, whether

@@ -261,6 +261,16 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 	}
 	build := effect("candidate-build", commandschema.EffectTrustedCodeExecution, "validate_complete_candidate", []string{"go", "build", "-mod=readonly", "./..."})
 	policyStarted, policyTemporary := false, false
+	observePolicySupport := func(event interfaceinventory.PackageLoadEvent) {
+		if event.GoStarted && !policyStarted {
+			policyStarted = true
+			accounting.Observed = append(accounting.Observed, effect("candidate-policy-go", commandschema.EffectTrustedCodeExecution, "inspect_selected_kernel_policy_support", []string{"go", "list", "-deps", "-export", "-json", "-e", "-mod=readonly", "github.com/plystra/kernel/invocation"}))
+		}
+		if event.TemporaryCreated && !policyTemporary {
+			policyTemporary = true
+			accounting.Observed = append(accounting.Observed, effect("candidate-policy-module", commandschema.EffectTemporaryFile, "private_selected_kernel_module", []string{"go", "env", "GOWORK"}))
+		}
+	}
 	validateCandidate := func(mutate applicationgenerate.ModuleMutation) error {
 		if err := retainDependencySources(ctx, stage, options.GoCommand); err != nil {
 			return err
@@ -285,13 +295,15 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 			return errors.Join(ErrPreview, err)
 		}
 		selectionOptions := implementationselect.Options{
-			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+			ObservePolicySupport: observePolicySupport,
+			Start:                stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 			GoCommand: options.GoCommand, Environment: stage.Environment(),
 		}
 		var planned implementationselect.PlanResult
 		if len(dependencies) != 0 {
 			state.inputs, err = applicationresolve.DiscoverSelectionInputs(ctx, applicationresolve.Options{
-				Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+				ObservePolicySupport: observePolicySupport,
+				Start:                stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 				GoCommand: options.GoCommand, Environment: stage.Environment(),
 			})
 			if err == nil {
@@ -352,17 +364,8 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 			return errors.Join(ErrPreview, err)
 		}
 		_, err = applicationgenerate.Generate(ctx, applicationgenerate.Options{
-			ObservePolicySupport: func(event interfaceinventory.PackageLoadEvent) {
-				if event.GoStarted && !policyStarted {
-					policyStarted = true
-					accounting.Observed = append(accounting.Observed, effect("candidate-policy-go", commandschema.EffectTrustedCodeExecution, "inspect_selected_kernel_policy_support", []string{"go", "list", "-deps", "-export", "-json", "-e", "-mod=readonly", "github.com/plystra/kernel/invocation"}))
-				}
-				if event.TemporaryCreated && !policyTemporary {
-					policyTemporary = true
-					accounting.Observed = append(accounting.Observed, effect("candidate-policy-module", commandschema.EffectTemporaryFile, "private_selected_kernel_module", []string{"go", "env", "GOWORK"}))
-				}
-			},
-			Start: stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
+			ObservePolicySupport: observePolicySupport,
+			Start:                stage.Root(), ConfigurationPath: options.ConfigurationPath, EnvironmentName: options.EnvironmentName,
 			GoCommand: options.GoCommand, Environment: stage.Environment(), MutateModule: mutate, RejectUnexpected: true,
 			Validate: func(ctx context.Context, root string) error {
 				if err := retainDependencySources(ctx, stage, options.GoCommand); err != nil {

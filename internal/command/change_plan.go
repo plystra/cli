@@ -108,8 +108,13 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	if err != nil {
 		return 8
 	}
+	policyEffects := &policySupportEffects{}
 	fail := func(status commandschema.Status, code, message string) int {
-		result, buildErr := newChangePlanFailure(invocationID, emptyEffects, status, code, message)
+		effects, mergeErr := policyEffects.merge(emptyEffects)
+		if mergeErr != nil {
+			return 8
+		}
+		result, buildErr := newChangePlanFailure(invocationID, effects, status, code, message)
 		if buildErr != nil {
 			return 8
 		}
@@ -124,7 +129,11 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 			return fail(commandschema.StatusValidationFailed, diagnosticcode.ChangePlanFailed, message)
 		}
 		recoveryContext := commandRecoveryContext(parsed.configurationPath, parsed.environmentName, environment)
-		result, err := newChangePlanPolicyFailure(invocationID, emptyEffects, policy, recoveryContext)
+		effects, err := policyEffects.merge(emptyEffects)
+		if err != nil {
+			return 8
+		}
+		result, err := newChangePlanPolicyFailure(invocationID, effects, policy, recoveryContext)
 		if err != nil {
 			return 8
 		}
@@ -251,14 +260,15 @@ func runChange(arguments []string, stdout, stderr io.Writer, workingDirectory st
 	ctx, cancel := context.WithTimeout(context.Background(), generationCommandTimeout)
 	defer cancel()
 	planned, err := planner(ctx, implementationselect.Options{
-		Start: workingDirectory, Target: target, Constructor: constructor,
+		ObservePolicySupport: policyEffects.observe,
+		Start:                workingDirectory, Target: target, Constructor: constructor,
 		ConfigurationPath: parsed.configurationPath, EnvironmentName: parsed.environmentName,
 		Environment: environment,
 	})
 	if err != nil {
 		return failCandidate(err, "The change could not be planned against the selected Project.")
 	}
-	payload, effects, err := buildChangePlanPayload(request, planned)
+	payload, effects, err := buildChangePlanPayload(request, planned, policyEffects)
 	if err != nil {
 		return fail(commandschema.StatusExecutionFailed, diagnosticcode.ChangePlanFailed, "The change plan could not be encoded.")
 	}
@@ -352,7 +362,7 @@ func readChangeRequest(base, path string) ([]byte, error) {
 	return data, nil
 }
 
-func buildChangePlanPayload(request changerequest.Request, planned implementationselect.PlanResult) (commandschema.ChangePlan, commandschema.Effects, error) {
+func buildChangePlanPayload(request changerequest.Request, planned implementationselect.PlanResult, policyEffects *policySupportEffects) (commandschema.ChangePlan, commandschema.Effects, error) {
 	inputs := planned.Inputs()
 	input, afterDigest, err := changePlanProjection(request, inputs, planned.Updated(), planned.ConfigurationImpact())
 	if err != nil {
@@ -372,6 +382,10 @@ func buildChangePlanPayload(request changerequest.Request, planned implementatio
 		plannedEffects = append(plannedEffects, effect)
 	}
 	input.Effects, err = commandschema.NewEffects(commandschema.EffectsInput{Planned: plannedEffects})
+	if err != nil {
+		return commandschema.ChangePlan{}, commandschema.Effects{}, err
+	}
+	input.Effects, err = policyEffects.merge(input.Effects)
 	if err != nil {
 		return commandschema.ChangePlan{}, commandschema.Effects{}, err
 	}

@@ -68,7 +68,7 @@ func previewConfigurations(ctx context.Context, options Options, changes []chang
 	if err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
-	if err := inputs.ValidateCandidate(candidate); err != nil {
+	if err := inputs.ValidateExecutableCandidate(ctx, candidate); err != nil {
 		return PlanResult{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
 	input := authoredResourceConfigurationImpact(inputs.CurrentLayers(), candidate.CurrentLayers(), inputs.ConfigurationSelection().Path())

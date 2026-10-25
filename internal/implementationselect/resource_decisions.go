@@ -1,6 +1,7 @@
 package implementationselect
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -34,21 +35,23 @@ type resourceBindingDecision struct {
 }
 
 type resourceBindingProbe struct {
-	inputs       applicationresolve.SelectionInputs
-	target       string
-	provider     constructorsymbol.Symbol
-	visits       int
-	set          func([]byte, string, string, string) ([]byte, bool, error)
-	decisions    map[string]*resourceBindingDecision
-	combinations map[string]bool
-	missing      *applicationmeta.ResourceConfigurationError
-	accepted     bool
-	choiceCount  int
+	ctx           context.Context
+	policyFailure error
+	inputs        applicationresolve.SelectionInputs
+	target        string
+	provider      constructorsymbol.Symbol
+	visits        int
+	set           func([]byte, string, string, string) ([]byte, bool, error)
+	decisions     map[string]*resourceBindingDecision
+	combinations  map[string]bool
+	missing       *applicationmeta.ResourceConfigurationError
+	accepted      bool
+	choiceCount   int
 }
 
-func viableResourceBindingDecisions(inputs applicationresolve.SelectionInputs, updated []byte, target string, provider constructorsymbol.Symbol) ([]configurationimpact.UnresolvedDecision, *applicationmeta.ResourceConfigurationError, error) {
+func viableResourceBindingDecisions(ctx context.Context, inputs applicationresolve.SelectionInputs, updated []byte, target string, provider constructorsymbol.Symbol) ([]configurationimpact.UnresolvedDecision, *applicationmeta.ResourceConfigurationError, error) {
 	probe := resourceBindingProbe{
-		inputs: inputs, target: target, provider: provider,
+		ctx: ctx, inputs: inputs, target: target, provider: provider,
 		set:       applicationmeta.SetResourceInstanceBinding,
 		decisions: make(map[string]*resourceBindingDecision), combinations: make(map[string]bool),
 	}
@@ -59,7 +62,7 @@ func viableResourceBindingDecisions(inputs applicationresolve.SelectionInputs, u
 		return nil, nil, err
 	}
 	if !probe.accepted {
-		return nil, nil, nil
+		return nil, nil, probe.policyFailure
 	}
 	parameters := make([]string, 0, len(probe.decisions))
 	for parameter := range probe.decisions {
@@ -115,9 +118,18 @@ func (p *resourceBindingProbe) explore(document []byte, selected map[string]reso
 	if err != nil {
 		return false, nil
 	}
-	validationErr := p.inputs.ValidateCandidate(composed)
+	validationErr := p.inputs.ValidateExecutableCandidate(p.ctx, composed)
 	if validationErr == nil {
 		return p.accept(selected, nil)
+	}
+	if errors.Is(validationErr, applicationresolve.ErrPolicySupportUnverified) || errors.Is(validationErr, context.Canceled) || errors.Is(validationErr, context.DeadlineExceeded) || errors.Is(validationErr, applicationresolve.ErrConcurrentChange) {
+		return false, validationErr
+	}
+	if errors.Is(validationErr, applicationresolve.ErrPolicyNotEnforced) {
+		if p.policyFailure == nil {
+			p.policyFailure = validationErr
+		}
+		return false, nil
 	}
 	var missing *applicationmeta.ResourceConfigurationError
 	if errors.Is(validationErr, applicationmeta.ErrConfigurationRequired) && errors.As(validationErr, &missing) && missing.InstanceName() == p.target && missing.Provider() == p.provider {

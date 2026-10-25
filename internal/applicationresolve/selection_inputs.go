@@ -24,18 +24,19 @@ import (
 // Resolve. It does not establish a valid composed or executable application.
 // Private document bytes are available only through explicit snapshot access.
 type SelectionInputs struct {
-	module             modulelocate.Module
-	dependencies       moduledependency.Index
-	declarations       interfaceinventory.Discovery
-	inventory          plugininventory.Index
-	rootManifest       applicationmeta.Manifest
-	selectedManifest   applicationmeta.Manifest
-	rootSnapshot       ManifestSnapshot
-	selectedSnapshot   ManifestSnapshot
-	selector           configurationSelector
-	moduleMetadata     []ModuleMetadataSnapshot
-	workspaceSnapshots []selectionWorkspaceSnapshot
-	dependencyOptions  moduledependency.Options
+	module               modulelocate.Module
+	dependencies         moduledependency.Index
+	declarations         interfaceinventory.Discovery
+	inventory            plugininventory.Index
+	rootManifest         applicationmeta.Manifest
+	selectedManifest     applicationmeta.Manifest
+	rootSnapshot         ManifestSnapshot
+	selectedSnapshot     ManifestSnapshot
+	selector             configurationSelector
+	moduleMetadata       []ModuleMetadataSnapshot
+	workspaceSnapshots   []selectionWorkspaceSnapshot
+	dependencyOptions    moduledependency.Options
+	observePolicySupport func(interfaceinventory.PackageLoadEvent)
 }
 
 func (SelectionInputs) String() string   { return "<private-selection-inputs>" }
@@ -214,6 +215,7 @@ func discoverSelectionInputs(ctx context.Context, options Options) (SelectionInp
 		rootManifest: rootManifest, selectedManifest: selectedManifest,
 		rootSnapshot: rootSnapshot, selectedSnapshot: selectedSnapshot, selector: selector,
 		moduleMetadata: moduleMetadata, workspaceSnapshots: workspaceSnapshots, dependencyOptions: dependencyOptions,
+		observePolicySupport: options.ObservePolicySupport,
 	}
 	declarations, err := interfaceinventory.DiscoverApplication(ctx, module, dependencies, interfaceinventory.Options{
 		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...), OutputLimit: options.DependencyOutputLimit, Offline: options.Offline,
