@@ -940,6 +940,18 @@ summary reads add no inferred manifests. This is a retained subset, not complete
 resolution capture: cold manifests, summaries without independent authority,
 and ambiguous summary reads remain outside graph inference. Traversal permits at most 65,536 graph states and 512 MiB of
 manifest bytes, in addition to the shared staging bounds.
+After a started graph listing settles, previews repeat that traversal against
+newly materialized manifests under the same original checksum authority,
+snapshots, cache selection, and cumulative bounds. This captures inferable
+transitive and intermediate versions even when absent from the final graph,
+before command-error handling or output decoding. The existing independent
+30-second context also covers failure and cancellation. This phase starts no
+Go command and invokes no source-tree or module-information callback. Root
+manifest callbacks receive defensive copies. Earlier evidence never refreshes.
+The replay records conservative manifest candidates, not an exact consumed
+readset or evidence before Go's first cold read. Missing or unauthorized
+summaries block descendant recovery; malformed summaries stop traversal, so
+complete failed-resolution coverage remains unfinished.
 When those checked summaries establish the complete selected graph, previews
 also retain present cache `.info` files for its distinct versioned effective
 identities before listing. Go-version shortcuts, replacement aliases, and

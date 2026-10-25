@@ -66,8 +66,11 @@ type Options struct {
 	// graph resolution, and requested effective manifests before preparation
 	// downloads or workspace selection. Discovery and exact preparation also
 	// capture present manifests around each download attempt under original authority.
+	// Settled discovery listings also recover inferable graph-manifest candidates
+	// under that original authority, including failure and cancellation. This is
+	// conservative post-command evidence, not an exact consumed readset.
 	// It does not initiate downloads or refresh previously retained evidence.
-	// Callbacks must use the supplied context, including bounded post-download
+	// Callbacks must use the supplied context, including bounded post-command
 	// retention after the operation context has been cancelled.
 	RetainRootManifests func(context.Context, []RootManifest) error
 	// RetainManifestFiles preserves present cache .mod files as private concurrency
@@ -322,14 +325,14 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if options.RetainManifestFiles != nil {
 		options.RetainManifestFiles = retainModuleFilesOnce(inputs, options.RetainManifestFiles)
 	}
-	var retainRootFiles func(context.Context) error
+	var retainListingManifests func(context.Context) error
 	if options.RetainRootManifests != nil || options.RetainManifestFiles != nil || options.RetainModuleInformation != nil || options.RetainModuleArchives != nil || options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
 				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)
 			}
 		}()
-		retainRootFiles, err = retainRootManifests(ctx, application.Path(), before, options, inputs, workspace)
+		retainListingManifests, err = retainRootManifests(ctx, application.Path(), before, options, inputs, workspace)
 		if err != nil {
 			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 		}
@@ -358,11 +361,11 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		OutputLimit: outputLimit,
 	}, "list", "-m", "-json", "-mod=readonly", "all")
 	var retentionErr error
-	if started && !errors.Is(listErr, gocommand.ErrProcessUnsettled) && retainRootFiles != nil && options.RetainManifestFiles != nil {
-		// Retain cold roots materialized by a settled listing even when it failed
-		// or the operation was cancelled. Cleanup never starts another Go command.
+	if started && !errors.Is(listErr, gocommand.ErrProcessUnsettled) && retainListingManifests != nil {
+		// Retain roots and inferable graph manifests after settled listing,
+		// including failure or cancellation. Cleanup starts no Go command.
 		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		retentionErr = errors.Join(retainRootFiles(captureCtx), captureCtx.Err())
+		retentionErr = errors.Join(retainListingManifests(captureCtx), captureCtx.Err())
 		cancel()
 		if retentionErr != nil {
 			retentionErr = errors.Join(ErrSourceIntegrity, retentionErr)

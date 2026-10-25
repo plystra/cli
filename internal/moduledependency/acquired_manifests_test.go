@@ -123,6 +123,11 @@ func TestDiscoverRetainsAcquisitionManifests(t *testing.T) {
 				if createdDuringDownload || mode == "unrecorded" || mode == "member-conflict" {
 					wantBefore = 0
 				}
+				if wantBefore != 0 && !preFailure {
+					// Listing retains the newly materialized manifest before the
+					// later exact-download precheck rechecks the same original.
+					wantBefore++
+				}
 				if preFailure || mode == "unrecorded" || mode == "member-conflict" {
 					wantAfter = 0
 				}

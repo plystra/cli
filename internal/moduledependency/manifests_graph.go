@@ -531,7 +531,7 @@ func (graph *manifestGraph) retainEffectiveBatch(ctx context.Context, versions [
 	}
 	if len(manifests) != 0 {
 		if graph.retain != nil {
-			if err := graph.retain(ctx, manifests); err != nil {
+			if err := graph.retain(ctx, append([]RootManifest(nil), manifests...)); err != nil {
 				return err
 			}
 		}

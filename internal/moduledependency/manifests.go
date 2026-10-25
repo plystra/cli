@@ -143,7 +143,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		return nil, err
 	}
 	if len(retained) != 0 && options.RetainRootManifests != nil {
-		if err := options.RetainRootManifests(ctx, retained); err != nil {
+		if err := options.RetainRootManifests(ctx, append([]RootManifest(nil), retained...)); err != nil {
 			return nil, err
 		}
 	}
@@ -165,7 +165,22 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 	if err := graph.capture(ctx); err != nil {
 		return nil, err
 	}
-	return retainFiles, retainFiles(ctx)
+	if err := retainFiles(ctx); err != nil {
+		return nil, err
+	}
+	// Settled listing may have filled a cold graph frontier. Recover only
+	// manifests authorized by the original sums, retaining the same snapshots.
+	graph.retainInformation, graph.retainSources, graph.retainTrees = nil, nil, nil
+	graph.retainManifestFiles = nil
+	return func(captureCtx context.Context) error {
+		if err := retainFiles(captureCtx); err != nil {
+			return err
+		}
+		if graph.retain == nil {
+			return nil
+		}
+		return graph.capture(captureCtx)
+	}, nil
 }
 
 func rootManifestFileRetainer(files []string, inputs preparationInputs, retain func(context.Context, []string) error) func(context.Context) error {

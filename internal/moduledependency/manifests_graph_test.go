@@ -288,20 +288,25 @@ func TestDiscoverRetainsOnlyDemandedGraphManifestsBeforeListing(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RetainRootManifests: func(_ context.Context, manifests []moduledependency.RootManifest) error {
-				batches = append(batches, len(manifests))
 				commands, _ := os.ReadFile(trace)
-				if strings.Contains(string(commands), "list ") || strings.Contains(string(commands), "download ") {
-					t.Fatalf("graph capture followed Go consumption: %s", commands)
+				early := !strings.Contains(string(commands), "list ")
+				if strings.Contains(string(commands), "download ") {
+					t.Fatalf("graph capture followed source acquisition: %s", commands)
+				}
+				if early {
+					batches = append(batches, len(manifests))
 				}
 				var metadata []projectstage.MetadataInput
 				for _, input := range manifests {
-					retained = append(retained, input.Path)
+					if early {
+						retained = append(retained, input.Path)
+					}
 					metadata = append(metadata, projectstage.MetadataInput{Path: input.Path, GoModChecksum: input.Checksum})
 				}
 				if err := stage.RetainMetadata(t.Context(), metadata); err != nil {
 					return err
 				}
-				if slices.Contains(retained, facts[b1].GoMod) && test.callback != "" {
+				if early && slices.Contains(retained, facts[b1].GoMod) && test.callback != "" {
 					if test.callback == "reject" {
 						return rejected
 					}
