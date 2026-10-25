@@ -108,18 +108,14 @@ func TestRunAddRestoresModuleConfigurationAndGeneratedOutputAfterValidationFailu
 	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "created capability records.list/v1") {
 		t.Fatalf("initial capability creation = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	writeCommandFile(t, filepath.Join(root, "validation_failure_test.go"), `package library
+	writeCommandFile(t, filepath.Join(root, "validation_failure.go"), `package library
 
-import "testing"
-
-func TestInjectedDependencyValidationFailure(t *testing.T) {
-	t.Fatal("injected dependency validation failure")
-}
+var _ int = "injected dependency validation failure"
 `)
 	before := commandTree(t, root)
 	query := "example.com/acme/platform@v1.0.0"
 	exitCode, stdout, stderr = runCommand(t, []string{"add", query}, filepath.Join(root, "records"), environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "injected dependency validation failure") {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "validate generated application") || !strings.Contains(stderr, "injected dependency validation failure") {
 		t.Fatalf("failed plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
@@ -228,17 +224,13 @@ func TestRunRemoveRestoresModuleConfigurationAndGeneratedOutputAfterValidationFa
 	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
 		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	writeCommandFile(t, filepath.Join(root, "validation_failure_test.go"), `package library
+	writeCommandFile(t, filepath.Join(root, "validation_failure.go"), `package library
 
-import "testing"
-
-func TestInjectedDependencyRemovalValidationFailure(t *testing.T) {
-	t.Fatal("injected dependency removal validation failure")
-}
+var _ int = "injected dependency removal validation failure"
 `)
 	before := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"remove", "example.com/acme/platform"}, filepath.Join(root, "records"), environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "injected dependency removal validation failure") {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "validate generated application") || !strings.Contains(stderr, "injected dependency removal validation failure") {
 		t.Fatalf("failed plystra remove = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {
@@ -394,17 +386,13 @@ func TestRunUpdateRestoresModuleConfigurationAndGeneratedOutputAfterValidationFa
 	if exitCode != 0 || stderr != "" || !strings.HasPrefix(stdout, "added dependency "+query) {
 		t.Fatalf("initial plystra add = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
-	writeCommandFile(t, filepath.Join(root, "validation_failure_test.go"), `package library
+	writeCommandFile(t, filepath.Join(root, "validation_failure.go"), `package library
 
-import "testing"
-
-func TestInjectedDependencyUpdateValidationFailure(t *testing.T) {
-	t.Fatal("injected dependency update validation failure")
-}
+var _ int = "injected dependency update validation failure"
 `)
 	before := commandTree(t, root)
 	exitCode, stdout, stderr = runCommand(t, []string{"update", "example.com/acme/platform@v1.1.0"}, filepath.Join(root, "records"), environment)
-	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "injected dependency update validation failure") {
+	if exitCode != 1 || stdout != "" || !strings.Contains(stderr, "validate generated application") || !strings.Contains(stderr, "injected dependency update validation failure") {
 		t.Fatalf("failed plystra update = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
 	if after := commandTree(t, root); !reflect.DeepEqual(after, before) {

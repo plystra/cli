@@ -25,6 +25,7 @@ import (
 	"github.com/plystra/cli/internal/modulepath"
 	"github.com/plystra/cli/internal/protobufwiremap"
 	"github.com/plystra/cli/internal/testkernel"
+	"github.com/plystra/cli/internal/testmodulecache"
 	"github.com/plystra/cli/internal/version"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
@@ -414,6 +415,7 @@ func TestRunGenerateReportsInvalidOwnershipManifestSourceWithoutMutation(t *test
 }
 
 func TestRunGenerateProjectsAuthoredInterfaceMessages(t *testing.T) {
+	prepareCommandConnectRuntime(t)
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := testkernel.Root(t)
@@ -957,6 +959,7 @@ func TestRunGenerateReportsUnsupportedOperationExposureSourceWithoutMutation(t *
 }
 
 func TestRunGenerateInstallsConnectRuntimeRequirementsAndCheckIsReadOnly(t *testing.T) {
+	prepareCommandConnectRuntime(t)
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := testkernel.Root(t)
@@ -1139,7 +1142,7 @@ func TestRunGenerateRollsBackKernelDependencyRepairAfterValidationFailure(t *tes
 	}
 	writeCommandFile(t, filepath.Join(root, "go.sum"), string(goSum))
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "{}\n")
-	writeCommandFile(t, filepath.Join(root, "validation_test.go"), "package kernelrepairrollback_test\n\nimport \"testing\"\n\nfunc TestRejectGeneratedState(t *testing.T) { t.Fatal(\"reject generated state\") }\n")
+	writeCommandFile(t, filepath.Join(root, "validation.go"), "package kernelrepairrollback\n\nvar _ int = \"reject generated state\"\n")
 	before := commandTree(t, root)
 
 	exitCode, stdout, stderr := runCommand(t, []string{"generate"}, root, commandGoEnvironment())
@@ -1600,6 +1603,7 @@ replace github.com/plystra/kernel => %s
 }
 
 func TestRunGenerateSelectsCompleteConfigurationThroughPublicCommand(t *testing.T) {
+	prepareCommandConnectRuntime(t)
 	root := t.TempDir()
 	applicationRoot := filepath.Join(root, "application")
 	dependencyRoot := filepath.Join(root, "platform")
@@ -2181,6 +2185,16 @@ func (*Plugin) Send(_ context.Context, _ contract.Request) (contract.Response, e
 	if exitCode != 0 || stderr != "" || stdout != "generated output is current for example.com/acme/library in "+commandCanonicalPath(t, root)+"\n" {
 		t.Fatalf("clean Project check = exit %d, stdout %q, stderr %q", exitCode, stdout, stderr)
 	}
+}
+
+func prepareCommandConnectRuntime(t testing.TB) {
+	t.Helper()
+	// Generated runtime dependencies are not necessarily CLI build dependencies.
+	// Prepare their real archives before a fixture disables module lookup.
+	testmodulecache.Ensure(t, "all",
+		connectgen.ConnectModulePath+"@"+connectgen.ConnectModuleVersion,
+		connectgen.ProtobufModulePath+"@"+connectgen.ProtobufModuleVersion,
+	)
 }
 
 func runCommand(t testing.TB, arguments []string, start string, environment []string) (int, string, string) {

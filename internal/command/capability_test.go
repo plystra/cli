@@ -820,6 +820,7 @@ func TestRunCapabilityRejectsGeneratedOwnershipConflict(t *testing.T) {
 
 func writeCapabilityCommandModule(t *testing.T) string {
 	t.Helper()
+	prepareCommandConnectRuntime(t)
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := testkernel.Root(t)

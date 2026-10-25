@@ -462,6 +462,7 @@ func TestRunUseRejectsAmbientSelectorConflictWithoutMutation(t *testing.T) {
 
 func writeImplementationSelectionCommandProject(t *testing.T) string {
 	t.Helper()
+	prepareCommandConnectRuntime(t)
 	root := t.TempDir()
 	cliRoot := commandRepositoryRoot(t)
 	kernelRoot := testkernel.Root(t)

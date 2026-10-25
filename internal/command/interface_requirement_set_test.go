@@ -93,6 +93,7 @@ func TestPublicInterfaceRequirementCompleteSets(t *testing.T) {
 }
 
 func TestPublicEmptyRequirementSetPreservesExposureAndConstructorDependencies(t *testing.T) {
+	prepareCommandConnectRuntime(t)
 	root := writeCommandPolicyProject(t)
 	writeCommandGraphInterface(t, root, "app/run/v1", "runv1", "app.run/v1", "Run")
 	writeCommandFile(t, filepath.Join(root, "app", "service.go"), `package app
