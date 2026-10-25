@@ -222,19 +222,38 @@ func TestDiscoverRetainsManifestsAcrossSequentialAcquisitions(t *testing.T) {
 				command, environment, trace := tracePreparation(t, fixture.root, stage.Environment())
 				rejected := errors.New("first post-download manifest rejected")
 				captures := map[string]int{}
+				expected := map[string]string{fixture.downloaded.GoMod: fixture.downloaded.GoModSum, downloads[0].GoMod: downloads[0].GoModSum, downloads[1].GoMod: downloads[1].GoModSum}
+				listingCaptured := false
 				sources := 0
 				index, err := moduledependency.Discover(t.Context(), locate(t, stage.Root()), moduledependency.Options{
 					Environment: environment, GoCommand: command, RequireSourceChecksums: true,
 					RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
-						if len(manifests) != 1 {
-							t.Fatal("distinct effective sources were combined")
+						commands := string(readFile(t, trace))
+						if !listingCaptured {
+							if len(manifests) != len(expected) || !strings.Contains(commands, "list -m ") || strings.Contains(commands, "mod download ") {
+								t.Fatal("settled listing did not retain the authorized manifest batch before acquisition")
+							}
+							listingCaptured = true
+						} else if len(manifests) != 1 {
+							t.Fatal("exact acquisition combined distinct effective sources")
 						}
-						manifest := manifests[0]
-						captures[manifest.Path]++
-						if err := stage.RetainMetadata(ctx, []projectstage.MetadataInput{{Path: manifest.Path, GoModChecksum: manifest.Checksum}}); err != nil {
+						inputs := make([]projectstage.MetadataInput, len(manifests))
+						seen := map[string]bool{}
+						for index, manifest := range manifests {
+							if checksum, ok := expected[manifest.Path]; !ok || checksum != manifest.Checksum || seen[manifest.Path] {
+								t.Fatal("manifest batch lost original physical identity or checksum")
+							}
+							seen[manifest.Path] = true
+							captures[manifest.Path]++
+							inputs[index] = projectstage.MetadataInput{Path: manifest.Path, GoModChecksum: manifest.Checksum}
+						}
+						if err := stage.RetainMetadata(ctx, inputs); err != nil {
 							return err
 						}
-						if mode == "post-rejected" && manifest.Path == fixture.downloaded.GoMod && captures[manifest.Path] == 2 {
+						if mode == "post-rejected" && captures[fixture.downloaded.GoMod] == 3 {
+							if !strings.Contains(commands, "mod download -json "+warmSourceModule+"@v1.0.0\n") {
+								t.Fatal("post-download rejection preceded the exact acquisition")
+							}
 							return rejected
 						}
 						return nil
@@ -245,17 +264,17 @@ func TestDiscoverRetainsManifestsAcrossSequentialAcquisitions(t *testing.T) {
 						if mode == "shared-source" {
 							want = 2
 						}
-						if len(selected) != want || captures[fixture.downloaded.GoMod] != 2 || strings.Contains(string(readFile(t, trace)), "mod download -json "+paths[0]+"@") {
+						if len(selected) != want || captures[fixture.downloaded.GoMod] != 3 || strings.Contains(string(readFile(t, trace)), "mod download -json "+paths[0]+"@") {
 							t.Fatal("source retention did not precede the later acquisition or follow its own manifest capture")
 						}
 						return retainWarmBundle(t, stage, t.Context(), selected)
 					},
 				})
-				wantSources, wantLater, wantError := 1, 2, moduledependency.ErrModuleUnavailable
+				wantSources, wantLater, wantError := 1, 3, moduledependency.ErrModuleUnavailable
 				if mode == "post-rejected" {
-					wantSources, wantLater, wantError = 0, 0, rejected
+					wantSources, wantLater, wantError = 0, 1, rejected
 				}
-				if !errors.Is(err, wantError) || len(index.Modules()) != 0 || sources != wantSources || captures[fixture.downloaded.GoMod] != 2 || captures[downloads[0].GoMod] != wantLater || captures[downloads[1].GoMod] != 0 {
+				if !listingCaptured || !errors.Is(err, wantError) || len(index.Modules()) != 0 || sources != wantSources || captures[fixture.downloaded.GoMod] != 3 || captures[downloads[0].GoMod] != wantLater || captures[downloads[1].GoMod] != 1 {
 					t.Fatalf("sequential acquisition lost evidence or advanced: captures=%v sources=%d error=%v", captures, sources, err)
 				}
 				commands := string(readFile(t, trace))
@@ -339,6 +358,9 @@ func TestDiscoverRetainsInterruptedAcquisitionManifests(t *testing.T) {
 					}
 					if ctx.Err() != nil {
 						post++
+						if calls != 3 || !strings.Contains(string(readFile(t, trace)), "mod download -json "+warmSourceModule+"@v1.0.0\n") {
+							t.Fatal("interrupted retention lost listing or pre-download evidence")
+						}
 						deadline, bounded := captureCtx.Deadline()
 						if !bounded || time.Until(deadline) <= 0 || time.Until(deadline) > 30*time.Second {
 							t.Fatal("interrupted capture lost its independent bounded budget")
@@ -346,11 +368,13 @@ func TestDiscoverRetainsInterruptedAcquisitionManifests(t *testing.T) {
 						path := filepath.Join(stage.Root(), "go.mod")
 						writeFile(t, path, string(readFile(t, path))+"// concurrent edit\n")
 						return rejected
+					} else if commands := string(readFile(t, trace)); calls > 2 || !strings.Contains(commands, "list -m ") || strings.Contains(commands, "mod download ") {
+						t.Fatal("listing and pre-download retention did not precede acquisition")
 					}
 					return nil
 				},
 			})
-			if calls != 2 || post != 1 || reached.Load() != 1 || len(index.Modules()) != 0 || !errors.Is(err, context.Canceled) || !errors.Is(err, rejected) || !errors.Is(err, moduledependency.ErrConcurrentChange) || !errors.Is(err, moduledependency.ErrModuleUnavailable) {
+			if calls != 3 || post != 1 || reached.Load() != 1 || len(index.Modules()) != 0 || !errors.Is(err, context.Canceled) || !errors.Is(err, rejected) || !errors.Is(err, moduledependency.ErrConcurrentChange) || !errors.Is(err, moduledependency.ErrModuleUnavailable) {
 				t.Fatalf("interrupted acquisition lost joined failure evidence: calls=%d post=%d reached=%d error=%v", calls, post, reached.Load(), err)
 			}
 			select {

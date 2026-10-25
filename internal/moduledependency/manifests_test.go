@@ -107,7 +107,11 @@ func TestDiscoverRetainsEffectiveRootManifestsBeforeListing(t *testing.T) {
 					t.Fatalf("wrong effective root manifest: %v", manifests)
 				}
 				commands := string(readFile(t, trace))
-				if calls == 1 {
+				if mode == "missing-manifest" {
+					if calls != 1 || !strings.Contains(commands, "list -m ") || strings.Contains(commands, "download ") {
+						t.Fatalf("missing root manifest was not recovered after settled listing: %s", commands)
+					}
+				} else if calls == 1 {
 					if strings.Contains(commands, "list ") || strings.Contains(commands, "download ") {
 						t.Fatalf("root capture happened after resolution: %s", commands)
 					}
@@ -144,7 +148,7 @@ func TestDiscoverRetainsEffectiveRootManifestsBeforeListing(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantCalls := 1
-			if mode == "local" || mode == "excluded" || mode == "missing-manifest" || mode == "missing-checksum" {
+			if mode == "local" || mode == "excluded" || mode == "missing-checksum" {
 				wantCalls = 0
 			} else if mode == "manifest-only" {
 				wantCalls = 3
