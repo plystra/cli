@@ -213,8 +213,15 @@ func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 	for _, mode := range []string{"cold", "added", "updated", "replacement", "module-manifest", "module-checksum", "workspace-cold", "workspace", "workspace-replacement", "workspace-module-replacement", "workspace-initial-replacement", "workspace-initial-local", "workspace-module-manifest", "workspace-module-checksum"} {
 		t.Run(mode, func(t *testing.T) {
 			proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false), previewDependency(t, "v1.1.0", false)})
-			environment := previewDependencyEnvironment(t, proxy)
 			root := writeImplementationSelectionCommandProject(t)
+			var environment []string
+			if strings.HasSuffix(mode, "cold") {
+				// Keep the requested target cold without reacquiring the unchanged
+				// CLI runtime graph, which has dedicated cold-capture coverage.
+				environment = warmPreviewDependencyEnvironment(t, proxy)
+			} else {
+				environment = previewDependencyEnvironment(t, proxy)
+			}
 			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1]\n")
 			action, version := "add", "v1.0.0"
 			if mode == "updated" {
@@ -297,6 +304,17 @@ func TestScaffoldPreviewCapturesExactTargetsBeforeGoGet(t *testing.T) {
 			}
 			marker := filepath.Join(t.TempDir(), "get-started")
 			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+mode, "PLYSTRA_SOURCE_PREPARATION_BACKUP="+filepath.Join(cache, "source-before-get.go"))
+			if strings.HasSuffix(mode, "cold") {
+				for _, candidate := range []string{
+					filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@"+effectiveVersion)),
+					filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule)),
+				} {
+					if _, err := os.Lstat(candidate); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("cold target already cached at %s: %v", candidate, err)
+					}
+				}
+				environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_OBSERVE_QUERY="+previewDependencyModule+"@"+effectiveVersion, "PLYSTRA_SOURCE_PREPARATION_OBSERVE_RELATIVE=remote/implementation.go")
+			}
 			request, err := changerequest.Parse([]byte(fmt.Sprintf(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":%q,"module":%q}]}`, action, previewDependencyModule+"@"+version)))
 			if err != nil {
 				t.Fatal(err)
@@ -434,6 +452,13 @@ func main() {
  }
  if firstGet {
   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+  if mode == "cold" || mode == "workspace-cold" {
+   checkOriginalCache()
+   // Preparation may acquire cold sources privately before ordinary Go get.
+   prepared, err := os.ReadFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER") + ".acquired-input"); check(err)
+   if !filepath.IsAbs(string(prepared)) || filepath.Clean(string(prepared)) == filepath.Clean(path) { os.Exit(12) }
+   path = string(prepared)
+  }
   data, err := os.ReadFile(path); check(err)
   info, err := os.Stat(path); check(err)
   if !os.SameFile(info, info) { os.Exit(10) }
