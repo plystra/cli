@@ -207,6 +207,13 @@ func Render(
 		return nil, fmt.Errorf("%w: descriptor runtime: %w", ErrRender, err)
 	}
 	files = append(files, File{path: schemaRuntimePath, packageName: "connectschema", data: schemaSource})
+	if len(interfaceOperations) != 0 {
+		credentialsSource, err := renderCredentialsRuntime()
+		if err != nil {
+			return nil, fmt.Errorf("%w: credential metadata runtime: %w", ErrRender, err)
+		}
+		files = append(files, File{path: credentialsRuntimePath, packageName: "connectschema", data: credentialsSource})
+	}
 	for _, operation := range interfaceOperations {
 		file, err := renderInterfaceCanonical(
 			modulePath,

@@ -271,6 +271,16 @@ the external context. Canonical, Alias, HTTP, and direct paths deliver
 invocation to the Provider and return no response when invocation observes it.
 These signals are best-effort interruption only; neither cancellation nor a
 deadline rolls back or compensates Provider work that already occurred.
+Authored Interface Connect ingress freezes bounded Bearer and cookie candidates
+before calling `RootContext`, then attaches the closed
+`plystra.http-credential-metadata/v1` payload to its resulting context through
+Kernel `contextmetadata`. Cookie names are unique and sorted. Duplicate or
+malformed credentials, exceeded bounds and existing metadata conflicts return
+a safe `invalid_argument` with `not_started` before Interface invocation.
+Anonymous requests remain valid. Candidates convey no authenticated identity
+or authority; selected implementation code explicitly performs verification.
+Only credential candidates are retained, and ordinary context formatting
+redacts them. Internal callers do not acquire transport metadata implicitly.
 Both handlers accept only Connect POST requests encoded as binary
 Protobuf or ProtoJSON, require `Connect-Protocol-Version: 1`, and reject gRPC
 and gRPC-Web with `415 Unsupported Media Type` before root-context or Provider
