@@ -926,6 +926,10 @@ captured again before command-error handling or output decoding. This retains
 manifests materialized during failed or cancelled listing through a local-only
 30-second retention context, without refreshing existing identities or starting
 another Go command. Unstarted or unsettled processes add no post-list capture.
+Related raw and authenticated post-list manifest callbacks share complete
+before/after checks within that same deadline. Each callback retains its input
+immediately, including on failure or caller cancellation; batching cannot skip
+capture or discard its error.
 This is post-command evidence, not capture before the first cold read or a
 complete failed-resolution readset.
 Capture uses the first applicable primary `h1:` row, ignoring Go's historical
