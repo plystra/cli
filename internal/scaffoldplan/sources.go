@@ -21,12 +21,15 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
 		MetadataBatch:     metadataBatch(stage),
+		SourceBatch:       sourceBatch(stage),
 		AcquisitionCache:  stage.AcquisitionCache,
-		RetainSourceTrees: stage.RetainSourceTrees,
+		RetainSourceTrees: func(ctx context.Context, paths []string) error { return retainSourceTrees(ctx, stage, paths) },
 		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
 			return retainArchives(ctx, stage, archives)
 		},
-		RetainSelectedSources:   func(sources []moduledependency.Module) error { return retainSources(ctx, stage, sources) },
+		RetainSelectedSources: func(ctx context.Context, sources []moduledependency.Module) error {
+			return retainSources(ctx, stage, sources)
+		},
 		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
 		RetainManifestFiles:     func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
 		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
@@ -56,8 +59,9 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
 		MetadataBatch:     metadataBatch(stage),
+		SourceBatch:       sourceBatch(stage),
 		AcquisitionCache:  stage.AcquisitionCache,
-		RetainSourceTrees: stage.RetainSourceTrees,
+		RetainSourceTrees: func(ctx context.Context, paths []string) error { return retainSourceTrees(ctx, stage, paths) },
 		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
 			return retainArchives(ctx, stage, archives)
 		},
@@ -70,7 +74,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 			}
 			return retainStageMetadata(ctx, stage, inputs)
 		},
-	}, func(dependencies []moduledependency.Module) error {
+	}, func(ctx context.Context, dependencies []moduledependency.Module) error {
 		return retainSources(ctx, stage, dependencies)
 	})
 	if err != nil {
@@ -120,7 +124,17 @@ func retainSources(ctx context.Context, stage *projectstage.Stage, dependencies 
 		sources = append(sources, projectstage.Source{Directory: filepath.Clean(dependency.SourceDirectory()),
 			Module: module.Version{Path: path, Version: version}, Checksum: dependency.Checksum()})
 	}
+	if batch, ok := ctx.Value(sourceBatchKey{}).(stageSourceBatch); ok && batch.stage == stage {
+		return batch.retain.Sources(sources, metadata...)
+	}
 	return stage.RetainSources(ctx, sources, metadata...)
+}
+
+func retainSourceTrees(ctx context.Context, stage *projectstage.Stage, paths []string) error {
+	if batch, ok := ctx.Value(sourceBatchKey{}).(stageSourceBatch); ok && batch.stage == stage {
+		return batch.retain.Trees(paths)
+	}
+	return stage.RetainSourceTrees(ctx, paths)
 }
 
 func retainMetadataFiles(ctx context.Context, stage *projectstage.Stage, paths []string) error {
@@ -132,6 +146,22 @@ func retainMetadataFiles(ctx context.Context, stage *projectstage.Stage, paths [
 }
 
 type metadataBatchKey struct{}
+
+type sourceBatchKey struct{}
+
+type stageSourceBatch struct {
+	stage  *projectstage.Stage
+	retain projectstage.SourceRetention
+}
+
+func sourceBatch(stage *projectstage.Stage) func(context.Context, func(context.Context) error) error {
+	return func(ctx context.Context, capture func(context.Context) error) error {
+		return stage.WithSourceBatch(ctx, func(retain projectstage.SourceRetention) error {
+			ctx = context.WithValue(ctx, metadataBatchKey{}, stageMetadataBatch{stage, retain.MetadataRetention})
+			return capture(context.WithValue(ctx, sourceBatchKey{}, stageSourceBatch{stage, retain}))
+		})
+	}
+}
 
 type stageMetadataBatch struct {
 	stage  *projectstage.Stage

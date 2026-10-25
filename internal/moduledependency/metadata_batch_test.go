@@ -78,7 +78,7 @@ func TestPrepareSourcesBatchesSettledMetadata(t *testing.T) {
 				RetainModuleArchives:    func(ctx context.Context, _ []moduledependency.ModuleArchive) error { return record(ctx, "archive") },
 				RetainManifestFiles:     func(ctx context.Context, _ []string) error { return record(ctx, "files") },
 				RetainModuleInformation: func(ctx context.Context, _ []string) error { return record(ctx, "information") },
-			}, func([]moduledependency.Module) error {
+			}, func(context.Context, []moduledependency.Module) error {
 				if inside {
 					t.Fatal("source retention moved inside the metadata group")
 				}

@@ -124,7 +124,7 @@ func TestPrepareSourcesRetainsLateManifestBeforeAcquisition(t *testing.T) {
 						}
 						return nil
 					},
-				}, func(sources []moduledependency.Module) error {
+				}, func(_ context.Context, sources []moduledependency.Module) error {
 					if len(sources) == 0 {
 						return stage.Recheck(t.Context())
 					}

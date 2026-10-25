@@ -3,10 +3,8 @@ package projectstage
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"path/filepath"
-	"sync"
 
 	"golang.org/x/mod/sumdb/dirhash"
 )
@@ -29,40 +27,12 @@ type MetadataRetention struct {
 // WithMetadataBatch shares complete before/after rechecks across related file
 // and archive captures, including failure and cancellation. The callback must
 // use the supplied functions rather than calling other Stage methods.
-func (s *Stage) WithMetadataBatch(ctx context.Context, capture func(MetadataRetention) error) (resultErr error) {
-	defer s.lock()()
+func (s *Stage) WithMetadataBatch(ctx context.Context, capture func(MetadataRetention) error) error {
 	if capture == nil {
 		return ErrStage
 	}
-	if err := s.recheck(ctx); err != nil {
-		return err
-	}
-	var mu sync.Mutex
-	active := true
-	retain := func(operation func() error) error {
-		mu.Lock()
-		defer mu.Unlock()
-		if !active {
-			return ErrStage
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return operation()
-	}
-	defer func() {
-		mu.Lock()
-		defer mu.Unlock()
-		active = false
-		resultErr = errors.Join(resultErr, ctx.Err(), s.recheck(ctx))
-	}()
-	return capture(MetadataRetention{
-		Files: func(files []MetadataInput) error {
-			return retain(func() error { return s.retainMetadata(ctx, files) })
-		},
-		Archives: func(archives []ArchiveInput) error {
-			return retain(func() error { return s.retainArchives(ctx, archives) })
-		},
+	return s.WithSourceBatch(ctx, func(retain SourceRetention) error {
+		return capture(retain.MetadataRetention)
 	})
 }
 

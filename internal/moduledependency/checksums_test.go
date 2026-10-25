@@ -2,6 +2,7 @@ package moduledependency_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -179,7 +180,7 @@ func TestDiscoverRequiresCompleteManifestChecksumEvidence(t *testing.T) {
 			options := moduledependency.Options{Environment: env, GoCommand: os.Args[0], RequireSourceChecksums: true, Offline: fact == "offline-missing-list"}
 			if strings.HasPrefix(fact, "preparation-missing-download") {
 				warmCalls := 0
-				err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: path, Version: version}}, options, func(sources []moduledependency.Module) error {
+				err = moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: path, Version: version}}, options, func(_ context.Context, sources []moduledependency.Module) error {
 					warmCalls++
 					if len(sources) != 1 || len(sources[0].ProjectGoMod()) != 0 || sources[0].GoModChecksum() != original.GoModChecksum() || sources[0].Checksum() != original.Checksum() {
 						t.Fatal("incomplete acquisition produced a completed or unverified source")

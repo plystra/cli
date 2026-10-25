@@ -216,7 +216,7 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 				} else if mode == "information-only" {
 					options.RetainRootManifests = nil
 				}
-				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}, {Path: second, Version: "v1.0.0"}}, options, func(sources []moduledependency.Module) error {
+				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}, {Path: second, Version: "v1.0.0"}}, options, func(_ context.Context, sources []moduledependency.Module) error {
 					if len(sources) != 0 {
 						t.Fatal("interrupted acquisition delivered a source")
 					}

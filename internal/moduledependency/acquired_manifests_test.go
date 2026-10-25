@@ -110,7 +110,7 @@ func TestDiscoverRetainsAcquisitionManifests(t *testing.T) {
 						}
 						return nil
 					},
-					RetainSelectedSources: func([]moduledependency.Module) error { sources++; return nil },
+					RetainSelectedSources: func(context.Context, []moduledependency.Module) error { sources++; return nil },
 				}
 				if mode == "manifest-only-callback" {
 					options.RetainSelectedSources = nil
@@ -239,7 +239,7 @@ func TestDiscoverRetainsManifestsAcrossSequentialAcquisitions(t *testing.T) {
 						}
 						return nil
 					},
-					RetainSelectedSources: func(selected []moduledependency.Module) error {
+					RetainSelectedSources: func(_ context.Context, selected []moduledependency.Module) error {
 						sources++
 						want := 1
 						if mode == "shared-source" {

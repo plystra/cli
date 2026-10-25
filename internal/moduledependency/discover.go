@@ -110,6 +110,13 @@ type Options struct {
 	// immediately and in their ordinary order, including failure/cancellation.
 	// Source retention and Go commands remain outside this group.
 	MetadataBatch func(context.Context, func(context.Context) error) error
+	// SourceBatch groups one closed local source capture phase, or the metadata
+	// and decoded sources from one settled exact download. It has the same
+	// exactly-once and error-preservation contract as MetadataBatch, with a
+	// deadline of at most 30 seconds. It starts no Go commands and retains source
+	// evidence before extracted-manifest validation or the next acquisition.
+	// When set, it replaces MetadataBatch for the settled download phase only.
+	SourceBatch func(context.Context, func(context.Context) error) error
 	// AcquisitionCache may provide a private cache for an exact source download.
 	// It receives the effective cache and canonical versions after original-input
 	// retention. The returned absolute cache must remain available to all source
@@ -138,7 +145,9 @@ type Options struct {
 	// Missing sources are acquired under the original checksum authorities and
 	// retained before CLI validation or the next acquisition. Their extracted
 	// manifests have not been parsed or recognized as Projects.
-	RetainSelectedSources func([]Module) error
+	// Callbacks honor their supplied context so a closed capture can share its
+	// bounded retention lifetime without inheriting a cancelled command context.
+	RetainSelectedSources func(context.Context, []Module) error
 }
 
 // Replacement records the selected replacement provenance reported by Go.
@@ -749,10 +758,10 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 			return errors.Join(callback(retainCtx, paths), retainCtx.Err(), inputs.recheck())
 		}
 	}
-	retain := func(sources []Module) error {
+	retain := func(retainCtx context.Context, sources []Module) error {
 		var err error
 		if callback := options.RetainSelectedSources; callback != nil {
-			err = callback(sources)
+			err = callback(retainCtx, sources)
 		}
 		return errors.Join(err, ctx.Err(), inputs.recheck())
 	}

@@ -125,7 +125,7 @@ func TestFixedRootManifestsRetainedBeforeSelection(t *testing.T) {
 				} else if mode == "manifest-only-callback" {
 					options.RetainRootManifests = nil
 				}
-				retain := func([]moduledependency.Module) error { return stage.Recheck(ctx) }
+				retain := func(context.Context, []moduledependency.Module) error { return stage.Recheck(ctx) }
 				if mode == "source-authentication" {
 					options.RetainSourceTrees = func(ctx context.Context, directories []string) error {
 						if err := stage.RetainSourceTrees(ctx, directories); err != nil {
@@ -136,7 +136,9 @@ func TestFixedRootManifestsRetainedBeforeSelection(t *testing.T) {
 						}
 						return nil
 					}
-					retain = func(sources []moduledependency.Module) error { return retainWarmBundle(t, stage, ctx, sources) }
+					retain = func(_ context.Context, sources []moduledependency.Module) error {
+						return retainWarmBundle(t, stage, ctx, sources)
+					}
 					options.RetainSelectedSources = retain
 				}
 				if phase == "preparation" {
@@ -149,7 +151,7 @@ func TestFixedRootManifestsRetainedBeforeSelection(t *testing.T) {
 						if !exists {
 							t.Fatal("missing independently resolved source")
 						}
-						err = retain([]moduledependency.Module{source})
+						err = retain(ctx, []moduledependency.Module{source})
 					}
 				}
 				commands := string(readFile(t, trace))

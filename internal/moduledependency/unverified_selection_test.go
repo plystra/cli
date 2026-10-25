@@ -114,7 +114,7 @@ func TestPendingSourcesRetainedBeforeSelection(t *testing.T) {
 						return nil
 					},
 				}
-				retain := func(sources []moduledependency.Module) error {
+				retain := func(_ context.Context, sources []moduledependency.Module) error {
 					err := retainWarmBundle(t, stage, ctx, sources)
 					if err == nil && len(sources) != 0 {
 						authenticated = true
@@ -137,7 +137,7 @@ func TestPendingSourcesRetainedBeforeSelection(t *testing.T) {
 						if mode == "mvs-upgrade" && source.SelectedVersion() != "v1.1.0" {
 							t.Fatal("fixed-source retention replaced actual Go version selection")
 						}
-						err = retain([]moduledependency.Module{source})
+						err = retain(ctx, []moduledependency.Module{source})
 					}
 				}
 				switch mode {

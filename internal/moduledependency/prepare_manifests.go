@@ -11,7 +11,7 @@ import (
 	"golang.org/x/mod/module"
 )
 
-func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Context, selection *preparationWorkspace, requested []module.Version, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
+func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Context, selection *preparationWorkspace, requested []module.Version, options Options, environment []string, inputs preparationInputs, retain func(context.Context, []Module) error) error {
 	if len(requested) == 0 {
 		return nil
 	}
@@ -148,7 +148,8 @@ func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Conte
 			toolchain: selected.GOVERSION, queryPaths: pending,
 			retain: options.RetainRootManifests, retainInformation: options.RetainModuleInformation,
 			retainSources: retain, retainTrees: options.RetainSourceTrees,
-			retained: map[string]bool{}, parsed: map[string]*modfile.File{},
+			sourceBatch: options.SourceBatch,
+			retained:    map[string]bool{}, parsed: map[string]*modfile.File{},
 		}
 		return errors.Join(graph.capture(ctx), ctx.Err(), inputs.recheck())
 	}

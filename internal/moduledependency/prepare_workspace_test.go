@@ -2,6 +2,7 @@ package moduledependency_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,7 +105,7 @@ func TestPrepareSourcesPreservesWorkspaceChecksumAuthorities(t *testing.T) {
 			command, env, trace := tracePreparation(t, filepath.Dir(app), env)
 			var prepared []moduledependency.Module
 			completed := map[module.Version]int{}
-			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command, Offline: strings.HasPrefix(mode, "offline")}, func(sources []moduledependency.Module) error {
+			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env, GoCommand: command, Offline: strings.HasPrefix(mode, "offline")}, func(_ context.Context, sources []moduledependency.Module) error {
 				for _, source := range sources {
 					version := module.Version{Path: source.Path(), Version: source.SelectedVersion()}
 					if replacement, ok := source.Replacement(); ok {
@@ -191,7 +192,7 @@ func TestPrepareSourcesUsesGoWorkspaceReplacementSelection(t *testing.T) {
 			}
 			writeFile(t, paths["workspace"], work)
 			var prepared []moduledependency.Module
-			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env}, func(sources []moduledependency.Module) error {
+			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}, moduledependency.Options{Environment: env}, func(_ context.Context, sources []moduledependency.Module) error {
 				prepared = append(prepared, sources...)
 				return nil
 			})
@@ -233,7 +234,7 @@ func TestPrepareSourcesRechecksWorkspaceMetadataAfterRetention(t *testing.T) {
 						requested = []module.Version{{Path: preparedOriginal, Version: "v1.0.0"}}
 					}
 					calls := 0
-					err := moduledependency.PrepareSources(t.Context(), locate(t, app), requested, moduledependency.Options{Environment: env}, func([]moduledependency.Module) error {
+					err := moduledependency.PrepareSources(t.Context(), locate(t, app), requested, moduledependency.Options{Environment: env}, func(context.Context, []moduledependency.Module) error {
 						calls++
 						if calls > 1 {
 							return nil

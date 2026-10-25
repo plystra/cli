@@ -67,7 +67,7 @@ func TestPrepareSourcesRetainsArchiveAuthorizedWarmTrees(t *testing.T) {
 					defer cancel()
 					rejected := errors.New("archive-authorized source rejected")
 					calls := 0
-					retain := func(sources []moduledependency.Module) error {
+					retain := func(_ context.Context, sources []moduledependency.Module) error {
 						if len(sources) == 0 {
 							return stage.Recheck(ctx)
 						}

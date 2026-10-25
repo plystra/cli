@@ -2,6 +2,7 @@ package moduledependency_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -62,7 +63,7 @@ func TestPrepareSourcesMaterializesExactEffectiveVersions(t *testing.T) {
 			before, beforeErr := os.ReadFile(filepath.Join(app, "go.sum"))
 			var prepared []moduledependency.Module
 			early := 0
-			err := moduledependency.PrepareSources(t.Context(), locate(t, app), requested, moduledependency.Options{Environment: env, Offline: strings.HasPrefix(mode, "offline")}, func(sources []moduledependency.Module) error {
+			err := moduledependency.PrepareSources(t.Context(), locate(t, app), requested, moduledependency.Options{Environment: env, Offline: strings.HasPrefix(mode, "offline")}, func(_ context.Context, sources []moduledependency.Module) error {
 				for _, source := range sources {
 					if source.IncompleteSourceMetadata() {
 						early++

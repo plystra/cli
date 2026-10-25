@@ -90,7 +90,7 @@ func TestPrepareSourcesWorkspaceSelectionBoundary(t *testing.T) {
 				environment = append(environment, "PLYSTRA_MODULE_LIST_SUFFIX={")
 			}
 			beforeList, calls := 0, 0
-			err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command}, func(sources []moduledependency.Module) error {
+			err = moduledependency.PrepareSources(t.Context(), locate(t, stage.Root()), requested, moduledependency.Options{Environment: environment, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 				for _, source := range sources {
 					if source.Path() != warmRequestedModule {
 						continue
@@ -151,7 +151,7 @@ func TestPrepareSourcesWorkspaceSelectionJoinsRetentionFailures(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	rejected := errors.New("workspace source rejected")
-	err := moduledependency.PrepareSources(ctx, locate(t, fixture.app), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment, GoCommand: command}, func(sources []moduledependency.Module) error {
+	err := moduledependency.PrepareSources(ctx, locate(t, fixture.app), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment, GoCommand: command}, func(_ context.Context, sources []moduledependency.Module) error {
 		if len(sources) == 0 {
 			return nil
 		}

@@ -78,7 +78,9 @@ func TestPrepareSourcesAcquisitionCache(t *testing.T) {
 					},
 				}
 				err = moduledependency.PrepareSources(ctx, locate(t, stage.Root()), []module.Version{{Path: warmRequestedModule, Version: "v1.0.0"}}, options,
-					func(sources []moduledependency.Module) error { return retainWarmBundle(t, stage, ctx, sources) })
+					func(_ context.Context, sources []moduledependency.Module) error {
+						return retainWarmBundle(t, stage, ctx, sources)
+					})
 				failed := mode == "rejected" || mode == "cancelled" || mode == "relative-cache" || mode == "callback-drift"
 				if failed {
 					if err == nil || mode == "rejected" && !errors.Is(err, rejected) || mode == "cancelled" && !errors.Is(err, context.Canceled) || mode == "relative-cache" && !errors.Is(err, moduledependency.ErrInvalidOutput) || mode == "callback-drift" && !errors.Is(err, moduledependency.ErrConcurrentChange) {
@@ -165,7 +167,7 @@ func TestAcquisitionCacheUsesEffectiveChecksumExemptions(t *testing.T) {
 							calls++
 							return stage.AcquisitionCache(ctx, cache, versions)
 						},
-						RetainSelectedSources: func(sources []moduledependency.Module) error {
+						RetainSelectedSources: func(_ context.Context, sources []moduledependency.Module) error {
 							return retainWarmBundle(t, stage, t.Context(), sources)
 						},
 					}
@@ -244,7 +246,9 @@ func TestAcquisitionCacheRequiresWholeBatchChecksumExemption(t *testing.T) {
 					}
 					return cache, nil
 				},
-				RetainSelectedSources: func(sources []moduledependency.Module) error { return retainWarmBundle(t, stage, t.Context(), sources) },
+				RetainSelectedSources: func(_ context.Context, sources []moduledependency.Module) error {
+					return retainWarmBundle(t, stage, t.Context(), sources)
+				},
 			})
 			if err != nil || all && calls != 1 || !all && calls != 0 {
 				t.Fatalf("whole-batch checksum exemption: calls=%d, %v", calls, err)
@@ -265,7 +269,7 @@ func TestAcquisitionCacheKeepsDistributionVerification(t *testing.T) {
 			calls := 0
 			err := moduledependency.PrepareSources(t.Context(), locate(t, app), []module.Version{{Path: path, Version: "v1.0.0"}}, moduledependency.Options{Environment: environment,
 				AcquisitionCache: func(_ context.Context, cache string, _ []module.Version) (string, error) { calls++; return cache, nil },
-			}, func([]moduledependency.Module) error { return nil })
+			}, func(context.Context, []moduledependency.Module) error { return nil })
 			if err != nil || calls != 0 {
 				t.Fatalf("distribution verification changed: calls=%d, %v", calls, err)
 			}
@@ -316,7 +320,7 @@ func TestDiscoverKeepsAcquisitionCacheDuringChecksumResolution(t *testing.T) {
 				t.Cleanup(func() { _ = stage.Close() })
 				options := moduledependency.Options{Environment: stage.Environment(), RequireSourceChecksums: true,
 					AcquisitionCache: stage.AcquisitionCache,
-					RetainSelectedSources: func(sources []moduledependency.Module) error {
+					RetainSelectedSources: func(_ context.Context, sources []moduledependency.Module) error {
 						return retainWarmBundle(t, stage, t.Context(), sources)
 					},
 				}
