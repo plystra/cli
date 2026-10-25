@@ -104,8 +104,8 @@ type Options struct {
 	// Settled downloads recheck the same captures even after failure or
 	// cancellation; callbacks honor the supplied bounded retention context.
 	RetainModuleArchives func(context.Context, []ModuleArchive) error
-	// MetadataBatch groups the metadata callbacks after one settled exact
-	// download. It must invoke capture once with the supplied context or a
+	// MetadataBatch groups the metadata callbacks after one settled listing or
+	// exact download. It must invoke capture once with the supplied context or a
 	// derived context, preserving its deadline and errors. Captures still occur
 	// immediately and in their ordinary order, including failure/cancellation.
 	// Source retention and Go commands remain outside this group.
@@ -395,7 +395,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		// Retain roots and inferable graph manifests after settled listing,
 		// including failure or cancellation. Cleanup starts no Go command.
 		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		retentionErr = errors.Join(retainListingManifests(captureCtx), captureCtx.Err())
+		retentionErr = errors.Join(captureMetadataBatch(captureCtx, options.MetadataBatch, retainListingManifests), captureCtx.Err())
 		cancel()
 		if retentionErr != nil {
 			retentionErr = errors.Join(ErrSourceIntegrity, retentionErr)
