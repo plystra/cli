@@ -32,11 +32,11 @@ type fileProxy struct {
 func (s *Stage) StartFileProxy(ctx context.Context, command string) (bool, error) {
 	output, started, err := gocommand.OutputObserved(ctx, gocommand.Options{
 		Command: command, Directory: s.Root(), Environment: s.Environment(), OutputLimit: maximumMetadataBytes,
-	}, "env", "-json", "GOPROXY", "GOTOOLCHAIN")
+	}, "env", "-json", "GOPROXY", "GOTOOLCHAIN", "GOMODCACHE")
 	if err != nil {
 		return started, err
 	}
-	var settings struct{ GOPROXY, GOTOOLCHAIN string }
+	var settings struct{ GOPROXY, GOTOOLCHAIN, GOMODCACHE string }
 	if json.Unmarshal(output, &settings) != nil {
 		return started, ErrStage
 	}
@@ -49,6 +49,9 @@ func (s *Stage) StartFileProxy(ctx context.Context, command string) (bool, error
 	if err != nil {
 		return started, nil
 	}
+	if !filepath.IsAbs(settings.GOMODCACHE) {
+		return started, ErrStage
+	}
 	defer s.lock()()
 	if err := s.recheck(ctx); err != nil {
 		return started, err
@@ -57,12 +60,17 @@ func (s *Stage) StartFileProxy(ctx context.Context, command string) (bool, error
 		return started, ErrStage
 	}
 	// Go's sole-file-proxy exception also covers explicitly requested
-	// toolchain modules. Do not rewrite a proxy distributing those archives.
-	toolchain := filepath.Join(path, "golang.org", "toolchain")
-	if _, err := os.Lstat(toolchain); !errors.Is(err, os.ErrNotExist) {
-		return started, nil
+	// toolchain modules, including distributions already in the consuming cache.
+	toolchains := []string{filepath.Join(path, "golang.org", "toolchain"),
+		filepath.Join(settings.GOMODCACHE, "cache", "download", "golang.org", "toolchain")}
+	for _, toolchain := range toolchains {
+		if _, err := os.Lstat(toolchain); !errors.Is(err, os.ErrNotExist) {
+			return started, nil
+		}
 	}
-	s.paths = append(s.paths, pathSnapshot{path: toolchain})
+	for _, toolchain := range toolchains {
+		s.paths = append(s.paths, pathSnapshot{path: toolchain})
+	}
 	s.inputs = s.captureInputs()
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {

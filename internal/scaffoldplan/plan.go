@@ -232,7 +232,7 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 			resultErr = errors.Join(resultErr, ErrPreview, closeErr)
 		}
 	}()
-	proxyEnvironment := effect("candidate-proxy-environment", commandschema.EffectTrustedCodeExecution, "inspect_go_acquisition", []string{"go", "env", "-json", "GOPROXY", "GOTOOLCHAIN"})
+	proxyEnvironment := effect("candidate-proxy-environment", commandschema.EffectTrustedCodeExecution, "inspect_go_acquisition", []string{"go", "env", "-json", "GOPROXY", "GOTOOLCHAIN", "GOMODCACHE"})
 	proxyStarted, proxyErr := stage.StartFileProxy(ctx, options.GoCommand)
 	if proxyStarted {
 		accounting.Observed = append(accounting.Observed, proxyEnvironment)

@@ -1202,8 +1202,11 @@ does not refresh evidence, and a capture rejection remains fatal to the session.
 These content identities grant no independent checksum authority or source
 authentication; ordinary Go checks and existing extracted-source retention
 remain required. Toolchain distributions keep their original file-proxy
-verification semantics: an existing `golang.org/toolchain` proxy entry disables
-this session, and concurrent appearance rejects the captured exclusion.
+verification semantics: an existing `golang.org/toolchain` entry in the proxy
+or the consuming cache's `cache/download` tree disables this session. Both
+absences remain private evidence; concurrent appearance rejects the captured
+exclusion even after stage cleanup. Cached distributions retain the original
+file-proxy behavior when their proxy files are no longer present.
 Other proxy configurations and toolchain modes remain unchanged. This slice
 does not isolate the consuming Module Cache, capture cache hits or direct/VCS
 access, implement HTTP authentication or proxy-chain fallback, or establish a
