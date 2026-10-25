@@ -2395,6 +2395,14 @@ Rollback regressions inject ordinary source compilation failures at the final
 build gate. Cold acquisition drift fixtures use the actual `Dir` or `GoMod`
 returned by Go, including private acquisition caches, while preserving the
 separate original-input retention checks.
+The cold exact-target controls warm only the unchanged CLI dependency graph,
+assert that the candidate's extracted directory and download metadata are
+absent, and observe its actual acquisition path before the first `go get`.
+They still recheck retained inputs after cleanup and reject removed metadata.
+On Linux/amd64 with Go 1.26.5, both module and workspace controls pass normally
+and with the race detector. A four-minute Windows diagnostic run still times
+out during retained-input rechecking; Windows performance acceptance remains
+incomplete. No capture deadline or CI invocation budget was increased.
 
 Lifecycle smoke tests compare the configuration root with the child working
 directory by filesystem identity, including symbolic directory paths and a
