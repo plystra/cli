@@ -574,6 +574,8 @@ See the [Project README](../../../../README.md) and the exact command help for d
 
 const verifyBuildAndReleaseTask = `# Verify, build, and release
 
+Generation installation, including offline mode, builds the complete Project with ` + "`" + `go build -mod=readonly ./...` + "`" + ` inside its rollback boundary, without running application tests. Ordinary dependency and scaffolding commands use the same default validation. ` + "`" + `plystra generate --check` + "`" + ` only compares generated output; ` + "`" + `plystra check` + "`" + ` remains the explicit application-test gate.
+
 Use the narrowest relevant authored test first, then verify the complete selected Project state:
 
     plystra generate --check

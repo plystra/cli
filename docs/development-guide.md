@@ -305,7 +305,7 @@ without an absolute path or internal resolution detail:
 ```text
 Created orders with dependency example.com/acme/platform@v1.2.3
 Configuration scaffolded
-Generated and tested
+Generated and built
 
 Next:
   cd orders
@@ -322,10 +322,10 @@ the same document. Invalid invocation, validation, missing-prerequisite,
 cancellation, and execution-failure outcomes use exit classes `2`, `3`, `4`,
 `5`, and `8` respectively.
 
-Creation with `--template` generates the selected Project and runs Go package
-tests before installation. It does not run a separate build, startup health
-check, or JavaScript SDK qualification; run those checks independently when
-applicable.
+Creation generates and builds the complete staged Project with
+`go build -mod=readonly ./...` before installation, without running application
+tests. Build failure leaves no target Project. Run application tests, startup
+health checks, and JavaScript SDK qualification independently when applicable.
 The complete public creation acceptance suite still needs `plystra dev` and
 `plystra build` workflows. `--template` records an ordinary dependency and does
 not qualify or activate that dependency.
@@ -764,8 +764,9 @@ targets one query; ordinary Go resolution may still adjust transitive versions
 required by the selected graph. Each command captures old declarations before
 module resolution, recomputes final discovery and the selected current-Project
 model, regenerates, tidies, and runs its validation. The default validation is
-`go test -mod=readonly ./...`. Ambient `PLYSTRA_ENV` and `PLYSTRA_CONFIG` select
-one environment overlay or complete replacement document; these commands do
+`go build -mod=readonly ./...`, without running application tests. Ambient
+`PLYSTRA_ENV` and `PLYSTRA_CONFIG` select one environment overlay or complete
+replacement document; these commands do
 not yet accept explicit selector flags.
 
 The shared old/final ownership planner removes configuration whose last proven

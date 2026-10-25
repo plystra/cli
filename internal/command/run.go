@@ -68,6 +68,8 @@ disappears and exact binding parameters removed by their consumer. Bindings
 that the old consumer never declared remain errors. Still-owned configuration,
 Resource instances, and surviving bindings are retained; no missing value or
 replacement binding is guessed. Cleanup shares generation's rollback boundary.
+Validation builds the complete Project with go build -mod=readonly ./...
+without running application tests.
 PLYSTRA_ENV or PLYSTRA_CONFIG selects an environment or replacement document.
 `
 	addUsage = `Usage:
@@ -142,6 +144,9 @@ report none.
 Configuration composes only the current Project root with one selected overlay,
 or uses one complete current-Project replacement document.
 Generation does not rewrite the selected current-Project configuration document.
+Installation validates the complete Project with go build -mod=readonly ./...
+inside the rollback boundary, without running application tests. --check only
+compares generated output and does not build.
 PLYSTRA_POLICY_NOT_ENFORCED rejects a reachable Interface policy unless the
 installed CLI/Kernel pair both generates and executes it. The diagnostic reports
 the field, support stages, and module-relative configuration declarations.

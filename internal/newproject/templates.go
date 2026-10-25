@@ -39,6 +39,8 @@ The baseline's validation inventory covers every visible constructor independent
 
 ## Development
 
+Generation installation, including offline mode, builds the complete Project with ` + "`go build -mod=readonly ./...`" + ` inside its rollback boundary, without running application tests. Ordinary dependency and scaffolding commands use the same default validation. ` + "`plystra generate --check`" + ` only compares generated output; ` + "`plystra check`" + ` remains the explicit application-test gate.
+
 ` + "```powershell" + `
 plystra plugin create records
 plystra capability create records.read --query --plugin records --expose
