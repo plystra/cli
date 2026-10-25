@@ -3,8 +3,10 @@ package projectstage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
+	"sync"
 
 	"golang.org/x/mod/sumdb/dirhash"
 )
@@ -17,21 +19,62 @@ type MetadataInput struct {
 	GoModChecksum string // Optional Go h1 checksum over one file named go.mod.
 }
 
+// MetadataRetention captures related inputs immediately under one Stage lock.
+// Its functions expire when the WithMetadataBatch callback returns.
+type MetadataRetention struct {
+	Files    func([]MetadataInput) error
+	Archives func([]ArchiveInput) error
+}
+
+// WithMetadataBatch shares complete before/after rechecks across related file
+// and archive captures, including failure and cancellation. The callback must
+// use the supplied functions rather than calling other Stage methods.
+func (s *Stage) WithMetadataBatch(ctx context.Context, capture func(MetadataRetention) error) (resultErr error) {
+	defer s.lock()()
+	if capture == nil {
+		return ErrStage
+	}
+	if err := s.recheck(ctx); err != nil {
+		return err
+	}
+	var mu sync.Mutex
+	active := true
+	retain := func(operation func() error) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if !active {
+			return ErrStage
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return operation()
+	}
+	defer func() {
+		mu.Lock()
+		defer mu.Unlock()
+		active = false
+		resultErr = errors.Join(resultErr, ctx.Err(), s.recheck(ctx))
+	}()
+	return capture(MetadataRetention{
+		Files: func(files []MetadataInput) error {
+			return retain(func() error { return s.retainMetadata(ctx, files) })
+		},
+		Archives: func(archives []ArchiveInput) error {
+			return retain(func() error { return s.retainArchives(ctx, archives) })
+		},
+	})
+}
+
 // RetainMetadata retains regular original inputs or registered private cache
 // outputs without refreshing earlier evidence. Only original-side evidence
 // outlives stage cleanup.
 func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error {
-	defer s.lock()()
-	if err := s.recheck(ctx); err != nil {
-		return err
-	}
-	if err := s.retainMetadata(ctx, files); err != nil {
-		return err
-	}
-	return s.recheck(ctx)
+	return s.WithMetadataBatch(ctx, func(retain MetadataRetention) error { return retain.Files(files) })
 }
 
 func (s *Stage) retainMetadata(ctx context.Context, files []MetadataInput) error {
+	defer func() { s.inputs = s.captureInputs() }()
 	if len(files) > MaximumEntries {
 		return ErrStage
 	}
@@ -82,7 +125,6 @@ func (s *Stage) retainMetadata(ctx context.Context, files []MetadataInput) error
 		}
 		s.metadata = append(s.metadata, file)
 	}
-	s.inputs = s.captureInputs()
 	return nil
 }
 

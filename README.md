@@ -1242,9 +1242,14 @@ including an unused malformed ZIP. Cached archives use the same bounded raw and
 expanded-content checks as proxy payloads, with distinct cache and proxy origin
 identities. Captures are independent of original checksum authority and source
 callbacks. They are rechecked after a settled download, including failures and
-cancellation, with an independent bounded context. Original file and parent-path
-evidence survives cleanup without refreshing earlier captures. This covers
-present ZIPs at exact acquisition boundaries, not cache isolation or every
+cancellation, with an independent 30-second context. After each settled exact
+download, related manifest, archive, raw manifest, and information captures
+share one complete before/after source recheck. Each capture still retains its
+input immediately in callback order; failures and cancellation preserve evidence
+and run the final recheck. Go commands and source retention remain outside this
+group. Original file and parent-path evidence survives cleanup without refreshing
+earlier captures. This covers present ZIPs at exact acquisition boundaries,
+not cache isolation or every
 earlier graph, cold, mutable-query, or failed-resolution read.
 Capture drains requested archives made newly consumable by earlier archive
 callbacks before starting Go; each round preserves all prior evidence and adds

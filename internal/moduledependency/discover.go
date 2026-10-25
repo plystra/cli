@@ -104,6 +104,12 @@ type Options struct {
 	// Settled downloads recheck the same captures even after failure or
 	// cancellation; callbacks honor the supplied bounded retention context.
 	RetainModuleArchives func(context.Context, []ModuleArchive) error
+	// MetadataBatch groups the metadata callbacks after one settled exact
+	// download. It must invoke capture once with the supplied context or a
+	// derived context, preserving its deadline and errors. Captures still occur
+	// immediately and in their ordinary order, including failure/cancellation.
+	// Source retention and Go commands remain outside this group.
+	MetadataBatch func(context.Context, func(context.Context) error) error
 	// AcquisitionCache may provide a private cache for an exact source download.
 	// It receives the effective cache and canonical versions after original-input
 	// retention. The returned absolute cache must remain available to all source
