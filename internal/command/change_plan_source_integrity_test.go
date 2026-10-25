@@ -378,7 +378,29 @@ func main() {
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download" || mode == "ziphash-removed-after-download"
  requestedList := mode == "fixed-manifest-identity-after-list" || mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
  requestedGraph := mode == "manifest-identity-after-graph" || mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "missing-origin-after-get" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
+ isolatedDownload := false
+ checkOriginalCache := func() {
+  if partial := os.Getenv("PLYSTRA_SOURCE_PARTIAL_PATH"); partial != "" {
+   if _, err := os.Stat(partial); err != nil {
+    check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("original partial marker missing\n"), 0600)); os.Exit(12)
+   }
+  } else if _, err := os.Lstat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")); !os.IsNotExist(err) {
+   check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("original source unexpectedly present\n"), 0600)); os.Exit(12)
+  }
+ }
+ if mode == "isolated-acquisition" && len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download" {
+  directory, err := os.Getwd(); check(err)
+  matched := false
+  for _, argument := range os.Args[3:] { matched = matched || argument == os.Getenv("PLYSTRA_SOURCE_PREPARATION_QUERY") }
+  isolatedDownload = matched && strings.HasPrefix(filepath.Base(directory), "plystra-source-preparation-")
+  if isolatedDownload {
+   checkOriginalCache()
+   if os.Getenv("GOMODCACHE") == os.Getenv("PLYSTRA_SOURCE_ORIGINAL_CACHE") {
+    check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("original acquisition cache selected\n"), 0600)); os.Exit(12)
+   }
+  }
+ }
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "isolated-acquisition" && mode != "missing-origin-after-get" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -402,6 +424,10 @@ func main() {
  command := exec.Command(REAL_GO, os.Args[1:]...)
  command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
  err := command.Run()
+ if err == nil && isolatedDownload {
+  checkOriginalCache()
+  check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("exact acquisition consumed a private cache\n"), 0600))
+ }
  if err == nil && mode == "missing-origin-after-get" && len(os.Args) > 1 && os.Args[1] == "get" {
   marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
   if _, markerErr := os.Stat(marker); os.IsNotExist(markerErr) {

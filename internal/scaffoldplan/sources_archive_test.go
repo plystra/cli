@@ -65,6 +65,51 @@ func TestDependencySourcesRetainConsumedCachedArchive(t *testing.T) {
 	}
 }
 
+func TestDependencyAcquisitionDoesNotRepairOriginalCache(t *testing.T) {
+	for _, discover := range []bool{false, true} {
+		for _, partial := range []bool{false, true} {
+			t.Run(map[bool]string{false: "prepare", true: "discover"}[discover]+map[bool]string{false: "/missing-tree", true: "/partial"}[partial], func(t *testing.T) {
+				t.Parallel()
+				stage, archive := cachedArchiveStage(t, partial)
+				original := strings.TrimSuffix(archive, ".zip") + ".partial"
+				cache := ""
+				for _, entry := range stage.Environment() {
+					if name, value, _ := strings.Cut(entry, "="); strings.EqualFold(name, "GOMODCACHE") {
+						cache = value
+					}
+				}
+				if cache == "" {
+					t.Fatal("missing cache fixture")
+				}
+				directory := filepath.Join(cache, "example.com", "dependency@v1.0.0")
+				var err error
+				if discover {
+					err = retainDependencySources(t.Context(), stage, "")
+				} else {
+					err = prepareDependencySources(t.Context(), stage, "", []module.Version{{Path: "example.com/dependency", Version: "v1.0.0"}})
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if partial {
+					if _, err := os.Stat(original); err != nil {
+						t.Fatal("download repaired original partial extraction", err)
+					}
+				} else if _, err := os.Stat(directory); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("download populated original extraction", err)
+				}
+				inputs := stage.Inputs()
+				if err := stage.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := inputs.Recheck(t.Context()); err != nil {
+					t.Fatal("private outputs leaked into original inputs", err)
+				}
+			})
+		}
+	}
+}
+
 func cachedArchiveStage(t *testing.T, partial bool) (*projectstage.Stage, string) {
 	t.Helper()
 	const dependency = "example.com/dependency"

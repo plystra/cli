@@ -28,6 +28,8 @@ type Source struct {
 // independently resolved h1 checksums. Previously captured roots are never
 // refreshed or discarded, including after a dependency is removed.
 // Inputs obtained earlier remain immutable; obtain Inputs again after success.
+// Registered acquisition outputs are checked during the Stage's lifetime;
+// only original-source evidence participates in Inputs after cleanup.
 // Optional metadata shares the operation's complete before/after rechecks,
 // avoiding repeated scans of earlier sources between related captures.
 func (s *Stage) RetainSources(ctx context.Context, sources []Source, metadata ...MetadataInput) (resultErr error) {
@@ -89,11 +91,14 @@ func (s *Stage) retainSources(ctx context.Context, sources []Source, authenticat
 			base64.StdEncoding.EncodeToString(decoded) != source.Checksum[3:]) {
 			return ErrStage
 		}
-		root, err := s.captureDirectory(s.project, source.Directory)
+		root, staged, err := s.acquisitionDirectory(source.Directory)
+		if err == nil && !staged {
+			root, err = s.captureDirectory(s.project, source.Directory)
+		}
 		if err != nil {
 			return err
 		}
-		if within(root, s.temporary) || within(s.temporary, root) {
+		if !staged && (within(root, s.temporary) || within(s.temporary, root)) {
 			return ErrStage
 		}
 		var captured *treeSnapshot
@@ -125,6 +130,7 @@ func (s *Stage) retainSources(ctx context.Context, sources []Source, authenticat
 			}
 		}
 		tree.module, tree.checksum = source.Module, source.Checksum
+		tree.staged = staged
 		added = append(added, tree)
 		trees = append(trees, tree)
 	}

@@ -82,6 +82,7 @@ type Stage struct {
 	environment   []string
 	trees         []treeSnapshot
 	sources       []treeSnapshot
+	cacheRoots    []string
 	metadata      []fileSnapshot
 	aliases       []directorySnapshot
 	mainRoots     map[string]string
@@ -319,6 +320,21 @@ func (s *Stage) recheck(ctx context.Context) error {
 	if s.goEnvironment != nil && s.goEnvironment.recheck() != nil {
 		return ErrConcurrentChange
 	}
+	for _, file := range s.metadata {
+		if file.staged && file.recheck() != nil {
+			return ErrConcurrentChange
+		}
+	}
+	for _, tree := range s.sources {
+		if !tree.staged {
+			continue
+		}
+		var used budget
+		after, err := captureTree(ctx, tree.source, "", nil, &used, true)
+		if err != nil || !sameTree(tree, after) {
+			return ErrConcurrentChange
+		}
+	}
 	return s.inputs.Recheck(ctx)
 }
 
@@ -346,8 +362,13 @@ func (s *Stage) Close() error {
 			// Removal by the owner is already clean; never follow a replacement.
 		} else if err != nil || !os.SameFile(s.identity, current) {
 			return ErrConcurrentChange
-		} else if err := s.parent.RemoveAll(filepath.Base(s.temporary)); err != nil {
-			return ErrStage
+		} else {
+			if err := s.prepareCacheCleanup(); err != nil {
+				return err
+			}
+			if err := s.parent.RemoveAll(filepath.Base(s.temporary)); err != nil {
+				return ErrStage
+			}
 		}
 	}
 	if s.parent != nil {
@@ -360,6 +381,7 @@ func (s *Stage) Close() error {
 }
 
 type fileSnapshot struct {
+	staged bool
 	parent string
 	name   string
 	info   os.FileInfo

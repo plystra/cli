@@ -111,6 +111,12 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 				continue
 			}
 		}
+		// Private acquisitions have already run exact Go verification under the
+		// original sums. Their complete checksums are download evidence, not the
+		// unauthenticated fields of an earlier graph listing.
+		if modules[index].acquisitionCache != "" && validSourceChecksum(modules[index].checksum) && validSourceChecksum(modules[index].goModChecksum) {
+			continue
+		}
 		if _, exists := queries[version]; !exists {
 			arguments = append(arguments, version.String())
 			versions = append(versions, version)

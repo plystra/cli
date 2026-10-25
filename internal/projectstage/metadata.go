@@ -17,8 +17,9 @@ type MetadataInput struct {
 	GoModChecksum string // Optional Go h1 checksum over one file named go.mod.
 }
 
-// RetainMetadata retains regular external input files without modifying them
-// or refreshing earlier evidence. Its private evidence outlives stage cleanup.
+// RetainMetadata retains regular original inputs or registered private cache
+// outputs without refreshing earlier evidence. Only original-side evidence
+// outlives stage cleanup.
 func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error {
 	defer s.lock()()
 	if err := s.recheck(ctx); err != nil {
@@ -42,11 +43,14 @@ func (s *Stage) retainMetadata(ctx context.Context, files []MetadataInput) error
 		if !filepath.IsAbs(input.Path) {
 			return ErrStage
 		}
-		parent, err := s.captureDirectory(s.project, filepath.Dir(input.Path))
+		parent, staged, err := s.acquisitionDirectory(filepath.Dir(input.Path))
+		if err == nil && !staged {
+			parent, err = s.captureDirectory(s.project, filepath.Dir(input.Path))
+		}
 		if err != nil {
 			return err
 		}
-		if within(s.temporary, parent) || within(parent, s.temporary) {
+		if !staged && (within(s.temporary, parent) || within(parent, s.temporary)) {
 			return ErrStage
 		}
 		name := filepath.Base(input.Path)
@@ -70,6 +74,7 @@ func (s *Stage) retainMetadata(ctx context.Context, files []MetadataInput) error
 		if !input.matches(file.data) {
 			return ErrStage
 		}
+		file.staged = staged
 		used.entries++
 		used.bytes += int64(len(file.data))
 		if used.entries > MaximumEntries || used.bytes > MaximumTotalBytes {

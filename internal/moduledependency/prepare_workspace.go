@@ -362,8 +362,27 @@ func (workspace *preparationWorkspace) resolveChecksums(ctx context.Context, mod
 	if err != nil {
 		return err
 	}
-	if err := downloadPreparedSources(ctx, work.members[0].root, sources, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work.path), nil, nil); err != nil {
-		return err
+	// Previously isolated acquisitions must verify against the same cache and
+	// source identities, even when a workspace combines several private caches.
+	groups := map[string][]int{}
+	var caches []string
+	for index, source := range sources {
+		if _, exists := groups[source.acquisitionCache]; !exists {
+			caches = append(caches, source.acquisitionCache)
+		}
+		groups[source.acquisitionCache] = append(groups[source.acquisitionCache], index)
+	}
+	for _, cache := range caches {
+		group := make([]Module, len(groups[cache]))
+		for index, source := range groups[cache] {
+			group[index] = sources[source]
+		}
+		if err := downloadPreparedSources(ctx, work.members[0].root, group, nil, options, environmentWith(preparationEnvironment(options), "GOWORK", work.path), nil, nil); err != nil {
+			return err
+		}
+		for index, source := range groups[cache] {
+			sources[source] = group[index]
+		}
 	}
 	for index, source := range sources {
 		original := modules[indices[index]]

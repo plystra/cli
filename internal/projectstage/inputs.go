@@ -111,13 +111,21 @@ func (s *Stage) Inputs() Inputs {
 }
 
 func (s *Stage) captureInputs() Inputs {
-	state := &inputState{project: s.project, metadata: append([]fileSnapshot(nil), s.metadata...),
+	state := &inputState{project: s.project,
 		aliases: append([]directorySnapshot(nil), s.aliases...), paths: append([]pathSnapshot(nil), s.paths...),
 		artifacts: append([]proxyArtifact(nil), s.artifacts...)}
+	for _, file := range s.metadata {
+		if !file.staged {
+			state.metadata = append(state.metadata, file)
+		}
+	}
 	for index := range state.metadata {
 		state.metadata[index].data = append([]byte(nil), state.metadata[index].data...)
 	}
 	for _, tree := range append(append([]treeSnapshot(nil), s.trees...), s.sources...) {
+		if tree.staged {
+			continue
+		}
 		state.trees = append(state.trees, inputTree{source: tree.source, entries: maps.Clone(tree.entries),
 			allFiles: tree.allFiles, module: tree.module, checksum: tree.checksum})
 	}

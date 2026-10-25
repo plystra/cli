@@ -1238,6 +1238,25 @@ earlier graph, cold, mutable-query, or failed-resolution read.
 Capture drains requested archives made newly consumable by earlier archive
 callbacks before starting Go; each round preserves all prior evidence and adds
 only previously uncaptured requested versions.
+With the effective `GOSUMDB=off` and `GOTOOLCHAIN=local`, exact preparation and
+discovery downloads whose source directories are absent or marked partial now
+use an owner-private Module Cache. Only requested versions' present `.info`,
+`.mod`, `.ziphash`, and consumed ZIP bytes are seeded from retained originals.
+The original cache is not extracted or repaired by that acquisition. Partial
+source bytes and progress markers are not copied; later ordinary Go phases may
+finish the original extraction without invalidating the retained content.
+Any complete or symbolically linked source directory keeps the whole batch on
+its existing cache path, preserving warm modified trees and unused ZIP behavior.
+Private outputs require the same independent source and manifest checksums,
+share staging bounds, and reject live content, identity, and permission drift.
+Workspace checksum normalization preserves each private source's cache identity;
+single-module discovery reuses complete exact-download checksum evidence under
+the original sums. Cleanup removes only the allocated caches, including Go's
+default read-only extracted directories. Temporary outputs do not become
+original inputs after cleanup; retained positive originals remain recheckable.
+This does not isolate general graph, checksum-service, direct/VCS, or later
+candidate cache access, nor retain complete negative cache metadata. Unsupported
+checksum-service and toolchain settings retain their ordinary acquisition path.
 For a sole `file://` Go proxy with `GOTOOLCHAIN=local`, source and dependency
 previews now capture requested proxy payloads before returning successful
 response headers or bytes to Go. One owner-private loopback session spans old
@@ -1271,10 +1290,11 @@ or the consuming cache's `cache/download` tree disables this session. Both
 absences remain private evidence; concurrent appearance rejects the captured
 exclusion even after stage cleanup. Cached distributions retain the original
 file-proxy behavior when their proxy files are no longer present.
-Other proxy configurations and toolchain modes remain unchanged. This slice
-does not isolate the consuming Module Cache, capture every cache read or direct/VCS
-access, implement HTTP authentication or proxy-chain fallback, or establish a
-complete resolution read set. Offline phases retain their existing local-only
+Other proxy configurations and toolchain modes remain unchanged. The proxy
+session itself does not isolate the consuming Module Cache or capture every
+cache read or direct/VCS access, implement HTTP authentication or proxy-chain
+fallback, or establish a complete resolution read set. Offline phases retain
+their existing local-only
 behavior. Plans remain `non_exact`, and Gate 9 remains incomplete.
 Private staging snapshots also bind native owner and access-control state on
 captured files and directories. Windows retains owner, group, DACL control and

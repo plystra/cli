@@ -31,6 +31,7 @@ func privateOutput(root *os.Root, path string, mode os.FileMode) (*os.File, erro
 }
 
 type treeSnapshot struct {
+	staged      bool
 	source      string
 	destination string
 	entries     map[string]treeEntry

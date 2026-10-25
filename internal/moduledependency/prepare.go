@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/plystra/cli/internal/gocommand"
@@ -44,6 +45,12 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 	}
 	options.Environment = append([]string{}, options.Environment...)
 	inputs := preparationInputs{}
+	if callback := options.AcquisitionCache; callback != nil {
+		options.AcquisitionCache = func(ctx context.Context, cache string, versions []module.Version) (string, error) {
+			selected, err := callback(ctx, cache, versions)
+			return selected, errors.Join(err, ctx.Err(), inputs.recheck())
+		}
+	}
 	if callback := options.RetainModuleArchives; callback != nil {
 		options.RetainModuleArchives = func(ctx context.Context, archives []ModuleArchive) error {
 			return errors.Join(callback(ctx, archives), ctx.Err(), inputs.recheck())
@@ -192,6 +199,18 @@ func downloadAndRetainSources(ctx context.Context, root string, sources []Module
 }
 
 func downloadPreparedSources(ctx context.Context, root string, result []Module, checksums map[module.Version]string, options Options, environment []string, retain func([]Module) error, retainMetadata func(context.Context) error) error {
+	cache := ""
+	if len(result) != 0 {
+		cache = result[0].acquisitionCache
+		for _, source := range result {
+			if source.acquisitionCache != cache {
+				return ErrInvalidOutput
+			}
+		}
+		if cache != "" {
+			environment = environmentWith(environment, "GOMODCACHE", cache)
+		}
+	}
 	queries := map[module.Version][]int{}
 	var arguments []string
 	var versions []module.Version
@@ -234,6 +253,41 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	}
 	retainArchives, err := preparationArchiveRetainer(ctx, root, versions, options, environment)
 	if err != nil {
+		return err
+	}
+	if options.AcquisitionCache != nil {
+		output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE", "GOSUMDB", "GOTOOLCHAIN")
+		if err != nil {
+			return err
+		}
+		var selected struct{ GOMODCACHE, GOSUMDB, GOTOOLCHAIN string }
+		if json.Unmarshal(output, &selected) != nil || !filepath.IsAbs(selected.GOMODCACHE) {
+			return ErrInvalidOutput
+		}
+		isolated := selected.GOMODCACHE
+		if selected.GOSUMDB == "off" && selected.GOTOOLCHAIN == "local" {
+			isolated, err = options.AcquisitionCache(ctx, selected.GOMODCACHE, append([]module.Version(nil), versions...))
+			if err != nil {
+				return err
+			}
+			if !filepath.IsAbs(isolated) {
+				return ErrInvalidOutput
+			}
+		}
+		environment = environmentWith(environment, "GOMODCACHE", isolated)
+		if isolated != selected.GOMODCACHE {
+			cache = isolated
+			for _, version := range versions {
+				_, manifest, err := cachedSourcePaths(isolated, version)
+				if err != nil {
+					return err
+				}
+				manifests = append(manifests, manifest)
+				information = append(information, strings.TrimSuffix(manifest, ".mod")+".info")
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	output, started, downloadErr := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
@@ -284,6 +338,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 			}
 			acquired[index].root, acquired[index].goMod, acquired[index].goModChecksum = canonical, nil, downloaded.GoModSum
 			acquired[index].sourceDirectory, acquired[index].checksum = downloaded.Dir, downloaded.Checksum
+			acquired[index].acquisitionCache = cache
 			acquired[index].goModFile = downloaded.GoMod
 			acquired[index].incompleteSourceMetadata = false
 		}

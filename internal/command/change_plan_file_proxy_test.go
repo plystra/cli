@@ -119,6 +119,78 @@ func TestBuiltCLIChangePlanRejectsReplacedCachedArchive(t *testing.T) {
 	assertBuiltCLIChangePlanRejectsArchiveReplacement(t, true)
 }
 
+func TestBuiltCLIChangePlanIsolatesExactAcquisition(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+			t.Parallel()
+			root, proxy, environment := fileProxyPreviewFixture(t)
+			cacheOutput, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "env", "GOMODCACHE")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cache := strings.TrimSpace(string(cacheOutput))
+			original := filepath.Join(cache, filepath.FromSlash(fileProxyPreviewModule)+"@v1.0.0")
+			if partial {
+				output, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "download", "-json", fileProxyPreviewModule+"@v1.0.0")
+				var downloaded struct{ Dir, Zip string }
+				if err != nil || json.Unmarshal(output, &downloaded) != nil || downloaded.Dir != original || downloaded.Zip == "" {
+					t.Fatal("seed partial source", err)
+				}
+				marker := strings.TrimSuffix(downloaded.Zip, ".zip") + ".partial"
+				writeCommandFile(t, marker, "partial extraction\n")
+				writeCommandFile(t, filepath.Join(original, "partial-only.go"), "invalid partial Go source\n")
+				environment = append(environment, "PLYSTRA_SOURCE_PARTIAL_PATH="+marker)
+			}
+			wrapper := sourcePreparationGoWrapper(t)
+			goName := "go"
+			if runtime.GOOS == "windows" {
+				goName += ".exe"
+			}
+			if err := os.Rename(wrapper, filepath.Join(filepath.Dir(wrapper), goName)); err != nil {
+				t.Fatal(err)
+			}
+			for index, entry := range environment {
+				if key, value, _ := strings.Cut(entry, "="); strings.EqualFold(key, "PATH") {
+					environment[index] = key + "=" + filepath.Dir(wrapper) + string(os.PathListSeparator) + value
+				}
+			}
+			marker := filepath.Join(t.TempDir(), "private-acquisition-observed")
+			environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+original,
+				"PLYSTRA_SOURCE_ORIGINAL_CACHE="+cache,
+				"PLYSTRA_SOURCE_PREPARATION_MARKER="+marker,
+				"PLYSTRA_SOURCE_PREPARATION_QUERY="+fileProxyPreviewModule+"@v1.0.0",
+				"PLYSTRA_SOURCE_PREPARATION_MODE=isolated-acquisition")
+			before := commandTree(t, root)
+			process := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
+			process.Dir, process.Env, process.Stdin = filepath.Join(root, "reports"), environment, strings.NewReader(fileProxyPreviewRequest)
+			var stdout, stderr bytes.Buffer
+			process.Stdout, process.Stderr = &stdout, &stderr
+			commandErr := process.Run()
+			var result scaffoldPlanDocument
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil || commandErr != nil || stderr.Len() != 0 || result.Status != "success" || result.Payload.PlanDigest == "" {
+				observation, _ := os.ReadFile(marker)
+				t.Fatalf("public private-acquisition preview failed: %v, %v, acquisition=%q\n%s\n%s", commandErr, err, observation, &stdout, &stderr)
+			}
+			if data, err := os.ReadFile(marker); err != nil || string(data) != "exact acquisition consumed a private cache\n" {
+				t.Fatal("public preview did not isolate exact acquisition", err)
+			}
+			if !reflect.DeepEqual(before, commandTree(t, root)) {
+				t.Fatal("private-acquisition preview changed the Project")
+			}
+			for _, private := range []string{cache, original, proxy, "127.0.0.1"} {
+				for _, spelling := range []string{private, filepath.ToSlash(private)} {
+					encoded, err := json.Marshal(spelling)
+					if err != nil || bytes.Contains(stdout.Bytes(), encoded[1:len(encoded)-1]) {
+						t.Fatal("public preview leaked acquisition paths", err)
+					}
+				}
+			}
+			assertNoCommandTransactions(t, root)
+		})
+	}
+}
+
 func TestBuiltCLIChangePlanRetainsMissingFileProxyInput(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, changed := range []bool{false, true} {

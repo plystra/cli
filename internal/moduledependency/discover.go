@@ -47,7 +47,7 @@ var (
 	ErrSourceIntegrity = errors.New("dependency source integrity unavailable")
 )
 
-// Options controls the read-only Go command used for module discovery.
+// Options controls module discovery, acquisition, and private input retention.
 type Options struct {
 	GoCommand   string
 	Environment []string
@@ -104,6 +104,13 @@ type Options struct {
 	// Settled downloads recheck the same captures even after failure or
 	// cancellation; callbacks honor the supplied bounded retention context.
 	RetainModuleArchives func(context.Context, []ModuleArchive) error
+	// AcquisitionCache may provide a private cache for an exact source download.
+	// It receives the effective cache and canonical versions after original-input
+	// retention. The returned absolute cache must remain available to all source
+	// callbacks and consumers. Other resolution commands keep their environment.
+	// It is used only with GOSUMDB=off and GOTOOLCHAIN=local; checksum-service
+	// cache and toolchain acquisition require separate isolation contracts.
+	AcquisitionCache func(context.Context, string, []module.Version) (string, error)
 	// RetainSourceTrees preserves existing extracted trees before their archive
 	// checksum is independently available. It records private concurrency evidence
 	// only; consumers must authenticate the same retained trees against complete
@@ -147,21 +154,22 @@ func (r Replacement) Local() bool { return r.path != "" && r.version == "" }
 // Module is one dependency in the effective graph resolved to its selected
 // read-only source root.
 type Module struct {
-	path            string
-	requiredVersion string
-	selectedVersion string
-	root            string
-	sourceDirectory string
-	sourcePath      string
-	checksum        string
-	goModChecksum   string
-	goModFile       string
-	direct          bool
-	indirect        bool
-	workspace       bool
-	project         bool
-	goMod           []byte
-	replacement     Replacement
+	path             string
+	requiredVersion  string
+	selectedVersion  string
+	root             string
+	sourceDirectory  string
+	acquisitionCache string
+	sourcePath       string
+	checksum         string
+	goModChecksum    string
+	goModFile        string
+	direct           bool
+	indirect         bool
+	workspace        bool
+	project          bool
+	goMod            []byte
+	replacement      Replacement
 
 	incompleteSourceMetadata bool
 }
@@ -299,6 +307,12 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		environment = environmentWith(environment, "GOTOOLCHAIN", "local")
 	}
 	inputs := preparationInputs{goModPath: before}
+	if callback := options.AcquisitionCache; callback != nil {
+		options.AcquisitionCache = func(ctx context.Context, cache string, versions []module.Version) (string, error) {
+			selected, err := callback(ctx, cache, versions)
+			return selected, errors.Join(err, ctx.Err(), inputs.recheck())
+		}
+	}
 	if callback := options.RetainModuleArchives; callback != nil {
 		options.RetainModuleArchives = func(ctx context.Context, archives []ModuleArchive) error {
 			return errors.Join(callback(ctx, archives), ctx.Err(), inputs.recheck())

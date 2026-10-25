@@ -20,6 +20,7 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	}
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
+		AcquisitionCache:  stage.AcquisitionCache,
 		RetainSourceTrees: stage.RetainSourceTrees,
 		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
 			return retainArchives(ctx, stage, archives)
@@ -53,6 +54,7 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 		return err
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
+		AcquisitionCache:  stage.AcquisitionCache,
 		RetainSourceTrees: stage.RetainSourceTrees,
 		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
 			return retainArchives(ctx, stage, archives)
