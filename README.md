@@ -948,7 +948,11 @@ Local replacements and versionless workspace mains introduce no cache input;
 a versioned replacement target still does, even when its path names a workspace
 main. Unselected historical versions and unused replacements remain excluded.
 The queried filenames provide raw private evidence without parsing their JSON
-or claiming checksum authority. Missing files may materialize normally. An
+or claiming checksum authority. Missing files may materialize normally. Each
+known raw-metadata batch drains files materialized by its retention callbacks
+before returning to Go. Only newly present known paths enter later rounds;
+earlier captures keep their original evidence, and unrelated siblings remain
+excluded. Rejection, cancellation, or earlier-input drift stops the batch. An
 incomplete discovery graph can still retain existing raw-root information when
 wildcard and every exact replacement alternative fix the same versioned physical
 source. This uses the same bounded proof as early pending-tree retention, but

@@ -94,23 +94,34 @@ func retainPresentModuleFiles(ctx context.Context, paths []string, retain func(c
 	if retain == nil {
 		return nil
 	}
-	var present []string
-	for _, path := range paths {
-		if err := ctx.Err(); err != nil {
+	seen := map[string]bool{}
+	for {
+		var present []string
+		for _, path := range paths {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if seen[path] {
+				continue
+			}
+			info, err := os.Lstat(path)
+			if errors.Is(err, os.ErrNotExist) {
+				continue // Go may legitimately materialize a missing metadata file.
+			} else if err != nil {
+				return errors.Join(ErrSourceIntegrity, err)
+			} else if !info.Mode().IsRegular() {
+				return ErrSourceIntegrity
+			}
+			seen[path] = true
+			present = append(present, path)
+		}
+		if len(present) == 0 {
+			return ctx.Err()
+		}
+		if err := errors.Join(retain(ctx, present), ctx.Err()); err != nil {
 			return err
 		}
-		info, err := os.Lstat(path)
-		if errors.Is(err, os.ErrNotExist) {
-			continue // Go may legitimately materialize a missing metadata file.
-		} else if err != nil {
-			return errors.Join(ErrSourceIntegrity, err)
-		} else if !info.Mode().IsRegular() {
-			return ErrSourceIntegrity
-		}
-		present = append(present, path)
+		// A callback may materialize another known path. Drain those finite
+		// targets before returning to Go without refreshing earlier captures.
 	}
-	if len(present) == 0 {
-		return nil
-	}
-	return errors.Join(retain(ctx, present), ctx.Err())
 }

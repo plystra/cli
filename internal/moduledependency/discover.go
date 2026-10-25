@@ -89,6 +89,8 @@ type Options struct {
 	// Incomplete discovery graphs retain fixed-root effective information when
 	// all-version replacement proofs establish the same physical source.
 	// Information retention does not require a source-tree callback or directory.
+	// Each known metadata batch drains callback-materialized paths before Go
+	// resumes, without refreshing earlier captures or discovering sibling files.
 	// These files have no independent Go checksum authority.
 	// Callbacks honor the supplied context, including post-cancellation retention.
 	RetainModuleInformation func(context.Context, []string) error
