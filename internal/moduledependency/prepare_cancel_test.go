@@ -22,8 +22,13 @@ import (
 
 func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 	for _, phase := range []string{"module", "workspace"} {
-		for _, mode := range []string{"cancel", "deadline", "reject-manifest", "reject-information", "combined", "unrecorded", "information-only", "manifest-only", "before-start", "wrapped-cancel", "wrapped-deadline", "unsettled", "exhausted-budget"} {
+		for _, mode := range []string{"cancel", "deadline", "reject-manifest", "reject-information", "combined", "unrecorded", "information-only", "manifest-only", "before-start", "wrapped-cancel", "wrapped-deadline", "unsettled", "exhausted-budget", "raw-manifest", "reject-raw-manifest", "raw-combined"} {
+			if phase == "workspace" && (mode == "reject-raw-manifest" || mode == "raw-combined") {
+				continue // Workspace selection already retains this warm manifest.
+			}
 			t.Run(phase+"/"+mode, func(t *testing.T) {
+				raw := strings.Contains(mode, "raw-")
+				combined := mode == "combined" || mode == "raw-combined"
 				wrapped := strings.HasPrefix(mode, "wrapped-") || mode == "unsettled"
 				mode = strings.TrimPrefix(mode, "wrapped-")
 				t.Parallel()
@@ -31,7 +36,7 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 				if err := os.RemoveAll(fixture.cache); err != nil {
 					t.Fatal(err)
 				}
-				if mode == "unrecorded" {
+				if mode == "unrecorded" || raw {
 					writeFile(t, fixture.authority, "")
 				}
 				const second = "example.com/second"
@@ -128,7 +133,7 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 					case <-watch.Done():
 					}
 				}()
-				manifests, information := 0, 0
+				manifests, information, rawManifests := 0, 0, 0
 				var retentionContext context.Context
 				manifestRejected, informationRejected := errors.New("manifest retention rejected"), errors.New("information retention rejected")
 				checkContext := func(captureCtx context.Context) {
@@ -161,11 +166,11 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 							<-captureCtx.Done()
 							return captureCtx.Err()
 						}
-						if ctx.Err() != nil && mode == "combined" {
+						if ctx.Err() != nil && combined {
 							path := filepath.Join(stage.Root(), "go.mod")
 							writeFile(t, path, string(readFile(t, path))+"// concurrent metadata edit\n")
 						}
-						if ctx.Err() != nil && (mode == "reject-manifest" || mode == "combined") {
+						if ctx.Err() != nil && (mode == "reject-manifest" || combined) {
 							return manifestRejected
 						}
 						return nil
@@ -179,11 +184,32 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 						if err := stage.RetainMetadata(captureCtx, []projectstage.MetadataInput{{Path: paths[0]}}); err != nil {
 							return err
 						}
-						if ctx.Err() != nil && (mode == "reject-information" || mode == "combined") {
+						if ctx.Err() != nil && (mode == "reject-information" || combined) {
 							return informationRejected
 						}
 						return nil
 					},
+				}
+				if raw {
+					options.RetainRootManifests = nil
+					options.RetainManifestFiles = func(captureCtx context.Context, paths []string) error {
+						checkContext(captureCtx)
+						rawManifests++
+						if len(paths) != 1 || paths[0] != fixture.downloaded.GoMod {
+							t.Fatal("interrupted raw manifest lost its physical identity")
+						}
+						if err := stage.RetainMetadata(captureCtx, []projectstage.MetadataInput{{Path: paths[0]}}); err != nil {
+							return err
+						}
+						if ctx.Err() != nil && combined {
+							path := filepath.Join(stage.Root(), "go.mod")
+							writeFile(t, path, string(readFile(t, path))+"// concurrent metadata edit\n")
+						}
+						if ctx.Err() != nil && (mode == "reject-raw-manifest" || combined) {
+							return manifestRejected
+						}
+						return nil
+					}
 				}
 				if mode == "manifest-only" {
 					options.RetainModuleInformation = nil
@@ -203,7 +229,7 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 				}
 				if mode == "manifest-only" {
 					wantInformation = 0
-				} else if mode == "information-only" || mode == "unrecorded" {
+				} else if mode == "information-only" || mode == "unrecorded" || raw {
 					wantManifest = 0
 				}
 				if mode == "before-start" {
@@ -229,10 +255,13 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 				if !errors.Is(err, wantError) || manifests != wantManifest || information != wantInformation || later.Load() != 0 || mode != "before-start" && reached.Load() == 0 || mode == "before-start" && reached.Load() != 0 {
 					t.Fatalf("interrupted metadata lost: manifests=%d information=%d, %v", manifests, information, err)
 				}
+				if raw && rawManifests != 1 {
+					t.Fatal("interrupted download lost its raw manifest", rawManifests)
+				}
 				if mode == "exhausted-budget" && !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("cleanup budget exhaustion lost: %v", err)
 				}
-				if (mode == "reject-manifest" || mode == "combined") && !errors.Is(err, manifestRejected) || (mode == "reject-information" || mode == "combined") && !errors.Is(err, informationRejected) || mode == "combined" && !errors.Is(err, moduledependency.ErrConcurrentChange) {
+				if (mode == "reject-manifest" || mode == "reject-raw-manifest" || combined) && !errors.Is(err, manifestRejected) || (mode == "reject-information" || combined) && !errors.Is(err, informationRejected) || combined && !errors.Is(err, moduledependency.ErrConcurrentChange) {
 					t.Fatalf("interrupted retention failure or metadata drift lost: %v", err)
 				}
 				if wrapped && !bytes.Equal(<-commandsAtInterruption, readFile(t, trace)) {

@@ -92,7 +92,11 @@ func TestFixedRootManifestsRetainedBeforeSelection(t *testing.T) {
 						if len(paths) != 1 || paths[0] != fixture.downloaded.GoMod {
 							t.Fatal("fixed manifest lost its physical source identity")
 						}
-						if !strings.Contains(string(readFile(t, trace)), "list -m ") {
+						commands := string(readFile(t, trace))
+						if strings.Contains(commands, "mod download ") {
+							t.Fatal("first raw manifest capture followed acquisition")
+						}
+						if !strings.Contains(commands, "list -m ") {
 							early++
 						}
 						if err := stage.RetainMetadata(ctx, []projectstage.MetadataInput{{Path: paths[0]}}); err != nil {
@@ -180,11 +184,14 @@ func TestFixedRootManifestsRetainedBeforeSelection(t *testing.T) {
 						t.Fatal("unchanged fixed manifest failed", err)
 					}
 				}
-				want := 1
+				wantEarly, wantCalls := 1, 1
 				if mode == "missing" || mode == "exact-different" || mode == "unused" || mode == "no-callback" {
-					want = 0
+					wantEarly = 0
 				}
-				if early != want || calls != want {
+				if mode == "unused" || mode == "no-callback" {
+					wantCalls = 0
+				}
+				if early != wantEarly || calls != wantCalls {
 					t.Fatalf("fixed manifest first-read boundary: early=%d calls=%d", early, calls)
 				}
 				if strings.Contains(string(readFile(t, trace)), "mod download ") && mode == "identity" {

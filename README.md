@@ -1036,7 +1036,14 @@ files appearing after phase initialization or an earlier completed-source callba
 It uses each phase's already resolved physical source without applying another
 replacement. This capture works independently of source-retention callbacks;
 rejection, cancellation, or original metadata drift prevents the command.
-Checksum-only downloads with no manifest retainer remain outside this boundary.
+Every exact download also retains present effective-source `.mod` files as raw
+private concurrency evidence independently of original checksum authority or
+source-retention callbacks. This includes workspace checksum-only downloads.
+The raw boundary follows information and authorized-manifest callbacks, uses the
+already resolved physical source without another replacement lookup, and shares
+the bounded settled-command post-capture context. Raw retention never supplies
+checksum authority or permission to interpret an unauthenticated graph summary;
+missing files may materialize normally and are captured again after acquisition.
 After each exact preparation or discovery download returns, present
 effective-source cache manifests are retained again under that phase's original
 `/go.mod` checksums,

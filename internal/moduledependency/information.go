@@ -59,6 +59,10 @@ func preparationInformationPaths(ctx context.Context, root string, versions []mo
 	if options.RetainModuleInformation == nil || len(versions) == 0 {
 		return nil, nil
 	}
+	return preparationModuleFilePaths(ctx, root, versions, options, environment, ".info")
+}
+
+func preparationModuleFilePaths(ctx context.Context, root string, versions []module.Version, options Options, environment []string, suffix string) ([]string, error) {
 	seen := map[module.Version]bool{}
 	var paths []string
 	for _, version := range versions {
@@ -71,7 +75,7 @@ func preparationInformationPaths(ctx context.Context, root string, versions []mo
 			return nil, ErrInvalidOutput
 		}
 		seen[version] = true
-		paths = append(paths, filepath.Join("cache", "download", filepath.FromSlash(path), "@v", value+".info"))
+		paths = append(paths, filepath.Join("cache", "download", filepath.FromSlash(path), "@v", value+suffix))
 	}
 	if len(paths) == 0 {
 		return nil, nil

@@ -811,6 +811,13 @@ func TestBuiltCLIChangePlanRejectsLatePreparationManifest(t *testing.T) {
 	testBuiltCLIChangePlanCacheInput(t, binary, "late-manifest-prepared-manifest-identity-after-download")
 }
 
+func TestBuiltCLIChangePlanRejectsUnrecordedAcquisitionManifest(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{"no-authority-prepared-manifest-identity-after-download", "no-authority-prepared-workspace-selected-graph-manifest-identity-after-download"} {
+		t.Run(mode, func(t *testing.T) { testBuiltCLIChangePlanCacheInput(t, binary, mode) })
+	}
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
