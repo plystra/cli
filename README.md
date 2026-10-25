@@ -1029,10 +1029,14 @@ manifest checksums introduce no prefetch. Workspace query spellings decline
 optional inference rather than guessing an exact version. The retained manifest
 evidence survives later archive failure and stage cleanup, and callbacks are
 followed by original metadata rechecks before Go proceeds.
-Discovery also retains present effective-source manifests immediately before
-each missing-source acquisition under original Project or workspace checksum
-authority. It uses the already selected physical source without applying another
-replacement. This capture works independently of source-retention callbacks.
+Discovery and exact preparation retain present effective-source manifests
+immediately before each acquisition under original Project or workspace checksum
+authority. The shared boundary follows information callbacks, so it also captures
+files appearing after phase initialization or an earlier completed-source callback.
+It uses each phase's already resolved physical source without applying another
+replacement. This capture works independently of source-retention callbacks;
+rejection, cancellation, or original metadata drift prevents the command.
+Checksum-only downloads with no manifest retainer remain outside this boundary.
 After each exact preparation or discovery download returns, present
 effective-source cache manifests are retained again under that phase's original
 `/go.mod` checksums,

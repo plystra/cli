@@ -289,6 +289,13 @@ func runRootManifestsHelper() int {
 	}
 	metadataPhase := os.Getenv("PLYSTRA_MODULE_METADATA_PHASE")
 	metadataRead := len(os.Args) > 1 && os.Args[1] == "list" && metadataPhase != "download" || len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download" && metadataPhase == "download"
+	if query := os.Getenv("PLYSTRA_MODULE_METADATA_QUERY"); query != "" {
+		matched := false
+		for _, argument := range os.Args[1:] {
+			matched = matched || argument == query
+		}
+		metadataRead = metadataRead && matched
+	}
 	if path := os.Getenv("PLYSTRA_MODULE_METADATA_PATH"); path != "" && metadataRead {
 		if os.Getenv("PLYSTRA_MODULE_METADATA_MODE") == "delete" {
 			if err := os.Remove(path); err != nil {

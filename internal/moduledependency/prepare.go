@@ -211,6 +211,11 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	if err := retainPresentModuleFiles(ctx, information, options.RetainModuleInformation); err != nil {
 		return err
 	}
+	if retainMetadata != nil {
+		if err := retainMetadata(ctx); err != nil {
+			return err
+		}
+	}
 	output, started, downloadErr := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
 	var retentionErr error
 	if started && !errors.Is(downloadErr, gocommand.ErrProcessUnsettled) {

@@ -715,9 +715,6 @@ func resolveMissingSources(ctx context.Context, applicationRoot, applicationModu
 		if err != nil {
 			return err
 		}
-		if err := retainMetadata(ctx); err != nil {
-			return err
-		}
 		if err := downloadPreparedSources(ctx, downloadRoot, group, nil, options, environment, retain, retainMetadata); err != nil {
 			return err
 		}

@@ -157,15 +157,15 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 						if err := stage.RetainMetadata(captureCtx, []projectstage.MetadataInput{{Path: inputs[0].Path, GoModChecksum: inputs[0].Checksum}}); err != nil {
 							return err
 						}
-						if mode == "exhausted-budget" {
+						if ctx.Err() != nil && mode == "exhausted-budget" {
 							<-captureCtx.Done()
 							return captureCtx.Err()
 						}
-						if mode == "combined" {
+						if ctx.Err() != nil && mode == "combined" {
 							path := filepath.Join(stage.Root(), "go.mod")
 							writeFile(t, path, string(readFile(t, path))+"// concurrent metadata edit\n")
 						}
-						if mode == "reject-manifest" || mode == "combined" {
+						if ctx.Err() != nil && (mode == "reject-manifest" || mode == "combined") {
 							return manifestRejected
 						}
 						return nil
@@ -199,6 +199,7 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 				wantManifest, wantInformation := 1, 1
 				if phase == "workspace" {
 					wantInformation++
+					wantManifest++
 				}
 				if mode == "manifest-only" {
 					wantInformation = 0
@@ -212,6 +213,7 @@ func TestPrepareSourcesRetainsInterruptedMetadata(t *testing.T) {
 					wantManifest, wantInformation = 0, 0
 					if phase == "workspace" {
 						wantInformation = 1
+						wantManifest = 1
 					}
 				}
 				if mode == "exhausted-budget" {

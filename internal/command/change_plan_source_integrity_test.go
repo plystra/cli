@@ -350,11 +350,31 @@ import (
  "fmt"
  "os"
  "os/exec"
+ "path/filepath"
+ "strings"
 )
 func check(err error) { if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(9) } }
 func main() {
  backup := ""
  mode := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MODE")
+ if source := os.Getenv("PLYSTRA_SOURCE_PREPARATION_LATE_MANIFEST"); source != "" && len(os.Args) > 1 && os.Args[1] == "env" {
+  directory, err := os.Getwd(); check(err)
+  cacheQuery := false
+  for _, argument := range os.Args[2:] { cacheQuery = cacheQuery || argument == "GOMODCACHE" }
+  if cacheQuery && strings.HasPrefix(filepath.Base(directory), "plystra-source-preparation-") {
+   countPath := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER") + ".cache-queries"
+   count, err := os.ReadFile(countPath)
+   if err != nil && !os.IsNotExist(err) { check(err) }
+   count = append(count, 'x')
+   check(os.WriteFile(countPath, count, 0600))
+   if len(count) == 2 {
+    path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+    if _, err := os.Lstat(path); !os.IsNotExist(err) { os.Exit(12) }
+    data, err := os.ReadFile(source); check(err)
+    check(os.WriteFile(path, data, 0600))
+   }
+  }
+ }
  requestedDownload := mode == "manifest-identity-after-download" || mode == "source-identity-after-download" || mode == "source-manifest-identity-after-download" || mode == "information-identity-after-download" || mode == "information-removed-after-download" || mode == "ziphash-removed-after-download"
  requestedList := mode == "fixed-manifest-identity-after-list" || mode == "information-identity-after-list" || mode == "source-identity-after-list" || mode == "source-manifest-identity-after-list"
  requestedGraph := mode == "manifest-identity-after-graph" || mode == "information-identity-after-graph" || mode == "source-identity-after-graph" || mode == "source-manifest-identity-after-graph"
@@ -786,6 +806,11 @@ func TestBuiltCLIChangePlanRejectsChangedAcquisitionManifest(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRejectsLatePreparationManifest(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	testBuiltCLIChangePlanCacheInput(t, binary, "late-manifest-prepared-manifest-identity-after-download")
+}
+
 func buildSourceIntegrityCLI(t *testing.T) string {
 	t.Helper()
 	binary := filepath.Join(t.TempDir(), "plystra.exe")
@@ -799,6 +824,8 @@ func buildSourceIntegrityCLI(t *testing.T) string {
 
 func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 	t.Helper()
+	lateManifest := strings.HasPrefix(mode, "late-manifest-")
+	mode = strings.TrimPrefix(mode, "late-manifest-")
 	coldManifests := strings.HasPrefix(mode, "cold-manifests-")
 	mode = strings.TrimPrefix(mode, "cold-manifests-")
 	missingMetadata := ""
@@ -993,6 +1020,29 @@ func testBuiltCLIChangePlanCacheInput(t *testing.T, binary, mode string) {
 		path = filepath.Join(cache, "cache", "download", filepath.FromSlash(transitivePath), "@v", "v1.0.0.mod")
 	}
 	marker := filepath.Join(t.TempDir(), "manifest-changed")
+	if lateManifest {
+		if !prepared || workspaceRoot != "" {
+			t.Fatal("late manifest fixture requires exact single-module preparation")
+		}
+		manifest, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := filepath.Join(t.TempDir(), "original.mod")
+		writeCommandFile(t, saved, string(manifest))
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Join(cache, filepath.FromSlash(previewDependencyModule+"@v1.0.0"))
+		relative, err := filepath.Rel(cache, directory)
+		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			t.Fatal("late source removal escaped isolated cache")
+		}
+		if err := os.RemoveAll(directory); err != nil {
+			t.Fatal(err)
+		}
+		environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_LATE_MANIFEST="+saved)
+	}
 	environment = append(environment, "PLYSTRA_SOURCE_PREPARATION_PATH="+path, "PLYSTRA_SOURCE_PREPARATION_MARKER="+marker, "PLYSTRA_SOURCE_PREPARATION_MODE="+mode)
 	before := commandTree(t, root)
 	var beforeWorkspace, beforeLocal map[string][]byte

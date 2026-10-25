@@ -85,11 +85,16 @@ func TestPrepareSourcesRetainsMaterializedManifest(t *testing.T) {
 							t.Fatalf("materialized manifest lost its original authority: %v", manifests)
 						}
 						commands := string(readFile(t, trace))
-						if !strings.Contains(commands, "mod download -json "+warmSourceModule+"@v1.0.0\n") || strings.Contains(commands, "example.com/second@v1.0.0\n") || completed != 0 {
+						post := strings.Contains(commands, "mod download -json "+warmSourceModule+"@v1.0.0\n")
+						wantPost := phase == "module" || captures == 2
+						if post != wantPost || strings.Contains(commands, "example.com/second@v1.0.0\n") || completed != 0 {
 							t.Fatalf("manifest retained outside its acquisition boundary: %s, completed=%d", commands, completed)
 						}
 						if err := stage.RetainMetadata(ctx, []projectstage.MetadataInput{{Path: manifests[0].Path, GoModChecksum: manifests[0].Checksum}}); err != nil {
 							return err
+						}
+						if !post {
+							return nil
 						}
 						if strings.HasSuffix(mode, "combined") {
 							path := filepath.Join(stage.Root(), "go.mod")
@@ -113,6 +118,9 @@ func TestPrepareSourcesRetainsMaterializedManifest(t *testing.T) {
 					return nil
 				})
 				wantCaptures := 1
+				if phase == "workspace" {
+					wantCaptures = 2
+				}
 				if strings.HasSuffix(mode, "unrecorded") {
 					wantCaptures = 0
 				}
@@ -131,7 +139,11 @@ func TestPrepareSourcesRetainsMaterializedManifest(t *testing.T) {
 						t.Fatalf("invalid acquisition output accepted: %v", err)
 					}
 				} else if mode == "poisoned" {
-					if !errors.Is(err, projectstage.ErrStage) || completed != 0 || len(readFile(t, filepath.Join(fixture.root, "poisoned"))) == 0 {
+					want := projectstage.ErrStage
+					if phase == "workspace" {
+						want = projectstage.ErrConcurrentChange
+					}
+					if !errors.Is(err, want) || completed != 0 || len(readFile(t, filepath.Join(fixture.root, "poisoned"))) == 0 {
 						t.Fatalf("poisoned manifest accepted under original checksum: %v", err)
 					}
 				} else if mode == "success" || mode == "success-unrecorded" || mode == "shared-source" {
@@ -162,6 +174,12 @@ func TestPrepareSourcesRetainsMaterializedManifest(t *testing.T) {
 				inputs := stage.Inputs()
 				if err := stage.Close(); err != nil {
 					t.Fatal(err)
+				}
+				if phase == "workspace" && mode == "poisoned" {
+					if !errors.Is(inputs.Recheck(t.Context()), projectstage.ErrConcurrentChange) {
+						t.Fatal("poisoned manifest lost its earlier evidence after cleanup")
+					}
+					return
 				}
 				if err := inputs.Recheck(t.Context()); err != nil {
 					t.Fatalf("retained evidence failed after cleanup: %v", err)
@@ -229,7 +247,7 @@ func TestPrepareSourcesRechecksWarmManifestAfterAcquisition(t *testing.T) {
 					}
 					return nil
 				})
-				if captures != 2 || !errors.Is(err, projectstage.ErrConcurrentChange) || len(readFile(t, marker)) == 0 {
+				if captures != 3 || !errors.Is(err, projectstage.ErrConcurrentChange) || len(readFile(t, marker)) == 0 {
 					t.Fatalf("warm evidence was refreshed after acquisition: captures=%d, %v", captures, err)
 				}
 			})
