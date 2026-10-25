@@ -106,7 +106,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 		if !found {
 			return fmt.Errorf("created plugin %q is not discoverable", options.Name)
 		}
-		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+		return modulemutation.Tidy(ctx, updatedRoot, modulemutation.TidyOptions{GoCommand: options.GoCommand, Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 			_, err = applicationgenerate.Generate(ctx, applicationgenerate.Options{
 				Start:            updatedRoot,
 				GoCommand:        options.GoCommand,

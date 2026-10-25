@@ -316,7 +316,7 @@ func TestTidyRestoresMetadataWhenGenerationFailsAfterMutation(t *testing.T) {
 	}
 	laterErr := errors.New("generation failed after module mutation")
 	mutated := false
-	err = Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=1"), func(mutate applicationgenerate.ModuleMutation) error {
+	err = Tidy(t.Context(), root, TidyOptions{GoCommand: command, Environment: append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=1")}, func(mutate applicationgenerate.ModuleMutation) error {
 		if err := mutate(t.Context(), root, nil, func() error { return nil }); err != nil {
 			return err
 		}
@@ -362,7 +362,7 @@ func TestTidyRejectsModuleEditsBeforeNormalization(t *testing.T) {
 			}
 			var edited moduleFiles
 			validated := false
-			err := Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=1"), func(mutate applicationgenerate.ModuleMutation) error {
+			err := Tidy(t.Context(), root, TidyOptions{GoCommand: command, Environment: append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=1")}, func(mutate applicationgenerate.ModuleMutation) error {
 				name, data := "go.sum", "concurrent checksum metadata\n"
 				if change == "edit-mod" {
 					name, data = "go.mod", "module example.com/acme/concurrent\n\ngo 1.26\n\n// concurrent authored edit\n"
@@ -427,7 +427,7 @@ func TestTidySelectsGeneratedRuntimeMinimumAndPreservesNewerDirectRequirement(t 
 				t.Fatalf("WriteFile(go.mod): %v", err)
 			}
 			validated := false
-			err := Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=runtime"), func(mutate applicationgenerate.ModuleMutation) error {
+			err := Tidy(t.Context(), root, TidyOptions{GoCommand: command, Environment: append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=runtime")}, func(mutate applicationgenerate.ModuleMutation) error {
 				return mutate(t.Context(), root, requirements, func() error {
 					validated = true
 					return nil
@@ -471,7 +471,7 @@ func TestTidyRestoresGeneratedRuntimeRequirementsAfterValidationFailure(t *testi
 	protobuf, _ := applicationgenerate.NewModuleRequirement("google.golang.org/protobuf", "v1.36.11")
 	yaml, _ := applicationgenerate.NewModuleRequirement(bootstrapgen.YAMLModulePath, bootstrapgen.YAMLModuleVersion)
 	validationFailure := errors.New("reject generated runtime")
-	err = Tidy(t.Context(), root, command, append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=runtime"), func(mutate applicationgenerate.ModuleMutation) error {
+	err = Tidy(t.Context(), root, TidyOptions{GoCommand: command, Environment: append(os.Environ(), "PLYSTRA_MODULE_MUTATION_HELPER=runtime")}, func(mutate applicationgenerate.ModuleMutation) error {
 		return mutate(t.Context(), root, []applicationgenerate.ModuleRequirement{connect, protobuf, yaml}, func() error {
 			return validationFailure
 		})

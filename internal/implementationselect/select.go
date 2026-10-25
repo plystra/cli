@@ -132,7 +132,7 @@ func Select(ctx context.Context, options Options) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %w", ErrSelect, err)
 	}
 	if err := atomicfs.WriteFiles(module.Path(), writes, func(updatedRoot string) error {
-		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+		return modulemutation.Tidy(ctx, updatedRoot, modulemutation.TidyOptions{GoCommand: options.GoCommand, Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 			guardedMutation := func(ctx context.Context, root string, requirements []applicationgenerate.ModuleRequirement, validate func() error) error {
 				return mutate(ctx, root, requirements, func() error {
 					tidy, err := inputs.CaptureTidySnapshot(ctx)

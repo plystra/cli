@@ -383,7 +383,12 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		return err
 	}
 	if len(dependencies) == 0 {
-		err = modulemutation.Tidy(ctx, stage.Root(), options.GoCommand, stage.Environment(), validateCandidate)
+		err = modulemutation.Tidy(ctx, stage.Root(), modulemutation.TidyOptions{
+			GoCommand: options.GoCommand, Environment: stage.Environment(),
+			PrepareRuntime: func(versions []module.Version) error {
+				return prepareDependencySources(ctx, stage, options.GoCommand, versions)
+			},
+		}, validateCandidate)
 	} else {
 		get := effect("candidate-dependencies", commandschema.EffectTrustedCodeExecution, "resolve_dependency_batch", []string{"go", "get"})
 		reported := false

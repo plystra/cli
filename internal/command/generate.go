@@ -144,7 +144,7 @@ func executeGenerate(ctx context.Context, arguments generateArguments, workingDi
 		result, generateErr = applicationgenerate.Generate(ctx, options)
 		return generateErr
 	}
-	err = modulemutation.Tidy(ctx, project.Path(), options.GoCommand, environment, generateWithMutation)
+	err = modulemutation.Tidy(ctx, project.Path(), modulemutation.TidyOptions{GoCommand: options.GoCommand, Environment: environment}, generateWithMutation)
 	var dependencySource *applicationgenerate.DependencySourceError
 	if errors.Is(err, applicationgenerate.ErrKernelDependency) && errors.As(err, &dependencySource) {
 		err = modulemutation.Change(ctx, project.Path(), modulemutation.ChangeOptions{

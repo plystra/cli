@@ -32,8 +32,8 @@ type DependencyBatchOptions struct {
 	Environment []string
 	Changes     []DependencyChange
 	Observe     func(started bool)
-	// Prepare captures exact canonical-version targets after batch validation
-	// and before go get. Mutable queries retain ordinary Go query semantics.
+	// Prepare captures exact canonical-version targets before the initial get
+	// and any generated-runtime get. Mutable queries retain ordinary Go semantics.
 	Prepare func([]module.Version) error
 }
 
@@ -139,7 +139,7 @@ func ChangeDependencies(ctx context.Context, root string, options DependencyBatc
 	}
 	return Change(ctx, root, ChangeOptions{
 		GoCommand: options.GoCommand, Environment: append([]string(nil), options.Environment...),
-		Arguments: arguments, DirectRequirements: direct, Observe: options.Observe,
+		Arguments: arguments, DirectRequirements: direct, Observe: options.Observe, PrepareRuntime: options.Prepare,
 	}, func(mutate applicationgenerate.ModuleMutation) error {
 		_, resolved, err := dependencySelections(root)
 		if err != nil {

@@ -182,7 +182,7 @@ func TestSelectionPostwriteTidyGeneratedImportsAndRollback(t *testing.T) {
 				}
 				requirements = append(requirements, runtime)
 			}
-			err = modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+			err = modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 				return mutate(t.Context(), root, requirements, func() error {
 					tidy, err := inputs.CaptureTidySnapshot(t.Context())
 					if err != nil {

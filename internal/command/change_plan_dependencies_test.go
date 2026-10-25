@@ -463,7 +463,7 @@ func TestRunChangePlanDependencyRemovalReplacesStaleGeneratedImports(t *testing.
 	owner := previewDependencyModule + "/remote.New"
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1, remote.echo/v1]\nconfig:\n  "+owner+": {endpoint: PRIVATE_ENDPOINT}\n")
 	seedPreviewDependency(t, root, environment, "v1.0.0")
-	if err := modulemutation.Tidy(t.Context(), root, "", environment, func(mutate applicationgenerate.ModuleMutation) error {
+	if err := modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: environment}, func(mutate applicationgenerate.ModuleMutation) error {
 		_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, MutateModule: mutate, RejectUnexpected: true})
 		return err
 	}); err != nil {

@@ -39,7 +39,7 @@ func TestSelectionTidyAcceptsExistingWorkspaceRequirement(t *testing.T) {
 				t.Fatal("fixture must start with an unrequired workspace member of the expected kind")
 			}
 			writeFile(t, filepath.Join(root, "generated/runtime.go"), "package generated\nimport _ \"example.com/runtime\"\n")
-			err = modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+			err = modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 				return mutate(t.Context(), root, nil, func() error {
 					requirement, exists, err := modulemutation.FindRequirement(root, "example.com/runtime")
 					if err != nil || !exists || requirement.Version() == "" {
@@ -79,7 +79,7 @@ func TestSelectionTidyAcceptsRemovalOfImpliedToolchain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+	err = modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 		return mutate(t.Context(), root, nil, func() error {
 			if strings.Contains(string(readSelectionFile(t, root, "go.mod")), "toolchain") {
 				t.Fatal("real Tidy did not remove the implied toolchain directive")
@@ -126,7 +126,7 @@ func TestSelectionTidyWorkspaceRequirementRetainsOriginalEvidence(t *testing.T) 
 				t.Fatal(err)
 			}
 			writeFile(t, filepath.Join(root, "generated/runtime.go"), "package generated\nimport _ \"example.com/runtime\"\n")
-			err = modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+			err = modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 				return mutate(t.Context(), root, nil, func() error {
 					switch scenario {
 					case "member-metadata":

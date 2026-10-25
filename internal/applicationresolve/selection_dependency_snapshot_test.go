@@ -62,7 +62,7 @@ func TestDependencyOwnershipSnapshotPreservesWorkspaceAndRelativeReplacements(t 
 					if err != nil {
 						return err
 					}
-					return modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+					return modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 						return mutate(t.Context(), root, nil, func() error {
 							tidy, err := current.CaptureTidySnapshot(t.Context())
 							if err != nil {

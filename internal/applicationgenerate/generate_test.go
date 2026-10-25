@@ -1407,7 +1407,7 @@ func TestGenerateRepairsModulePathRuntimeRequirementTransactionally(t *testing.T
 			options.Check = false
 			generate := func() (applicationgenerate.Result, error) {
 				var result applicationgenerate.Result
-				err := modulemutation.Tidy(t.Context(), root, "", options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+				err := modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 					options.MutateModule = mutate
 					var err error
 					result, err = applicationgenerate.Generate(t.Context(), options)

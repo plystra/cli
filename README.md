@@ -1208,6 +1208,18 @@ failing preparation. Retention errors, cancellation, or changed original metadat
 stop validation and later acquisitions without replacing the retained evidence.
 Empty-source callbacks apply the same failure checks before preparation returns
 or advances to workspace selection.
+Staged previews also prepare the exact generated-runtime targets before their
+normalizing `go get`, including when no dependency operation was requested.
+Only requirements absent from `go.mod` or below their generated minimum enter
+this batch; sufficient versions are not downgraded or reacquired merely to
+change directness. Preparation and the
+command use the same normalized targets, preserving existing replacement and
+workspace handling. Rejection, cancellation, or changed module metadata prevents
+the command, and callback edits are never claimed as normalization-owned files
+for rollback. Final discovery still retains the resulting selected graph.
+This does not capture every transitive or cold normalization read. Capturing and
+relocating current-Project local replacements hidden by a workspace during
+runtime normalization remains incomplete.
 The workspace phase independently verifies its original checksum authorities
 even when it selects a source already acquired by the single-module phase.
 This does not capture every input partially consumed by a failed acquisition.

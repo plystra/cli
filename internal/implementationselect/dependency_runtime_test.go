@@ -42,7 +42,7 @@ func TestDependencyWholeOwnerExclusionGeneratesAndLoads(t *testing.T) {
 	writeImplementationFile(t, implementationPath, strings.Replace(string(implementation), "type Config struct {", "type Config struct { Password runtimeSecret;", 1))
 	writeImplementationFile(t, filepath.Join(root, "alternate/secret.go"), "package alternate\nimport \"github.com/plystra/kernel/configuration\"\ntype runtimeSecret = configuration.Secret\n")
 	validated := false
-	err = modulemutation.Tidy(t.Context(), root, "", environment, func(mutate applicationgenerate.ModuleMutation) error {
+	err = modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: environment}, func(mutate applicationgenerate.ModuleMutation) error {
 		_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: root, EnvironmentName: "test", Environment: environment, MutateModule: mutate,
 			Validate: func(ctx context.Context, directory string) error {

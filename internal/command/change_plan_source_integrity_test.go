@@ -403,7 +403,27 @@ func main() {
    }
   }
  }
- firstGet := len(os.Args) > 1 && os.Args[1] == "get" && mode != "unchanged" && mode != "isolated-acquisition" && mode != "missing-origin-after-get" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
+ runtimeGet := false
+ runtimePreparation := false
+ if strings.HasPrefix(mode, "runtime-") {
+  for _, argument := range os.Args[2:] {
+   if argument == "connectrpc.com/connect@v1.20.0" {
+    runtimeGet = len(os.Args) > 1 && os.Args[1] == "get"
+    if len(os.Args) > 2 && os.Args[1] == "mod" && os.Args[2] == "download" {
+     directory, directoryErr := os.Getwd(); check(directoryErr)
+     runtimePreparation = strings.HasPrefix(filepath.Base(directory), "plystra-source-preparation-")
+    }
+   }
+  }
+ }
+ if runtimeGet && (mode == "runtime-order" || mode == "runtime-preparation-failure") {
+  marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
+  prepared, markerErr := os.ReadFile(marker)
+  if markerErr != nil || string(prepared) != "runtime source prepared before get\n" {
+   check(os.WriteFile(marker, []byte("runtime get started without preparation\n"), 0600)); os.Exit(12)
+  }
+ }
+ firstGet := len(os.Args) > 1 && os.Args[1] == "get" && !strings.HasPrefix(mode, "runtime-") && mode != "unchanged" && mode != "isolated-acquisition" && mode != "missing-origin-after-get" && mode != "manifest-after-list" && mode != "manifest-after-download" && mode != "manifest-identity-after-list" && !requestedDownload && !requestedList && !requestedGraph
  if firstGet {
   _, err := os.Stat(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"))
   if err == nil { firstGet = false } else if !os.IsNotExist(err) { check(err) }
@@ -427,6 +447,33 @@ func main() {
  command := exec.Command(REAL_GO, os.Args[1:]...)
  command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
  err := command.Run()
+ if err == nil && runtimePreparation && (mode == "runtime-order" || mode == "runtime-preparation-failure") {
+  marker := os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER")
+  if mode == "runtime-preparation-failure" {
+   check(os.WriteFile(marker, []byte("runtime preparation failed before get\n"), 0600)); os.Exit(13)
+  }
+  check(os.WriteFile(marker, []byte("runtime source prepared before get\n"), 0600))
+ }
+ if err == nil && runtimeGet && mode == "runtime-order" {
+  check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("runtime source prepared before get\nruntime get completed\n"), 0600))
+ }
+ if err == nil && strings.HasPrefix(mode, "runtime-") && mode != "runtime-unchanged" && mode != "runtime-order" && mode != "runtime-preparation-failure" && len(os.Args) > 1 && os.Args[1] == "get" {
+  matched := false
+  for _, argument := range os.Args[2:] { matched = matched || argument == "connectrpc.com/connect@v1.20.0" }
+  if matched {
+   path := os.Getenv("PLYSTRA_SOURCE_PREPARATION_PATH")
+   data, readErr := os.ReadFile(path); check(readErr)
+   info, statErr := os.Stat(path); check(statErr)
+   if !os.SameFile(info, info) { os.Exit(10) }
+   backup = path + ".prior"
+   check(os.Rename(path, backup))
+   check(os.WriteFile(path, data, info.Mode().Perm()))
+   check(os.Chtimes(path, info.ModTime(), info.ModTime()))
+   current, statErr := os.Stat(path); check(statErr)
+   if os.SameFile(info, current) { os.Exit(10) }
+   check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("runtime input changed after get\n"), 0600))
+  }
+ }
  if err == nil && isolatedDownload {
   checkOriginalCache()
   check(os.WriteFile(os.Getenv("PLYSTRA_SOURCE_PREPARATION_MARKER"), []byte("exact acquisition consumed a private cache\n"), 0600))

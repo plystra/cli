@@ -223,7 +223,7 @@ func create(ctx context.Context, options Options, after postValidate) (Result, e
 			}
 			return checkSource()
 		}
-		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+		return modulemutation.Tidy(ctx, updatedRoot, modulemutation.TidyOptions{GoCommand: options.GoCommand, Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 				Start: updatedRoot, GoCommand: options.GoCommand, Environment: options.Environment,
 				DependencyOutputLimit: options.DependencyOutputLimit, Validate: validate,

@@ -177,7 +177,7 @@ func Expose(ctx context.Context, options Options) (Result, error) {
 		writes = append(writes, write)
 	}
 	if err := atomicfs.WriteFiles(module.Path(), writes, func(updatedRoot string) error {
-		return modulemutation.Tidy(ctx, updatedRoot, options.GoCommand, options.Environment, func(mutate applicationgenerate.ModuleMutation) error {
+		return modulemutation.Tidy(ctx, updatedRoot, modulemutation.TidyOptions{GoCommand: options.GoCommand, Environment: options.Environment}, func(mutate applicationgenerate.ModuleMutation) error {
 			_, err := applicationgenerate.Generate(ctx, applicationgenerate.Options{
 				Start:                 updatedRoot,
 				ConfigurationPath:     options.ConfigurationPath,

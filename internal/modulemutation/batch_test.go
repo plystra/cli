@@ -314,6 +314,7 @@ func TestChangeDependenciesPreconditionsRunBeforeGoCommand(t *testing.T) {
 		}
 	}
 	valid := DependencyBatchOptions{Changes: []DependencyChange{{Action: "add", Module: "example.com/new@v1.0.0"}}}
+	//lint:ignore SA1012 Verify explicit nil-context rejection before execution.
 	if err := ChangeDependencies(nil, root, valid, func(applicationgenerate.ModuleMutation) error { return nil }); !errors.Is(err, ErrChange) {
 		t.Fatalf("nil context accepted: %v", err)
 	}

@@ -346,7 +346,7 @@ func runScaffoldPlan(t *testing.T, root string, operations []map[string]any) (sc
 func seedScaffoldGeneratedProject(t *testing.T, root string) {
 	t.Helper()
 	environment := implementationSelectionCommandEnvironment(nil)
-	err := modulemutation.Tidy(t.Context(), root, "", environment, func(mutate applicationgenerate.ModuleMutation) error {
+	err := modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: environment}, func(mutate applicationgenerate.ModuleMutation) error {
 		_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{
 			Start: root, Environment: environment, MutateModule: mutate,
 			Validate: func(ctx context.Context, directory string) error {

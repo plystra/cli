@@ -237,7 +237,7 @@ func writeDependencyOwnershipProject(t *testing.T, mode, change string) (string,
 		environment = append(environment, "PLYSTRA_CONFIG="+filepath.Join(root, filepath.FromSlash(selected)))
 	}
 	seedPreviewDependency(t, root, environment, "v1.0.0")
-	if err := modulemutation.Tidy(t.Context(), root, "", environment, func(mutate applicationgenerate.ModuleMutation) error {
+	if err := modulemutation.Tidy(t.Context(), root, modulemutation.TidyOptions{Environment: environment}, func(mutate applicationgenerate.ModuleMutation) error {
 		_, err := applicationgenerate.Generate(t.Context(), applicationgenerate.Options{Start: root, Environment: environment, MutateModule: mutate,
 			Validate: func(ctx context.Context, directory string) error {
 				return gocommand.Run(ctx, gocommand.Options{Directory: directory, Environment: environment}, "build", "-mod=readonly", "./...")

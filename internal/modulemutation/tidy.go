@@ -44,6 +44,8 @@ type ChangeOptions struct {
 	Environment        []string
 	Arguments          []string
 	DirectRequirements []string
+	// PrepareRuntime retains the exact generated-runtime targets before get.
+	PrepareRuntime func([]module.Version) error
 	// Observe reports whether the initial dependency command started, even if
 	// it failed. It runs once after changed metadata is captured for rollback;
 	// subsequent normalization commands are outside this observation.
@@ -108,7 +110,7 @@ func Change(ctx context.Context, root string, options ChangeOptions, operation f
 		if !sameModuleRoot(mutationRoot, root) {
 			return fmt.Errorf("%w: generation changed module root from %q to %q", ErrChange, root, mutationRoot)
 		}
-		normalized, normalizeErr := normalizeModuleMetadata(ctx, root, options.GoCommand, options.Environment, preserved, requirements)
+		normalized, normalizeErr := normalizeModuleMetadata(ctx, root, options.GoCommand, options.Environment, preserved, requirements, options.PrepareRuntime, func(owned moduleFiles) { installed = owned })
 		if normalized != nil {
 			installed = normalized
 		}
@@ -178,12 +180,27 @@ func markDirectRequirements(root string, direct []string) error {
 	}}, func(string) error { return nil })
 }
 
+// TidyOptions controls normalization of generated runtime dependencies.
+type TidyOptions struct {
+	GoCommand   string
+	Environment []string
+	// PrepareRuntime runs for a nonempty exact batch before its get command.
+	// Rejection, cancellation, or module-metadata changes prevent execution.
+	PrepareRuntime func([]module.Version) error
+}
+
 // Tidy runs operation with a generation mutation that tidies Go module
 // metadata after generated imports are installed. Existing explicit
 // requirements and checksum entries are retained. Metadata is restored when
 // operation fails after the mutation, including by panic, and concurrent edits
 // are never overwritten during restoration.
-func Tidy(ctx context.Context, root, goCommand string, environment []string, operation func(applicationgenerate.ModuleMutation) error) (operationErr error) {
+func Tidy(ctx context.Context, root string, options TidyOptions, operation func(applicationgenerate.ModuleMutation) error) (operationErr error) {
+	if ctx == nil {
+		return fmt.Errorf("%w: context is nil", ErrTidy)
+	}
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrTidy, err)
+	}
 	if operation == nil {
 		return fmt.Errorf("%w: generation operation is nil", ErrTidy)
 	}
@@ -223,7 +240,7 @@ func Tidy(ctx context.Context, root, goCommand string, environment []string, ope
 		if len(changed) != 0 {
 			return fmt.Errorf("%w: %w", ErrTidy, atomicfs.NewConcurrentChangeError(changed, atomicfs.ErrConcurrentChange))
 		}
-		normalized, err = normalizeModuleMetadata(ctx, root, goCommand, environment, before, requirements)
+		normalized, err = normalizeModuleMetadata(ctx, root, options.GoCommand, options.Environment, before, requirements, options.PrepareRuntime, func(owned moduleFiles) { normalized = owned })
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrTidy, err)
 		}
@@ -245,12 +262,29 @@ func normalizeModuleMetadata(
 	environment []string,
 	preserved moduleFiles,
 	requirements []applicationgenerate.ModuleRequirement,
+	prepare func([]module.Version) error,
+	retainOwnership func(moduleFiles),
 ) (moduleFiles, error) {
 	normalizedRequirements, operationErr := normalizeRuntimeRequirements(requirements)
-	selected := preserved
-	if operationErr == nil {
-		operationErr = selectRuntimeRequirements(ctx, root, goCommand, environment, normalizedRequirements)
+	var versions []module.Version
+	var prepared moduleFiles
+	if operationErr == nil && len(normalizedRequirements) != 0 {
+		var files moduleFiles
+		files, operationErr = captureModuleFiles(root)
+		if operationErr == nil {
+			versions, operationErr = runtimeRequirementVersions(files, normalizedRequirements)
+		}
+		if operationErr == nil && prepare != nil && len(versions) != 0 {
+			prepared, operationErr = prepareRuntimeSources(ctx, root, files, versions, prepare, retainOwnership)
+		}
 	}
+	if operationErr != nil {
+		// Callback edits are not normalization-owned. A sparse snapshot retains
+		// only unaffected files for an enclosing dependency-command rollback.
+		return prepared, operationErr
+	}
+	selected := preserved
+	operationErr = selectRuntimeRequirements(ctx, root, goCommand, environment, normalizedRequirements, versions)
 	if operationErr == nil && len(normalizedRequirements) != 0 {
 		var captureErr error
 		selected, captureErr = captureModuleFiles(root)
@@ -321,28 +355,14 @@ func selectRuntimeRequirements(
 	root, goCommand string,
 	environment []string,
 	requirements []applicationgenerate.ModuleRequirement,
+	versions []module.Version,
 ) error {
 	if len(requirements) == 0 {
 		return nil
 	}
-	files, err := captureModuleFiles(root)
-	if err != nil {
-		return fmt.Errorf("capture runtime dependency metadata: %w", err)
-	}
-	parsed, err := modfile.Parse("go.mod", files["go.mod"].data, nil)
-	if err != nil {
-		return fmt.Errorf("parse go.mod for generated runtime requirements: %w", err)
-	}
-	selected := make(map[string]string, len(parsed.Require))
-	for _, requirement := range parsed.Require {
-		selected[requirement.Mod.Path] = requirement.Mod.Version
-	}
-	queries := make([]string, 0, len(requirements))
-	for _, requirement := range requirements {
-		version, exists := selected[requirement.Path()]
-		if !exists || !semver.IsValid(version) || semver.Compare(version, requirement.MinimumVersion()) < 0 {
-			queries = append(queries, requirement.Path()+"@"+requirement.MinimumVersion())
-		}
+	queries := make([]string, len(versions))
+	for index, version := range versions {
+		queries[index] = version.String()
 	}
 	if len(queries) != 0 {
 		arguments := append([]string{"get"}, queries...)
@@ -364,6 +384,25 @@ func selectRuntimeRequirements(
 		}
 	}
 	return nil
+}
+
+func runtimeRequirementVersions(files moduleFiles, requirements []applicationgenerate.ModuleRequirement) ([]module.Version, error) {
+	parsed, err := modfile.Parse("go.mod", files["go.mod"].data, nil)
+	if err != nil {
+		return nil, fmt.Errorf("parse go.mod for generated runtime requirements: %w", err)
+	}
+	selected := make(map[string]string, len(parsed.Require))
+	for _, requirement := range parsed.Require {
+		selected[requirement.Mod.Path] = requirement.Mod.Version
+	}
+	var versions []module.Version
+	for _, requirement := range requirements {
+		version, exists := selected[requirement.Path()]
+		if !exists || !semver.IsValid(version) || semver.Compare(version, requirement.MinimumVersion()) < 0 {
+			versions = append(versions, module.Version{Path: requirement.Path(), Version: requirement.MinimumVersion()})
+		}
+	}
+	return versions, nil
 }
 
 func mergeOriginalModuleMetadata(root string, original moduleFiles) error {
@@ -487,31 +526,41 @@ func captureModuleFiles(rootPath string) (result moduleFiles, captureErr error) 
 	}()
 	result = make(moduleFiles, 2)
 	for _, name := range []string{"go.mod", "go.sum"} {
-		info, err := root.Lstat(name)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			result[name] = moduleFile{}
-			continue
-		case err != nil:
-			return nil, fmt.Errorf("inspect %s: %w", name, err)
-		}
-		if !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0 {
-			return nil, fmt.Errorf("%s is not a regular non-symbolic file", name)
-		}
-		data, err := root.ReadFile(name)
+		file, err := captureModuleFile(root, name)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", name, err)
+			return nil, err
 		}
-		result[name] = moduleFile{exists: true, data: data, mode: info.Mode().Perm()}
+		result[name] = file
 	}
 	return result, nil
+}
+
+func captureModuleFile(root *os.Root, name string) (moduleFile, error) {
+	info, err := root.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return moduleFile{}, nil
+	}
+	if err != nil {
+		return moduleFile{}, fmt.Errorf("inspect %s: %w", name, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&fs.ModeSymlink != 0 {
+		return moduleFile{}, fmt.Errorf("%s is not a regular non-symbolic file", name)
+	}
+	data, err := root.ReadFile(name)
+	if err != nil {
+		return moduleFile{}, fmt.Errorf("read %s: %w", name, err)
+	}
+	return moduleFile{exists: true, data: data, mode: info.Mode().Perm()}, nil
 }
 
 func restoreModuleFiles(root string, before, normalized moduleFiles) error {
 	var restoreErr error
 	for _, name := range []string{"go.mod", "go.sum"} {
 		original := before[name]
-		installed := normalized[name]
+		installed, owned := normalized[name]
+		if !owned {
+			continue
+		}
 		if original.exists == installed.exists && original.mode == installed.mode && bytes.Equal(original.data, installed.data) {
 			continue
 		}
