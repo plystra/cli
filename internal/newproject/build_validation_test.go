@@ -127,11 +127,13 @@ func TestPublicNewBuildsStagedProjectWithoutTests(t *testing.T) {
 		name      string
 		arguments []string
 		builds    int
+		alias     bool
 	}{
-		{"plain", nil, 1},
-		{"plugin", []string{"--plugin", "account"}, 1},
-		{"template", []string{"--template", templatePath + "@v1.0.0"}, 1},
-		{"plugin-template", []string{"--plugin", "account", "--template", templatePath + "@v1.0.0"}, 2},
+		{"plain", nil, 1, false},
+		{"plain-parent-alias", nil, 1, true},
+		{"plugin", []string{"--plugin", "account"}, 1, false},
+		{"template", []string{"--template", templatePath + "@v1.0.0"}, 1, false},
+		{"plugin-template", []string{"--plugin", "account", "--template", templatePath + "@v1.0.0"}, 2, false},
 	} {
 		t.Run(route.name, func(t *testing.T) {
 			for _, fail := range []bool{false, true} {
@@ -141,6 +143,13 @@ func TestPublicNewBuildsStagedProjectWithoutTests(t *testing.T) {
 						environment = setEnvironmentValue(environment, "PLYSTRA_TEST_BREAK_BUILD", "1")
 					}
 					parent := t.TempDir()
+					if route.alias {
+						alias := filepath.Join(t.TempDir(), "parent")
+						if err := os.Symlink(parent, alias); err != nil {
+							t.Skipf("directory symlinks unavailable: %v", err)
+						}
+						parent = alias
+					}
 					arguments := append([]string{"new", "my-app", "--module", "example.com/acme/my-app", "--no-agent-guidance"}, route.arguments...)
 					var stdout, stderr bytes.Buffer
 					exit := command.RunIn(arguments, &stdout, &stderr, parent, environment)
@@ -148,7 +157,9 @@ func TestPublicNewBuildsStagedProjectWithoutTests(t *testing.T) {
 					for _, invocation := range readGoInvocations(t, log) {
 						if reflect.DeepEqual(invocation.Arguments, []string{"build", "-mod=readonly", "./..."}) {
 							builds++
-							if filepath.Dir(invocation.Directory) != parent || !strings.HasPrefix(filepath.Base(invocation.Directory), ".my-app.plystra-") {
+							parentInfo, parentErr := os.Stat(parent)
+							buildParent, buildParentErr := os.Stat(filepath.Dir(invocation.Directory))
+							if parentErr != nil || buildParentErr != nil || !os.SameFile(parentInfo, buildParent) || !strings.HasPrefix(filepath.Base(invocation.Directory), ".my-app.plystra-") {
 								t.Fatalf("build ran outside creation stage: %s", invocation.Directory)
 							}
 						}

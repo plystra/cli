@@ -95,6 +95,11 @@ func (d Discovery) CaptureOwnershipSources(ctx context.Context, application modu
 		if root == "" {
 			return ErrOwnershipSnapshot
 		}
+		_, rootInfo, err := ownershipDirectoryPath(root)
+		if err != nil {
+			return err
+		}
+		s.directories[root] = rootInfo
 		data, err := readRegularFile(filepath.Join(root, "go.mod"), 1<<20)
 		if errors.Is(err, fs.ErrNotExist) {
 			data, err = nil, nil
@@ -109,7 +114,7 @@ func (d Discovery) CaptureOwnershipSources(ctx context.Context, application modu
 				return ErrOwnershipSnapshot
 			}
 			s.directories[directory] = info
-			if directory == root {
+			if os.SameFile(info, rootInfo) {
 				break
 			}
 			if filepath.Dir(directory) == directory {
@@ -221,7 +226,7 @@ func (s OwnershipSnapshot) ValidateSnapshot(ctx context.Context) error {
 	}
 	for name, before := range s.packages {
 		after, exists := selected[name]
-		if !exists || before.Dir != after.Dir || !reflect.DeepEqual(ownershipSourceFiles(before), ownershipSourceFiles(after)) {
+		if !exists || !sameDirectory(before.Dir, after.Dir) || !reflect.DeepEqual(ownershipSourceFiles(before), ownershipSourceFiles(after)) {
 			return ErrOwnershipSnapshot
 		}
 	}
@@ -336,11 +341,28 @@ func (s OwnershipSnapshot) selectSources(ctx context.Context, root string, direc
 	data := s.modules[root]
 	directory, mode := root, "readonly"
 	paths := make([]string, 0, len(directories))
-	for packageDirectory := range directories {
-		relative, err := filepath.Rel(root, packageDirectory)
+	physicalRoot, _, err := ownershipDirectoryPath(root)
+	if err != nil {
+		return nil, err
+	}
+	type selectedDirectory struct {
+		name string
+		info fs.FileInfo
+	}
+	requested := make(map[string]selectedDirectory, len(directories))
+	for packageDirectory, name := range directories {
+		physical, info, err := ownershipDirectoryPath(packageDirectory)
+		if err != nil {
+			return nil, err
+		}
+		relative, err := filepath.Rel(physicalRoot, physical)
 		if err != nil || !filepath.IsLocal(relative) {
 			return nil, ErrOwnershipSnapshot
 		}
+		if previous, exists := requested[physical]; exists && (previous.name != name || !os.SameFile(previous.info, info)) {
+			return nil, ErrOwnershipSnapshot
+		}
+		requested[physical] = selectedDirectory{name: name, info: info}
 		paths = append(paths, "./"+filepath.ToSlash(relative))
 	}
 	if len(data) == 0 {
@@ -417,11 +439,39 @@ func (s OwnershipSnapshot) selectSources(ctx context.Context, root string, direc
 	for _, loaded := range listed {
 		// A versioned fork has its own module directive when listed as a main
 		// module. The captured source directory binds its original import identity.
-		if name, exists := directories[loaded.Dir]; exists {
-			result[name] = loaded
+		physical, info, err := ownershipDirectoryPath(loaded.Dir)
+		if err != nil {
+			return nil, err
+		}
+		if selected, exists := requested[physical]; exists {
+			if !os.SameFile(selected.info, info) {
+				return nil, ErrOwnershipSnapshot
+			}
+			result[selected.name] = loaded
 		}
 	}
 	return result, nil
+}
+
+// Resolve ancestor aliases while retaining the actual directory identity. A
+// symlink in place of the selected directory itself remains invalid.
+func ownershipDirectoryPath(name string) (string, fs.FileInfo, error) {
+	if !filepath.IsAbs(name) {
+		return "", nil, ErrOwnershipSnapshot
+	}
+	before, err := os.Lstat(name)
+	if err != nil || !before.IsDir() || before.Mode()&fs.ModeSymlink != 0 {
+		return "", nil, ErrOwnershipSnapshot
+	}
+	physical, err := filepath.EvalSymlinks(name)
+	if err != nil {
+		return "", nil, ErrOwnershipSnapshot
+	}
+	after, err := os.Lstat(physical)
+	if err != nil || !after.IsDir() || before.Mode() != after.Mode() || !os.SameFile(before, after) {
+		return "", nil, ErrOwnershipSnapshot
+	}
+	return physical, before, nil
 }
 
 func moduledependencyEnvironment(environment []string, key, value string) []string {
