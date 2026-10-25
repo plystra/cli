@@ -83,7 +83,7 @@ var _ contract.Interface = (*candidate.Service)(nil)
 		{"kind": "implementation_selection", "action": "set", "interface": "remote.echo/v1", "constructor": previewDependencyModule + "/remote.New"},
 		{"kind": "configuration", "action": "set", "owner": previewDependencyModule + "/remote.New", "path": "endpoint", "value": "PRIVATE_ENDPOINT"},
 	}
-	environment := previewDependencyEnvironment(t, proxy)
+	environment := warmPreviewDependencyEnvironment(t, proxy)
 	var first json.RawMessage
 	for _, reverse := range []bool{false, true} {
 		if reverse {
@@ -138,7 +138,7 @@ func TestRunChangePlanDependencyOnlyUsesSelectedConfiguration(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
 		previewDependency(t, "v1.0.0", false), previewDependency(t, "v1.1.0", true),
 	})
-	baseEnvironment := previewDependencyEnvironment(t, proxy)
+	baseEnvironment := warmPreviewDependencyEnvironment(t, proxy)
 	for _, mode := range []string{"default", "environment", "replacement", "ambient absolute replacement"} {
 		for _, action := range []string{"add", "remove", "update"} {
 			t.Run(mode+"/"+action, func(t *testing.T) {
@@ -206,7 +206,7 @@ func TestRunChangePlanDependencyOnlyUsesSelectedConfiguration(t *testing.T) {
 
 func TestRunChangePlanDependencyFailurePreservesInputsAndActualEffects(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
-	environment := previewDependencyEnvironment(t, proxy)
+	environment := warmPreviewDependencyEnvironment(t, proxy)
 	for _, failure := range []string{"prepare", "get", "missing required configuration", "unselected removal"} {
 		t.Run(failure, func(t *testing.T) {
 			root := writeImplementationSelectionCommandProject(t)
@@ -256,7 +256,7 @@ func TestRunChangePlanDependencyUpdateReportsSameSymbolRequiredField(t *testing.
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{
 		previewDependency(t, "v1.0.0", false), previewDependency(t, "v1.1.0", true),
 	})
-	environment := previewDependencyEnvironment(t, proxy)
+	environment := warmPreviewDependencyEnvironment(t, proxy)
 	for _, mode := range []string{"default", "environment", "replacement"} {
 		t.Run(mode, func(t *testing.T) {
 			root := writeImplementationSelectionCommandProject(t)
@@ -321,7 +321,7 @@ func TestRunChangePlanDependencyUpdatePreservesOldPrivateIdentity(t *testing.T) 
 	next := previewDependency(t, "v1.1.0", false)
 	next.sources["remote/implementation.go"] = strings.Replace(next.sources["remote/implementation.go"], `plystra:"required"`, `plystra:"required,build-visible"`, 1)
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{old, next})
-	environment := previewDependencyEnvironment(t, proxy)
+	environment := warmPreviewDependencyEnvironment(t, proxy)
 	for _, unknownOld := range []bool{false, true} {
 		t.Run(map[bool]string{false: "captured-old-schema", true: "unknown-old-schema"}[unknownOld], func(t *testing.T) {
 			root := writeImplementationSelectionCommandProject(t)
@@ -403,7 +403,7 @@ func (*Pool) Value() string { return "" }
 			proxy := writeCommandDependencyProxy(t, []commandProxyModule{old, next})
 			root := writeImplementationSelectionCommandProject(t)
 			writeCommandFile(t, filepath.Join(root, "plystra.yaml"), document)
-			environment := previewDependencyEnvironment(t, proxy)
+			environment := warmPreviewDependencyEnvironment(t, proxy)
 			seedPreviewDependency(t, root, environment, "v1.0.0")
 			request, _ := json.Marshal(map[string]any{"schema": "plystra.change/v1", "operations": operations})
 			writeCommandFile(t, filepath.Join(root, "change.json"), string(request))
@@ -444,7 +444,7 @@ func TestBuiltCLIChangePlanDependenciesFromStdin(t *testing.T) {
 	}
 	before := commandTree(t, root)
 	command := exec.CommandContext(t.Context(), binary, "change", "plan", "--request", "-", "--format", "json")
-	command.Dir, command.Env = filepath.Join(root, "reports"), previewDependencyEnvironment(t, proxy)
+	command.Dir, command.Env = filepath.Join(root, "reports"), warmPreviewDependencyEnvironment(t, proxy)
 	command.Stdin = strings.NewReader(`{"schema":"plystra.change/v1","operations":[{"kind":"dependency","action":"add","module":"example.com/preview/remote@v1.0.0"}]}`)
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
@@ -458,7 +458,7 @@ func TestBuiltCLIChangePlanDependenciesFromStdin(t *testing.T) {
 
 func TestRunChangePlanDependencyRemovalReplacesStaleGeneratedImports(t *testing.T) {
 	proxy := writeCommandDependencyProxy(t, []commandProxyModule{previewDependency(t, "v1.0.0", false)})
-	environment := previewDependencyEnvironment(t, proxy)
+	environment := warmPreviewDependencyEnvironment(t, proxy)
 	root := writeImplementationSelectionCommandProject(t)
 	owner := previewDependencyModule + "/remote.New"
 	writeCommandFile(t, filepath.Join(root, "plystra.yaml"), "interfaces:\n  require: [reports.read/v1, remote.echo/v1]\nconfig:\n  "+owner+": {endpoint: PRIVATE_ENDPOINT}\n")
@@ -527,6 +527,33 @@ func previewDependencyEnvironment(t *testing.T, proxy string) []string {
 		environment = append(environment, entry)
 	}
 	return append(environment, "GOMODCACHE="+t.TempDir())
+}
+
+func warmPreviewDependencyEnvironment(t *testing.T, proxy string) []string {
+	t.Helper()
+	environment := previewDependencyEnvironment(t, proxy)
+	root := t.TempDir()
+	for _, name := range []string{"go.mod", "go.sum"} {
+		data, err := os.ReadFile(filepath.Join(commandRepositoryRoot(t), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeCommandFile(t, filepath.Join(root, name), string(data))
+	}
+	// Dependency/configuration tests warm the real CLI graph, leaving candidate
+	// modules cold. Cold runtime capture has dedicated tests.
+	if err := gocommand.Run(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "download", "all"); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range environment {
+		if cache, ok := strings.CutPrefix(entry, "GOMODCACHE="); ok {
+			candidate := filepath.Join(cache, "cache", "download", filepath.FromSlash(previewDependencyModule))
+			if _, err := os.Lstat(candidate); !os.IsNotExist(err) {
+				t.Fatalf("runtime seed unexpectedly acquired the candidate module: %v", err)
+			}
+		}
+	}
+	return environment
 }
 
 func previewDependency(t *testing.T, version string, changed bool) commandProxyModule {
