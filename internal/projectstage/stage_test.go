@@ -634,7 +634,12 @@ func TestCreateRejectsTemporaryParentInsideWorkspaceVendor(t *testing.T) {
 
 func fixture(t *testing.T) (string, string) {
 	t.Helper()
-	base := t.TempDir()
+	// Go resolves its working directory physically. Keep incidental host temp
+	// aliases out of workspace fixtures; explicit alias cases remain below.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	root, parent := filepath.Join(base, "app"), filepath.Join(base, "staging")
 	if err := os.Mkdir(parent, 0o700); err != nil {
 		t.Fatal(err)
@@ -643,6 +648,39 @@ func fixture(t *testing.T) (string, string) {
 	write(t, root, "plystra.yaml", "{}\n")
 	write(t, root, "app.go", "package app\n")
 	return root, parent
+}
+
+func TestCreateWithAliasedPaths(t *testing.T) {
+	root, parent := fixture(t)
+	base := filepath.Dir(root)
+	dependency := filepath.Join(base, "dependency")
+	write(t, dependency, "go.mod", "module example.com/dependency\n\ngo 1.26\n")
+	write(t, dependency, "value.go", "package dependency\nconst Value = 9\n")
+	write(t, root, "go.mod", "module example.com/app\n\ngo 1.26\nrequire example.com/dependency v1.0.0\nreplace example.com/dependency => ../dependency\n")
+	alias := filepath.Join(t.TempDir(), "parent")
+	if err := os.Symlink(base, alias); err != nil {
+		t.Skipf("directory symlinks unavailable: %v", err)
+	}
+	before := tree(t, root)
+	stage := capturedStage(t, filepath.Join(alias, "app"), filepath.Join(alias, "staging"), "GOWORK=off")
+	output, err := gocommand.Output(t.Context(), gocommand.Options{Directory: stage.Root(), Environment: stage.Environment()}, "list", "-mod=readonly", "-m", "-f", "{{.Dir}}", "example.com/dependency")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := strings.TrimSpace(string(output))
+	selectedParent, selectedErr := os.Stat(filepath.Dir(filepath.Dir(selected)))
+	parentInfo, parentErr := os.Stat(parent)
+	selectedInfo, selectedInfoErr := os.Stat(selected)
+	originalInfo, originalErr := os.Stat(dependency)
+	if selectedErr != nil || parentErr != nil || selectedInfoErr != nil || originalErr != nil || !os.SameFile(selectedParent, parentInfo) || os.SameFile(selectedInfo, originalInfo) {
+		t.Fatalf("aliased path escaped its private stage: %q", selected)
+	}
+	if err := stage.Recheck(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, tree(t, root)) {
+		t.Fatal("staging through an alias changed original inputs")
+	}
 }
 
 func write(t *testing.T, root, name, data string) {
