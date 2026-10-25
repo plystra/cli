@@ -98,7 +98,7 @@ func runRollbackHelper() int {
 			return 12
 		}
 		return 0
-	case len(os.Args) == 4 && os.Args[1] == "test" && os.Args[2] == "-mod=readonly" && os.Args[3] == "./...":
+	case len(os.Args) == 4 && os.Args[1] == "build" && os.Args[2] == "-mod=readonly" && os.Args[3] == "./...":
 		return 9
 	default:
 		return 8

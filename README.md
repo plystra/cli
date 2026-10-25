@@ -1606,7 +1606,7 @@ plystra capability implement email.send/v1 --plugin mailer
 
 For a genuinely new name, creation reports conservative typo-like visible exact Capabilities as advisory recommendations. It never redirects or blocks the requested custom identity based only on similar spelling.
 
-Implementation searches local and effective-graph dependency Project contracts, requires exact provider-independent equality including closed field constraints, typed semantics, and normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go test -mod=readonly ./...`. Repeating the command preserves an existing method byte-for-byte.
+Implementation searches local and effective-graph dependency Project contracts, requires exact provider-independent equality including closed field constraints, typed semantics, and normalized extension metadata, copies the canonical schema when the target plugin does not yet provide it, adds a compile-safe user-owned method only when absent, regenerates all affected module surfaces, tidies module metadata, and validates with `go build -mod=readonly ./...` without running application tests. Repeating the command preserves an existing method byte-for-byte.
 
 If visible Providers disagree on the source exact contract, both creation of a
 later version and implementation of that exact version stop before mutation
@@ -2251,7 +2251,7 @@ selected application model and generated fixed point, then runs
 the remaining transport, JavaScript SDK, formatting, race, and release-era
 checks without changing this command or its configuration selectors.
 
-`plystra plugin create` keeps the new scaffold, generated module surfaces, and Go module metadata in one rollback boundary. It runs `go mod tidy` after generated imports exist, retains explicit pre-existing requirements and checksum entries, validates with `go test -mod=readonly ./...`, and rolls back its own `go.mod`, `go.sum`, generated-file, and scaffold changes if any later check fails. Concurrent user edits remain protected.
+`plystra plugin create` keeps the new scaffold, generated module surfaces, and Go module metadata in one rollback boundary. It runs `go mod tidy` after generated imports exist, retains explicit pre-existing requirements and checksum entries, validates with `go build -mod=readonly ./...` without running application tests, and rolls back its own `go.mod`, `go.sum`, generated-file, and scaffold changes if any later check fails. Concurrent user edits remain protected.
 
 ### Module generation
 
@@ -2282,6 +2282,8 @@ plystra generate --check --config deploy/customer-a.yaml
 The command resolves mandatory root metadata, the effective Go Module graph, and the selected current-Project model. Ordinary dependency roots contribute discovery, not application intent. Only the root, one selected environment overlay, or one complete replacement document contributes configuration; dependency overlays and deployment settings are never read.
 
 Generation preserves authored YAML bytes and never materializes lower-layer values. It installs generated output and required module metadata in one transaction. Invalid selected configuration, concurrent input changes, validation failure, or nondeterministic output rolls back CLI-owned changes while preserving concurrent user edits.
+
+Installation, including `--offline`, validates the complete Project with `go build -mod=readonly ./...` inside that transaction, without running application tests. Ordinary dependency and scaffolding commands use the same default validation. `--check` only compares generated output and does not build; `plystra check` remains the explicit application-test gate.
 
 `--format human` is the default. `--format json` writes exactly one
 `plystra.result/v1` document to stdout with a `plystra.generate/v1` payload,

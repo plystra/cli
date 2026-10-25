@@ -104,7 +104,7 @@ type ModuleMutation func(context.Context, string, []ModuleRequirement, func() er
 
 // Options contains the application location, bounded Go helper settings, and
 // operation mode. Check performs a read-only comparison. Validate overrides
-// the default `go test -mod=readonly ./...` installation validation when
+// the default `go build -mod=readonly ./...` installation validation when
 // non-nil. RejectUnexpected makes compound mutating commands fail and roll
 // back rather than commit beside unowned generated output.
 type Options struct {
@@ -258,7 +258,7 @@ func Generate(ctx context.Context, options Options) (Result, error) {
 				Command:     options.GoCommand,
 				Directory:   root,
 				Environment: options.Environment,
-			}, "test", "-mod=readonly", "./...")
+			}, "build", "-mod=readonly", "./...")
 		}
 	}
 	additional, err := runtimebaseline.Writes(prepared.resolved.Module().Path(), prepared.baseline)

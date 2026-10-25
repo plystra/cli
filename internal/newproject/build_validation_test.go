@@ -46,9 +46,12 @@ func runObservedGo() int {
 		if err := os.MkdirAll(probe, 0o755); err != nil {
 			panic(err)
 		}
-		if err := os.WriteFile(filepath.Join(probe, "probe.go"), []byte("package buildvalidation\nvar _ = missingBuildValidationSymbol\n"), 0o644); err != nil {
+		file := filepath.Join(probe, "probe.go")
+		if err := os.WriteFile(file, []byte("package buildvalidation\nvar _ = missingBuildValidationSymbol\n"), 0o644); err != nil {
 			panic(err)
 		}
+		defer os.Remove(probe)
+		defer os.Remove(file)
 	}
 	process := exec.Command(os.Getenv("PLYSTRA_TEST_REAL_GO"), os.Args[1:]...)
 	process.Stdin, process.Stdout, process.Stderr = os.Stdin, os.Stdout, os.Stderr
