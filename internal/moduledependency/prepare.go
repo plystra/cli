@@ -29,7 +29,7 @@ import (
 // effective source for every possible selected version, or checked cached
 // manifests completely infer the synthetic graph's selected requested sources.
 // RetainSourceTrees additionally preserves existing trees without original
-// archive authority as private pending evidence before exact acquisition;
+// archive authority as private pending evidence before selection and acquisition;
 // consumers authenticate that same evidence using the completed source callback.
 // Mutable queries and cold resolution reads remain outside this boundary.
 func PrepareSources(ctx context.Context, application modulelocate.Module, requested []module.Version, options Options, retain func([]Module) error) (resultErr error) {

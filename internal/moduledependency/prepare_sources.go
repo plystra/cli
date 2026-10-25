@@ -177,20 +177,26 @@ func existingSourceTree(directory, manifest string) (bool, error) {
 
 func retainWarmPreparedSources(ctx context.Context, root string, group []Module, checksums preparationChecksums, options Options, environment []string, inputs preparationInputs, retain func([]Module) error) error {
 	version := sourceVersion(group[0])
-	if !validSourceChecksum(checksums.archives[version]) {
+	if !validSourceChecksum(checksums.archives[version]) && options.RetainSourceTrees == nil {
 		return inputs.recheck()
 	}
 	cache, err := preparationModuleCache(ctx, root, options, environment)
 	if err != nil {
 		return err
 	}
-	return retainWarmSourceBundle(ctx, cache, group, checksums, inputs, retain)
+	return retainWarmSourceBundle(ctx, cache, group, checksums, inputs, retain, options.RetainSourceTrees)
 }
 
-func retainWarmSourceBundle(ctx context.Context, cache string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error) error {
+func retainWarmSourceBundle(ctx context.Context, cache string, group []Module, checksums preparationChecksums, inputs preparationInputs, retain func([]Module) error, retainTrees func(context.Context, []string) error) error {
 	directory, manifest, err := cachedSourcePaths(cache, sourceVersion(group[0]))
 	if err != nil {
 		return err
+	}
+	if !validSourceChecksum(checksums.archives[sourceVersion(group[0])]) || retain == nil {
+		if retainTrees == nil {
+			return inputs.recheck()
+		}
+		return errors.Join(retainUnverifiedSourceTree(ctx, directory, manifest, retainTrees), ctx.Err(), inputs.recheck())
 	}
 	return retainWarmSourceAt(ctx, directory, manifest, group, checksums, inputs, retain)
 }

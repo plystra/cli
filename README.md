@@ -916,7 +916,7 @@ captured once, without parsing extracted
 declarations; local sources use their existing staged evidence. Missing archive
 files do not prevent capture of an otherwise complete tree. Later discovery
 rechecks the same baseline, and retention failures prevent listing. Incomplete
-selection, missing archive authority or trees, and cold acquisition still do not
+selection, missing trees, and cold acquisition still do not
 establish capture before first use.
 After Go returns a complete valid module list, discovery also retains eligible
 actual selected warm bundles before the CLI parses any versioned extracted
@@ -936,7 +936,8 @@ incomplete JSON selections introduce no post-list captures. This closes the
 warm-source boundary before the CLI's first extracted-manifest read.
 When an existing extracted tree has no original archive checksum, discovery
 retains its complete inventory, file identities, modes, and content digests as
-private pending evidence after complete module listing. Exact source acquisitions
+private pending evidence before listing when checked summaries prove complete
+selection, and otherwise after complete module listing. Exact source acquisitions
 also capture such existing trees before starting Go. A `.partial` marker excludes
 the old tree because Go discards it. Pending capture supplies no expected checksum
 and does not authenticate source. The same original snapshot must later match the
@@ -1026,8 +1027,9 @@ so an unused authored toolchain suggestion cannot redirect the probe.
 Before each exact acquisition, preparation also retains an eligible warm source
 tree under its independently recorded original archive `h1:` checksum. Missing
 cache `.mod`, `.ziphash`, or original manifest checksum does not prevent this
-capture. Missing trees, unavailable original archive authority, and `.partial`
-extraction markers still make a source ineligible. Present metadata must be
+authenticated capture. Trees without original archive authority retain private
+pending evidence instead; missing trees and `.partial` extraction markers remain
+ineligible. Present metadata must be
 regular; available authorized metadata is captured independently, without treating absence as an immutable
 input or using cache bytes as their own authority. The callback marks incomplete
 metadata explicitly and receives provenance before extracted-manifest parsing.
@@ -1044,7 +1046,9 @@ requested identities and their one-step
 replacement provenance, not a prediction of the final selected version. Requested
 workspace mains and local sources introduce no cache bundle; a versioned target
 whose path also names a main remains a versioned source. The workspace's separate
-original archive and manifest checksum authorities govern this capture. Callback
+original archive and manifest checksum authorities govern authenticated capture.
+Without archive authority, the same proven source retains pending evidence
+before selection, even when no original checksum rows exist. Callback
 rejection, cancellation, or metadata drift prevents selection; later selection
 failure retains completed evidence through stage cleanup.
 For remaining requested paths, preparation reuses checked cached manifests to
@@ -1056,8 +1060,10 @@ declarations and rebased replacements, rather than the authored requirements,
 exclusions, or toolchain suggestions omitted from those roots. Complete proofs
 retain actual upgraded selections and explicit self-replacement provenance;
 incomplete proofs retain no provisional source choice. Original separate checksum
-authority and fixed-source fallback remain intact. Cold-source first reads and
-complete resolution readsets remain unfinished. Replacement partitions that
+authority and fixed-source fallback remain intact. Proven selected trees without
+archive authority retain pending evidence here too, without capturing unqueried
+transitive trees or accepting the source before later authentication. Cold-source
+first reads and complete resolution readsets remain unfinished. Replacement partitions that
 remain entirely local introduce no cache probe, even if their directories differ.
 Graph inference locates the cache only when it actually needs a versioned
 manifest or source; exact local replacements and exhausted optional proofs do

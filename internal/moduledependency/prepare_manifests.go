@@ -132,7 +132,8 @@ func (workspace *preparationWorkspace) retainPreparationInputs(ctx context.Conte
 			},
 			toolchain: selected.GOVERSION, queryPaths: pending,
 			retain: options.RetainRootManifests, retainInformation: options.RetainModuleInformation,
-			retainSources: retain, retained: map[string]bool{}, parsed: map[string]*modfile.File{},
+			retainSources: retain, retainTrees: options.RetainSourceTrees,
+			retained: map[string]bool{}, parsed: map[string]*modfile.File{},
 		}
 		return errors.Join(graph.capture(ctx), ctx.Err(), inputs.recheck())
 	}

@@ -81,6 +81,8 @@ type Options struct {
 	// checksum is independently available. It records private concurrency evidence
 	// only; consumers must authenticate the same retained trees against complete
 	// resolved checksums before accepting them. Partial extractions are excluded.
+	// Complete checked selection proofs retain these trees before graph listing
+	// or workspace preparation selection, without requiring archive authority.
 	RetainSourceTrees func(context.Context, []string) error
 	// RetainSelectedSources captures warm and newly acquired source bundles before
 	// extracted-manifest validation. A completely inferred selected graph is

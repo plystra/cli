@@ -37,6 +37,7 @@ type manifestGraph struct {
 	retain            func(context.Context, []RootManifest) error
 	retainInformation func(context.Context, []string) error
 	retainSources     func([]Module) error
+	retainTrees       func(context.Context, []string) error
 	archives          map[module.Version]string
 	queryPaths        map[string]bool // Nil queries all selected modules; graph traversal remains unfiltered.
 	retained          map[string]bool
@@ -246,7 +247,7 @@ func (graph *manifestGraph) capture(ctx context.Context) error {
 }
 
 func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected []module.Version) error {
-	if graph.retainSources == nil {
+	if graph.retainSources == nil && graph.retainTrees == nil {
 		return nil
 	}
 	groups := map[module.Version][]Module{}
@@ -286,7 +287,7 @@ func (graph *manifestGraph) retainSelectedSources(ctx context.Context, selected 
 		if err != nil {
 			return err
 		}
-		if err := retainWarmSourceBundle(ctx, cache, groups[effective], checksums, graph.inputs, graph.retainSources); err != nil {
+		if err := retainWarmSourceBundle(ctx, cache, groups[effective], checksums, graph.inputs, graph.retainSources, graph.retainTrees); err != nil {
 			return err
 		}
 	}

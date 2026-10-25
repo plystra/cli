@@ -109,7 +109,16 @@ func TestPrepareSourcesRetainsTreesBeforeChecksumAcquisition(t *testing.T) {
 						t.Fatalf("unchanged acquisition did not authenticate: %v", err)
 					}
 				}
-				if mode == "partial" && rawCalls != 0 || mode != "partial" && rawCalls != 1 {
+				wantRaw := 2 // Warm retention and the immediate acquisition boundary.
+				if workspace {
+					wantRaw++ // The fixed workspace source is also retained before selection.
+				}
+				if mode == "rejected" || mode == "cancelled" {
+					wantRaw = 1
+				} else if mode == "partial" {
+					wantRaw = 0
+				}
+				if rawCalls != wantRaw {
 					t.Fatalf("unexpected raw capture count: %d", rawCalls)
 				}
 				if string(readFile(t, fixture.authority)) != sums {
@@ -147,6 +156,10 @@ func TestDiscoverPendingTreeRejectsMetadataDriftBeforeAcquisition(t *testing.T) 
 			fixture := warmPreparation(t, workspace, false)
 			path := filepath.Join(fixture.app, "go.mod")
 			writeFile(t, path, string(readFile(t, path))+"require "+warmRequestedModule+" v1.0.0\n")
+			// Missing graph metadata leaves this regression on the post-list boundary.
+			if err := os.Remove(fixture.downloaded.GoMod); err != nil {
+				t.Fatal(err)
+			}
 			sums := warmSourceModule + " v1.0.0/go.mod " + fixture.downloaded.GoModSum + "\n"
 			writeFile(t, fixture.authority, sums)
 			command, environment, trace := tracePreparation(t, fixture.root, fixture.environment)
@@ -187,6 +200,10 @@ func TestDiscoverRetainsListedTreesBeforeChecksumResolution(t *testing.T) {
 				fixture := warmPreparation(t, workspace, false)
 				project := filepath.Join(fixture.app, "go.mod")
 				writeFile(t, project, string(readFile(t, project))+"require "+warmRequestedModule+" v1.0.0\n")
+				// Go restores this missing manifest after early inference declines.
+				if err := os.Remove(fixture.downloaded.GoMod); err != nil {
+					t.Fatal(err)
+				}
 				writeFile(t, fixture.authority, warmSourceModule+" v1.0.0/go.mod "+fixture.downloaded.GoModSum+"\n")
 				path := filepath.Join(fixture.downloaded.Dir, "smtp", "plugin.yaml")
 				if mode == "poisoned-tree" {

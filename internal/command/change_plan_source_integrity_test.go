@@ -668,6 +668,20 @@ func TestBuiltCLIChangePlanRetainsTreesBeforeChecksumAcquisition(t *testing.T) {
 	}
 }
 
+func TestBuiltCLIChangePlanRetainsPendingSourcesBeforeSelection(t *testing.T) {
+	binary := buildSourceIntegrityCLI(t)
+	for _, mode := range []string{
+		"manifest-only-source-identity-after-graph",
+		"manifest-only-workspace-prepared-source-identity-after-list",
+		"manifest-only-selected-graph-workspace-prepared-source-manifest-identity-after-list",
+		"manifest-only-selected-graph-workspace-prepared-unchanged",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			testBuiltCLIChangePlanCacheInput(t, binary, mode)
+		})
+	}
+}
+
 func TestBuiltCLIChangePlanRejectsChangedModuleInformation(t *testing.T) {
 	binary := buildSourceIntegrityCLI(t)
 	for _, mode := range []string{"prepared-information-identity-after-download", "workspace-prepared-information-identity-after-download", "workspace-prepared-information-identity-after-list", "prepared-information-removed-after-download", "workspace-prepared-information-removed-after-download"} {

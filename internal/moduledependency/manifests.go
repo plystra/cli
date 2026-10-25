@@ -67,7 +67,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		return err
 	}
 	var archives map[module.Version]string
-	if options.RetainSelectedSources != nil {
+	if options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
 		archives, err = rootChecksums(primary, memberSums, false)
 		if err != nil {
 			return err
@@ -141,7 +141,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		checksums: checksums, excluded: excluded, cache: selected.GOMODCACHE,
 		toolchain: selected.GOVERSION, retain: options.RetainRootManifests,
 		retainInformation: options.RetainModuleInformation,
-		retainSources:     options.RetainSelectedSources, archives: archives,
+		retainSources:     options.RetainSelectedSources, retainTrees: options.RetainSourceTrees, archives: archives,
 		retained: map[string]bool{}, parsed: map[string]*modfile.File{},
 	}
 	for _, manifest := range retained {
