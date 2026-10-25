@@ -49,7 +49,8 @@ func (s *Stage) RetainSourceTrees(ctx context.Context, directories []string) err
 // CheckSources rejects an accepting path that has not authenticated every
 // retained source tree. Pending evidence remains recheckable on failure.
 func (s *Stage) CheckSources(ctx context.Context) error {
-	if err := s.Recheck(ctx); err != nil {
+	defer s.lock()()
+	if err := s.recheck(ctx); err != nil {
 		return err
 	}
 	for _, tree := range s.sources {
@@ -61,12 +62,13 @@ func (s *Stage) CheckSources(ctx context.Context) error {
 }
 
 func (s *Stage) retainSources(ctx context.Context, sources []Source, authenticate bool, metadata ...MetadataInput) (resultErr error) {
+	defer s.lock()()
 	defer func() {
 		if resultErr != nil {
 			resultErr = errors.Join(ErrSourceIntegrity, resultErr)
 		}
 	}()
-	if err := s.Recheck(ctx); err != nil {
+	if err := s.recheck(ctx); err != nil {
 		return err
 	}
 	if len(metadata) != 0 {
@@ -133,7 +135,7 @@ func (s *Stage) retainSources(ctx context.Context, sources []Source, authenticat
 		}
 	}
 	s.inputs = s.captureInputs()
-	return s.Recheck(ctx)
+	return s.recheck(ctx)
 }
 
 func (tree treeSnapshot) checkSource(ctx context.Context, source Source) error {

@@ -184,7 +184,7 @@ func TestPreviewResultKeepsFailureEffects(t *testing.T) {
 	for _, effect := range observed {
 		seen[effect.ID()] = true
 	}
-	if len(observed) != 2 || !seen["candidate-go-environment"] || !seen["candidate-stage"] || len(result.Effects().Unverified()) != 3 {
+	if len(observed) != 3 || !seen["candidate-go-environment"] || !seen["candidate-stage"] || !seen["candidate-proxy-environment"] || len(result.Effects().Unverified()) != 3 {
 		t.Fatal("failed preview lost observed or unverified effects")
 	}
 	if children, err := os.ReadDir(parent); err != nil || len(children) != 0 {

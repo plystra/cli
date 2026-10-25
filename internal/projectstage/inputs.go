@@ -28,11 +28,12 @@ type Inputs struct {
 }
 
 type inputState struct {
-	project  string
-	trees    []inputTree
-	metadata []fileSnapshot
-	aliases  []directorySnapshot
-	paths    []pathSnapshot
+	project   string
+	trees     []inputTree
+	metadata  []fileSnapshot
+	aliases   []directorySnapshot
+	paths     []pathSnapshot
+	artifacts []proxyArtifact
 }
 
 type inputTree struct {
@@ -102,6 +103,7 @@ func (i Inputs) captured() *inputState {
 // Inputs returns immutable original-side evidence, independently of the Stage's
 // temporary files and lifetime. A Stage not successfully created returns zero.
 func (s *Stage) Inputs() Inputs {
+	defer s.lock()()
 	if s == nil {
 		return Inputs{}
 	}
@@ -110,7 +112,8 @@ func (s *Stage) Inputs() Inputs {
 
 func (s *Stage) captureInputs() Inputs {
 	state := &inputState{project: s.project, metadata: append([]fileSnapshot(nil), s.metadata...),
-		aliases: append([]directorySnapshot(nil), s.aliases...), paths: append([]pathSnapshot(nil), s.paths...)}
+		aliases: append([]directorySnapshot(nil), s.aliases...), paths: append([]pathSnapshot(nil), s.paths...),
+		artifacts: append([]proxyArtifact(nil), s.artifacts...)}
 	for index := range state.metadata {
 		state.metadata[index].data = append([]byte(nil), state.metadata[index].data...)
 	}
@@ -130,6 +133,11 @@ func (i Inputs) Recheck(ctx context.Context) error {
 	}
 	for _, file := range state.metadata {
 		if ctx.Err() != nil || file.recheck() != nil {
+			return ErrConcurrentChange
+		}
+	}
+	for _, artifact := range state.artifacts {
+		if ctx.Err() != nil || artifact.file.recheck() != nil {
 			return ErrConcurrentChange
 		}
 	}

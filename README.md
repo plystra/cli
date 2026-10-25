@@ -1183,6 +1183,32 @@ bounds. Complete capture before first use, including workspace MVS upgrades,
 mutable-query, transitive, and intermediate resolution sources, complete
 module-resolution metadata remain unfinished; previews remain
 `non_exact`.
+For a sole `file://` Go proxy with `GOTOOLCHAIN=local`, source and dependency
+previews now capture requested proxy payloads before returning successful
+response headers or bytes to Go. One owner-private loopback session spans old
+discovery, exact preparation, candidate dependency changes, generation, tidy,
+and build. It serves the retained bytes rather than reopening the origin.
+Complete ZIP payloads pass Go's module-archive structure checks and bounded
+content traversal, retaining every record's content digest and a Go-compatible
+content identity. Actual central-directory records are bounded before ZIP
+allocation, including wrapped counts and ZIP64. Duplicate directory records
+remain separate checksum inputs and consume the entry budget too. Compressed
+payloads and expanded contents share the existing cumulative budget; individual
+expanded files remain limited to 64 MiB and metadata payloads to 1 MiB.
+The original file and directory path identities, native access state, and bytes
+remain private recheckable evidence after cleanup. Completed payloads survive
+later command, archive-validation, and checksum failures. Repeated capture
+does not refresh evidence, and a capture rejection remains fatal to the session.
+These content identities grant no independent checksum authority or source
+authentication; ordinary Go checks and existing extracted-source retention
+remain required. Toolchain distributions keep their original file-proxy
+verification semantics: an existing `golang.org/toolchain` proxy entry disables
+this session, and concurrent appearance rejects the captured exclusion.
+Other proxy configurations and toolchain modes remain unchanged. This slice
+does not isolate the consuming Module Cache, capture cache hits or direct/VCS
+access, implement HTTP authentication or proxy-chain fallback, or establish a
+complete resolution read set. Offline phases retain their existing local-only
+behavior. Plans remain `non_exact`, and Gate 9 remains incomplete.
 Private staging snapshots also bind native owner and access-control state on
 captured files and directories. Windows retains owner, group, DACL control and
 entries, and mandatory integrity labels; Linux retains UID, GID, and access and

@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/privatefile"
@@ -64,6 +65,11 @@ type Options struct {
 // Stage owns only its independently allocated temporary tree. Captured file
 // identities and digests are private concurrency evidence, not public plan data.
 type Stage struct {
+	mu            *sync.Mutex
+	proxy         *fileProxy
+	proxyStopped  bool
+	proxyErr      error
+	artifacts     []proxyArtifact
 	project       string
 	inputs        Inputs
 	projectImages map[string]relocationImage
@@ -91,8 +97,11 @@ func (Stage) String() string                   { return "<private-project-stage>
 func (s Stage) GoString() string               { return s.String() }
 func (s Stage) Format(state fmt.State, _ rune) { _, _ = io.WriteString(state, s.String()) }
 
-func (s *Stage) Root() string          { return s.root }
-func (s *Stage) Environment() []string { return append([]string(nil), s.environment...) }
+func (s *Stage) Root() string { return s.root }
+func (s *Stage) Environment() []string {
+	defer s.lock()()
+	return append([]string(nil), s.environment...)
+}
 
 // Create copies the authored working tree, assets, and generated history, not a
 // Git revision. Only VCS administration entries are excluded. It never invokes
@@ -121,7 +130,7 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 	if json.Unmarshal(output, &settings) != nil || unsafeGoFlags(settings.GOFLAGS) {
 		return nil, ErrStage
 	}
-	s := &Stage{project: project.Path(), environment: environment, projectImages: map[string]relocationImage{}}
+	s := &Stage{mu: new(sync.Mutex), project: project.Path(), environment: environment, projectImages: map[string]relocationImage{}}
 	defer func() {
 		if resultErr != nil {
 			s.inputs = Inputs{}
@@ -259,11 +268,27 @@ func Create(ctx context.Context, options Options) (result *Stage, resultErr erro
 // Recheck rejects changed bytes, membership, modes, native access state, and path
 // identities. It does not grant a lock or replace installation-time checks.
 func (s *Stage) Recheck(ctx context.Context) error {
+	defer s.lock()()
+	return s.recheck(ctx)
+}
+
+func (s *Stage) lock() func() {
+	if s == nil || s.mu == nil {
+		return func() {}
+	}
+	s.mu.Lock()
+	return s.mu.Unlock
+}
+
+func (s *Stage) recheck(ctx context.Context) error {
 	if ctx == nil || s == nil || s.closed {
 		return ErrConcurrentChange
 	}
 	if s.files == nil {
 		return ErrConcurrentChange
+	}
+	if s.proxyErr != nil {
+		return s.proxyErr
 	}
 	temporary, access, err := readAccessInfo(s.parent, filepath.Base(s.temporary))
 	if err != nil || !temporary.IsDir() || !os.SameFile(temporary, s.identity) || access != s.access {
@@ -299,6 +324,10 @@ func (s *Stage) Recheck(ctx context.Context) error {
 
 // Close removes only this Stage's allocated directory and is idempotent.
 func (s *Stage) Close() error {
+	if err := s.stopFileProxy(); err != nil {
+		return err
+	}
+	defer s.lock()()
 	if s == nil || s.closed {
 		return nil
 	}
@@ -337,6 +366,7 @@ type fileSnapshot struct {
 	access accessState
 	digest [sha256.Size]byte
 	data   []byte
+	limit  int64
 }
 
 type directorySnapshot struct {
@@ -381,6 +411,10 @@ func (s *Stage) captureDirectory(base, path string) (string, error) {
 }
 
 func readMetadata(parent, name string, optional bool) (fileSnapshot, error) {
+	return readInputFile(parent, name, optional, maximumMetadataBytes)
+}
+
+func readInputFile(parent, name string, optional bool, limit int64) (fileSnapshot, error) {
 	r, err := os.OpenRoot(parent)
 	if err != nil {
 		return fileSnapshot{}, ErrStage
@@ -402,17 +436,21 @@ func readMetadata(parent, name string, optional bool) (fileSnapshot, error) {
 	if err != nil {
 		return fileSnapshot{}, ErrConcurrentChange
 	}
-	data, err := io.ReadAll(io.LimitReader(f, maximumMetadataBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	afterAccess, accessErr := fileAccess(f, info)
 	after, statErr := r.Lstat(name)
-	if err != nil || statErr != nil || accessErr != nil || access != afterAccess || len(data) > maximumMetadataBytes || !sameFile(info, after) {
+	if err != nil || statErr != nil || accessErr != nil || access != afterAccess || int64(len(data)) > limit || !sameFile(info, after) {
 		return fileSnapshot{}, ErrConcurrentChange
 	}
-	return fileSnapshot{parent: parent, name: name, info: info, access: access, digest: sha256.Sum256(data), data: data}, nil
+	return fileSnapshot{parent: parent, name: name, info: info, access: access, digest: sha256.Sum256(data), data: data, limit: limit}, nil
 }
 
 func (f fileSnapshot) recheck() error {
-	after, err := readMetadata(f.parent, f.name, f.info == nil)
+	limit := f.limit
+	if limit == 0 {
+		limit = maximumMetadataBytes
+	}
+	after, err := readInputFile(f.parent, f.name, f.info == nil, limit)
 	if err != nil || !sameFile(f.info, after.info) || f.access != after.access || f.digest != after.digest {
 		return ErrConcurrentChange
 	}

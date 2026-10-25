@@ -110,6 +110,7 @@ func originalReplacementToken(data []byte, replacement *modfile.Replace) (replac
 // baseline yields the exact authored bytes, including formatting and spelling.
 // Other Project-relative slash paths yield a defensive copy without rewriting.
 func (s *Stage) OriginalProjectBytes(path string, stagedData []byte) ([]byte, error) {
+	defer s.lock()()
 	if s == nil || !projectFilePath(path) || len(stagedData) > MaximumFileBytes {
 		return nil, ErrStage
 	}

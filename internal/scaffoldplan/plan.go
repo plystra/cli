@@ -227,11 +227,21 @@ func Preview(ctx context.Context, options Options, request changerequest.Request
 		return result, errors.Join(ErrPreview, err)
 	}
 	defer func() {
-		if closeErr := stage.Close(); closeErr != nil {
+		if closeErr := errors.Join(stage.StopFileProxy(), stage.Close()); closeErr != nil {
 			state.model = ""
 			resultErr = errors.Join(resultErr, ErrPreview, closeErr)
 		}
 	}()
+	proxyEnvironment := effect("candidate-proxy-environment", commandschema.EffectTrustedCodeExecution, "inspect_go_acquisition", []string{"go", "env", "-json", "GOPROXY", "GOTOOLCHAIN"})
+	proxyStarted, proxyErr := stage.StartFileProxy(ctx, options.GoCommand)
+	if proxyStarted {
+		accounting.Observed = append(accounting.Observed, proxyEnvironment)
+	} else {
+		accounting.Skipped = append(accounting.Skipped, proxyEnvironment)
+	}
+	if proxyErr != nil {
+		return result, errors.Join(ErrPreview, proxyErr)
+	}
 	baseline, err := capture(ctx, stage.Root())
 	if err != nil {
 		return result, errors.Join(ErrPreview, err)

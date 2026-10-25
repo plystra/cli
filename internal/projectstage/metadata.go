@@ -20,13 +20,14 @@ type MetadataInput struct {
 // RetainMetadata retains regular external input files without modifying them
 // or refreshing earlier evidence. Its private evidence outlives stage cleanup.
 func (s *Stage) RetainMetadata(ctx context.Context, files []MetadataInput) error {
-	if err := s.Recheck(ctx); err != nil {
+	defer s.lock()()
+	if err := s.recheck(ctx); err != nil {
 		return err
 	}
 	if err := s.retainMetadata(ctx, files); err != nil {
 		return err
 	}
-	return s.Recheck(ctx)
+	return s.recheck(ctx)
 }
 
 func (s *Stage) retainMetadata(ctx context.Context, files []MetadataInput) error {
@@ -95,6 +96,10 @@ func (input MetadataInput) matches(data []byte) bool {
 
 func (s *Stage) inputBudget() budget {
 	var used budget
+	for _, artifact := range s.artifacts {
+		used.entries += 1 + len(artifact.inventory)
+		used.bytes += int64(len(artifact.file.data)) + artifact.expandedBytes
+	}
 	for _, file := range s.metadata {
 		used.entries++
 		used.bytes += int64(len(file.data))
