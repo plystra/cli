@@ -219,6 +219,7 @@ func artifactUsesGlobalEvidence(filePath string) bool {
 		strings.HasPrefix(filePath, "generated/go/internal/privatefile/") ||
 		filePath == "generated/go/internal/runtimebaseline/baseline_gen.go" ||
 		filePath == "generated/go/internal/connectschema/schema_gen.go" ||
+		filePath == "generated/go/internal/connectschema/credentials_gen.go" ||
 		filePath == protobufdescriptor.DescriptorSetPath ||
 		filePath == protobufwiremap.Path {
 		return true
@@ -328,6 +329,8 @@ func classifyArtifact(filePath string) (artifactIdentity, error) {
 		return artifactIdentity{generator: invocationContextGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
 	case "generated/go/internal/connectschema/schema_gen.go":
 		return artifactIdentity{generator: protobufDescriptorGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
+	case "generated/go/internal/connectschema/credentials_gen.go":
+		return artifactIdentity{generator: connectGenerator, kind: generatedfiles.ArtifactKindGoSource}, nil
 	}
 
 	switch {
