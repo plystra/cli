@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/plystra/cli/internal/gocommand"
 	"github.com/plystra/cli/internal/modulelocate"
@@ -71,13 +72,14 @@ type Options struct {
 	RetainRootManifests func(context.Context, []RootManifest) error
 	// RetainManifestFiles preserves present cache .mod files as private concurrency
 	// evidence for exact raw root requirements before discovery graph listing,
+	// and after settled listing, including failure or cancellation,
 	// when all-version replacement proofs fix their physical source before
 	// discovery or workspace preparation selection, and around every exact source
 	// download including checksum-only workspace downloads. It is independent of
 	// source-tree availability and valid checksum authority. Raw-root capture obeys
 	// Go's readonly sum-presence check and supplies no graph-reading authority.
 	// Callbacks honor the supplied context, including bounded retention
-	// after a started download has terminated under cancellation.
+	// after a started listing or download has terminated under cancellation.
 	RetainManifestFiles func(context.Context, []string) error
 	// RetainModuleInformation captures present cache .info files before and
 	// after exact preparation downloads, including failed downloads, and
@@ -306,13 +308,15 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 	if options.RetainManifestFiles != nil {
 		options.RetainManifestFiles = retainModuleFilesOnce(inputs, options.RetainManifestFiles)
 	}
+	var retainRootFiles func(context.Context) error
 	if options.RetainRootManifests != nil || options.RetainManifestFiles != nil || options.RetainModuleInformation != nil || options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
 				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)
 			}
 		}()
-		if err := retainRootManifests(ctx, application.Path(), before, options, inputs, workspace); err != nil {
+		retainRootFiles, err = retainRootManifests(ctx, application.Path(), before, options, inputs, workspace)
+		if err != nil {
 			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 		}
 	}
@@ -333,14 +337,25 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		environment = environmentWith(environment, "GOWORK", work)
 	}
 	options.Environment = environment
-	output, err := gocommand.Output(ctx, gocommand.Options{
+	output, started, listErr := gocommand.OutputObserved(ctx, gocommand.Options{
 		Command:     options.GoCommand,
 		Directory:   application.Path(),
 		Environment: environment,
 		OutputLimit: outputLimit,
 	}, "list", "-m", "-json", "-mod=readonly", "all")
-	if err != nil {
-		return Index{}, fmt.Errorf("%w: resolve effective module graph: %w", ErrDiscover, errors.Join(err, ctx.Err(), inputs.recheck()))
+	var retentionErr error
+	if started && !errors.Is(listErr, gocommand.ErrProcessUnsettled) && retainRootFiles != nil && options.RetainManifestFiles != nil {
+		// Retain cold roots materialized by a settled listing even when it failed
+		// or the operation was cancelled. Cleanup never starts another Go command.
+		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		retentionErr = errors.Join(retainRootFiles(captureCtx), captureCtx.Err())
+		cancel()
+		if retentionErr != nil {
+			retentionErr = errors.Join(ErrSourceIntegrity, retentionErr)
+		}
+	}
+	if err := errors.Join(listErr, retentionErr, ctx.Err()); err != nil {
+		return Index{}, fmt.Errorf("%w: resolve effective module graph: %w", ErrDiscover, errors.Join(err, inputs.recheck()))
 	}
 	after, err := readGoMod(goModPath)
 	if err != nil || !sameSnapshot(before, after) {

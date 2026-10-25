@@ -21,18 +21,18 @@ type RootManifest struct {
 	Checksum string
 }
 
-func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot, options Options, inputs preparationInputs, workspace *preparationWorkspace) error {
+func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot, options Options, inputs preparationInputs, workspace *preparationWorkspace) (func(context.Context) error, error) {
 	var manifests []*modfile.File
 	var primary []byte
 	var memberSums [][]byte
 	if workspace == nil {
 		parsed, err := modfile.Parse("go.mod", manifest.data, nil)
 		if err != nil {
-			return ErrInvalidGoMod
+			return nil, ErrInvalidGoMod
 		}
 		sums, err := inputs.read(filepath.Join(root, "go.sum"), true)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		manifests, primary = []*modfile.File{parsed}, sums.data
 	} else {
@@ -49,28 +49,28 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		}
 		original, exists := inputs[filepath.Join(owner, "go.mod")]
 		if !exists {
-			return ErrInvalidGoMod
+			return nil, ErrInvalidGoMod
 		}
 		// A prefix such as v1 is a Go query, not the v1.0.0 identity produced
 		// by nil-fixer parsing. No early cache identity is established here.
 		if _, err := modfile.Parse("go.mod", original.data, exactManifestVersion); err != nil {
-			return nil
+			return nil, nil
 		}
 	}
 	if workspace != nil {
 		if err := workspace.validateRootManifestReplacements(); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	checksums, err := rootManifestChecksums(primary, memberSums)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var archives map[module.Version]string
 	if options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
 		archives, err = rootChecksums(primary, memberSums, false)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	excluded := map[module.Version]bool{}
@@ -90,7 +90,7 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 			if workspace != nil {
 				version, err = workspace.rootManifestVersion(version)
 				if err != nil {
-					return err
+					return nil, err
 				}
 			} else if replacement := rootManifestReplacement(version, parsed.Replace); replacement != nil {
 				version = replacement.New
@@ -107,22 +107,22 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 	}
 	output, err := gocommand.Output(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: options.Environment, OutputLimit: maximumGoModSize}, "env", "-json", "GOMODCACHE", "GOVERSION")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var selected struct{ GOMODCACHE, GOVERSION string }
 	if json.Unmarshal(output, &selected) != nil || !filepath.IsAbs(selected.GOMODCACHE) {
-		return ErrInvalidOutput
+		return nil, ErrInvalidOutput
 	}
 	var retained []RootManifest
 	var manifestFiles []string
 	for _, version := range versions {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		path, pathErr := module.EscapePath(version.Path)
 		value, versionErr := module.EscapeVersion(version.Version)
 		if pathErr != nil || versionErr != nil {
-			return ErrInvalidGoMod
+			return nil, ErrInvalidGoMod
 		}
 		name := filepath.Join(selected.GOMODCACHE, "cache", "download", filepath.FromSlash(path), "@v", value+".mod")
 		if options.RetainManifestFiles != nil {
@@ -134,46 +134,21 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		if _, err := os.Lstat(name); errors.Is(err, os.ErrNotExist) {
 			continue // Go may materialize a missing manifest during resolution.
 		} else if err != nil {
-			return err
+			return nil, err
 		}
 		retained = append(retained, RootManifest{Path: name, Checksum: checksums[version]})
 	}
-	capturedFiles := map[string]bool{}
-	retainFiles := func() error {
-		if options.RetainManifestFiles == nil {
-			return nil
-		}
-		for {
-			previous := len(capturedFiles)
-			err := retainPresentModuleFiles(ctx, manifestFiles, func(ctx context.Context, paths []string) error {
-				if err := options.RetainManifestFiles(ctx, paths); err != nil {
-					return err
-				}
-				for _, path := range paths {
-					capturedFiles[path] = true
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-			// A callback may materialize another known root. Drain those paths
-			// before listing, without refreshing existing evidence.
-			if len(capturedFiles) == previous {
-				return errors.Join(ctx.Err(), inputs.recheck())
-			}
-		}
-	}
-	if err := retainFiles(); err != nil {
-		return err
+	retainFiles := rootManifestFileRetainer(manifestFiles, inputs, options.RetainManifestFiles)
+	if err := retainFiles(ctx); err != nil {
+		return nil, err
 	}
 	if len(retained) != 0 && options.RetainRootManifests != nil {
 		if err := options.RetainRootManifests(ctx, retained); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := inputs.recheck(); err != nil {
-		return err
+		return nil, err
 	}
 	graph := manifestGraph{
 		root: root, mains: manifests, workspace: workspace, inputs: inputs,
@@ -188,9 +163,39 @@ func retainRootManifests(ctx context.Context, root string, manifest fileSnapshot
 		graph.retained[manifest.Path] = true
 	}
 	if err := graph.capture(ctx); err != nil {
-		return err
+		return nil, err
 	}
-	return retainFiles()
+	return retainFiles, retainFiles(ctx)
+}
+
+func rootManifestFileRetainer(files []string, inputs preparationInputs, retain func(context.Context, []string) error) func(context.Context) error {
+	captured := map[string]bool{}
+	return func(ctx context.Context) error {
+		if retain == nil || len(files) == 0 {
+			return nil
+		}
+		for {
+			previous := len(captured)
+			err := retainPresentModuleFiles(ctx, files, func(ctx context.Context, paths []string) error {
+				if err := retain(ctx, paths); err != nil {
+					return err
+				}
+				for _, path := range paths {
+					captured[path] = true
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			// A callback may materialize another known root. Drain those paths
+			// without refreshing evidence held by retainModuleFilesOnce.
+			if len(captured) == previous {
+				recheckErr := inputs.recheck()
+				return errors.Join(ctx.Err(), recheckErr)
+			}
+		}
+	}
 }
 
 func rootManifestChecksums(primary []byte, members [][]byte) (map[module.Version]string, error) {

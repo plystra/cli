@@ -887,6 +887,13 @@ Rejection, cancellation, or changed inputs prevent listing; listing-return
 rechecks prevent acquisition after file or parent identity drift. Raw capture
 never supplies parsed graph summaries or source authentication, and its original
 evidence remains recheckable after failed listing and stage cleanup.
+After a started graph listing has settled, the same known raw-root paths are
+captured again before command-error handling or output decoding. This retains
+manifests materialized during failed or cancelled listing through a local-only
+30-second retention context, without refreshing existing identities or starting
+another Go command. Unstarted or unsettled processes add no post-list capture.
+This is post-command evidence, not capture before the first cold read or a
+complete failed-resolution readset.
 Capture uses the first applicable primary `h1:` row, ignoring Go's historical
 empty-manifest sentinel; without primary authority, all applicable member rows
 must agree. Unknown checksum algorithms supply no authority, and malformed sum

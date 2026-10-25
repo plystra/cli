@@ -371,6 +371,9 @@ func runRootManifestsHelper() int {
 		if _, err := os.Stdout.WriteString(os.Getenv("PLYSTRA_MODULE_LIST_SUFFIX")); err != nil {
 			return 21
 		}
+		if os.Getenv("PLYSTRA_MODULE_LIST_FAIL") == "1" {
+			return 38
+		}
 	}
 	return 0
 }
