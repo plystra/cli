@@ -58,6 +58,9 @@ func TestRenderProducesDeterministicVersionedProjection(t *testing.T) {
 		"records the selected Project module as one ordinary direct Go Module dependency",
 		"configuration and source are never copied or activated",
 		"After creation it is indistinguishable from a dependency added with",
+		"go build -mod=readonly ./...",
+		"without running application tests",
+		"A build failure leaves no target Project",
 	} {
 		if !bytes.Contains(project, []byte(phrase)) {
 			t.Fatalf("Project guidance omits %q", phrase)

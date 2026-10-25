@@ -847,7 +847,7 @@ Successful creation with `--template` reports the selected query:
 ```text
 Created my-app with dependency github.com/acme/platform@v1.2.3
 Configuration scaffolded
-Generated and tested
+Generated and built
 
 Next:
   cd my-app
@@ -855,10 +855,11 @@ Next:
 ```
 
 The concise output names the result and next action without exposing absolute
-paths or internal resolution detail. Creation generates the selected Project
-and runs its Go package tests before installation. It does not claim a separate
-build, startup health check, or JavaScript SDK qualification. Those checks can
-be run independently where applicable. Complete public `plystra dev` and
+paths or internal resolution detail. Creation generates the complete staged
+Project and runs `go build -mod=readonly ./...` before installation, without
+running application tests. A build failure leaves no target Project. Startup
+health checks, application tests, and JavaScript SDK qualification can be run
+independently where applicable. Complete public `plystra dev` and
 `plystra build` workflows remain future acceptance work; `--template` itself
 does not qualify or activate the selected dependency.
 

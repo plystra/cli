@@ -119,9 +119,9 @@ Unavailable Git emits PLYSTRA_PROJECT_CREATE_GIT_UNAVAILABLE. Git processes
 that start but fail initialization emit
 PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED. Both leave no target Project.
 
-The selected dependency is installed and the new Project is generated and
-tested through the ordinary dependency workflow. A dependency Project remains
-ordinary graph input after creation.
+Creation generates and builds the complete staged Project with
+go build -mod=readonly ./... before installation, without running application
+tests. A dependency Project remains ordinary graph input after creation.
 `
 	wantNewInvalidInvocation             = wantNewUsage + "\nRecovery:\nReview `plystra new --help`, then rerun `plystra new <project-name> [options]` with one valid argument form.\n\nDiagnostic: PLYSTRA_PROJECT_CREATE_INVOCATION_INVALID\n"
 	wantPluginUsage                      = "Usage:\n  plystra plugin create <name>\n"

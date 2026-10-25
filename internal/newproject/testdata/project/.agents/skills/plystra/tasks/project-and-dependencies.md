@@ -16,6 +16,8 @@ Use this task for Project creation, module identity, the `--template` dependency
 
 The positional name is one safe child directory; `--module` sets its independent Go Module identity. A new Project contains root `plystra.yaml`, module files, and committed generated source, but no environment overlay, example configuration, or `go.work`.
 
+Creation generates and builds the complete staged Project with `go build -mod=readonly ./...` before installation, without running application tests. A build failure leaves no target Project.
+
 `--template` records the selected Project module as one ordinary direct Go Module dependency. The dependency must expose a regular root `plystra.yaml` marker, but its configuration and source are never copied or activated. After creation it is indistinguishable from a dependency added with `plystra add`.
 
 `--format json` returns one `plystra.result/v1` document. Success nests `plystra.project-created/v1`; enter `payload.directory` and run `plystra check` independently.

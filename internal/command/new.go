@@ -57,9 +57,9 @@ Unavailable Git emits PLYSTRA_PROJECT_CREATE_GIT_UNAVAILABLE. Git processes
 that start but fail initialization emit
 PLYSTRA_PROJECT_CREATE_GIT_INITIALIZATION_FAILED. Both leave no target Project.
 
-The selected dependency is installed and the new Project is generated and
-tested through the ordinary dependency workflow. A dependency Project remains
-ordinary graph input after creation.
+Creation generates and builds the complete staged Project with
+go build -mod=readonly ./... before installation, without running application
+tests. A dependency Project remains ordinary graph input after creation.
 `
 
 var (
@@ -208,7 +208,7 @@ func runNewCommand(arguments []string, stdout, stderr io.Writer, workingDirector
 		if options.template != "" {
 			_, _ = fmt.Fprintf(
 				output.resultWriter(),
-				"Created %s with dependency %s\nConfiguration scaffolded\nGenerated and tested\n\nNext:\n  cd %s\n  plystra check\n",
+				"Created %s with dependency %s\nConfiguration scaffolded\nGenerated and built\n\nNext:\n  cd %s\n  plystra check\n",
 				options.projectName,
 				options.template,
 				options.projectName,

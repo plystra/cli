@@ -164,6 +164,9 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	if environment == nil {
 		environment = os.Environ()
 	}
+	validate := func(ctx context.Context, root string) error {
+		return gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: root, Environment: environment}, "build", "-mod=readonly", "./...")
+	}
 
 	err = atomicfs.CreateDirectory(target, func(stagingRoot string) error {
 		if err := populate(ctx, stagingRoot, modulePath, options.ProjectName, options.GitHubCI, !options.NoAgentGuidance); err != nil {
@@ -179,6 +182,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 				Start:       stagingRoot,
 				GoCommand:   goCommand,
 				Environment: environment,
+				Validate:    validate,
 			}); err != nil {
 				return fmt.Errorf("generate resolved initial Project: %w", err)
 			}
@@ -189,19 +193,13 @@ func Create(ctx context.Context, options Options) (Result, error) {
 				Name:        options.Plugin,
 				GoCommand:   goCommand,
 				Environment: environment,
+				Validate:    validate,
 			}); err != nil {
-				return err
-			}
-		} else if templateQuery == "" {
-			if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
 				return err
 			}
 		}
 		if templateQuery != "" {
-			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, environment); err != nil {
-				return err
-			}
-			if err := gocommand.Run(ctx, gocommand.Options{Command: goCommand, Directory: stagingRoot, Environment: environment}, "test", "./..."); err != nil {
+			if err := installTemplateDependency(ctx, stagingRoot, templateQuery, templateModulePath, goCommand, environment, validate); err != nil {
 				return err
 			}
 		}
@@ -224,7 +222,7 @@ func Create(ctx context.Context, options Options) (Result, error) {
 	return Result{modulePath: modulePath, directory: options.ProjectName, path: target}, nil
 }
 
-func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand string, environment []string) error {
+func installTemplateDependency(ctx context.Context, root, query, modulePath, goCommand string, environment []string, validate applicationgenerate.Validator) error {
 	return modulemutation.Change(ctx, root, modulemutation.ChangeOptions{
 		GoCommand:          goCommand,
 		Environment:        environment,
@@ -256,6 +254,7 @@ func installTemplateDependency(ctx context.Context, root, query, modulePath, goC
 			Start:            root,
 			GoCommand:        goCommand,
 			Environment:      environment,
+			Validate:         validate,
 			MutateModule:     mutate,
 			RejectUnexpected: true,
 		}); err != nil {
