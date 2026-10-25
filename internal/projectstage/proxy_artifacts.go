@@ -21,6 +21,7 @@ import (
 // Origin payloads and Go's later extracted files have different identities.
 // The checksum below describes content; it is not independent authority.
 type proxyArtifact struct {
+	origin        string
 	request       string
 	file          fileSnapshot
 	module        module.Version
@@ -34,7 +35,36 @@ type proxyRecord struct {
 	digest [sha256.Size]byte
 }
 
-func (s *Stage) retainProxyFile(ctx context.Context, path, request string) (data []byte, resultErr error) {
+func (s *Stage) retainProxyFile(ctx context.Context, path, request string) ([]byte, error) {
+	return s.retainAcquisitionFile(ctx, path, request, "proxy")
+}
+
+// ArchiveInput identifies an original cached module archive. Content identity
+// does not grant independent checksum authority for its extracted sources.
+type ArchiveInput struct {
+	Path   string
+	Module module.Version
+}
+
+// RetainArchives preserves bounded archive bytes and original input identities.
+// Evidence survives failed validation and Stage.Close without refreshing a prior
+// capture. Proxy origins and cache files remain distinct original inputs.
+func (s *Stage) RetainArchives(ctx context.Context, archives []ArchiveInput) error {
+	for _, archive := range archives {
+		path, pathErr := module.EscapePath(archive.Module.Path)
+		version, versionErr := module.EscapeVersion(archive.Module.Version)
+		if pathErr != nil || versionErr != nil || module.Check(archive.Module.Path, archive.Module.Version) != nil ||
+			module.CanonicalVersion(archive.Module.Version) != archive.Module.Version || !filepath.IsAbs(archive.Path) {
+			return ErrSourceIntegrity
+		}
+		if _, err := s.retainAcquisitionFile(ctx, archive.Path, path+"/@v/"+version+".zip", "cache"); err != nil {
+			return err
+		}
+	}
+	return s.Recheck(ctx)
+}
+
+func (s *Stage) retainAcquisitionFile(ctx context.Context, path, request, origin string) (data []byte, resultErr error) {
 	defer s.lock()()
 	defer func() {
 		if resultErr != nil && s.proxyErr == nil {
@@ -49,7 +79,7 @@ func (s *Stage) retainProxyFile(ctx context.Context, path, request string) (data
 		return nil, ErrStage
 	}
 	for _, artifact := range s.artifacts {
-		if artifact.request == request {
+		if artifact.origin == origin && artifact.request == request {
 			if artifact.file.parent != parent || artifact.file.name != filepath.Base(path) {
 				return nil, ErrConcurrentChange
 			}
@@ -71,7 +101,7 @@ func (s *Stage) retainProxyFile(ctx context.Context, path, request string) (data
 	if used.bytes+int64(len(file.data)) > MaximumTotalBytes {
 		return nil, ErrStage
 	}
-	artifact := proxyArtifact{request: request, file: file}
+	artifact := proxyArtifact{origin: origin, request: request, file: file}
 	// Retain the complete origin read even if archive validation, cancellation,
 	// or the final recheck subsequently prevents delivery.
 	index := len(s.artifacts)

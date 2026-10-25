@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/plystra/cli/internal/gocommand"
 	"golang.org/x/mod/module"
@@ -92,6 +93,7 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 	}
 	queries := map[module.Version][]int{}
 	var arguments []string
+	var versions []module.Version
 	for index := range modules {
 		version := sourceVersion(modules[index])
 		if version.Path == "" {
@@ -111,6 +113,7 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 		}
 		if _, exists := queries[version]; !exists {
 			arguments = append(arguments, version.String())
+			versions = append(versions, version)
 		}
 		queries[version] = append(queries[version], index)
 	}
@@ -135,11 +138,21 @@ func resolveSourceChecksums(ctx context.Context, applicationRoot string, goMod f
 	if err := os.WriteFile(filepath.Join(root, "go.sum"), before.data, 0o600); err != nil {
 		return err
 	}
-	output, err := gocommand.Output(ctx, gocommand.Options{
+	retainArchives, err := preparationArchiveRetainer(ctx, root, versions, options, environmentWith(options.Environment, "GOWORK", "off"))
+	if err != nil {
+		return err
+	}
+	output, started, downloadErr := gocommand.OutputObserved(ctx, gocommand.Options{
 		Command: options.GoCommand, Directory: root,
 		Environment: environmentWith(options.Environment, "GOWORK", "off"), OutputLimit: outputLimit,
 	}, append([]string{"mod", "download", "-json"}, arguments...)...)
-	if err != nil {
+	var retentionErr error
+	if started && !errors.Is(downloadErr, gocommand.ErrProcessUnsettled) && retainArchives != nil {
+		captureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		retentionErr = retainArchives(captureCtx)
+	}
+	if err := errors.Join(downloadErr, retentionErr, ctx.Err()); err != nil {
 		return fmt.Errorf("%w: resolve source checksums: %w", ErrModuleUnavailable, err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(output))

@@ -92,6 +92,13 @@ type Options struct {
 	// These files have no independent Go checksum authority.
 	// Callbacks honor the supplied context, including post-cancellation retention.
 	RetainModuleInformation func(context.Context, []string) error
+	// RetainModuleArchives captures present cached ZIPs before exact downloads
+	// that may read them for extraction or checksum repair. Complete extracted
+	// trees with valid checksum references do not consume their archive bytes.
+	// This records concurrency evidence, not independent checksum authority.
+	// Settled downloads recheck the same captures even after failure or
+	// cancellation; callbacks honor the supplied bounded retention context.
+	RetainModuleArchives func(context.Context, []ModuleArchive) error
 	// RetainSourceTrees preserves existing extracted trees before their archive
 	// checksum is independently available. It records private concurrency evidence
 	// only; consumers must authenticate the same retained trees against complete
@@ -287,13 +294,18 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		environment = environmentWith(environment, "GOTOOLCHAIN", "local")
 	}
 	inputs := preparationInputs{goModPath: before}
+	if callback := options.RetainModuleArchives; callback != nil {
+		options.RetainModuleArchives = func(ctx context.Context, archives []ModuleArchive) error {
+			return errors.Join(callback(ctx, archives), ctx.Err(), inputs.recheck())
+		}
+	}
 	options.Environment = environment
 	workspace, err := capturePreparationWorkspace(ctx, application.Path(), options, inputs)
 	if err != nil {
 		return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
 	}
 	var sourceChecksums preparationChecksums
-	if options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
+	if options.RetainSelectedSources != nil || options.RetainSourceTrees != nil || options.RetainModuleArchives != nil {
 		sourceChecksums, err = originalSourceChecksums(application.Path(), workspace, inputs)
 		if err != nil {
 			return Index{}, errors.Join(ErrDiscover, ErrSourceIntegrity, err)
@@ -309,7 +321,7 @@ func Discover(ctx context.Context, application modulelocate.Module, options Opti
 		options.RetainManifestFiles = retainModuleFilesOnce(inputs, options.RetainManifestFiles)
 	}
 	var retainRootFiles func(context.Context) error
-	if options.RetainRootManifests != nil || options.RetainManifestFiles != nil || options.RetainModuleInformation != nil || options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
+	if options.RetainRootManifests != nil || options.RetainManifestFiles != nil || options.RetainModuleInformation != nil || options.RetainModuleArchives != nil || options.RetainSelectedSources != nil || options.RetainSourceTrees != nil {
 		defer func() {
 			if err := inputs.recheck(); err != nil {
 				result, resultErr = Index{}, errors.Join(resultErr, ErrDiscover, ErrSourceIntegrity, err)

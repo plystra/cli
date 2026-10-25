@@ -2,7 +2,9 @@ package command_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,7 +107,39 @@ func TestScaffoldPreviewRetainsFileProxyOriginAfterCleanup(t *testing.T) {
 }
 
 func TestBuiltCLIChangePlanRejectsReplacedFileProxyOrigin(t *testing.T) {
+	assertBuiltCLIChangePlanRejectsArchiveReplacement(t, false)
+}
+
+func TestBuiltCLIChangePlanRejectsReplacedCachedArchive(t *testing.T) {
+	assertBuiltCLIChangePlanRejectsArchiveReplacement(t, true)
+}
+
+func assertBuiltCLIChangePlanRejectsArchiveReplacement(t *testing.T, cached bool) {
+	t.Helper()
 	root, proxy, environment := fileProxyPreviewFixture(t)
+	path := filepath.Join(proxy, filepath.FromSlash(fileProxyPreviewModule), "@v", "v1.0.0.zip")
+	if cached {
+		output, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "mod", "download", "-json", fileProxyPreviewModule+"@v1.0.0")
+		var downloaded struct{ Dir, Zip string }
+		if err != nil || json.Unmarshal(output, &downloaded) != nil || !filepath.IsAbs(downloaded.Dir) || !filepath.IsAbs(downloaded.Zip) {
+			t.Fatal("seed target cache", err)
+		}
+		cache, err := gocommand.Output(t.Context(), gocommand.Options{Directory: root, Environment: environment}, "env", "GOMODCACHE")
+		if err != nil {
+			t.Fatal(err)
+		}
+		relative, err := filepath.Rel(strings.TrimSpace(string(cache)), downloaded.Dir)
+		if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			t.Fatal("source removal escaped isolated cache")
+		}
+		if err := os.RemoveAll(downloaded.Dir); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(path, path+".unavailable"); err != nil {
+			t.Fatal(err)
+		}
+		path = downloaded.Zip
+	}
 	wrapper := sourcePreparationGoWrapper(t)
 	goName := "go"
 	if runtime.GOOS == "windows" {
@@ -121,7 +155,7 @@ func TestBuiltCLIChangePlanRejectsReplacedFileProxyOrigin(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "origin-replaced")
 	environment = append(environment,
-		"PLYSTRA_SOURCE_PREPARATION_PATH="+filepath.Join(proxy, filepath.FromSlash(fileProxyPreviewModule), "@v", "v1.0.0.zip"),
+		"PLYSTRA_SOURCE_PREPARATION_PATH="+path,
 		"PLYSTRA_SOURCE_PREPARATION_MARKER="+marker,
 		"PLYSTRA_SOURCE_PREPARATION_MODE=source-identity-after-download",
 		"PLYSTRA_SOURCE_PREPARATION_QUERY="+fileProxyPreviewModule+"@v1.0.0")
@@ -136,7 +170,13 @@ func TestBuiltCLIChangePlanRejectsReplacedFileProxyOrigin(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatal("origin replacement was not exercised", err)
 	}
-	if strings.Contains(stdout.String(), proxy) || strings.Contains(stdout.String(), "127.0.0.1") || !reflect.DeepEqual(before, commandTree(t, root)) {
+	var result any
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatal("public failure did not return structured JSON", err)
+	}
+	public := fmt.Sprint(result)
+	if strings.Contains(public, proxy) || strings.Contains(public, path) || strings.Contains(public, filepath.ToSlash(path)) ||
+		strings.Contains(public, "127.0.0.1") || !reflect.DeepEqual(before, commandTree(t, root)) {
 		t.Fatal("failed preview disclosed private paths or changed authored files")
 	}
 	assertNoCommandTransactions(t, root)

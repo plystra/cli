@@ -212,6 +212,11 @@ func runRootManifestsHelper() int {
 	if command.Stdout == &downloaded {
 		data := downloaded.Bytes()
 		switch mode {
+		case "command-error":
+			if _, err := os.Stdout.Write(data); err != nil {
+				return 22
+			}
+			return 39
 		case "trailing-json":
 			data = append(data, '{')
 		case "duplicate":
@@ -262,7 +267,23 @@ func runRootManifestsHelper() int {
 			} else if err != nil {
 				return 27
 			}
-			if record["Path"] == warmRequestedModule {
+			if listChecksum == "checksum-normalization" {
+				target := record
+				if replacement, ok := record["Replace"].(map[string]any); ok {
+					target = replacement
+				}
+				delete(target, "GoModSum")
+				if manifest, ok := target["GoMod"].(string); ok && target["Version"] != nil {
+					hash := strings.TrimSuffix(manifest, ".mod") + ".ziphash"
+					relative, err := filepath.Rel(os.Getenv("GOMODCACHE"), hash)
+					if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+						return 40
+					}
+					if err := os.Remove(hash); err != nil && !errors.Is(err, os.ErrNotExist) {
+						return 41
+					}
+				}
+			} else if record["Path"] == warmRequestedModule {
 				if listChecksum == "missing-source" {
 					delete(record, "Dir")
 					delete(record, "GoMod")

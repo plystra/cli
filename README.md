@@ -1206,6 +1206,22 @@ bounds. Complete capture before first use, including workspace MVS upgrades,
 mutable-query, transitive, and intermediate resolution sources, complete
 module-resolution metadata remain unfinished; previews remain
 `non_exact`.
+Before exact source downloads in preparation, discovery, and checksum
+normalization, previews also retain present cached ZIPs that Go may read for
+extraction or checksum repair. This includes missing or partial extracted trees
+and missing or invalid archive checksum references. A complete extracted tree
+with a valid checksum reference leaves unused ZIP bytes outside the capture,
+including an unused malformed ZIP. Cached archives use the same bounded raw and
+expanded-content checks as proxy payloads, with distinct cache and proxy origin
+identities. Captures are independent of original checksum authority and source
+callbacks. They are rechecked after a settled download, including failures and
+cancellation, with an independent bounded context. Original file and parent-path
+evidence survives cleanup without refreshing earlier captures. This covers
+present ZIPs at exact acquisition boundaries, not cache isolation or every
+earlier graph, cold, mutable-query, or failed-resolution read.
+Capture drains requested archives made newly consumable by earlier archive
+callbacks before starting Go; each round preserves all prior evidence and adds
+only previously uncaptured requested versions.
 For a sole `file://` Go proxy with `GOTOOLCHAIN=local`, source and dependency
 previews now capture requested proxy payloads before returning successful
 response headers or bytes to Go. One owner-private loopback session spans old
@@ -1231,7 +1247,7 @@ absences remain private evidence; concurrent appearance rejects the captured
 exclusion even after stage cleanup. Cached distributions retain the original
 file-proxy behavior when their proxy files are no longer present.
 Other proxy configurations and toolchain modes remain unchanged. This slice
-does not isolate the consuming Module Cache, capture cache hits or direct/VCS
+does not isolate the consuming Module Cache, capture every cache read or direct/VCS
 access, implement HTTP authentication or proxy-chain fallback, or establish a
 complete resolution read set. Offline phases retain their existing local-only
 behavior. Plans remain `non_exact`, and Gate 9 remains incomplete.

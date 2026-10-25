@@ -20,7 +20,10 @@ func retainDependencySources(ctx context.Context, stage *projectstage.Stage, com
 	}
 	dependencies, err := moduledependency.Discover(ctx, project, moduledependency.Options{
 		GoCommand: command, Environment: stage.Environment(), RequireSourceChecksums: true,
-		RetainSourceTrees:       stage.RetainSourceTrees,
+		RetainSourceTrees: stage.RetainSourceTrees,
+		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
+			return retainArchives(ctx, stage, archives)
+		},
 		RetainSelectedSources:   func(sources []moduledependency.Module) error { return retainSources(ctx, stage, sources) },
 		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
 		RetainManifestFiles:     func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
@@ -50,7 +53,10 @@ func prepareDependencySources(ctx context.Context, stage *projectstage.Stage, co
 		return err
 	}
 	err = moduledependency.PrepareSources(ctx, project, versions, moduledependency.Options{GoCommand: command, Environment: stage.Environment(),
-		RetainSourceTrees:       stage.RetainSourceTrees,
+		RetainSourceTrees: stage.RetainSourceTrees,
+		RetainModuleArchives: func(ctx context.Context, archives []moduledependency.ModuleArchive) error {
+			return retainArchives(ctx, stage, archives)
+		},
 		RetainModuleInformation: func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
 		RetainManifestFiles:     func(ctx context.Context, paths []string) error { return retainMetadataFiles(ctx, stage, paths) },
 		RetainRootManifests: func(ctx context.Context, manifests []moduledependency.RootManifest) error {
@@ -119,4 +125,12 @@ func retainMetadataFiles(ctx context.Context, stage *projectstage.Stage, paths [
 		metadata[index] = projectstage.MetadataInput{Path: path}
 	}
 	return stage.RetainMetadata(ctx, metadata)
+}
+
+func retainArchives(ctx context.Context, stage *projectstage.Stage, archives []moduledependency.ModuleArchive) error {
+	inputs := make([]projectstage.ArchiveInput, len(archives))
+	for index, archive := range archives {
+		inputs[index] = projectstage.ArchiveInput{Path: archive.Path, Module: archive.Module}
+	}
+	return stage.RetainArchives(ctx, inputs)
 }

@@ -44,6 +44,11 @@ func PrepareSources(ctx context.Context, application modulelocate.Module, reques
 	}
 	options.Environment = append([]string{}, options.Environment...)
 	inputs := preparationInputs{}
+	if callback := options.RetainModuleArchives; callback != nil {
+		options.RetainModuleArchives = func(ctx context.Context, archives []ModuleArchive) error {
+			return errors.Join(callback(ctx, archives), ctx.Err(), inputs.recheck())
+		}
+	}
 	if options.RetainManifestFiles != nil {
 		options.RetainManifestFiles = retainModuleFilesOnce(inputs, options.RetainManifestFiles)
 	}
@@ -227,6 +232,10 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	if err := retainPresentModuleFiles(ctx, manifests, options.RetainManifestFiles); err != nil {
 		return err
 	}
+	retainArchives, err := preparationArchiveRetainer(ctx, root, versions, options, environment)
+	if err != nil {
+		return err
+	}
 	output, started, downloadErr := gocommand.OutputObserved(ctx, gocommand.Options{Command: options.GoCommand, Directory: root, Environment: environment, OutputLimit: options.OutputLimit}, append([]string{"mod", "download", "-json"}, arguments...)...)
 	var retentionErr error
 	if started && !errors.Is(downloadErr, gocommand.ErrProcessUnsettled) {
@@ -236,6 +245,9 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		defer cancel()
 		if retainMetadata != nil {
 			retentionErr = retainMetadata(captureCtx)
+		}
+		if retainArchives != nil {
+			retentionErr = errors.Join(retentionErr, retainArchives(captureCtx))
 		}
 		retentionErr = errors.Join(retentionErr,
 			retainPresentModuleFiles(captureCtx, manifests, options.RetainManifestFiles),
