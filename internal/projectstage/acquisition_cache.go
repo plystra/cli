@@ -20,10 +20,19 @@ import (
 // selection, and establish that every version bypasses checksum-service lookups.
 // The returned cache lives until Close. Only positive original inputs are retained;
 // cache absence is not frozen.
-func (s *Stage) AcquisitionCache(ctx context.Context, cache string, versions []module.Version) (string, error) {
-	if err := s.Recheck(ctx); err != nil {
+func (s *Stage) AcquisitionCache(ctx context.Context, cache string, versions []module.Version) (selected string, resultErr error) {
+	defer s.lock()()
+	if err := s.recheck(ctx); err != nil {
 		return "", err
 	}
+	// Like WithMetadataBatch, one closed acquisition owns the complete checks.
+	// Per-file captures still retain their original identity and access evidence.
+	defer func() {
+		resultErr = errors.Join(resultErr, ctx.Err(), s.recheck(ctx))
+		if resultErr != nil {
+			selected = ""
+		}
+	}()
 	if !filepath.IsAbs(cache) || len(versions) == 0 || len(versions) > MaximumRoots {
 		return "", ErrStage
 	}
@@ -31,6 +40,9 @@ func (s *Stage) AcquisitionCache(ctx context.Context, cache string, versions []m
 	fallback := false
 	seen := map[module.Version]bool{}
 	for _, version := range versions {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		path, pathErr := module.EscapePath(version.Path)
 		value, versionErr := module.EscapeVersion(version.Version)
 		if pathErr != nil || versionErr != nil || module.Check(version.Path, version.Version) != nil || module.CanonicalVersion(version.Version) != version.Version || seen[version] {
@@ -62,14 +74,17 @@ func (s *Stage) AcquisitionCache(ctx context.Context, cache string, versions []m
 		paths = append(paths, prefix)
 	}
 	if fallback {
-		return cache, s.Recheck(ctx)
+		return cache, nil
 	}
-	name, err := s.newAcquisitionCache(ctx)
+	name, err := s.newAcquisitionCache()
 	if err != nil {
 		return "", err
 	}
 	for _, prefix := range paths {
 		for _, suffix := range []string{".info", ".mod", ".ziphash", ".zip"} {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
 			relative := prefix + suffix
 			original := filepath.Join(cache, relative)
 			if _, err := os.Lstat(original); errors.Is(err, os.ErrNotExist) {
@@ -78,23 +93,20 @@ func (s *Stage) AcquisitionCache(ctx context.Context, cache string, versions []m
 				return "", ErrStage
 			}
 			request := filepath.ToSlash(strings.TrimPrefix(relative, filepath.Join("cache", "download")+string(filepath.Separator)))
-			data, err := s.retainAcquisitionFile(ctx, original, request, "cache")
+			data, err := s.captureAcquisitionFile(ctx, original, request, "cache")
 			if err != nil {
 				return "", err
 			}
-			if err := s.writeCacheSeed(ctx, name, relative, data); err != nil {
+			if err := s.writeCacheSeed(name, relative, data); err != nil {
 				return "", err
 			}
 		}
 	}
-	return filepath.Join(s.temporary, name), s.Recheck(ctx)
+	return filepath.Join(s.temporary, name), nil
 }
 
-func (s *Stage) newAcquisitionCache(ctx context.Context) (string, error) {
-	defer s.lock()()
-	if err := s.recheck(ctx); err != nil {
-		return "", err
-	}
+// The caller holds the Stage lock and owns the surrounding complete rechecks.
+func (s *Stage) newAcquisitionCache() (string, error) {
 	if len(s.cacheRoots) >= MaximumRoots {
 		return "", ErrStage
 	}
@@ -107,11 +119,8 @@ func (s *Stage) newAcquisitionCache(ctx context.Context) (string, error) {
 	return name, err
 }
 
-func (s *Stage) writeCacheSeed(ctx context.Context, name, relative string, data []byte) error {
-	defer s.lock()()
-	if err := s.recheck(ctx); err != nil {
-		return err
-	}
+// The caller holds the Stage lock and owns the surrounding complete rechecks.
+func (s *Stage) writeCacheSeed(name, relative string, data []byte) error {
 	if err := s.files.MkdirAll(filepath.Join(name, filepath.Dir(relative)), 0o700); err != nil {
 		return err
 	}
