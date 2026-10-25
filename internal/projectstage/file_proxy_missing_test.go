@@ -201,7 +201,11 @@ func TestFileProxyMissingOriginMayShareTemporaryAncestor(t *testing.T) {
 			if err := original.Close(); err != nil {
 				t.Fatal(err)
 			}
-			parent := t.TempDir()
+			// Stage resolves directory aliases, including macOS /var temp paths.
+			parent, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 			origin := parent
 			if mode == "missing-root" {
 				origin = filepath.Join(parent, "not-published")

@@ -232,7 +232,7 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 		return err
 	}
 	var manifests []string
-	if options.RetainManifestFiles != nil {
+	if options.RetainManifestFiles != nil || options.MetadataBatch != nil && options.RetainRootManifests != nil {
 		var err error
 		manifests, err = preparationModuleFilePaths(ctx, root, versions, options, environment, ".mod")
 		if err != nil {
@@ -243,15 +243,38 @@ func downloadPreparedSources(ctx context.Context, root string, result []Module, 
 	if err != nil {
 		return err
 	}
-	if err := retainPresentModuleFiles(ctx, information, options.RetainModuleInformation); err != nil {
-		return err
-	}
-	if retainMetadata != nil {
-		if err := retainMetadata(ctx); err != nil {
-			return err
+	batch := options.MetadataBatch
+	if batch != nil {
+		present := false
+		for _, paths := range [][]string{information, manifests} {
+			for _, path := range paths {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+					present = true
+				}
+			}
+		}
+		if !present {
+			// Empty cold-cache captures need no additional complete tree walks.
+			// A later materialized file still uses ordinary individual checks.
+			batch = nil
 		}
 	}
-	if err := retainPresentModuleFiles(ctx, manifests, options.RetainManifestFiles); err != nil {
+	// Paths and manifest authority are resolved before this closed local phase.
+	// Share complete checks without spanning cache selection or Go work.
+	if err := captureSourceBatch(ctx, batch, func(captureCtx context.Context) error {
+		if err := retainPresentModuleFiles(captureCtx, information, options.RetainModuleInformation); err != nil {
+			return err
+		}
+		if retainMetadata != nil {
+			if err := retainMetadata(captureCtx); err != nil {
+				return err
+			}
+		}
+		return retainPresentModuleFiles(captureCtx, manifests, options.RetainManifestFiles)
+	}); err != nil {
 		return err
 	}
 	retainArchives, err := preparationArchiveRetainer(ctx, root, versions, options, environment)
